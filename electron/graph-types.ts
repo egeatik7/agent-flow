@@ -44,6 +44,12 @@ export type AgentNode = {
   clickMode?: ClickMode
   /** Execute this node by showing a screenshot to the vision model instead of text matching. */
   useVision?: boolean
+  /** Loop list mode: one value per turn, exposed as {{öğe}} while the body runs. */
+  items?: string[]
+  /** Index of the list item currently being processed; persisted so a stopped run resumes there. */
+  loopIndex?: number
+  /** Folder the list was filled from (display only). */
+  folder?: string
   /** Last known screen position of the target; breaks ties when the same text appears several times. */
   anchor?: { x: number; y: number }
   locator?: Locator
@@ -176,7 +182,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
       { key: 'loop', label: 'tekrar' },
       { key: 'done', label: 'bitti' },
     ],
-    description: 'N kez “tekrar” çıkışına, sonra “bitti”ye gider.',
+    description: 'Listedeki her öğe için (veya N kez) “tekrar”a, sonra “bitti”ye gider.',
   },
   end: {
     label: 'Bitir',
@@ -291,11 +297,54 @@ export function summarize(n: AgentNode): string {
       return `“${n.text || '—'}” görünene kadar bekle (en çok ${Math.round((n.timeoutMs ?? 0) / 1000)} sn)`
     case 'condition':
       return `Ekranda “${n.text || '—'}” var mı?`
-    case 'loop':
-      return `${n.count ?? 1} kez tekrarla`
+    case 'loop': {
+      const items = listItems(n)
+      if (!items.length) return `${n.count ?? 1} kez tekrarla`
+      const i = Math.min(Math.max(0, n.loopIndex ?? 0), items.length - 1)
+      return `${items.length} öğe · sıradaki ${i + 1}/${items.length}: ${baseName(items[i])}`
+    }
     case 'end':
       return 'Akışı bitir.'
   }
+}
+
+export function listItems(n: AgentNode): string[] {
+  return (n.items ?? []).map((s) => s.trim()).filter(Boolean)
+}
+
+export function baseName(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p
+}
+
+function keyNorm(k: string): string {
+  return k
+    .trim()
+    .replace(/[İIı]/g, 'i')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+/** Variables for the current loop item: {{öğe}}, {{öğe.yol}}, {{öğe.ad}}, {{öğe.isim}}, {{sıra}}, {{toplam}}. */
+export function itemVars(item: string, index: number, total: number): Record<string, string> {
+  const ad = baseName(item)
+  const vars: Record<string, string> = {
+    'öğe': item,
+    'öğe.yol': item,
+    'öğe.ad': ad,
+    'öğe.isim': ad.replace(/\.[^.]+$/, ''),
+    'sıra': String(index + 1),
+    'toplam': String(total),
+  }
+  return Object.fromEntries(Object.entries(vars).map(([k, v]) => [keyNorm(k), v]))
+}
+
+export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}']
+
+/** Replaces {{name}} placeholders; accepts ASCII spellings too ({{oge.isim}}, {{sira}}). Unknown names stay as-is. */
+export function renderTemplate(s: string | undefined, vars: Record<string, string>): string | undefined {
+  if (!s || !s.includes('{{')) return s
+  return s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (m, k: string) => vars[keyNorm(k)] ?? m)
 }
 
 type LegacyNode = Partial<AgentNode> & {

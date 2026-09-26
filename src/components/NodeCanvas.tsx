@@ -4,6 +4,7 @@ import {
   NODE_SPECS,
   NODE_W,
   inputPoint,
+  listItems,
   nodeHeight,
   outputPoint,
   summarize,
@@ -12,6 +13,35 @@ import {
   type NodeKind,
   type StepStatus,
 } from '../types'
+import { loopBody } from '../lib/graph-ops'
+
+type Frame = { loop: AgentNode; ids: string[]; x: number; y: number; w: number; h: number; label: string }
+
+const FRAME_PAD = 22
+const FRAME_HEAD = 24
+const FRAME_BOTTOM = 128
+
+function computeFrames(graph: AgentGraph): Frame[] {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const frames: Frame[] = []
+  for (const loop of graph.nodes) {
+    if (loop.kind !== 'loop') continue
+    const ids = loopBody(graph, loop.id)
+    if (!ids.length) continue
+    const nodes = ids.map((id) => byId.get(id)!).filter(Boolean)
+    const x1 = Math.min(...nodes.map((n) => n.x)) - FRAME_PAD
+    const y1 = Math.min(...nodes.map((n) => n.y)) - FRAME_PAD - FRAME_HEAD
+    const x2 = Math.max(...nodes.map((n) => n.x + NODE_W)) + FRAME_PAD
+    const y2 = Math.max(...nodes.map((n) => n.y + nodeHeight(n.kind))) + FRAME_BOTTOM
+    const items = listItems(loop)
+    const idx = items.length ? Math.min(Math.max(0, loop.loopIndex ?? 0), items.length - 1) : 0
+    const label = items.length
+      ? `${loop.title} · ${items.length} öğe · sıradaki ${idx + 1}/${items.length}`
+      : `${loop.title} · ${loop.count ?? 1} kez`
+    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label })
+  }
+  return frames.sort((a, b) => b.w * b.h - a.w * a.h)
+}
 
 type Props = {
   graph: AgentGraph
@@ -22,6 +52,7 @@ type Props = {
   onSelectNode: (id: string | null) => void
   onSelectEdge: (id: string | null) => void
   onMoveNode: (id: string, x: number, y: number) => void
+  onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void
   onConnect: (from: string, port: string, to: string) => void
   onAddAfter: (fromId: string, port: string, kind: NodeKind) => void
   onAddAt: (kind: NodeKind, x: number, y: number) => void
@@ -202,6 +233,37 @@ export default function NodeCanvas(p: Props) {
     window.addEventListener('mouseup', up)
   }
 
+  const frames = useMemo(() => computeFrames(p.graph), [p.graph])
+
+  const startFrameDrag = (e: React.MouseEvent, f: Frame) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    setMenu(null)
+    p.onSelectNode(f.loop.id)
+    const start = toCanvas(e.clientX, e.clientY)
+    const orig = Object.fromEntries(
+      f.ids.map((id) => {
+        const n = byId.get(id)!
+        return [id, { x: n.x, y: n.y }]
+      })
+    )
+    const move = (ev: MouseEvent) => {
+      autoScroll(ev.clientX, ev.clientY)
+      const c = toCanvas(ev.clientX, ev.clientY)
+      const dx = Math.round((c.x - start.x) / 8) * 8
+      const dy = Math.round((c.y - start.y) / 8) * 8
+      const next: Record<string, { x: number; y: number }> = {}
+      for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
+      p.onMoveNodes(next)
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
   const startLink = (e: React.MouseEvent, n: AgentNode, port: string) => {
     e.stopPropagation()
     e.preventDefault()
@@ -254,6 +316,20 @@ export default function NodeCanvas(p: Props) {
             Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin.
           </div>
         )}
+
+        {frames.map((f) => (
+          <div
+            key={f.loop.id}
+            className={`loop-frame${p.selectedNodeId && f.ids.includes(p.selectedNodeId) ? ' active' : ''}${
+              p.stepStatus[f.loop.id] === 'running' || f.ids.some((id) => p.stepStatus[id] === 'running') ? ' running' : ''
+            }`}
+            style={{ left: f.x, top: f.y, width: f.w, height: f.h }}
+          >
+            <div className="loop-frame-head" onMouseDown={(e) => startFrameDrag(e, f)} title="Sürükle: gruptaki tüm node’ları taşı">
+              ↻ {f.label}
+            </div>
+          </div>
+        ))}
 
         <svg className="edge-layer" width={size.w} height={size.h}>
           <defs>

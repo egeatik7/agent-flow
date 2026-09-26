@@ -99,6 +99,34 @@ export function freePort(graph: AgentGraph, node: AgentNode): string | null {
   return (free ?? outs[0]).key
 }
 
+/** Nodes on the cycle closed by a loop: reachable from its “tekrar” port and leading back to the loop. */
+export function loopBody(graph: AgentGraph, loopId: string): string[] {
+  const start = graph.edges.find((e) => e.from === loopId && e.fromPort === 'loop')?.to
+  if (!start) return []
+  const fwd = new Set<string>()
+  const q = [start]
+  while (q.length) {
+    const id = q.shift()!
+    if (id === loopId || fwd.has(id)) continue
+    fwd.add(id)
+    for (const e of graph.edges) if (e.from === id) q.push(e.to)
+  }
+  const back = new Set<string>()
+  const q2 = [loopId]
+  while (q2.length) {
+    const id = q2.shift()!
+    for (const e of graph.edges) {
+      if (e.to === id && e.from !== loopId && !back.has(e.from)) {
+        back.add(e.from)
+        q2.push(e.from)
+      }
+    }
+  }
+  const body = [...fwd].filter((id) => back.has(id))
+  if (start === loopId) return [loopId]
+  return body.length ? [...body, loopId] : []
+}
+
 /** Lays nodes out in columns by distance from the start node. */
 export function autoLayout(graph: AgentGraph): AgentGraph {
   const start = graph.nodes.find((n) => n.kind === 'start') ?? graph.nodes[0]

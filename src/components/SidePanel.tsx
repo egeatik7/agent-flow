@@ -1,7 +1,10 @@
-import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import {
   NODE_SPECS,
+  TEMPLATE_VARS,
   VISION_KINDS,
+  baseName,
+  listItems,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -32,6 +35,7 @@ type Props = {
   onDeleteEdge: () => void
   onCaptureForNode: () => void
   onOpenScanner: () => void
+  onFillFromFolder: (extensions: string[]) => void
   capturing: number
 }
 
@@ -105,6 +109,96 @@ function TargetBox(p: Props & { n: AgentNode }) {
         )}
       </div>
     </div>
+  )
+}
+
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'tif', 'tiff']
+
+function VarChips({ onInsert }: { onInsert: (v: string) => void }) {
+  return (
+    <div className="var-chips">
+      <span>Değişken:</span>
+      {TEMPLATE_VARS.map((v) => (
+        <button type="button" key={v} className="chip var" onClick={() => onInsert(v)} title="Alanın sonuna ekle">
+          {v}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const append = (cur: string | undefined, v: string) => {
+  const c = cur ?? ''
+  return c && !/\s$/.test(c) && !/[\\/]$/.test(c) ? `${c} ${v}` : c + v
+}
+
+function LoopEditor(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const [imagesOnly, setImagesOnly] = useState(true)
+  const items = listItems(n)
+  const idx = items.length ? Math.min(Math.max(0, n.loopIndex ?? 0), items.length - 1) : 0
+  return (
+    <>
+      <div className="field">
+        <label>Liste (her satır bir tur)</label>
+        <textarea
+          className="xp-textarea mono list-area"
+          value={(n.items ?? []).join('\n')}
+          placeholder={'C:\\Resimler\\kedi.png\nC:\\Resimler\\köpek.png\n…'}
+          onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n') })}
+        />
+        <div className="field-row wrap">
+          <button type="button" className="xp-btn primary" onClick={() => p.onFillFromFolder(imagesOnly ? IMAGE_EXTS : [])}>
+            Klasörden doldur…
+          </button>
+          <label className="check inline">
+            <input type="checkbox" checked={imagesOnly} onChange={(e) => setImagesOnly(e.target.checked)} />
+            sadece resimler
+          </label>
+          {items.length > 0 && (
+            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, loopIndex: 0 })}>
+              Listeyi temizle
+            </button>
+          )}
+        </div>
+        {n.folder && <p className="hint mono">{n.folder}</p>}
+      </div>
+
+      {items.length > 0 ? (
+        <div className="field loop-progress">
+          <label>İlerleme</label>
+          <div className="progress">
+            <div className="progress-bar" style={{ width: `${(idx / items.length) * 100}%` }} />
+          </div>
+          <p className="hint">
+            Sıradaki: <b>{idx + 1}/{items.length}</b> — {baseName(items[idx])}
+            {idx > 0 ? ' (öncekiler bitti, kaldığı yerden devam eder)' : ''}
+          </p>
+          {idx > 0 && (
+            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ loopIndex: 0 })}>
+              Baştan başla
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="field">
+          <label>Tekrar sayısı (liste boşken)</label>
+          <input
+            className="xp-input"
+            type="number"
+            min={1}
+            value={n.count ?? 1}
+            onChange={(e) => p.onUpdateNode({ count: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+          />
+        </div>
+      )}
+
+      <p className="hint">
+        Döngüyü tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Değişen yerlere{' '}
+        <span className="mono">{'{{öğe}}'}</span> yaz: her turda listenin sıradaki satırı gelir.{' '}
+        <span className="mono">{'{{öğe.isim}}'}</span> uzantısız dosya adıdır (kedi.png → kedi).
+      </p>
+    </>
   )
 }
 
@@ -204,6 +298,7 @@ function NodeInspector(p: Props) {
             }
               onChange={(e) => upd({ prompt: e.target.value })}
             />
+            <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
           </div>
           <div className="field">
             <label>Tıklama türü</label>
@@ -229,7 +324,13 @@ function NodeInspector(p: Props) {
         <>
           <div className="field">
             <label>Yazılacak metin</label>
-            <input className="xp-input" value={n.text ?? ''} onChange={(e) => upd({ text: e.target.value })} />
+            <input
+              className="xp-input"
+              value={n.text ?? ''}
+              placeholder="Örn: {{öğe}}  veya  D:\Modeller\{{öğe.isim}}.glb"
+              onChange={(e) => upd({ text: e.target.value })}
+            />
+            <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
           </div>
           <div className="field">
             <label>Hangi alana? (boşsa o an seçili alana yazar)</label>
@@ -256,6 +357,7 @@ function NodeInspector(p: Props) {
         <div className="field">
           <label>Tuş (SendKeys biçimi)</label>
           <input className="xp-input mono" value={n.keys ?? ''} onChange={(e) => upd({ keys: e.target.value })} />
+          <VarChips onInsert={(v) => upd({ keys: append(n.keys, v) })} />
           <div className="chips">
             {KEY_PRESETS.map((k) => (
               <button type="button" key={k.keys} className="chip" onClick={() => upd({ keys: k.keys })}>
@@ -315,6 +417,7 @@ function NodeInspector(p: Props) {
               </button>
             )}
           </div>
+          <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
         </div>
       )}
 
@@ -331,19 +434,7 @@ function NodeInspector(p: Props) {
         </div>
       )}
 
-      {n.kind === 'loop' && (
-        <div className="field">
-          <label>Tekrar sayısı</label>
-          <input
-            className="xp-input"
-            type="number"
-            min={1}
-            value={n.count ?? 1}
-            onChange={(e) => upd({ count: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-          />
-          <p className="hint">“tekrar” çıkışını başa (örn. ilk Tıkla node’una) bağla, “bitti” çıkışını devam edilecek yere.</p>
-        </div>
-      )}
+      {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
 
       <button type="button" className="xp-btn danger block" onClick={p.onDeleteNode}>
         Node’u Sil (Del)

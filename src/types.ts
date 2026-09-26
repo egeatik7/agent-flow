@@ -34,6 +34,8 @@ export type XpAgentApi = {
   onAgentLog: (cb: (payload: unknown) => void) => () => void
   onAgentStep: (cb: (payload: unknown) => void) => () => void
   onAgentAnchor: (cb: (payload: unknown) => void) => () => void
+  onAgentLoop: (cb: (payload: unknown) => void) => () => void
+  pickFolder: (extensions: string[]) => Promise<{ folder: string; files: string[] } | null>
 }
 
 declare global {

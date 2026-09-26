@@ -667,6 +667,89 @@ textarea {
   stroke-width: 3px;
 }
 
+.loop-frame {
+  position: absolute;
+  z-index: 0;
+  border: 1.5px dashed rgba(138, 75, 22, 0.55);
+  border-radius: 8px;
+  background: rgba(210, 122, 0, 0.07);
+  pointer-events: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.loop-frame.active {
+  background: rgba(210, 122, 0, 0.12);
+  border-color: rgba(138, 75, 22, 0.85);
+}
+
+.loop-frame.running {
+  border-style: solid;
+  border-color: rgba(22, 101, 202, 0.7);
+  background: rgba(22, 101, 202, 0.06);
+}
+
+.loop-frame-head {
+  pointer-events: auto;
+  height: 24px;
+  line-height: 24px;
+  padding: 0 10px;
+  border-radius: 7px 7px 0 0;
+  background: rgba(138, 75, 22, 0.16);
+  color: #5a3008;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: move;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.loop-frame.running .loop-frame-head {
+  background: rgba(22, 101, 202, 0.16);
+  color: #0a3a8a;
+}
+
+.var-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #555;
+}
+
+.chip.var {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: #fff7e6;
+  border-color: #d2a060;
+}
+
+.list-area {
+  min-height: 96px;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.check.inline {
+  margin: 0;
+}
+
+.progress {
+  height: 14px;
+  border: 1px solid #7f9db9;
+  background: #fff;
+  padding: 1px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: repeating-linear-gradient(90deg, #2f8a2f 0 8px, transparent 8px 10px);
+  transition: width 0.3s ease;
+}
+
 .agent-node {
   position: absolute;
   z-index: 2;

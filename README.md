@@ -16,6 +16,29 @@ gönderip seçtirir.
 
 Aynı yazı ekranda birden çok yerdeyse, o node’un son tıklandığı konuma en yakın olanı seçilir.
 
+## Liste döngüsü ve değişkenler
+
+Döngü node’una bir **liste** yazılabilir (her satır bir tur) ya da **“Klasörden doldur…”** ile bir klasördeki
+resimler listeye doldurulur (doğal sıralama: `resim2` → `resim10`). Liste doluyken tur sayısı = satır sayısı.
+
+- Döngüyü tekrar eden kısmın **sonuna** koy, “tekrar” çıkışını o kısmın **ilk** node’una bağla.
+- Değişen yerlere yer tutucu yaz; her turda listenin sıradaki satırıyla doldurulur:
+  `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
+  Tıkla/Yazı Yaz prompt’larında, yazılacak metinde, tuşlarda ve bekleme yazılarında çalışır.
+- Döngü kaçıncı öğede olduğunu kaydeder; durdurup tekrar başlatınca kaldığı yerden devam eder (“Baştan başla”
+  ile sıfırlanır).
+- Döngüye giren node’ların altında yarı saydam bir çerçeve çıkar (Blender’daki frame gibi); başlığından tutup
+  sürükleyince tüm grup birlikte taşınır.
+
+Örnek (her resmi yükle, indirilen dosyaya resmin adını ver; tarayıcıda “indirmeden önce nereye kaydedileceğini
+sor” açık olmalı):
+
+```
+Başlangıç → Tıkla “Resim yükle” → Yazı Yaz {{öğe}} + Enter → Tıkla “Oluştur” → Öğeyi Bekle “İndir”
+          → Tıkla “İndir” → Yazı Yaz D:\Modeller\{{öğe.isim}}.glb + Enter → Döngü (tekrar → “Resim yükle”)
+                                                                              └ bitti → Bitir
+```
+
 ## Ekran görüntüsü modu (görsel LLM)
 
 Tıkla, Yazı Yaz, Tuş Gönder, Öğeyi Bekle ve Koşul node’larında **“Ekran görüntüsüne bakarak yap”** seçeneği var.

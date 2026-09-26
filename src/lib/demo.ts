@@ -99,12 +99,14 @@ export async function runDemo(
   settings: AppSettings,
   log: (l: LogLevel, m: string) => void,
   step: (id: string, s: StepStatus) => void,
-  startId?: string
+  startId?: string,
+  loopProgress?: (id: string, index: number) => void
 ) {
   demoStop = false
   const ex: Executor = {
     log,
     step,
+    loopProgress,
     shouldStop: () => demoStop,
     click: async (n) => {
       await pause(350)
@@ -122,7 +124,7 @@ export async function runDemo(
     },
     type: async (n) => {
       await pause(350)
-      const item = n.prompt?.trim() ? demoLocate(n) : null
+      const item = n.prompt?.trim() && !n.useVision ? demoLocate(n) : null
       log('success', `(demo) ${item ? `“${item.text}” alanına ` : ''}yazıldı: “${n.text ?? ''}”`)
     },
     key: async (n) => {

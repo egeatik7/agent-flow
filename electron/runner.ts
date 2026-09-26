@@ -1,11 +1,30 @@
 import {
   NODE_SPECS,
+  baseName,
+  itemVars,
+  listItems,
   portLabel,
+  renderTemplate,
   type AgentGraph,
   type AgentNode,
   type LogLevel,
   type StepStatus,
 } from './graph-types'
+
+type RunState = {
+  loopCounters: Map<string, number>
+  listIndex: Map<string, number>
+  vars: Record<string, string>
+}
+
+function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
+  return {
+    ...node,
+    prompt: renderTemplate(node.prompt, vars),
+    text: renderTemplate(node.text, vars),
+    keys: renderTemplate(node.keys, vars),
+  }
+}
 
 export type Executor = {
   log: (level: LogLevel, message: string) => void
@@ -15,6 +34,8 @@ export type Executor = {
   type: (node: AgentNode, stepNo: number) => Promise<void>
   key: (node: AgentNode) => Promise<void>
   exists: (text: string, node: AgentNode) => Promise<boolean>
+  /** Called when a list loop moves to another item, so the index can be persisted for resuming. */
+  loopProgress?: (id: string, index: number) => void
 }
 
 export class StoppedError extends Error {
@@ -48,7 +69,22 @@ export async function runGraph(
   let current = findEntry(graph, opts.startId)
   if (!current) throw new Error('Başlangıç node’u bulunamadı.')
 
-  const loopCounters = new Map<string, number>()
+  const state: RunState = { loopCounters: new Map(), listIndex: new Map(), vars: { sira: '1' } }
+  for (const n of graph.nodes) {
+    const items = n.kind === 'loop' ? listItems(n) : []
+    if (!items.length) continue
+    const idx = (n.loopIndex ?? 0) >= 0 && (n.loopIndex ?? 0) < items.length ? n.loopIndex ?? 0 : 0
+    state.listIndex.set(n.id, idx)
+    if (Object.keys(state.vars).length <= 1) {
+      state.vars = itemVars(items[idx], idx, items.length)
+      ex.log(
+        'info',
+        idx > 0
+          ? `“${n.title}” kaldığı yerden devam ediyor: ${idx + 1}/${items.length} (${baseName(items[idx])})`
+          : `“${n.title}”: ${items.length} öğe, ilki ${baseName(items[0])}`
+      )
+    }
+  }
   let steps = 0
 
   while (current) {
@@ -64,7 +100,7 @@ export async function runGraph(
 
     let port = 'next'
     try {
-      port = await execNode(node, ex, loopCounters, steps, opts.stepDelayMs)
+      port = await execNode(node.kind === 'loop' ? node : renderNode(node, state.vars), ex, state, steps, opts.stepDelayMs)
     } catch (e) {
       ex.step(node.id, 'error')
       throw e
@@ -93,10 +129,11 @@ export async function runGraph(
 async function execNode(
   node: AgentNode,
   ex: Executor,
-  loopCounters: Map<string, number>,
+  state: RunState,
   stepNo: number,
   stepDelayMs: number
 ): Promise<string> {
+  const { loopCounters, listIndex } = state
   const settle = () => interruptibleSleep(stepDelayMs, ex.shouldStop)
   switch (node.kind) {
     case 'start':
@@ -147,10 +184,30 @@ async function execNode(
       return found ? 'true' : 'false'
     }
     case 'loop': {
+      const items = listItems(node)
+      if (items.length) {
+        // The loop node sits at the end of its body: arriving here means the current item is finished.
+        const cur = listIndex.get(node.id) ?? 0
+        ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
+        const next = cur + 1
+        if (next < items.length) {
+          listIndex.set(node.id, next)
+          state.vars = itemVars(items[next], next, items.length)
+          ex.loopProgress?.(node.id, next)
+          ex.log('info', `Sıradaki öğe ${next + 1}/${items.length}: ${baseName(items[next])}`)
+          return 'loop'
+        }
+        listIndex.set(node.id, 0)
+        state.vars = itemVars(items[0], 0, items.length)
+        ex.loopProgress?.(node.id, 0)
+        ex.log('success', `Döngü “${node.title}”: listedeki ${items.length} öğenin hepsi bitti.`)
+        return 'done'
+      }
       const total = Math.max(1, node.count ?? 1)
       const done = loopCounters.get(node.id) ?? 0
       if (done < total) {
         loopCounters.set(node.id, done + 1)
+        state.vars = { ...state.vars, sira: String(done + 2) }
         ex.log('info', `Döngü “${node.title}”: ${done + 1}/${total}`)
         return 'loop'
       }

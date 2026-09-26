@@ -1,4 +1,5 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron'
+import fs from 'fs'
 import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
@@ -280,6 +281,7 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
 const executor: Executor = {
   log,
   step: (id, status) => send('agent:step', { id, status }),
+  loopProgress: (id, index) => send('agent:loop', { id, index }),
   shouldStop: () => stopRequested,
   click: async (node, stepNo) => {
     const t = await findTarget(node, stepNo)
@@ -345,6 +347,22 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('windows:list', () => bridge.listWindows())
+
+  ipcMain.handle('dialog:pickFolder', async (_e, extensions: string[]) => {
+    if (!mainWindow) return null
+    const r = await dialog.showOpenDialog(mainWindow, { title: 'Klasör seç', properties: ['openDirectory'] })
+    const dir = r.filePaths[0]
+    if (r.canceled || !dir) return null
+    const exts = extensions.map((e) => e.trim().replace(/^\./, '').toLowerCase()).filter(Boolean)
+    const files = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isFile())
+      .map((d) => d.name)
+      .filter((n) => !exts.length || exts.includes(path.extname(n).slice(1).toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true, sensitivity: 'base' }))
+      .map((n) => path.join(dir, n))
+    return { folder: dir, files }
+  })
 
   ipcMain.handle('screen:scan', async (_e, windowTitle?: string) => {
     const hidden = await hideSelf()

@@ -183,11 +183,16 @@ export default function App() {
       const p = payload as { id: string; x: number; y: number }
       setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, anchor: { x: p.x, y: p.y } } : n)) }))
     })
+    const offLoop = api.onAgentLoop((payload) => {
+      const p = payload as { id: string; index: number }
+      setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, loopIndex: p.index } : n)) }))
+    })
     return () => {
       offLog()
       offStep()
       offRec()
       offAnchor()
+      offLoop()
     }
   }, [pushLog, appendRecorded])
 
@@ -342,6 +347,37 @@ export default function App() {
 
   const openScanner = (nodeId: string | null) => setScanner({ nodeId })
 
+  const pickFolder = async (extensions: string[]): Promise<{ folder: string; files: string[] } | null> => {
+    if (api) return api.pickFolder(extensions)
+    return new Promise((resolve) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.setAttribute('webkitdirectory', '')
+      input.onchange = () => {
+        const files = Array.from(input.files ?? [])
+          .filter((f) => !extensions.length || extensions.includes(f.name.split('.').pop()?.toLowerCase() ?? ''))
+          .map((f) => f.webkitRelativePath || f.name)
+          .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true, sensitivity: 'base' }))
+        resolve(files.length || input.files?.length ? { folder: files[0]?.split('/')[0] ?? '', files } : null)
+      }
+      input.click()
+    })
+  }
+
+  const fillLoopFromFolder = async (nodeId: string, extensions: string[]) => {
+    try {
+      const r = await pickFolder(extensions)
+      if (!r) return
+      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0 })
+      pushLog(
+        r.files.length ? 'success' : 'warn',
+        r.files.length ? `Klasörden ${r.files.length} dosya listeye eklendi: ${r.folder}` : `Klasörde uygun dosya yok: ${r.folder}`
+      )
+    } catch (e) {
+      pushLog('error', errText(e))
+    }
+  }
+
   const scanScreen = async (windowTitle: string) => {
     if (!api) {
       await new Promise((r) => setTimeout(r, 400))
@@ -377,7 +413,14 @@ export default function App() {
     try {
       if (api) await api.runAgent(graph, startId)
       else
-        await runDemo(graph, settings, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId)
+        await runDemo(
+          graph,
+          settings,
+          pushLog,
+          (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })),
+          startId,
+          (id, index) => setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, loopIndex: index } : n)) }))
+        )
     } catch (e) {
       pushLog('error', errText(e))
     } finally {
@@ -479,6 +522,9 @@ export default function App() {
               onSelectNode={selectNode}
               onSelectEdge={selectEdge}
               onMoveNode={(id, x, y) => updateNode(id, { x, y })}
+              onMoveNodes={(pos) =>
+                setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)) }))
+              }
               onConnect={(from, port, to) => {
                 const g = graphRef.current
                 const target = g.nodes.find((n) => n.id === to)
@@ -571,6 +617,7 @@ export default function App() {
             onDeleteEdge={() => selectedEdge && deleteEdge(selectedEdge.id)}
             onCaptureForNode={captureForSelected}
             onOpenScanner={() => openScanner(selectedNodeId)}
+            onFillFromFolder={(exts) => selectedNodeId && fillLoopFromFolder(selectedNodeId, exts)}
             capturing={capturing}
           />
           <LogPanel logs={logs} onClear={() => setLogs([])} />
