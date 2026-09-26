@@ -912,6 +912,16 @@ textarea {
   color: #9a5a00;
 }
 
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #0033cc;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 11px;
+}
+
 .seg {
   display: flex;
 }

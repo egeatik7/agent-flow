@@ -35,7 +35,8 @@ function Invoke-Op([string]$op, $P) {
       return $true
     }
     'locate' {
-      $win = Find-Window ([string]$P.windowTitle)
+      $win = Find-WindowOrNull ([string]$P.windowTitle)
+      if ($null -eq $win) { return $null }
       Enter-Window $win
       $el = Find-ByLocator $win $P.locator
       if ($null -eq $el) { return $null }
@@ -65,7 +66,10 @@ function Invoke-Op([string]$op, $P) {
       return $true
     }
     'keys' {
-      if ($P.windowTitle) { Enter-Window (Find-Window ([string]$P.windowTitle)) }
+      if ($P.windowTitle) {
+        $win = Find-WindowOrNull ([string]$P.windowTitle)
+        if ($null -ne $win) { Enter-Window $win }
+      }
       [System.Windows.Forms.SendKeys]::SendWait([string]$P.keys)
       return $true
     }

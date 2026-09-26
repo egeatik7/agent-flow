@@ -319,10 +319,15 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW) {
 
 function Invoke-Scan($P) {
   $win = $null
+  $missing = ''
   if ($P.windowTitle) {
-    $win = Find-Window ([string]$P.windowTitle)
-    Enter-Window $win
-    Start-Sleep -Milliseconds 150
+    $win = Find-WindowOrNull ([string]$P.windowTitle)
+    if ($null -eq $win) {
+      $missing = [string]$P.windowTitle
+    } else {
+      Enter-Window $win
+      Start-Sleep -Milliseconds 150
+    }
   }
   $rect = Get-CaptureRect $win
   $own = 0
@@ -357,6 +362,7 @@ function Invoke-Scan($P) {
     ocrCount = $ocr.Count
     image  = $img
     window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
+    missingWindow = $missing
   }
 }
 

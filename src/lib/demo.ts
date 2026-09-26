@@ -1,5 +1,5 @@
 import { runGraph, StoppedError, type Executor } from '../../electron/runner'
-import { containsText, extractTarget, matchPrompt, matchText } from '../../electron/matcher'
+import { containsText, extractTarget, matchFuzzy, matchPrompt, matchText } from '../../electron/matcher'
 import type { AgentGraph, AgentNode, AppSettings, Locator, LogLevel, ScanResult, ScreenItem, StepStatus } from '../types'
 
 const W = 1920
@@ -89,7 +89,8 @@ function demoLocate(n: AgentNode): ScreenItem | null {
     (ex?.quoted ? matchText(ITEMS, ex.text, { anchor }) : null) ??
     matchPrompt(ITEMS, prompt || n.locator?.text || '', anchor) ??
     (ex ? matchText(ITEMS, ex.text, { anchor }) : null) ??
-    (n.locator?.text ? matchText(ITEMS, n.locator.text, { anchor }) : null)
+    (n.locator?.text ? matchText(ITEMS, n.locator.text, { anchor }) : null) ??
+    matchFuzzy(ITEMS, ex?.text || prompt || n.locator?.text || '', { anchor })
   return hit?.item ?? null
 }
 

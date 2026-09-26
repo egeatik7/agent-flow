@@ -360,7 +360,16 @@ function Settings(p: Props) {
             ↻
           </button>
         </SaveRow>
-        <p className="hint">Seçilirse sadece o pencere okunur ve öne getirilir. “Tüm ekran” masaüstü ve görev çubuğu dahil her şeyi okur.</p>
+        {s.targetWindow && p.windows.length > 0 && !p.windows.some((w) => w.title === s.targetWindow) ? (
+          <p className="hint warn">
+            “{s.targetWindow}” şu an açık değil; çalışırken tüm ekran okunur.{' '}
+            <button type="button" className="link-btn" onClick={() => p.onSaveSettings({ targetWindow: '' })}>
+              Tüm ekran yap
+            </button>
+          </p>
+        ) : (
+          <p className="hint">Seçilirse sadece o pencere okunur ve öne getirilir. “Tüm ekran” masaüstü ve görev çubuğu dahil her şeyi okur.</p>
+        )}
       </div>
 
       <div className="field">

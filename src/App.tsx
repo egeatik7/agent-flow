@@ -444,7 +444,11 @@ export default function App() {
           />
           <span className="menubar-status">
             {counts} aşama · {graph.edges.length} bağlantı
-            {settings.targetWindow ? ` · hedef: ${settings.targetWindow}` : ''}
+            {settings.targetWindow
+              ? ` · hedef: ${settings.targetWindow}${
+                  windows.length && !windows.some((w) => w.title === settings.targetWindow) ? ' (açık değil)' : ''
+                }`
+              : ' · hedef: tüm ekran'}
             {settings.apiKey ? '' : ' · API anahtarı yok'}
           </span>
         </div>

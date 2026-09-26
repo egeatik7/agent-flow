@@ -21,6 +21,8 @@ export type ScanResult = {
   ocrCount: number
   image: { data: string; w: number; h: number; mime?: string } | null
   window: string
+  /** Set when the configured target window was not open and the whole screen was read instead. */
+  missingWindow?: string
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }
@@ -211,6 +213,80 @@ export function matchPrompt(items: ScreenItem[], prompt: string, anchor?: { x: n
   }
   const best = pickBest(scored, anchor)
   if (!best || best.score < 12) return null
+  return toTarget(best.item, best.box)
+}
+
+/** Optimal string alignment distance (Levenshtein + adjacent transpositions), capped for speed. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    let rowMin = Infinity
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+      rowMin = Math.min(rowMin, d[i][j])
+    }
+    if (rowMin > max) return max + 1
+  }
+  return d[a.length][b.length]
+}
+
+function wordSimilarity(q: string, w: string): number {
+  if (q === w) return 1
+  if (q.length >= 3 && w.length >= 3 && (w.startsWith(q) || q.startsWith(w))) {
+    const extra = Math.abs(q.length - w.length)
+    if (extra <= 5) return 0.9
+  }
+  const allowed = q.length >= 7 ? 2 : q.length >= 4 ? 1 : 0
+  if (allowed && editDistance(q, w, allowed) <= allowed) return 0.8
+  return 0
+}
+
+/** Word-overlap match that tolerates typos, OCR mistakes and extra words (“kutsla bilgi” → “kutsal bilgi kaynağı”). */
+export function matchFuzzy(
+  items: ScreenItem[],
+  text: string,
+  opts: { anchor?: { x: number; y: number }; minScore?: number } = {}
+): Target | null {
+  const qw = norm(text)
+    .split(' ')
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w))
+  if (!qw.length) return null
+  const total = qw.reduce((s, w) => s + w.length, 0)
+  const scored: Scored[] = []
+  for (const item of items) {
+    const iw = norm(item.text).split(' ').filter(Boolean)
+    if (!iw.length) continue
+    let got = 0
+    let matched = 0
+    const used = new Set<number>()
+    for (const q of qw) {
+      let best = 0
+      let bestIdx = -1
+      iw.forEach((w, i) => {
+        if (used.has(i)) return
+        const s = wordSimilarity(q, w)
+        if (s > best) {
+          best = s
+          bestIdx = i
+        }
+      })
+      if (bestIdx >= 0) {
+        used.add(bestIdx)
+        got += q.length * best
+        matched++
+      }
+    }
+    const coverage = got / total
+    if (coverage < 0.6 || matched < Math.ceil(qw.length * 0.6)) continue
+    const extra = iw.length - used.size
+    scored.push({ item, score: coverage * 100 - extra * 2 + typeBonus(item), box: null })
+  }
+  const best = pickBest(scored, opts.anchor)
+  if (!best || best.score < (opts.minScore ?? 50)) return null
   return toTarget(best.item, best.box)
 }
 

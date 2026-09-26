@@ -7,6 +7,7 @@ import { runGraph, StoppedError, type Executor } from './runner'
 import {
   containsText,
   extractTarget,
+  matchFuzzy,
   matchPrompt,
   matchText,
   refineTarget,
@@ -97,9 +98,21 @@ function center(t: { x: number; y: number; w: number; h: number }) {
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
 }
 
+const warnedMissing = new Set<string>()
+
+function warnMissingWindow(res: ScanResult) {
+  if (!res.missingWindow || warnedMissing.has(res.missingWindow)) return
+  warnedMissing.add(res.missingWindow)
+  log(
+    'warn',
+    `Hedef pencere “${res.missingWindow}” açık değil, tüm ekran okunuyor. Kalıcı çözüm: Ayarlar > Hedef pencere > “Tüm ekran” > Kaydet.`
+  )
+}
+
 async function scanFor(node: AgentNode, withImage: boolean): Promise<ScanResult> {
   const s = getSettings()
   const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: withImage ? 'marked' : 'none' })
+  warnMissingWindow(res)
   log(
     'info',
     `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})${res.window ? ` — ${res.window}` : ''}`
@@ -118,8 +131,8 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
     try {
       const r = await bridge.locate(loc, win)
       if (r) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
-    } catch (e) {
-      log('warn', `Kayıtlı öğe bulunamadı: ${(e as Error).message}`)
+    } catch {
+      /* fall through to reading the screen */
     }
   }
 
@@ -131,8 +144,16 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
   const anchor = node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
 
   let hit: Target | null = null
-  if (explicit?.quoted) hit = matchText(scanRes.items, explicit.text, { anchor, minScore: 60 })
-  if (!hit && !prompt && recordedText) hit = matchText(scanRes.items, recordedText, { anchor, minScore: 60 })
+  if (explicit?.quoted) {
+    hit =
+      matchText(scanRes.items, explicit.text, { anchor, minScore: 60 }) ??
+      matchFuzzy(scanRes.items, explicit.text, { anchor, minScore: 80 })
+  }
+  if (!hit && !prompt && recordedText) {
+    hit =
+      matchText(scanRes.items, recordedText, { anchor, minScore: 60 }) ??
+      matchFuzzy(scanRes.items, recordedText, { anchor, minScore: 80 })
+  }
   if (hit) return { ...center(hit), label: `“${hit.text}” yazısı` }
 
   if (wantLlm) {
@@ -158,7 +179,9 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
   hit =
     matchPrompt(scanRes.items, prompt || recordedText, anchor) ??
     (explicit ? matchText(scanRes.items, explicit.text, { anchor }) : null) ??
-    (recordedText ? matchText(scanRes.items, recordedText, { anchor }) : null)
+    (recordedText ? matchText(scanRes.items, recordedText, { anchor }) : null) ??
+    matchFuzzy(scanRes.items, explicit?.text || prompt || recordedText, { anchor }) ??
+    (recordedText && prompt ? matchFuzzy(scanRes.items, recordedText, { anchor }) : null)
   if (hit) return { ...center(hit), label: `“${hit.text}” (yazı eşleşmesi)` }
 
   if (loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
@@ -207,6 +230,7 @@ const executor: Executor = {
   exists: async (text) => {
     const s = getSettings()
     const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'none' })
+    warnMissingWindow(res)
     return containsText(res.items, text)
   },
 }
@@ -269,6 +293,7 @@ app.whenReady().then(() => {
     if (running) throw new Error('Ajan zaten çalışıyor.')
     running = true
     stopRequested = false
+    warnedMissing.clear()
     store.set('graph', graph)
     const s = getSettings()
     globalShortcut.register(STOP_HOTKEY, () => {

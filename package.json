@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Windows XP tarzı node-based accessibility agent promptlatıcı — OpenRouter ile",
   "main": "dist-electron/main.js",
   "author": "XP Agent Studio",

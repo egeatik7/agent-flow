@@ -62,12 +62,37 @@ function Get-TopWindows([int]$ownPid = 0) {
   return , $list
 }
 
+function Test-UsableWindow($w) {
+  try {
+    $h = [IntPtr]$w.Current.NativeWindowHandle
+    if ($h -eq [IntPtr]::Zero) { return $true }
+    return ([XpNative]::IsWindowVisible($h) -and -not [XpNative]::IsCloaked($h))
+  } catch { return $false }
+}
+
+# Window titles change with the open tab/folder ("X - Opera", "Y - Dosya Gezgini"),
+# so after exact and substring matches we fall back to the app suffix after the last " - ".
+function Find-WindowOrNull([string]$title) {
+  if ([string]::IsNullOrWhiteSpace($title)) { return $null }
+  $wins = @(Get-TopWindows | Where-Object { Test-UsableWindow $_ })
+  $t = $title.Trim()
+  foreach ($w in $wins) { if ($w.Current.Name -eq $t) { return $w } }
+  foreach ($w in $wins) { if ($w.Current.Name.IndexOf($t, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $w } }
+  $idx = $t.LastIndexOf(' - ')
+  if ($idx -ge 0) {
+    $suffix = $t.Substring($idx)
+    if ($suffix.Length -gt 4) {
+      foreach ($w in $wins) { if ($w.Current.Name.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase)) { return $w } }
+    }
+  }
+  return $null
+}
+
 function Find-Window([string]$title) {
   if ([string]::IsNullOrWhiteSpace($title)) { throw 'NO_TARGET_WINDOW' }
-  $wins = Get-TopWindows
-  foreach ($w in $wins) { if ($w.Current.Name -eq $title) { return $w } }
-  foreach ($w in $wins) { if ($w.Current.Name -like "*$title*") { return $w } }
-  throw "WINDOW_NOT_FOUND: $title"
+  $w = Find-WindowOrNull $title
+  if ($null -eq $w) { throw "WINDOW_NOT_FOUND: $title" }
+  return $w
 }
 
 function Enter-Window($win) {
