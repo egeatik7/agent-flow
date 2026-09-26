@@ -345,6 +345,7 @@ function NodeInspector(p: Props) {
             <input type="checkbox" checked={n.clearFirst !== false} onChange={(e) => upd({ clearFirst: e.target.checked })} />
             Önce alandaki yazıyı sil (Ctrl+A)
           </label>
+          <p className="hint">Tıklama, silme ve yazma arasında kısa beklemeler var. Yazı harf harf, yavaşça gider.</p>
           <label className="check">
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas

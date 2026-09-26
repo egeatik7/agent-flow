@@ -64,7 +64,7 @@ Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çi
 | --- | --- | --- |
 | Başlangıç | Akışın giriş noktası | sonra |
 | Tıkla | Ekranda yazan yazıyı bulup tıklar (tek/çift/sağ tık) | sonra |
-| Yazı Yaz | Bir alana (veya o an seçili alana) metin yazar, isteğe bağlı Enter | sonra |
+| Yazı Yaz | Bir alana (veya o an seçili alana) metin yazar, isteğe bağlı Enter. Tıklama, silme ve yazma arasında kısa beklemeler vardır; metin harf harf gider | sonra |
 | Tuş Gönder | Kısayol/tuş (`{ENTER}`, `^a`, `%{F4}` …) | sonra |
 | Zamanlayıcı | N saniye bekler | sonra |
 | Öğeyi Bekle | Bir yazı ekranda görünene kadar bekler | bulundu / zaman aşımı |

@@ -9,6 +9,14 @@ function ConvertTo-SendKeysText([string]$t) {
   return ($t -replace '([\+\^%~\(\)\{\}\[\]])', '{$1}')
 }
 
+function Send-TextPaced([string]$t, [int]$gapMs) {
+  if ([string]::IsNullOrEmpty($t)) { return }
+  foreach ($ch in $t.ToCharArray()) {
+    [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText ([string]$ch)))
+    if ($gapMs -gt 0) { Start-Sleep -Milliseconds $gapMs }
+  }
+}
+
 function Invoke-Op([string]$op, $P) {
   switch ($op) {
     'ping' {
@@ -67,14 +75,18 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height }
     }
     'typeText' {
+      # Click, select, delete, type and Enter each get a gap so the field can catch up.
       if ($P.clearFirst) {
+        Start-Sleep -Milliseconds 120
         [System.Windows.Forms.SendKeys]::SendWait('^a')
-        Start-Sleep -Milliseconds 40
+        Start-Sleep -Milliseconds 280
+        [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+        Start-Sleep -Milliseconds 200
       }
       $text = [string]$P.text
-      if ($text.Length -gt 0) { [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $text)) }
+      if ($text.Length -gt 0) { Send-TextPaced $text 20 }
       if ($P.pressEnter) {
-        Start-Sleep -Milliseconds 60
+        Start-Sleep -Milliseconds 240
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
       }
       return $true

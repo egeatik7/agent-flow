@@ -60,6 +60,8 @@ function log(level: LogLevel, message: string) {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** After a click, before keys: lets the field take focus. */
+const FOCUS_MS = 420
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
@@ -293,7 +295,7 @@ const executor: Executor = {
     if (node.prompt?.trim() || node.locator) {
       const t = await findTarget(node, stepNo)
       await bridge.clickAt(t.x, t.y, 'left')
-      await sleep(120)
+      await sleep(FOCUS_MS)
       log('info', `Alan seçildi: ${t.label}`)
       send('agent:anchor', { id: node.id, x: Math.round(t.x), y: Math.round(t.y) })
     }
@@ -304,7 +306,7 @@ const executor: Executor = {
     if (node.useVision && node.prompt?.trim()) {
       const t = await resolveVision(node)
       await bridge.clickAt(t.x, t.y, 'left')
-      await sleep(150)
+      await sleep(FOCUS_MS)
       log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       await bridge.sendKeys(node.keys)
       return
