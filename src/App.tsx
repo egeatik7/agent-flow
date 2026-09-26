@@ -5,19 +5,22 @@ import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import Taskbar from './components/Taskbar'
+import ScreenScanner from './components/ScreenScanner'
 import {
+  DEFAULT_SETTINGS,
   NODE_SPECS,
   createNode,
   newId,
   normalizeGraph,
-  type A11yNode,
   type AgentGraph,
   type AgentNode,
   type AppSettings,
   type Locator,
   type LogEntry,
   type LogLevel,
+  type ModelInfo,
   type NodeKind,
+  type ScreenItem,
   type StepStatus,
 } from './types'
 import {
@@ -30,18 +33,9 @@ import {
   freePort,
   removeNode,
 } from './lib/graph-ops'
-import { DEMO_CAPTURE, DEMO_TREE, runDemo, stopDemo } from './lib/demo'
+import { DEMO_CAPTURE, demoScan, runDemo, stopDemo } from './lib/demo'
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
-
-const DEFAULT_SETTINGS: AppSettings = {
-  apiKey: '',
-  model: 'openai/gpt-4o-mini',
-  targetWindow: '',
-  maxTreeDepth: 12,
-  stepDelayMs: 800,
-  maxSteps: 500,
-}
 
 const LOCAL_GRAPH = 'xp-agent-graph'
 const LOCAL_SETTINGS = 'xp-agent-settings'
@@ -51,9 +45,16 @@ function errText(e: unknown): string {
   return m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-function promptFor(loc: Locator): string {
-  return `${loc.controlType} “${loc.name || loc.automationId || loc.path}” öğesine tıkla`
+function locText(loc: Locator): string {
+  return (loc.text || loc.name || '').trim()
 }
+
+function promptFor(loc: Locator): string {
+  const t = locText(loc)
+  return t ? `“${t}” yazan yere tıkla` : `${loc.controlType} öğesine tıkla`
+}
+
+type NewClick = { prompt: string; title: string; locator?: Locator; anchor?: { x: number; y: number } }
 
 function initialGraph(): AgentGraph {
   return normalizeGraph({ nodes: [createNode('start', 40, 80)], edges: [] })
@@ -68,10 +69,9 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [tree, setTree] = useState<A11yNode | null>(null)
-  const [treeLoading, setTreeLoading] = useState(false)
+  const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
   const [windows, setWindows] = useState<{ title: string; handle: string }[]>([])
-  const [models, setModels] = useState<string[]>([])
+  const [models, setModels] = useState<ModelInfo[]>([])
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [loaded, setLoaded] = useState(false)
@@ -132,34 +132,40 @@ export default function App() {
     return () => clearTimeout(t)
   }, [graph, loaded])
 
+  const appendClick = useCallback((c: NewClick) => {
+    const g = graphRef.current
+    let tailRef = recordTailRef.current
+    if (!tailRef || !g.nodes.some((n) => n.id === tailRef!.id)) {
+      const sel = g.nodes.find((n) => n.id === selectedRef.current)
+      const port = sel ? freePort(g, sel) : null
+      const tail = chainTail(g)
+      tailRef = sel && port ? { id: sel.id, port } : tail ? { id: tail.node.id, port: tail.port } : null
+    }
+    const res = tailRef ? addAfter(g, tailRef.id, tailRef.port, 'click') : addAt(g, 'click', 300, 80)
+    const next = {
+      ...res.graph,
+      nodes: res.graph.nodes.map((n) =>
+        n.id === res.id ? { ...n, prompt: c.prompt, locator: c.locator, anchor: c.anchor, title: c.title.slice(0, 40) } : n
+      ),
+    }
+    recordTailRef.current = { id: res.id, port: 'next' }
+    setGraph(next)
+    setSelectedNodeId(res.id)
+    setSelectedEdgeId(null)
+  }, [])
+
   const appendRecorded = useCallback(
     (loc: Locator) => {
-      const g = graphRef.current
-      let anchor = recordTailRef.current
-      if (!anchor || !g.nodes.some((n) => n.id === anchor!.id)) {
-        const sel = g.nodes.find((n) => n.id === selectedRef.current)
-        const port = sel ? freePort(g, sel) : null
-        const tail = chainTail(g)
-        anchor = sel && port ? { id: sel.id, port } : tail ? { id: tail.node.id, port: tail.port } : null
-      }
-      const res = anchor ? addAfter(g, anchor.id, anchor.port, 'click') : addAt(g, 'click', 300, 80)
-      const next = {
-        ...res.graph,
-        nodes: res.graph.nodes.map((n) =>
-          n.id === res.id ? { ...n, prompt: promptFor(loc), locator: loc, title: `Tıkla: ${loc.name || loc.controlType}`.slice(0, 40) } : n
-        ),
-      }
-      recordTailRef.current = { id: res.id, port: 'next' }
-      setGraph(next)
-      setSelectedNodeId(res.id)
-      setSelectedEdgeId(null)
-      if (!settingsRef.current.targetWindow && loc.windowTitle) {
-        setSettings((s) => ({ ...s, targetWindow: loc.windowTitle! }))
-        void api?.saveSettings({ targetWindow: loc.windowTitle })
-      }
+      const t = locText(loc)
+      appendClick({
+        prompt: promptFor(loc),
+        title: `Tıkla: ${t || loc.controlType}`,
+        locator: loc,
+        anchor: loc.x !== undefined && loc.y !== undefined ? { x: loc.x, y: loc.y } : undefined,
+      })
       pushLog('success', `Kaydedildi: ${promptFor(loc)}${loc.windowTitle ? ` — ${loc.windowTitle}` : ''}`)
     },
-    [pushLog]
+    [appendClick, pushLog]
   )
 
   useEffect(() => {
@@ -173,10 +179,15 @@ export default function App() {
       setStepStatus((prev) => ({ ...prev, [p.id]: p.status }))
     })
     const offRec = api.onRecordEvent((payload) => appendRecorded(payload as Locator))
+    const offAnchor = api.onAgentAnchor((payload) => {
+      const p = payload as { id: string; x: number; y: number }
+      setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, anchor: { x: p.x, y: p.y } } : n)) }))
+    })
     return () => {
       offLog()
       offStep()
       offRec()
+      offAnchor()
     }
   }, [pushLog, appendRecorded])
 
@@ -187,7 +198,7 @@ export default function App() {
     setSelectedNodeId(id)
     if (id) {
       setSelectedEdgeId(null)
-      setSideTab((t) => (t === 'tree' ? t : 'node'))
+      setSideTab('node')
     }
   }
   const selectEdge = (id: string | null) => {
@@ -320,41 +331,41 @@ export default function App() {
       return
     }
     const node = graphRef.current.nodes.find((n) => n.id === id)
-    updateNode(id, { locator: loc, prompt: node?.prompt?.trim() ? node.prompt : promptFor(loc) })
-    pushLog('success', `“${loc.name || loc.controlType}” node’a bağlandı.`)
+    const anchor = loc.x !== undefined && loc.y !== undefined ? { x: loc.x, y: loc.y } : undefined
+    if (node?.kind === 'waitFor' || node?.kind === 'condition') {
+      updateNode(id, { text: locText(loc) })
+    } else {
+      updateNode(id, { locator: loc, anchor, prompt: node?.prompt?.trim() ? node.prompt : promptFor(loc) })
+    }
+    pushLog('success', `“${locText(loc) || loc.controlType}” node’a bağlandı.`)
   }
 
-  const refreshTree = async () => {
-    setSideTab('tree')
+  const openScanner = (nodeId: string | null) => setScanner({ nodeId })
+
+  const scanScreen = async (windowTitle: string) => {
     if (!api) {
-      setTree(DEMO_TREE)
-      return
+      await new Promise((r) => setTimeout(r, 400))
+      return demoScan()
     }
-    setTreeLoading(true)
-    try {
-      setTree(await api.getA11yTree(settings.targetWindow || selected?.locator?.windowTitle))
-    } catch (e) {
-      pushLog('error', errText(e))
-    } finally {
-      setTreeLoading(false)
-    }
+    return api.scanScreen(windowTitle || undefined)
   }
 
-  const pickTreeNode = (n: A11yNode) => {
-    if (!selected || (selected.kind !== 'click' && selected.kind !== 'type')) {
-      pushLog('warn', 'Önce bir “Tıkla” veya “Yazı Yaz” node’u seç.')
-      return
+  const pickScreenItem = (item: ScreenItem) => {
+    const text = item.text.trim()
+    const anchor = { x: Math.round(item.x + item.w / 2), y: Math.round(item.y + item.h / 2) }
+    const node = scanner?.nodeId ? graphRef.current.nodes.find((n) => n.id === scanner.nodeId) : undefined
+    if (node && (node.kind === 'waitFor' || node.kind === 'condition')) {
+      updateNode(node.id, { text })
+    } else if (node && node.kind === 'type') {
+      updateNode(node.id, { prompt: `“${text}” alanı`, anchor, locator: undefined })
+    } else if (node && node.kind === 'click') {
+      updateNode(node.id, { prompt: `“${text}” yazan yere tıkla`, anchor, locator: undefined })
+    } else {
+      appendClick({ prompt: `“${text}” yazan yere tıkla`, title: `Tıkla: ${text}`, anchor })
+      recordTailRef.current = null
     }
-    const loc: Locator = {
-      name: n.name,
-      controlType: n.controlType,
-      automationId: n.automationId,
-      path: n.path,
-      windowTitle: settings.targetWindow || tree?.name,
-    }
-    updateNode(selected.id, { locator: loc, prompt: selected.prompt?.trim() ? selected.prompt : promptFor(loc) })
-    setSideTab('node')
-    pushLog('success', `“${n.name || n.controlType}” → ${selected.title}`)
+    pushLog('success', `Ekrandan seçildi: “${text}”${node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'}`)
+    setScanner(null)
   }
 
   const run = async (startId?: string) => {
@@ -419,7 +430,7 @@ export default function App() {
           <button type="button" onClick={exportGraph}>Dışa Aktar</button>
           <button type="button" onClick={() => fileRef.current?.click()}>İçe Aktar</button>
           <button type="button" onClick={() => setSideTab('settings')}>Ayarlar</button>
-          <button type="button" onClick={refreshTree}>Accessibility Tree</button>
+          <button type="button" onClick={() => openScanner(null)}>Ekran Tarayıcı</button>
           <input
             ref={fileRef}
             type="file"
@@ -446,6 +457,7 @@ export default function App() {
           onAdd={addNode}
           onToggleRecord={toggleRecord}
           onCapture={captureAsNewNode}
+          onOpenScanner={() => openScanner(null)}
           onRun={() => run()}
           onRunFromSelected={() => selectedNodeId && run(selectedNodeId)}
           onStop={stop}
@@ -505,11 +517,19 @@ export default function App() {
             models={models}
             onLoadModels={async () => {
               try {
-                const list = api
+                const list: ModelInfo[] = api
                   ? await api.listModels()
-                  : ((await (await fetch('https://openrouter.ai/api/v1/models')).json()).data as { id: string }[]).map((m) => m.id).sort()
+                  : (
+                      (await (await fetch('https://openrouter.ai/api/v1/models')).json()).data as {
+                        id: string
+                        architecture?: { input_modalities?: string[] }
+                      }[]
+                    )
+                      .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
+                      .sort((a, b) => a.id.localeCompare(b.id))
                 setModels(list)
-                pushLog('success', `${list.length} model yüklendi, model kutusuna yazmaya başla.`)
+                const vision = list.filter((m) => m.vision).length
+                pushLog('success', `${list.length} model yüklendi (${vision} tanesi ekran görüntüsü görebiliyor).`)
               } catch (e) {
                 pushLog('error', errText(e))
               }
@@ -533,16 +553,25 @@ export default function App() {
             onDeleteNode={() => selected && deleteNode(selected.id)}
             onDeleteEdge={() => selectedEdge && deleteEdge(selectedEdge.id)}
             onCaptureForNode={captureForSelected}
+            onOpenScanner={() => openScanner(selectedNodeId)}
             capturing={capturing}
-            tree={tree}
-            treeLoading={treeLoading}
-            onRefreshTree={refreshTree}
-            onPickTreeNode={pickTreeNode}
           />
           <LogPanel logs={logs} onClear={() => setLogs([])} />
         </div>
       </div>
       <Taskbar recording={recording} running={running} />
+      {scanner && (
+        <ScreenScanner
+          targetLabel={
+            (scanner.nodeId && graph.nodes.find((n) => n.id === scanner.nodeId)?.title) || 'yeni Tıkla node’u'
+          }
+          windows={windows}
+          defaultWindow={settings.targetWindow}
+          onScan={scanScreen}
+          onPick={pickScreenItem}
+          onClose={() => setScanner(null)}
+        />
+      )}
     </div>
   )
 }

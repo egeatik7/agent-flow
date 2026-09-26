@@ -15,7 +15,17 @@ export type Locator = {
   automationId?: string
   path: string
   windowTitle?: string
+  /** Visible text at the click point (UIA name or OCR). */
+  text?: string
+  /** Screen point that was clicked when recorded. */
+  x?: number
+  y?: number
+  /** Click point relative to the top-left of its window. */
+  offsetX?: number
+  offsetY?: number
 }
+
+export type ClickMode = 'left' | 'double' | 'right'
 
 export type AgentNode = {
   id: string
@@ -30,6 +40,10 @@ export type AgentNode = {
   count?: number
   timeoutMs?: number
   pressEnter?: boolean
+  clearFirst?: boolean
+  clickMode?: ClickMode
+  /** Last known screen position of the target; breaks ties when the same text appears several times. */
+  anchor?: { x: number; y: number }
   locator?: Locator
 }
 
@@ -49,18 +63,22 @@ export type AppSettings = {
   apiKey: string
   model: string
   targetWindow: string
-  maxTreeDepth: number
   stepDelayMs: number
   maxSteps: number
+  /** Attach a numbered screenshot to LLM requests (needs a vision-capable model). */
+  sendScreenshot: boolean
+  /** Minimize this app while the agent runs so it does not cover the target. */
+  hideWhileRunning: boolean
 }
 
-export type A11yNode = {
-  id: string
-  name: string
-  controlType: string
-  automationId?: string
-  path: string
-  children?: A11yNode[]
+export const DEFAULT_SETTINGS: AppSettings = {
+  apiKey: '',
+  model: 'openai/gpt-4o-mini',
+  targetWindow: '',
+  stepDelayMs: 800,
+  maxSteps: 500,
+  sendScreenshot: true,
+  hideWhileRunning: true,
 }
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'
@@ -94,7 +112,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     color: '#1f5fbf',
     hasInput: true,
     outputs: NEXT,
-    description: 'Prompt’a göre accessibility öğesini bulup tıklar.',
+    description: 'Ekranda yazan yazıyı bulup tıklar (örn. “Opera’ya tıkla”).',
   },
   type: {
     label: 'Yazı Yaz',
@@ -229,9 +247,9 @@ export function createNode(
   }
   switch (kind) {
     case 'click':
-      return { ...base, prompt: '' }
+      return { ...base, prompt: '', clickMode: 'left' }
     case 'type':
-      return { ...base, prompt: '', text: '', pressEnter: false }
+      return { ...base, prompt: '', text: '', pressEnter: false, clearFirst: true }
     case 'key':
       return { ...base, keys: '{ENTER}' }
     case 'wait':
@@ -251,8 +269,11 @@ export function summarize(n: AgentNode): string {
   switch (n.kind) {
     case 'start':
       return 'Akış buradan başlar.'
-    case 'click':
-      return n.prompt?.trim() || (n.locator ? `“${n.locator.name}” öğesine tıkla` : 'Prompt yazılmadı…')
+    case 'click': {
+      const mode = n.clickMode === 'double' ? ' (çift tık)' : n.clickMode === 'right' ? ' (sağ tık)' : ''
+      const body = n.prompt?.trim() || (n.locator ? `“${n.locator.text || n.locator.name}” yazan yere tıkla` : 'Ne yazan yere tıklanacağını yaz…')
+      return body + mode
+    }
     case 'type':
       return `${n.prompt?.trim() ? n.prompt.trim() + ' → ' : ''}“${n.text || ''}”${n.pressEnter ? ' + Enter' : ''}`
     case 'key':

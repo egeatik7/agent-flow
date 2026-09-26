@@ -1,39 +1,5 @@
-import type { A11yNode, NodeKind } from './graph-types'
-
-export type A11yDecision = {
-  name: string
-  controlType: string
-  automationId?: string
-  path: string
-  reason: string
-}
-
-type CatalogItem = {
-  i: number
-  name: string
-  type: string
-  id?: string
-  path: string
-}
-
-function buildCatalog(tree: A11yNode, limit = 700): CatalogItem[] {
-  const out: CatalogItem[] = []
-  const walk = (n: A11yNode) => {
-    if (out.length >= limit) return
-    if (n.name || n.automationId) {
-      out.push({
-        i: out.length,
-        name: n.name,
-        type: n.controlType,
-        ...(n.automationId ? { id: n.automationId } : {}),
-        path: n.path,
-      })
-    }
-    for (const c of n.children ?? []) walk(c)
-  }
-  walk(tree)
-  return out
-}
+import type { NodeKind } from './graph-types'
+import { describeItems, type ScanResult } from './matcher'
 
 const HEADERS = (apiKey: string) => ({
   Authorization: `Bearer ${apiKey}`,
@@ -42,7 +8,11 @@ const HEADERS = (apiKey: string) => ({
   'X-Title': 'XP Agent Studio',
 })
 
-async function chat(apiKey: string, model: string, messages: object[]): Promise<string> {
+type Message = { role: 'system' | 'user'; content: string | object[] }
+
+class ImageUnsupportedError extends Error {}
+
+async function chat(apiKey: string, model: string, messages: Message[], hasImage: boolean): Promise<string> {
   const send = (json: boolean) =>
     fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -50,93 +20,121 @@ async function chat(apiKey: string, model: string, messages: object[]): Promise<
       body: JSON.stringify({
         model,
         temperature: 0,
+        max_tokens: 300,
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
     })
 
   let res = await send(true)
-  if (res.status === 400) res = await send(false)
+  if (res.status === 400 || res.status === 404 || res.status === 422) {
+    const text = await res.text()
+    if (hasImage && /image|vision|multimodal|modalit/i.test(text)) throw new ImageUnsupportedError(text.slice(0, 200))
+    res = await send(false)
+  }
   if (!res.ok) {
     const text = await res.text()
+    if (hasImage && /image|vision|multimodal|modalit/i.test(text)) throw new ImageUnsupportedError(text.slice(0, 200))
+    if (res.status === 401) throw new Error('OpenRouter API anahtarı geçersiz (401).')
+    if (res.status === 402) throw new Error('OpenRouter bakiyesi yetersiz (402).')
     throw new Error(`OpenRouter ${res.status}: ${text.slice(0, 300)}`)
   }
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
+  if (data.error?.message) throw new Error(`OpenRouter: ${data.error.message}`)
   return data.choices?.[0]?.message?.content ?? ''
 }
 
 function parseJson(content: string): Record<string, unknown> {
-  try {
-    return JSON.parse(content)
-  } catch {
-    const m = content.match(/\{[\s\S]*\}/)
-    if (!m) return {}
+  const tryParse = (s: string) => {
     try {
-      return JSON.parse(m[0])
+      return JSON.parse(s) as Record<string, unknown>
     } catch {
-      return {}
+      return null
     }
   }
+  return tryParse(content) ?? tryParse(content.match(/\{[\s\S]*\}/)?.[0] ?? '') ?? {}
 }
 
-export async function chooseElement(opts: {
+export type ScreenChoice = { id: number | null; text?: string; reason: string; usedImage: boolean }
+
+export async function chooseScreenTarget(opts: {
   apiKey: string
   model: string
   prompt: string
-  tree: A11yNode
   kind: NodeKind
-  stageTitle: string
-  stageIndex: number
-  windowTitle: string
-}): Promise<A11yDecision> {
-  const catalog = buildCatalog(opts.tree)
-  if (catalog.length === 0) throw new Error('Accessibility tree boş, seçilecek öğe yok.')
-
+  scan: ScanResult
+  stepTitle: string
+  sendImage: boolean
+  onImageFallback?: (msg: string) => void
+}): Promise<ScreenChoice> {
+  const { scan } = opts
   const action =
     opts.kind === 'type'
-      ? 'Kullanıcı bu adımda bir metin kutusuna yazı yazacak; yazılacak ALANI seç (Edit, ComboBox, Document vb.).'
-      : 'Kullanıcı bu adımda bir öğeye tıklayacak; tıklanacak öğeyi seç.'
+      ? 'Kullanıcı bu adımda bir metin kutusuna yazı yazacak: yazılacak ALANI seç (arama kutusu, Edit, giriş alanı).'
+      : 'Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.'
 
-  const system = `Sen bir Windows UI Automation ajanısın. Verilen accessibility kataloğundan kullanıcının adım talimatına en uygun TEK öğeyi seçersin.
+  const system = `Sen bir Windows masaüstü otomasyon ajanısın. Ekranda görünen yazıların ve öğelerin numaralı listesi verilir (UIA = uygulamanın bildirdiği öğe, Yazı = ekran görüntüsünden OCR ile okunan yazı).
 ${action}
-Yanıtı SADECE şu JSON olarak ver: {"i": <katalog numarası>, "reason": "<kısa gerekçe>"}`
+Kullanıcının talimatındaki isim ekrandaki yazıyla birebir aynı olmayabilir (Türkçe ekler, büyük/küçük harf, OCR hataları): anlamca en uygun öğeyi seç. Konum ifadelerini (tepedeki, sağdaki, alttaki) koordinatlara göre değerlendir.
+Yanıtı SADECE JSON olarak ver: {"id": <numara veya null>, "text": "<tıklanacak yazının kendisi>", "reason": "<kısa gerekçe>"}
+Uygun öğe yoksa id=null ver.`
 
-  const user = `Pencere: ${opts.windowTitle}
-Aşama ${opts.stageIndex} (${opts.stageTitle})
-Talimat: ${opts.prompt}
+  const listText = `Ekran alanı: ${scan.area.w}x${scan.area.h} (sol üst ${scan.area.x},${scan.area.y})${scan.window ? `, pencere: ${scan.window}` : ''}
+Öğeler (#numara tür "yazı" @x,y genişlikxyükseklik):
+${describeItems(scan.items)}
 
-Katalog (i, name, type, id, path):
-${JSON.stringify(catalog)}`
+Adım: ${opts.stepTitle}
+Talimat: ${opts.prompt}`
 
-  const content = await chat(opts.apiKey, opts.model, [
+  const withImage = opts.sendImage && !!scan.image
+  const build = (img: boolean): Message[] => [
     { role: 'system', content: system },
-    { role: 'user', content: user },
-  ])
-  const parsed = parseJson(content)
-  const idx = Number(parsed.i ?? parsed.index)
-  const byPath = typeof parsed.path === 'string' ? catalog.find((c) => c.path === parsed.path) : undefined
-  const hit = byPath ?? (Number.isInteger(idx) ? catalog[idx] : undefined)
-  if (!hit) throw new Error(`LLM geçerli bir öğe seçmedi: ${content.slice(0, 160)}`)
+    {
+      role: 'user',
+      content: img
+        ? [
+            { type: 'text', text: `${listText}\n\nEkran görüntüsünde her öğenin sol üstünde numarası yazılı (mavi = UIA, turuncu = OCR).` },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${scan.image!.data}` } },
+          ]
+        : listText,
+    },
+  ]
 
+  let content: string
+  let usedImage = withImage
+  try {
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage)
+  } catch (e) {
+    if (!(e instanceof ImageUnsupportedError)) throw e
+    opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
+    usedImage = false
+    content = await chat(opts.apiKey, opts.model, build(false), false)
+  }
+
+  const parsed = parseJson(content)
+  const raw = parsed.id ?? parsed.i ?? parsed.index
+  const id = raw === null || raw === undefined || raw === '' ? null : Number(String(raw).replace('#', ''))
   return {
-    name: hit.name,
-    controlType: hit.type,
-    automationId: hit.id,
-    path: hit.path,
+    id: id !== null && Number.isFinite(id) ? id : null,
+    text: typeof parsed.text === 'string' ? parsed.text : undefined,
     reason: String(parsed.reason ?? ''),
+    usedImage,
   }
 }
 
 export async function testKey(apiKey: string): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/key', { headers: HEADERS(apiKey) })
   if (!res.ok) throw new Error(`OpenRouter anahtarı geçersiz (${res.status}).`)
-  const data = (await res.json()) as { data?: { label?: string } }
-  return data.data?.label ?? 'OK'
+  const data = (await res.json()) as { data?: { label?: string; limit_remaining?: number | null } }
+  const rem = data.data?.limit_remaining
+  return `${data.data?.label ?? 'OK'}${typeof rem === 'number' ? `, kalan limit: ${rem.toFixed(2)}` : ''}`
 }
 
-export async function listModels(): Promise<string[]> {
+export async function listModels(): Promise<{ id: string; vision: boolean }[]> {
   const res = await fetch('https://openrouter.ai/api/v1/models')
   if (!res.ok) throw new Error(`Model listesi alınamadı (${res.status}).`)
-  const data = (await res.json()) as { data?: { id: string }[] }
-  return (data.data ?? []).map((m) => m.id).sort()
+  const data = (await res.json()) as { data?: { id: string; architecture?: { input_modalities?: string[] } }[] }
+  return (data.data ?? [])
+    .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
+    .sort((a, b) => a.id.localeCompare(b.id))
 }

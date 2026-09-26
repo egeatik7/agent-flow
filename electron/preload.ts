@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   saveGraph: (graph: unknown) => ipcRenderer.invoke('graph:save', graph),
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
-  getA11yTree: (windowTitle?: string) => ipcRenderer.invoke('a11y:tree', windowTitle),
+  scanScreen: (windowTitle?: string) => ipcRenderer.invoke('screen:scan', windowTitle),
 
   startRecord: () => ipcRenderer.invoke('record:start'),
   stopRecord: () => ipcRenderer.invoke('record:stop'),
@@ -36,4 +36,5 @@ contextBridge.exposeInMainWorld('xpAgent', {
   onRecordEvent: on('record:event'),
   onAgentLog: on('agent:log'),
   onAgentStep: on('agent:step'),
+  onAgentAnchor: on('agent:anchor'),
 })

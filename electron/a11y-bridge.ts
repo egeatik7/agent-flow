@@ -1,26 +1,23 @@
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
-import type { A11yNode, Locator } from './graph-types'
+import type { ClickMode, Locator } from './graph-types'
+import type { ScanResult, ScreenItem } from './matcher'
 
 const IS_WIN = process.platform === 'win32'
 
 function scriptDir(): string {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'a11y')
-    : path.join(app.getAppPath(), 'a11y')
+  return app.isPackaged ? path.join(process.resourcesPath, 'a11y') : path.join(app.getAppPath(), 'a11y')
 }
 
-function psArgs(script: string, extra: string[]): string[] {
+function psArgs(script: string, extra: string[] = []): string[] {
   return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra]
 }
 
 const ERROR_TEXT: Record<string, string> = {
-  NO_TARGET_WINDOW: 'Hedef pencere seçilmedi. Ayarlar > Hedef pencere.',
+  NO_TARGET_WINDOW: 'Hedef pencere seçilmedi.',
   WINDOW_NOT_FOUND: 'Hedef pencere bulunamadı (kapalı olabilir)',
-  ELEMENT_NOT_FOUND: 'Öğe hedef pencerede bulunamadı',
-  ELEMENT_NOT_CLICKABLE: 'Öğe görünür değil ve tıklanamıyor.',
 }
 
 function friendly(msg: string): string {
@@ -30,139 +27,222 @@ function friendly(msg: string): string {
   return msg
 }
 
-function runUia<T>(op: string, payload: object, timeoutMs = 45000): Promise<T> {
-  const script = path.join(scriptDir(), 'uia.ps1')
-  if (!fs.existsSync(script)) {
-    return Promise.reject(new Error(`UI Automation script bulunamadı: ${script}`))
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+
+class Worker {
+  private proc: ChildProcessWithoutNullStreams | null = null
+  private ready: Promise<void> | null = null
+  private pending = new Map<string, Pending>()
+  private seq = 0
+  private buf = ''
+
+  private start(): Promise<void> {
+    const script = path.join(scriptDir(), 'worker.ps1')
+    if (!fs.existsSync(script)) return Promise.reject(new Error(`Otomasyon script’i bulunamadı: ${script}`))
+    const proc = spawn('powershell.exe', psArgs(script), { windowsHide: true })
+    this.proc = proc
+    this.buf = ''
+    proc.stdout.setEncoding('utf8')
+    proc.stderr.setEncoding('utf8')
+
+    const ready = new Promise<void>((resolve, reject) => {
+      const boot = setTimeout(() => reject(new Error('PowerShell otomasyon işçisi başlamadı (60 sn).')), 60000)
+      const onLine = (line: string) => {
+        if (line === 'READY') {
+          clearTimeout(boot)
+          resolve()
+          return
+        }
+        const tab = line.indexOf('\t')
+        if (tab < 0) return
+        const id = line.slice(0, tab)
+        const p = this.pending.get(id)
+        if (!p) return
+        this.pending.delete(id)
+        clearTimeout(p.timer)
+        try {
+          const res = JSON.parse(Buffer.from(line.slice(tab + 1), 'base64').toString('utf8')) as {
+            ok: boolean
+            data?: unknown
+            error?: string
+          }
+          if (res.ok) p.resolve(res.data ?? null)
+          else p.reject(new Error(friendly(res.error || 'Bilinmeyen hata')))
+        } catch {
+          p.reject(new Error('Otomasyon yanıtı okunamadı.'))
+        }
+      }
+      proc.stdout.on('data', (d: string) => {
+        this.buf += d
+        const lines = this.buf.split(/\r?\n/)
+        this.buf = lines.pop() ?? ''
+        for (const l of lines) if (l.trim()) onLine(l.trim())
+      })
+      let errText = ''
+      proc.stderr.on('data', (d: string) => {
+        errText = (errText + d).slice(-2000)
+      })
+      proc.on('error', (e) => {
+        clearTimeout(boot)
+        reject(new Error(`PowerShell başlatılamadı: ${e.message}`))
+      })
+      proc.on('exit', () => {
+        clearTimeout(boot)
+        if (this.proc === proc) {
+          this.proc = null
+          this.ready = null
+        }
+        const err = new Error(`Otomasyon işçisi kapandı. ${errText.trim().split(/\r?\n/).slice(-3).join(' ')}`.trim())
+        for (const p of this.pending.values()) {
+          clearTimeout(p.timer)
+          p.reject(err)
+        }
+        this.pending.clear()
+        reject(err)
+      })
+    })
+    return ready
   }
-  const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
-  return new Promise((resolve, reject) => {
-    const ps = spawn('powershell.exe', psArgs(script, ['-Op', op, '-Payload', b64]), {
-      windowsHide: true,
+
+  async call<T>(op: string, payload: object = {}, timeoutMs = 60000): Promise<T> {
+    if (!this.proc || !this.ready) this.ready = this.start()
+    await this.ready
+    const proc = this.proc
+    if (!proc) throw new Error('Otomasyon işçisi çalışmıyor.')
+    const id = String(++this.seq)
+    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`Otomasyon zaman aşımı (${op}).`))
+        this.kill()
+      }, timeoutMs)
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
+      proc.stdin.write(`${id}\t${op}\t${b64}\n`)
     })
-    let out = ''
-    let err = ''
-    const timer = setTimeout(() => {
-      ps.kill()
-      reject(new Error(`UI Automation zaman aşımı (${op})`))
-    }, timeoutMs)
-    ps.stdout.setEncoding('utf8')
-    ps.stderr.setEncoding('utf8')
-    ps.stdout.on('data', (d: string) => (out += d))
-    ps.stderr.on('data', (d: string) => (err += d))
-    ps.on('error', (e) => {
-      clearTimeout(timer)
-      reject(new Error(`PowerShell başlatılamadı: ${e.message}`))
-    })
-    ps.on('close', () => {
-      clearTimeout(timer)
-      const line = out
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.startsWith('{'))
-        .pop()
-      if (!line) {
-        reject(new Error(friendly(err.trim() || `UI Automation yanıt vermedi (${op})`)))
-        return
-      }
-      try {
-        const res = JSON.parse(line) as { ok: boolean; data?: T; error?: string }
-        if (res.ok) resolve(res.data as T)
-        else reject(new Error(friendly(res.error || 'Bilinmeyen hata')))
-      } catch {
-        reject(new Error(`UI Automation çıktısı okunamadı: ${line.slice(0, 200)}`))
-      }
-    })
-  })
+  }
+
+  kill() {
+    const p = this.proc
+    this.proc = null
+    this.ready = null
+    try {
+      p?.kill()
+    } catch {
+      /* already gone */
+    }
+  }
 }
 
-const DEMO_TREE: A11yNode = {
-  id: '0',
-  name: 'Demo Uygulama',
-  controlType: 'Window',
-  path: '0',
-  children: [
-    { id: '0/0', name: 'Hunyuan Tencent', controlType: 'TabItem', automationId: 'tab-hunyuan', path: '0/0' },
-    { id: '0/1', name: 'Model Seç', controlType: 'Button', automationId: 'btn-model', path: '0/1' },
-    { id: '0/2', name: 'Modeli İndir', controlType: 'Button', automationId: 'btn-download', path: '0/2' },
-    { id: '0/3', name: 'Arama', controlType: 'Edit', automationId: 'search', path: '0/3' },
-  ],
+const worker = new Worker()
+
+export function warmUp() {
+  if (!IS_WIN) return
+  worker.call('ping').catch(() => {})
 }
+
+export function shutdown() {
+  worker.kill()
+}
+
+const DEMO_ITEMS: ScreenItem[] = [
+  { id: 1, text: 'Hunyuan Tencent', type: 'TabItem', src: 'uia', x: 120, y: 60, w: 130, h: 28 },
+  { id: 2, text: 'Model Seç', type: 'Button', src: 'uia', x: 420, y: 200, w: 110, h: 30 },
+  { id: 3, text: 'Modeli İndir', type: 'Button', src: 'uia', x: 420, y: 260, w: 110, h: 30 },
+  { id: 4, text: 'Arama', type: 'Edit', src: 'uia', x: 700, y: 60, w: 260, h: 26 },
+  { id: 5, text: 'Opera', type: 'Text', src: 'ocr', x: 40, y: 1040, w: 44, h: 16 },
+]
 
 export async function listWindows(): Promise<{ title: string; handle: string }[]> {
   if (!IS_WIN) return [{ title: 'Demo Uygulama', handle: '0' }]
-  return runUia('listWindows', { ownPid: process.pid })
+  return worker.call('listWindows', { ownPid: process.pid })
 }
 
-export async function captureTree(windowTitle: string, maxDepth: number): Promise<A11yNode> {
-  if (!IS_WIN) return { ...DEMO_TREE, name: windowTitle || DEMO_TREE.name }
-  return runUia('tree', { windowTitle, maxDepth })
+export async function scan(opts: {
+  windowTitle?: string
+  image?: 'none' | 'plain' | 'marked'
+  maxImageW?: number
+}): Promise<ScanResult> {
+  if (!IS_WIN) {
+    return {
+      area: { x: 0, y: 0, w: 1920, h: 1080 },
+      items: DEMO_ITEMS,
+      ocr: true,
+      uiaCount: 4,
+      ocrCount: 1,
+      image: null,
+      window: opts.windowTitle ?? '',
+    }
+  }
+  const r = await worker.call<ScanResult>(
+    'scan',
+    { windowTitle: opts.windowTitle || '', image: opts.image ?? 'none', maxImageW: opts.maxImageW ?? 1400, ownPid: process.pid },
+    90000
+  )
+  return { ...r, items: Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : [] }
 }
 
-export async function clickLocator(locator: Locator, windowTitle: string): Promise<{ method: string }> {
-  if (!IS_WIN) return { method: 'demo' }
-  return runUia('click', { locator, windowTitle })
+export async function clickAt(x: number, y: number, button: ClickMode = 'left'): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button })
 }
 
-export async function typeInto(
+export async function locate(
   locator: Locator,
-  windowTitle: string,
-  text: string,
-  pressEnter: boolean
-): Promise<void> {
-  if (!IS_WIN) return
-  await runUia('type', { locator, windowTitle, text, pressEnter })
+  windowTitle: string
+): Promise<{ x: number; y: number; w: number; h: number; name: string } | null> {
+  if (!IS_WIN) return null
+  return worker.call('locate', { locator, windowTitle }, 30000)
 }
 
-export async function sendKeys(keys: string, windowTitle: string): Promise<void> {
-  if (!IS_WIN) return
-  await runUia('keys', { keys, windowTitle })
+export async function windowRect(windowTitle: string): Promise<{ x: number; y: number; w: number; h: number }> {
+  if (!IS_WIN) return { x: 0, y: 0, w: 1920, h: 1080 }
+  return worker.call('windowRect', { windowTitle })
 }
 
-export async function elementExists(text: string, windowTitle: string): Promise<boolean> {
-  if (!IS_WIN) return true
-  const r = await runUia<{ found: boolean }>('exists', { text, windowTitle })
-  return !!r?.found
+export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('typeText', { text, pressEnter, clearFirst })
+}
+
+export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('keys', { keys, windowTitle: windowTitle || '' })
 }
 
 export async function captureAtCursor(): Promise<Locator | null> {
   if (!IS_WIN) {
-    return { name: 'Model Seç', controlType: 'Button', automationId: 'btn-model', path: '0/1', windowTitle: 'Demo Uygulama' }
+    return { name: 'Model Seç', text: 'Model Seç', controlType: 'Button', path: '0/1', windowTitle: 'Demo Uygulama', x: 475, y: 215 }
   }
-  return runUia('capture', {})
+  return worker.call('capture', {})
 }
 
 export type Recorder = { stop: () => void }
 
-export function startRecorder(
-  onClick: (loc: Locator) => void,
-  onError: (msg: string) => void
-): Recorder {
+export function startRecorder(onClick: (loc: Locator) => void, onError: (msg: string) => void): Recorder {
   if (!IS_WIN) return { stop: () => {} }
   const script = path.join(scriptDir(), 'record.ps1')
-  const ps: ChildProcess = spawn('powershell.exe', psArgs(script, ['-OwnPid', String(process.pid)]), {
-    windowsHide: true,
-  })
+  const ps = spawn('powershell.exe', psArgs(script, ['-OwnPid', String(process.pid)]), { windowsHide: true })
   let buf = ''
-  ps.stdout?.setEncoding('utf8')
-  ps.stdout?.on('data', (d: string) => {
+  ps.stdout.setEncoding('utf8')
+  ps.stdout.on('data', (d: string) => {
     buf += d
     const lines = buf.split(/\r?\n/)
     buf = lines.pop() ?? ''
     for (const raw of lines) {
       const line = raw.trim()
-      if (!line.startsWith('{')) continue
+      if (!line) continue
       try {
-        const obj = JSON.parse(line)
+        const obj = JSON.parse(Buffer.from(line, 'base64').toString('utf8'))
         if (obj.ready) continue
         onClick(obj as Locator)
       } catch {
-        /* partial line */
+        /* ignore partial or foreign output */
       }
     }
   })
-  ps.stderr?.setEncoding('utf8')
-  ps.stderr?.on('data', (d: string) => {
+  ps.stderr.setEncoding('utf8')
+  ps.stderr.on('data', (d: string) => {
     const msg = d.trim()
     if (msg) onError(msg.slice(0, 300))
   })

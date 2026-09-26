@@ -10,6 +10,7 @@ type Props = {
   onAdd: (kind: NodeKind) => void
   onToggleRecord: () => void
   onCapture: () => void
+  onOpenScanner: () => void
   onRun: () => void
   onRunFromSelected: () => void
   onStop: () => void
@@ -74,8 +75,11 @@ export default function Toolbar(p: Props) {
       >
         <span className="rec-dot" /> {p.recording ? 'Kaydı Durdur' : 'Kayıt'}
       </button>
+      <button type="button" className="xp-btn" onClick={p.onOpenScanner} disabled={p.running} title="Ekrandaki yazıları gör, birini seçerek Tıkla node’u ekle">
+        Ekran Tarayıcı
+      </button>
       <button type="button" className="xp-btn" onClick={p.onCapture} disabled={p.capturing > 0 || p.running}>
-        {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'Öğe Yakala (3 sn)'}
+        {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'İmleçle Yakala (3 sn)'}
       </button>
 
       <span className="tb-sep" />

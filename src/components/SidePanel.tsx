@@ -1,15 +1,15 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import {
   NODE_SPECS,
-  type A11yNode,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
   type AppSettings,
+  type ClickMode,
+  type ModelInfo,
 } from '../types'
-import TreeView from './TreeView'
 
-export type SideTab = 'node' | 'settings' | 'tree'
+export type SideTab = 'node' | 'settings'
 
 type Props = {
   tab: SideTab
@@ -19,7 +19,7 @@ type Props = {
   onSaveSettings: (partial: Partial<AppSettings>) => void
   windows: { title: string; handle: string }[]
   onRefreshWindows: () => void
-  models: string[]
+  models: ModelInfo[]
   onLoadModels: () => void
   onTestApi: () => void
   graph: AgentGraph
@@ -29,11 +29,8 @@ type Props = {
   onDeleteNode: () => void
   onDeleteEdge: () => void
   onCaptureForNode: () => void
+  onOpenScanner: () => void
   capturing: number
-  tree: A11yNode | null
-  treeLoading: boolean
-  onRefreshTree: () => void
-  onPickTreeNode: (n: A11yNode) => void
 }
 
 const KEY_PRESETS: { label: string; keys: string }[] = [
@@ -43,19 +40,60 @@ const KEY_PRESETS: { label: string; keys: string }[] = [
   { label: 'Ctrl+A', keys: '^a' },
   { label: 'Ctrl+C', keys: '^c' },
   { label: 'Ctrl+V', keys: '^v' },
+  { label: 'Ctrl+S', keys: '^s' },
   { label: 'Alt+F4', keys: '%{F4}' },
+  { label: 'Win', keys: '^{ESC}' },
   { label: 'F5', keys: '{F5}' },
   { label: '↓', keys: '{DOWN}' },
   { label: '↑', keys: '{UP}' },
 ]
 
-function SaveRow(props: { children: ReactNode; onSave: () => void; saveLabel?: string }) {
+const CLICK_MODES: { key: ClickMode; label: string }[] = [
+  { key: 'left', label: 'Tek tık' },
+  { key: 'double', label: 'Çift tık' },
+  { key: 'right', label: 'Sağ tık' },
+]
+
+function SaveRow(props: { children: ReactNode; onSave: () => void }) {
   return (
     <div className="field-row">
       {props.children}
       <button type="button" className="xp-btn save" onClick={props.onSave}>
-        {props.saveLabel ?? 'Kaydet'}
+        Kaydet
       </button>
+    </div>
+  )
+}
+
+function TargetBox(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const loc = n.locator
+  return (
+    <div className="field locator-box">
+      <label>Hedef</label>
+      {loc ? (
+        <p className="hint">
+          Kayıtlı: <b>“{loc.text || loc.name || loc.controlType}”</b> ({loc.controlType})
+          {loc.windowTitle ? <> — {loc.windowTitle}</> : null}
+        </p>
+      ) : n.anchor ? (
+        <p className="hint">Son bilinen konum: {n.anchor.x}, {n.anchor.y} (aynı yazı birden çok yerdeyse buna en yakın olan seçilir)</p>
+      ) : (
+        <p className="hint">Çalışırken ekran okunur, prompt’taki yazı aranır; bulunamazsa LLM ekrandaki yazılardan seçer.</p>
+      )}
+      <div className="field-row wrap">
+        <button type="button" className="xp-btn primary" onClick={p.onOpenScanner}>
+          Ekrandan Seç
+        </button>
+        <button type="button" className="xp-btn" disabled={p.capturing > 0} onClick={p.onCaptureForNode}>
+          {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'İmleçle Yakala (3 sn)'}
+        </button>
+        {(loc || n.anchor) && (
+          <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ locator: undefined, anchor: undefined })}>
+            Temizle
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -82,19 +120,18 @@ function NodeInspector(p: Props) {
       <div className="hint-block">
         <p className="hint"><b>Nasıl kullanılır?</b></p>
         <ul className="hint-list">
-          <li>Node’un sağındaki <b>+</b> ile ileriye yeni node ekle (araya da eklenir).</li>
-          <li>Sarı/renkli çıkış noktasını <b>sürükle</b>, başka bir node’un üstüne bırak → bağlanır.</li>
-          <li>Son node’dan ilk node’a bağlarsan akış <b>başa döner</b>. Sayılı tekrar için <b>Döngü</b> node’u kullan.</li>
-          <li>Bağlantıya tıklayıp <b>Del</b> ile sil, çift tıklayınca da silinir.</li>
-          <li>Boş yere <b>sağ tık</b> → istediğin türde node ekle. Node’a sağ tık → buradan çalıştır / kopyala / sil.</li>
-          <li><b>Kayıt</b> açıkken hedef uygulamada tıkladığın her öğe sıradaki “Tıkla” node’u olur.</li>
+          <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
+          <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
+          <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
+          <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
+          <li>Son node’u ilk aşamaya bağlarsan akış başa döner; sayılı tekrar için <b>Döngü</b>.</li>
+          <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
         </ul>
       </div>
     )
   }
   const spec = NODE_SPECS[n.kind]
   const upd = p.onUpdateNode
-  const needsLocator = n.kind === 'click' || n.kind === 'type'
 
   return (
     <div>
@@ -108,16 +145,35 @@ function NodeInspector(p: Props) {
         <input className="xp-input" value={n.title} onChange={(e) => upd({ title: e.target.value })} />
       </div>
 
-      {needsLocator && (
-        <div className="field">
-          <label>{n.kind === 'type' ? 'Hangi alana? (LLM prompt’u)' : 'Neye basılacak? (LLM prompt’u)'}</label>
-          <textarea
-            className="xp-textarea"
-            value={n.prompt ?? ''}
-            placeholder={n.kind === 'type' ? 'Örn: üstteki arama kutusu' : 'Örn: tepedeki “Hunyuan Tencent” sekmesine bas'}
-            onChange={(e) => upd({ prompt: e.target.value })}
-          />
-        </div>
+      {n.kind === 'click' && (
+        <>
+          <div className="field">
+            <label>Neye tıklanacak?</label>
+            <textarea
+              className="xp-textarea"
+              value={n.prompt ?? ''}
+              placeholder={'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'}
+              onChange={(e) => upd({ prompt: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Tıklama türü</label>
+            <div className="seg">
+              {CLICK_MODES.map((m) => (
+                <button
+                  type="button"
+                  key={m.key}
+                  className={`seg-btn${(n.clickMode ?? 'left') === m.key ? ' active' : ''}`}
+                  onClick={() => upd({ clickMode: m.key })}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint">Masaüstü simgeleri genelde çift tık ister.</p>
+          </div>
+          <TargetBox {...p} n={n} />
+        </>
       )}
 
       {n.kind === 'type' && (
@@ -126,10 +182,24 @@ function NodeInspector(p: Props) {
             <label>Yazılacak metin</label>
             <input className="xp-input" value={n.text ?? ''} onChange={(e) => upd({ text: e.target.value })} />
           </div>
+          <div className="field">
+            <label>Hangi alana? (boşsa o an seçili alana yazar)</label>
+            <input
+              className="xp-input"
+              value={n.prompt ?? ''}
+              placeholder="Örn: “Ara” kutusu"
+              onChange={(e) => upd({ prompt: e.target.value })}
+            />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={n.clearFirst !== false} onChange={(e) => upd({ clearFirst: e.target.checked })} />
+            Önce alandaki yazıyı sil (Ctrl+A)
+          </label>
           <label className="check">
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
           </label>
+          {(n.prompt?.trim() || n.locator) && <TargetBox {...p} n={n} />}
         </>
       )}
 
@@ -171,8 +241,13 @@ function NodeInspector(p: Props) {
 
       {(n.kind === 'waitFor' || n.kind === 'condition') && (
         <div className="field">
-          <label>Ekranda aranacak yazı (öğe adı içerir)</label>
-          <input className="xp-input" value={n.text ?? ''} placeholder="Örn: İndirme tamamlandı" onChange={(e) => upd({ text: e.target.value })} />
+          <label>Ekranda aranacak yazı</label>
+          <div className="field-row">
+            <input className="xp-input" value={n.text ?? ''} placeholder="Örn: İndirme tamamlandı" onChange={(e) => upd({ text: e.target.value })} />
+            <button type="button" className="xp-btn" onClick={p.onOpenScanner}>
+              Ekrandan
+            </button>
+          </div>
         </div>
       )}
 
@@ -203,35 +278,6 @@ function NodeInspector(p: Props) {
         </div>
       )}
 
-      {needsLocator && (
-        <div className="field locator-box">
-          <label>Kayıtlı accessibility öğesi</label>
-          {n.locator ? (
-            <p className="hint">
-              <b>{n.locator.controlType}</b> “{n.locator.name || '(isimsiz)'}”
-              {n.locator.automationId ? <> #{n.locator.automationId}</> : null}
-              <br />
-              <span className="mono">{n.locator.windowTitle ? `${n.locator.windowTitle} › ` : ''}{n.locator.path}</span>
-            </p>
-          ) : (
-            <p className="hint">Yok. Çalışırken LLM, prompt’a göre öğeyi accessibility tree’den seçer.</p>
-          )}
-          <div className="field-row wrap">
-            <button type="button" className="xp-btn" disabled={p.capturing > 0} onClick={p.onCaptureForNode}>
-              {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'Öğe Yakala (3 sn)'}
-            </button>
-            <button type="button" className="xp-btn" onClick={() => p.onTab('tree')}>
-              Ağaçtan Seç
-            </button>
-            {n.locator && (
-              <button type="button" className="xp-btn" onClick={() => upd({ locator: undefined })}>
-                Temizle
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       <button type="button" className="xp-btn danger block" onClick={p.onDeleteNode}>
         Node’u Sil (Del)
       </button>
@@ -242,6 +288,7 @@ function NodeInspector(p: Props) {
 function Settings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
+  const model = p.models.find((m) => m.id === s.model.trim())
   return (
     <div className="settings-grid">
       <p className="hint">Her ayarın yanındaki <b>Kaydet</b> ile kalıcı olarak saklanır.</p>
@@ -260,9 +307,14 @@ function Settings(p: Props) {
         </SaveRow>
         <datalist id="model-list">
           {p.models.map((m) => (
-            <option key={m} value={m} />
+            <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
           ))}
         </datalist>
+        {model && (
+          <p className={`hint ${model.vision ? 'ok' : 'warn'}`}>
+            {model.vision ? 'Bu model ekran görüntüsünü görebilir.' : 'Bu model ekran görüntüsü göremez; sadece yazı listesiyle seçer.'}
+          </p>
+        )}
         <div className="field-row">
           <button type="button" className="xp-btn" onClick={p.onLoadModels}>
             Model listesini getir{p.models.length ? ` (${p.models.length})` : ''}
@@ -273,11 +325,28 @@ function Settings(p: Props) {
         </div>
       </div>
 
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={s.sendScreenshot}
+          onChange={(e) => p.onSaveSettings({ sendScreenshot: e.target.checked })}
+        />
+        LLM’e numaralı ekran görüntüsü de gönder
+      </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={s.hideWhileRunning}
+          onChange={(e) => p.onSaveSettings({ hideWhileRunning: e.target.checked })}
+        />
+        Çalışırken bu pencereyi küçült (Ctrl+Shift+Q durdurur)
+      </label>
+
       <div className="field">
         <label htmlFor="target">Hedef pencere</label>
         <SaveRow onSave={() => p.onSaveSettings({ targetWindow: s.targetWindow })}>
           <select id="target" className="xp-select" value={s.targetWindow} onChange={(e) => set({ targetWindow: e.target.value })}>
-            <option value="">(kayıtlı öğenin penceresi)</option>
+            <option value="">Tüm ekran</option>
             {s.targetWindow && !p.windows.some((w) => w.title === s.targetWindow) && (
               <option value={s.targetWindow}>{s.targetWindow}</option>
             )}
@@ -291,6 +360,7 @@ function Settings(p: Props) {
             ↻
           </button>
         </SaveRow>
+        <p className="hint">Seçilirse sadece o pencere okunur ve öne getirilir. “Tüm ekran” masaüstü ve görev çubuğu dahil her şeyi okur.</p>
       </div>
 
       <div className="field">
@@ -304,13 +374,6 @@ function Settings(p: Props) {
         <label htmlFor="maxSteps">Maks. adım (sonsuz döngü koruması)</label>
         <SaveRow onSave={() => p.onSaveSettings({ maxSteps: s.maxSteps })}>
           <input id="maxSteps" className="xp-input" type="number" min={1} value={s.maxSteps} onChange={(e) => set({ maxSteps: Math.max(1, Number(e.target.value) || 1) })} />
-        </SaveRow>
-      </div>
-
-      <div className="field">
-        <label htmlFor="depth">Accessibility tree derinliği</label>
-        <SaveRow onSave={() => p.onSaveSettings({ maxTreeDepth: s.maxTreeDepth })}>
-          <input id="depth" className="xp-input" type="number" min={3} max={25} value={s.maxTreeDepth} onChange={(e) => set({ maxTreeDepth: Math.min(25, Math.max(3, Number(e.target.value) || 12)) })} />
         </SaveRow>
       </div>
 
@@ -329,7 +392,6 @@ export default function SidePanel(p: Props) {
           [
             ['node', p.selectedEdge ? 'Bağlantı' : 'Node'],
             ['settings', 'Ayarlar'],
-            ['tree', 'Ağaç'],
           ] as [SideTab, string][]
         ).map(([k, label]) => (
           <button type="button" key={k} className={`tab ${p.tab === k ? 'active' : ''}`} onClick={() => p.onTab(k)}>
@@ -340,25 +402,6 @@ export default function SidePanel(p: Props) {
       <div className="panel-body">
         {p.tab === 'node' && <NodeInspector {...p} />}
         {p.tab === 'settings' && <Settings {...p} />}
-        {p.tab === 'tree' && (
-          <div>
-            <div className="field-row">
-              <button type="button" className="xp-btn" onClick={p.onRefreshTree} disabled={p.treeLoading}>
-                {p.treeLoading ? 'Okunuyor…' : 'Ağacı Yenile'}
-              </button>
-            </div>
-            <p className="hint">
-              {p.selected && (p.selected.kind === 'click' || p.selected.kind === 'type')
-                ? `Bir öğeye tıkla → “${p.selected.title}” node’una bağlanır.`
-                : 'Bir Tıkla/Yazı Yaz node’u seç, sonra buradan öğeye tıkla.'}
-            </p>
-            {p.tree ? (
-              <TreeView node={p.tree} onPick={p.onPickTreeNode} depth={0} />
-            ) : (
-              <p className="hint">{p.treeLoading ? 'Hedef pencerenin accessibility tree’si okunuyor…' : 'Hedef pencereyi seçip “Ağacı Yenile”ye bas.'}</p>
-            )}
-          </div>
-        )}
       </div>
     </aside>
   )

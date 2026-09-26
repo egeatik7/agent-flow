@@ -6,6 +6,7 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Drawing
 
 if (-not ('XpNative' -as [type])) {
   Add-Type -TypeDefinition @"
@@ -20,6 +21,13 @@ public static class XpNative {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
+  public static bool IsCloaked(IntPtr hWnd) {
+    int v = 0;
+    try { if (DwmGetWindowAttribute(hWnd, 14, out v, 4) == 0) return v != 0; } catch { }
+    return false;
+  }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 }
 "@
@@ -153,15 +161,35 @@ function Find-ByLocator($top, $loc) {
   return $null
 }
 
-function New-Locator($el, $top) {
+function New-Locator($el, $top, [int]$px, [int]$py) {
+  $name = [string]$el.Current.Name
+  $text = ($name -replace '\s+', ' ').Trim()
+  $ct = Get-CT $el
+  if ($text.Length -eq 0 -or $text.Length -gt 60 -or $ct -eq 'Pane' -or $ct -eq 'Document' -or $ct -eq 'Window') {
+    $near = ''
+    try { $near = Get-TextNear $px $py } catch {}
+    if ($near) { $text = $near }
+  }
+  $tr = $top.Current.BoundingRectangle
   return [pscustomobject]@{
-    name         = [string]$el.Current.Name
-    controlType  = (Get-CT $el)
+    name         = $name
+    text         = $text
+    controlType  = $ct
     automationId = [string]$el.Current.AutomationId
     path         = (Get-RelPath $el $top)
     windowTitle  = [string]$top.Current.Name
     processId    = [int]$el.Current.ProcessId
+    x            = $px
+    y            = $py
+    offsetX      = [int]($px - $tr.X)
+    offsetY      = [int]($py - $tr.Y)
   }
+}
+
+function Get-CursorPoint {
+  $p = New-Object XpNative+POINT
+  [void][XpNative]::GetCursorPos([ref]$p)
+  return $p
 }
 
 function Get-CursorElement {

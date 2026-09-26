@@ -904,6 +904,205 @@ textarea {
   color: #dde8ff;
 }
 
+.hint.ok {
+  color: #1e6b1e;
+}
+
+.hint.warn {
+  color: #9a5a00;
+}
+
+.seg {
+  display: flex;
+}
+
+.seg-btn {
+  flex: 1;
+  border: 1px solid #7f9db9;
+  background: linear-gradient(180deg, #fff, #ecebe5);
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.seg-btn + .seg-btn {
+  border-left: none;
+}
+
+.seg-btn.active {
+  background: linear-gradient(180deg, #d6e6fc, #9fc0ee);
+  font-weight: 700;
+}
+
+/* ---------- Screen scanner dialog ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(10, 30, 70, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xp-dialog {
+  background: var(--xp-face);
+  border: 3px solid #0842c6;
+  border-top: none;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 4px 6px 20px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: windowIn 0.2s ease-out;
+}
+
+.xp-dialog.scanner {
+  width: min(1500px, 96vw);
+  height: min(900px, 92vh);
+}
+
+.dialog-title {
+  -webkit-app-region: no-drag;
+}
+
+.xp-dialog .toolbar .scope {
+  width: 220px;
+}
+
+.xp-dialog .toolbar .search {
+  width: 220px;
+}
+
+.xp-dialog .toolbar .source {
+  width: 150px;
+}
+
+.scanner-count {
+  margin-left: auto;
+  color: #444;
+}
+
+.scanner-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+}
+
+.scanner-shot {
+  position: relative;
+  overflow: auto;
+  background: #3a3a3a;
+  padding: 8px;
+  border-right: 1px solid var(--xp-border-mid);
+}
+
+.shot-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.shot-wrap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  box-shadow: 0 0 0 1px #000;
+}
+
+.shot-box {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  background: rgba(0, 90, 255, 0.08);
+  border: 1px solid rgba(0, 90, 255, 0.75);
+  cursor: pointer;
+}
+
+.shot-box.ocr {
+  background: rgba(255, 110, 0, 0.08);
+  border-color: rgba(255, 110, 0, 0.85);
+}
+
+.shot-box:hover,
+.shot-box.hover {
+  background: rgba(255, 210, 74, 0.45);
+  border: 2px solid #e05a00;
+  z-index: 2;
+}
+
+.scanner-empty {
+  color: #eee;
+  padding: 24px;
+  font-size: 13px;
+}
+
+.scanner-empty.error {
+  color: #ffb0b0;
+}
+
+.scanner-list {
+  overflow: auto;
+  background: #fff;
+  padding: 2px;
+}
+
+.scan-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.scan-row:hover,
+.scan-row.hover {
+  background: #316ac5;
+  color: #fff;
+}
+
+.scan-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-type {
+  font-size: 10px;
+  color: #777;
+}
+
+.scan-row:hover .scan-type,
+.scan-row.hover .scan-type {
+  color: #dde8ff;
+}
+
+.src-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #005aff;
+}
+
+.src-dot.ocr {
+  background: #ff6e00;
+}
+
+.dialog-status {
+  padding: 4px 8px;
+  border-top: 1px solid #fff;
+  box-shadow: inset 0 1px 0 #aca899;
+  color: #333;
+  font-size: 11px;
+}
+
 /* ---------- Taskbar ---------- */
 
 .taskbar {
