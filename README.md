@@ -1,42 +1,39 @@
 # XP Agent Studio
 
-Windows XP görünümünde, **node tabanlı** accessibility-tree ajanı. Her node bir aşama prompt’u tutar; ajan OpenRouter LLM ile UI Automation ağacından tıklanacak öğeyi seçer (veya kayıtlı path kullanır).
+Windows XP görünümünde **node tabanlı** accessibility-tree ajanı.
 
-## Özellikler
+## Exe
 
-- XP Luna arayüzü (başlık çubuğu, taskbar, klasik butonlar)
-- OpenRouter API key + model adı (yanlarında **Kaydet**)
-- Hedef pencere, ağaç derinliği, aşama gecikmesi — kayıt tuşlarıyla
-- Sürüklenebilir node canvas, port ile bağlantı
-- **Kayıt** / **İmleçteki Öğeyi Yakala** → a11y öğesini prompt + path olarak node’a yazar
-- Accessibility tree paneli → öğeye tıklayınca seçili node’a bağlar
-- Ajan koşusu: her aşamada tree çek → LLM seç → tıkla
+Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows x64).
 
-## Windows’ta çalıştırma
+Çift tıkla çalıştır — kurulum gerekmez.
 
-Hazır paket: `release/XP-Agent-Studio.exe` (portable).
+## Ne yapar?
 
-1. Exe’yi çalıştır
-2. Ayarlar → API key ve model → **Kaydet**
-3. Hedef pencereyi seç → **Kaydet**
-4. Node ekle veya Kayıt ile yakala
+1. Her **node** bir aşama prompt’u tutar  
+   (örn. `Tepeye "Hunyuan Tencent" yazısına bas`)
+2. **Kayıt / İmleçteki Öğeyi Yakala** → imleç altındaki UI Automation öğesini bulur, prompt + path yazar
+3. **Ajanı Çalıştır** → her aşamada accessibility tree çeker, OpenRouter ile öğeyi seçer (veya kayıtlı path’i kullanır), tıklar
+
+## İlk kurulum (exe içinde)
+
+1. Ayarlar → OpenRouter API Key → **Kaydet**
+2. Model adı → **Kaydet** (varsayılan: `openai/gpt-4o-mini`)
+3. Hedef pencere seç → **Kaydet**
+4. Node ekle veya Kayıt ile yakala → portlardan sıraya bağla
 5. **Ajanı Çalıştır**
 
 ## Geliştirme
 
 ```bash
 npm install
-npm run dev
-```
-
-Windows exe üretmek için (Windows makinede veya wine ile):
-
-```bash
-npm run pack:win
+npm run dev          # Electron + Vite
+npm run dev:web      # Sadece arayüz önizleme
+npm run pack:win     # Yeniden exe üret
 ```
 
 ## Notlar
 
-- Accessibility otomasyonu yalnızca **Windows** üzerinde gerçek UI Automation kullanır.
-- Linux/macOS’ta demo tree ile arayüz test edilir; tıklama no-op’tur.
-- API key `electron-store` ile kullanıcı dizinine kaydedilir.
+- Gerçek UI Automation yalnızca **Windows**’ta çalışır (PowerShell + UIAutomation).
+- Linux/mac önizlemede demo ağaç kullanılır.
+- API key `electron-store` ile kullanıcı profiline yazılır.
