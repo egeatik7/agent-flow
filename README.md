@@ -1,39 +1,54 @@
 # XP Agent Studio
 
-Windows XP görünümünde **node tabanlı** accessibility-tree ajanı.
+Windows XP görünümünde, **node tabanlı** bir masaüstü otomasyon ajanı. Her node bir aşamadır; ajan
+her aşamada hedef uygulamanın **accessibility tree**’sini okur, OpenRouter’daki LLM ile doğru öğeyi
+seçer ve tıklar / yazar / tuş gönderir.
 
 ## Exe
 
-Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows x64).
+Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok.
 
-Çift tıkla çalıştır — kurulum gerekmez.
+## Node türleri
 
-## Ne yapar?
+| Node | Ne yapar | Çıkışlar |
+| --- | --- | --- |
+| Başlangıç | Akışın giriş noktası | sonra |
+| Tıkla | Prompt’a (veya kayıtlı öğeye) göre öğeye tıklar | sonra |
+| Yazı Yaz | Bir alana metin yazar, isteğe bağlı Enter | sonra |
+| Tuş Gönder | Kısayol/tuş (`{ENTER}`, `^a`, `%{F4}` …) | sonra |
+| Zamanlayıcı | N saniye bekler | sonra |
+| Öğeyi Bekle | Bir yazı ekranda görünene kadar bekler | bulundu / zaman aşımı |
+| Koşul | Ekranda bir yazı var mı? | var / yok |
+| Döngü | N kez “tekrar”a, sonra “bitti”ye gider | tekrar / bitti |
+| Bitir | Akışı sonlandırır | — |
 
-1. Her **node** bir aşama prompt’u tutar  
-   (örn. `Tepeye "Hunyuan Tencent" yazısına bas`)
-2. **Kayıt / İmleçteki Öğeyi Yakala** → imleç altındaki UI Automation öğesini bulur, prompt + path yazar
-3. **Ajanı Çalıştır** → her aşamada accessibility tree çeker, OpenRouter ile öğeyi seçer (veya kayıtlı path’i kullanır), tıklar
+## Kullanım
 
-## İlk kurulum (exe içinde)
+- **İleriye ekle:** node’un sağındaki yeşil **+** → tür seç. Arada bağlantı varsa yeni node araya girer.
+- **Bağla:** renkli çıkış noktasını sürükleyip başka bir node’un üstüne bırak (ya da noktaya tıkla, sonra hedef node’a tıkla). Ekran kenarına gelince canvas kayar.
+- **Başa dön:** son node’un çıkışını ilk aşamaya bağla. Sayılı tekrar için **Döngü** node’u kullan. Sonsuz döngüye karşı “Maks. adım” koruması var.
+- **Sil:** node’u veya bağlantıyı seçip `Del`; bağlantıya çift tıklamak da siler. `Ctrl+D` kopyalar.
+- **Sağ tık:** boş yerde node ekleme menüsü; node üzerinde “Buradan çalıştır / Kopyala / Bağla / Sil”.
+- **Kayıt:** açıkken hedef uygulamada tıkladığın her öğe accessibility tree’den bulunur ve sıradaki “Tıkla” node’u olarak eklenir (prompt + öğe yolu yazılır).
+- **Öğe Yakala (3 sn):** 3 saniye içinde imleci hedef öğeye götür; öğe node’a bağlanır.
+- **Dışa/İçe Aktar:** akışı JSON olarak kaydet/aç. Akış ve ayarlar ayrıca otomatik kaydedilir.
 
-1. Ayarlar → OpenRouter API Key → **Kaydet**
-2. Model adı → **Kaydet** (varsayılan: `openai/gpt-4o-mini`)
-3. Hedef pencere seç → **Kaydet**
-4. Node ekle veya Kayıt ile yakala → portlardan sıraya bağla
-5. **Ajanı Çalıştır**
+## İlk kurulum
+
+1. Ayarlar → OpenRouter API Key → **Kaydet**, sonra **API Test**
+2. Model adı (listeden seçmek için “Model listesini getir”) → **Kaydet**
+3. Hedef pencere → **Kaydet** (boş bırakılırsa kayıtlı öğenin penceresi kullanılır)
+4. Node’ları diz, **▶ Ajanı Çalıştır**
 
 ## Geliştirme
 
 ```bash
 npm install
-npm run dev          # Electron + Vite
-npm run dev:web      # Sadece arayüz önizleme
-npm run pack:win     # Yeniden exe üret
+npm run dev          # Electron + Vite (hot reload)
+npm run dev:web      # Sadece arayüz, tarayıcıda http://127.0.0.1:4521 (tıklamalar simüle)
+npm run pack:win     # release/XP-Agent-Studio.exe üretir
 ```
 
-## Notlar
-
-- Gerçek UI Automation yalnızca **Windows**’ta çalışır (PowerShell + UIAutomation).
-- Linux/mac önizlemede demo ağaç kullanılır.
-- API key `electron-store` ile kullanıcı profiline yazılır.
+UI Automation, `a11y/` altındaki PowerShell script’leriyle (`System.Windows.Automation`) yapılır; bu yüzden
+gerçek otomasyon yalnızca Windows’ta çalışır. Linux/macOS’ta demo ağaç ve simüle tıklamalar kullanılır.
+API anahtarı `electron-store` ile kullanıcı profiline (`%APPDATA%/xp-agent-studio`) yazılır.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export default function Taskbar() {
+export default function Taskbar({ recording, running }: { recording: boolean; running: boolean }) {
   const [clock, setClock] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000)
@@ -9,33 +9,17 @@ export default function Taskbar() {
   return (
     <div className="taskbar">
       <button type="button" className="start-btn">
-        <span
-          aria-hidden
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: '50%',
-            background: 'linear-gradient(180deg,#fff,#ffd24a 40%,#e08a00)',
-            display: 'inline-block',
-            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.25)',
-          }}
-        />{' '}
+        <span className="start-logo" aria-hidden />
         başlat
       </button>
       <div className="task-pill">
-        <span
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: 2,
-            background: 'linear-gradient(135deg,#fff,#ffd24a,#e08a00)',
-            display: 'inline-block',
-          }}
-        />
+        <span className="task-icon" />
         XP Agent Studio
       </div>
-      <div className="clock">
-        {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      <div className="tray">
+        {recording && <span className="tray-item rec">● KAYIT</span>}
+        {running && <span className="tray-item run">▶ Çalışıyor</span>}
+        <span className="clock">{clock.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
     </div>
   )

@@ -1,53 +1,107 @@
+import { useEffect, useRef, useState } from 'react'
+import { NODE_KINDS, NODE_SPECS, type NodeKind } from '../types'
+
 type Props = {
   recording: boolean
   running: boolean
-  canDelete: boolean
-  onAddNode: () => void
+  hasStart: boolean
+  hasSelection: boolean
+  capturing: number
+  onAdd: (kind: NodeKind) => void
   onToggleRecord: () => void
   onCapture: () => void
   onRun: () => void
-  onRefreshTree: () => void
-  onSaveGraph: () => void
-  onDelete: () => void
+  onRunFromSelected: () => void
+  onStop: () => void
+  onLayout: () => void
+  onClear: () => void
 }
 
-export default function Toolbar(props: Props) {
+export default function Toolbar(p: Props) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [open])
+
+  const kinds = NODE_KINDS.filter((k) => k !== 'start' || !p.hasStart)
+
   return (
     <div className="toolbar">
-      <button type="button" className="xp-btn" onClick={props.onAddNode}>
-        + Node Ekle
-      </button>
+      <div className="dropdown" ref={ref}>
+        <button type="button" className="xp-btn" onClick={() => setOpen((o) => !o)}>
+          + Node Ekle ▾
+        </button>
+        {open && (
+          <div className="dropdown-menu">
+            <div className="ctx-title">{p.hasSelection ? 'Seçili node’dan sonra ekle' : 'Akışın sonuna ekle'}</div>
+            {kinds.map((k) => (
+              <button
+                type="button"
+                key={k}
+                onClick={() => {
+                  p.onAdd(k)
+                  setOpen(false)
+                }}
+              >
+                <span className="ctx-icon" style={{ background: NODE_SPECS[k].color }}>
+                  {NODE_SPECS[k].icon}
+                </span>
+                <span>
+                  <b>{NODE_SPECS[k].label}</b>
+                  <small>{NODE_SPECS[k].description}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <span className="tb-sep" />
+
       <button
         type="button"
-        className={`xp-btn ${props.recording ? 'record-on' : 'danger'}`}
-        onClick={props.onToggleRecord}
+        className={`xp-btn ${p.recording ? 'record-on' : ''}`}
+        onClick={p.onToggleRecord}
+        disabled={p.running}
+        title="Açıkken hedef uygulamada tıkladığın her öğe yeni bir Tıkla node’u olur"
       >
-        {props.recording ? '● Kayıt Açık' : '○ Kayıt'}
+        <span className="rec-dot" /> {p.recording ? 'Kaydı Durdur' : 'Kayıt'}
       </button>
-      <button type="button" className="xp-btn" onClick={props.onCapture}>
-        İmleçteki Öğeyi Yakala
+      <button type="button" className="xp-btn" onClick={p.onCapture} disabled={p.capturing > 0 || p.running}>
+        {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'Öğe Yakala (3 sn)'}
       </button>
-      <button
-        type="button"
-        className="xp-btn primary"
-        disabled={props.running}
-        onClick={props.onRun}
-      >
-        {props.running ? 'Çalışıyor…' : '▶ Ajanı Çalıştır'}
+
+      <span className="tb-sep" />
+
+      {p.running ? (
+        <button type="button" className="xp-btn danger strong" onClick={p.onStop}>
+          ■ Durdur
+        </button>
+      ) : (
+        <>
+          <button type="button" className="xp-btn primary" onClick={p.onRun}>
+            ▶ Ajanı Çalıştır
+          </button>
+          <button type="button" className="xp-btn" onClick={p.onRunFromSelected} disabled={!p.hasSelection}>
+            Seçiliden Çalıştır
+          </button>
+        </>
+      )}
+
+      <span className="tb-sep" />
+
+      <button type="button" className="xp-btn" onClick={p.onLayout} disabled={p.running}>
+        Düzenle
       </button>
-      <button type="button" className="xp-btn" onClick={props.onRefreshTree}>
-        Accessibility Tree
-      </button>
-      <button type="button" className="xp-btn save" onClick={props.onSaveGraph}>
-        Grafiği Kaydet
-      </button>
-      <button
-        type="button"
-        className="xp-btn"
-        disabled={!props.canDelete}
-        onClick={props.onDelete}
-      >
-        Node Sil
+      <button type="button" className="xp-btn" onClick={p.onClear} disabled={p.running}>
+        Yeni Akış
       </button>
     </div>
   )

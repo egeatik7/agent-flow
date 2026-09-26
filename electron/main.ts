@@ -1,83 +1,62 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  globalShortcut,
-  screen,
-} from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'path'
 import ElectronStore from 'electron-store'
-import { runOpenRouterAgentStep } from './openrouter'
+import * as bridge from './a11y-bridge'
+import { chooseElement, listModels, testKey } from './openrouter'
+import { runGraph, StoppedError, type Executor } from './runner'
 import {
-  captureAccessibilityTree,
-  clickElementByPath,
-  getElementAtPoint,
-  listWindows,
-  type A11yNode,
-} from './a11y-bridge'
+  normalizeGraph,
+  type AgentGraph,
+  type AgentNode,
+  type AppSettings,
+  type Locator,
+  type LogLevel,
+} from './graph-types'
 
-export type AppSettings = {
-  apiKey: string
-  model: string
-  targetWindow: string
-  maxTreeDepth: number
-  stepDelayMs: number
+const DEFAULT_SETTINGS: AppSettings = {
+  apiKey: '',
+  model: 'openai/gpt-4o-mini',
+  targetWindow: '',
+  maxTreeDepth: 12,
+  stepDelayMs: 800,
+  maxSteps: 500,
 }
 
-export type AgentNode = {
-  id: string
-  title: string
-  prompt: string
-  x: number
-  y: number
-  recorded?: {
-    name: string
-    controlType: string
-    automationId?: string
-    path: string
-  }
-}
-
-export type AgentGraph = {
-  nodes: AgentNode[]
-  edges: { id: string; from: string; to: string }[]
-}
-
-// electron-store CJS/ESM interop
 const StoreCtor =
-  (ElectronStore as unknown as { default?: typeof ElectronStore }).default ??
-  ElectronStore
+  (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{
-  settings: AppSettings
-  graph: AgentGraph
-}>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph }>({
   name: 'xp-agent-studio',
-  defaults: {
-    settings: {
-      apiKey: '',
-      model: 'openai/gpt-4o-mini',
-      targetWindow: '',
-      maxTreeDepth: 8,
-      stepDelayMs: 800,
-    },
-    graph: { nodes: [], edges: [] },
-  },
+  defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
 })
 
 let mainWindow: BrowserWindow | null = null
-let recording = false
-let lastClickAt = 0
+let recorder: bridge.Recorder | null = null
+let running = false
+let stopRequested = false
+
+function getSettings(): AppSettings {
+  return { ...DEFAULT_SETTINGS, ...store.get('settings') }
+}
+
+function send(channel: string, payload: unknown) {
+  mainWindow?.webContents.send(channel, payload)
+}
+
+function log(level: LogLevel, message: string) {
+  send('agent:log', { level, message })
+}
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   mainWindow = new BrowserWindow({
-    width: Math.min(1180, width),
-    height: Math.min(780, height),
-    minWidth: 960,
+    width: Math.min(1320, width),
+    height: Math.min(860, height),
+    minWidth: 980,
     minHeight: 640,
     frame: false,
     backgroundColor: '#3a6ea5',
+    icon: path.join(__dirname, '../resources/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -87,143 +66,75 @@ function createWindow() {
     title: 'XP Agent Studio',
   })
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
-  }
+  if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+  else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
 
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 }
 
-function sendToRenderer(channel: string, payload: unknown) {
-  mainWindow?.webContents.send(channel, payload)
+function targetWindowFor(node?: AgentNode): string {
+  const w = getSettings().targetWindow || node?.locator?.windowTitle || ''
+  if (!w) throw new Error('Hedef pencere seçilmedi. Ayarlar > Hedef pencere kısmından seç ve Kaydet.')
+  return w
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-async function onGlobalClickRecord() {
-  if (!recording) return
-  const now = Date.now()
-  if (now - lastClickAt < 250) return
-  lastClickAt = now
-
-  try {
-    const el = await getElementAtPoint()
-    if (!el) return
-    sendToRenderer('record:event', {
-      kind: 'click',
-      at: now,
-      element: el,
-      suggestedPrompt: buildPromptFromElement(el),
-    })
-  } catch (err) {
-    sendToRenderer('agent:log', {
-      level: 'error',
-      message: `Kayıt hatası: ${String(err)}`,
-    })
+async function locateWithLlm(node: AgentNode, stepNo: number, windowTitle: string): Promise<Locator> {
+  const s = getSettings()
+  if (!s.apiKey) throw new Error('OpenRouter API anahtarı kayıtlı değil. Ayarlar’dan girip Kaydet’e bas.')
+  if (!node.prompt?.trim()) {
+    throw new Error(`“${node.title}”: prompt boş ve kayıtlı öğe yok. Prompt yaz veya öğe yakala.`)
   }
-}
-
-function buildPromptFromElement(el: A11yNode): string {
-  const parts = [
-    el.controlType ? `${el.controlType} öğesine` : 'öğeye',
-    el.name ? `"${el.name}"` : el.automationId ? `id=${el.automationId}` : 'isimsiz',
-    'bas',
-  ]
-  return parts.join(' ')
-}
-
-function topologicalOrder(graph: AgentGraph): AgentNode[] {
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
-  const indeg = new Map(graph.nodes.map((n) => [n.id, 0]))
-  const outs = new Map<string, string[]>()
-  for (const e of graph.edges) {
-    indeg.set(e.to, (indeg.get(e.to) || 0) + 1)
-    if (!outs.has(e.from)) outs.set(e.from, [])
-    outs.get(e.from)!.push(e.to)
-  }
-  const q = [...indeg.entries()].filter(([, d]) => d === 0).map(([id]) => id)
-  const order: AgentNode[] = []
-  while (q.length) {
-    const id = q.shift()!
-    const n = byId.get(id)
-    if (n) order.push(n)
-    for (const t of outs.get(id) || []) {
-      indeg.set(t, (indeg.get(t) || 0) - 1)
-      if (indeg.get(t) === 0) q.push(t)
-    }
-  }
-  if (order.length < graph.nodes.length) {
-    return [...graph.nodes]
-  }
-  return order
-}
-
-async function runGraph(graph: AgentGraph) {
-  const settings = store.get('settings')
-  if (!settings.apiKey) {
-    throw new Error('OpenRouter API anahtarı kayıtlı değil. Ayarlar’dan kaydet.')
-  }
-  const steps = topologicalOrder(graph)
-  sendToRenderer('agent:log', {
-    level: 'info',
-    message: `${steps.length} aşama çalıştırılacak…`,
+  const tree = await bridge.captureTree(windowTitle, s.maxTreeDepth)
+  const d = await chooseElement({
+    apiKey: s.apiKey,
+    model: s.model,
+    prompt: node.prompt,
+    tree,
+    kind: node.kind,
+    stageTitle: node.title,
+    stageIndex: stepNo,
+    windowTitle,
   })
+  log('info', `LLM seçti: ${d.controlType} “${d.name}”${d.reason ? ` (${d.reason})` : ''}`)
+  return { name: d.name, controlType: d.controlType, automationId: d.automationId, path: d.path, windowTitle }
+}
 
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i]
-    sendToRenderer('agent:step', { index: i, id: step.id, status: 'running' })
-    sendToRenderer('agent:log', {
-      level: 'info',
-      message: `Aşama ${i + 1}: ${step.title || step.prompt.slice(0, 60)}`,
-    })
-
-    const tree = await captureAccessibilityTree({
-      windowTitle: settings.targetWindow,
-      maxDepth: settings.maxTreeDepth,
-    })
-
-    let targetPath = step.recorded?.path
-    let targetName = step.recorded?.name
-
-    if (!targetPath) {
-      const decision = await runOpenRouterAgentStep({
-        apiKey: settings.apiKey,
-        model: settings.model,
-        prompt: step.prompt,
-        tree,
-        stageTitle: step.title,
-        stageIndex: i + 1,
-      })
-      targetPath = decision.path
-      targetName = decision.name
-      sendToRenderer('agent:log', {
-        level: 'info',
-        message: `LLM seçimi: ${decision.name} (${decision.controlType}) — ${decision.reason}`,
-      })
-    } else {
-      sendToRenderer('agent:log', {
-        level: 'info',
-        message: `Kayıtlı öğe kullanılıyor: ${targetName || targetPath}`,
-      })
+async function resolveTarget(
+  node: AgentNode,
+  stepNo: number,
+  act: (loc: Locator, windowTitle: string) => Promise<void>
+) {
+  const windowTitle = targetWindowFor(node)
+  if (node.locator) {
+    try {
+      await act(node.locator, windowTitle)
+      return
+    } catch (e) {
+      if (!node.prompt?.trim()) throw e
+      log('warn', `Kayıtlı öğe kullanılamadı (${(e as Error).message}); LLM ile aranıyor…`)
     }
-
-    if (!targetPath) {
-      sendToRenderer('agent:step', { index: i, id: step.id, status: 'error' })
-      throw new Error(`Aşama ${i + 1} için tıklanacak öğe bulunamadı.`)
-    }
-
-    await clickElementByPath(targetPath, settings.targetWindow)
-    sendToRenderer('agent:step', { index: i, id: step.id, status: 'done' })
-    await sleep(settings.stepDelayMs)
   }
+  const loc = await locateWithLlm(node, stepNo, windowTitle)
+  await act(loc, windowTitle)
+}
 
-  sendToRenderer('agent:log', { level: 'success', message: 'Tüm aşamalar tamamlandı.' })
+const executor: Executor = {
+  log,
+  step: (id, status) => send('agent:step', { id, status }),
+  shouldStop: () => stopRequested,
+  click: (node, stepNo) =>
+    resolveTarget(node, stepNo, async (loc, w) => {
+      await bridge.clickLocator(loc, w)
+    }),
+  type: (node, stepNo) =>
+    resolveTarget(node, stepNo, (loc, w) => bridge.typeInto(loc, w, node.text ?? '', !!node.pressEnter)),
+  key: async (node) => {
+    if (!node.keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
+    await bridge.sendKeys(node.keys, targetWindowFor(node))
+  },
+  exists: (text, node) => bridge.elementExists(text, targetWindowFor(node)),
 }
 
 app.whenReady().then(() => {
@@ -237,88 +148,82 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
 
-  ipcMain.handle('settings:get', () => store.get('settings'))
+  ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
-    const next = { ...store.get('settings'), ...partial }
+    const next = { ...getSettings(), ...partial }
     store.set('settings', next)
     return next
   })
 
-  ipcMain.handle('graph:get', () => store.get('graph'))
+  ipcMain.handle('graph:get', () => normalizeGraph(store.get('graph')))
   ipcMain.handle('graph:save', (_e, graph: AgentGraph) => {
     store.set('graph', graph)
     return true
   })
 
-  ipcMain.handle('windows:list', async () => listWindows())
-  ipcMain.handle('a11y:tree', async (_e, opts?: { windowTitle?: string }) => {
-    const settings = store.get('settings')
-    return captureAccessibilityTree({
-      windowTitle: opts?.windowTitle ?? settings.targetWindow,
-      maxDepth: settings.maxTreeDepth,
-    })
+  ipcMain.handle('windows:list', () => bridge.listWindows())
+  ipcMain.handle('a11y:tree', (_e, windowTitle?: string) => {
+    const s = getSettings()
+    const w = windowTitle || s.targetWindow
+    if (!w) throw new Error('Önce hedef pencere seç.')
+    return bridge.captureTree(w, s.maxTreeDepth)
   })
 
   ipcMain.handle('record:start', () => {
-    recording = true
-    try {
-      globalShortcut.register('CommandOrControl+Shift+R', () => {
-        /* reserved */
-      })
-    } catch {
-      /* ignore */
-    }
-    sendToRenderer('agent:log', {
-      level: 'info',
-      message:
-        'Kayıt açık. Hedef uygulamada Ctrl+Shift+Click ile öğe yakala (veya kayıt tuşunu kullan).',
-    })
-    return true
+    recorder?.stop()
+    recorder = bridge.startRecorder(
+      (loc) => send('record:event', loc),
+      (msg) => log('error', `Kaydedici: ${msg}`)
+    )
+    return process.platform === 'win32'
   })
-
   ipcMain.handle('record:stop', () => {
-    recording = false
+    recorder?.stop()
+    recorder = null
     return true
   })
+  ipcMain.handle('record:captureAfter', async (_e, ms: number) => {
+    await new Promise((r) => setTimeout(r, Math.max(0, ms)))
+    return bridge.captureAtCursor()
+  })
 
-  ipcMain.handle('record:captureNow', async () => {
-    const el = await getElementAtPoint()
-    if (!el) return null
-    return {
-      kind: 'click',
-      at: Date.now(),
-      element: el,
-      suggestedPrompt: buildPromptFromElement(el),
+  ipcMain.handle('agent:run', async (_e, graph: AgentGraph, startId?: string) => {
+    if (running) throw new Error('Ajan zaten çalışıyor.')
+    running = true
+    stopRequested = false
+    store.set('graph', graph)
+    const s = getSettings()
+    try {
+      await runGraph(graph, executor, {
+        maxSteps: Math.max(1, s.maxSteps),
+        stepDelayMs: Math.max(0, s.stepDelayMs),
+        startId,
+      })
+      return { ok: true }
+    } catch (e) {
+      if (e instanceof StoppedError) {
+        log('warn', 'Ajan durduruldu.')
+        return { ok: false, stopped: true }
+      }
+      throw e
+    } finally {
+      running = false
     }
   })
-
-  ipcMain.handle('agent:run', async (_e, graph: AgentGraph) => {
-    store.set('graph', graph)
-    await runGraph(graph)
+  ipcMain.handle('agent:stop', () => {
+    stopRequested = true
     return true
   })
 
-  ipcMain.handle('agent:testOpenRouter', async () => {
-    const settings = store.get('settings')
-    if (!settings.apiKey) throw new Error('API anahtarı yok')
-    const res = await fetch('https://openrouter.ai/api/v1/models', {
-      headers: { Authorization: `Bearer ${settings.apiKey}` },
-    })
-    if (!res.ok) throw new Error(`OpenRouter hata: ${res.status}`)
-    return { ok: true }
+  ipcMain.handle('openrouter:test', async () => {
+    const s = getSettings()
+    if (!s.apiKey) throw new Error('Önce API anahtarını kaydet.')
+    return testKey(s.apiKey)
   })
-
-  // Simulate click capture via IPC from renderer "yakala" button
-  ipcMain.on('record:simulateClick', () => {
-    void onGlobalClickRecord()
-  })
+  ipcMain.handle('openrouter:models', () => listModels())
 })
 
 app.on('window-all-closed', () => {
-  globalShortcut.unregisterAll()
-  if (process.platform !== 'darwin') app.quit()
-})
-
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll()
+  recorder?.stop()
+  app.quit()
 })

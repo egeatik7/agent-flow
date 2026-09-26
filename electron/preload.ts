@@ -1,74 +1,39 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export type AppSettings = {
-  apiKey: string
-  model: string
-  targetWindow: string
-  maxTreeDepth: number
-  stepDelayMs: number
-}
-
-export type AgentNode = {
-  id: string
-  title: string
-  prompt: string
-  x: number
-  y: number
-  recorded?: {
-    name: string
-    controlType: string
-    automationId?: string
-    path: string
+function on(channel: string) {
+  return (cb: (payload: unknown) => void) => {
+    const listener = (_: unknown, payload: unknown) => cb(payload)
+    ipcRenderer.on(channel, listener)
+    return () => {
+      ipcRenderer.removeListener(channel, listener)
+    }
   }
 }
 
-export type AgentGraph = {
-  nodes: AgentNode[]
-  edges: { id: string; from: string; to: string }[]
-}
-
-const api = {
+contextBridge.exposeInMainWorld('xpAgent', {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
 
-  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
-  saveSettings: (partial: Partial<AppSettings>): Promise<AppSettings> =>
-    ipcRenderer.invoke('settings:save', partial),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (partial: unknown) => ipcRenderer.invoke('settings:save', partial),
+  getGraph: () => ipcRenderer.invoke('graph:get'),
+  saveGraph: (graph: unknown) => ipcRenderer.invoke('graph:save', graph),
 
-  getGraph: (): Promise<AgentGraph> => ipcRenderer.invoke('graph:get'),
-  saveGraph: (graph: AgentGraph): Promise<boolean> =>
-    ipcRenderer.invoke('graph:save', graph),
-
-  listWindows: (): Promise<{ title: string; handle: string }[]> =>
-    ipcRenderer.invoke('windows:list'),
-  getA11yTree: (opts?: { windowTitle?: string }) =>
-    ipcRenderer.invoke('a11y:tree', opts),
+  listWindows: () => ipcRenderer.invoke('windows:list'),
+  getA11yTree: (windowTitle?: string) => ipcRenderer.invoke('a11y:tree', windowTitle),
 
   startRecord: () => ipcRenderer.invoke('record:start'),
   stopRecord: () => ipcRenderer.invoke('record:stop'),
-  captureNow: () => ipcRenderer.invoke('record:captureNow'),
+  captureAfter: (ms: number) => ipcRenderer.invoke('record:captureAfter', ms),
 
-  runAgent: (graph: AgentGraph) => ipcRenderer.invoke('agent:run', graph),
-  testOpenRouter: () => ipcRenderer.invoke('agent:testOpenRouter'),
+  runAgent: (graph: unknown, startId?: string) => ipcRenderer.invoke('agent:run', graph, startId),
+  stopAgent: () => ipcRenderer.invoke('agent:stop'),
 
-  onRecordEvent: (cb: (payload: unknown) => void) => {
-    const listener = (_: unknown, payload: unknown) => cb(payload)
-    ipcRenderer.on('record:event', listener)
-    return () => ipcRenderer.removeListener('record:event', listener)
-  },
-  onAgentLog: (cb: (payload: unknown) => void) => {
-    const listener = (_: unknown, payload: unknown) => cb(payload)
-    ipcRenderer.on('agent:log', listener)
-    return () => ipcRenderer.removeListener('agent:log', listener)
-  },
-  onAgentStep: (cb: (payload: unknown) => void) => {
-    const listener = (_: unknown, payload: unknown) => cb(payload)
-    ipcRenderer.on('agent:step', listener)
-    return () => ipcRenderer.removeListener('agent:step', listener)
-  },
-}
+  testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),
+  listModels: () => ipcRenderer.invoke('openrouter:models'),
 
-contextBridge.exposeInMainWorld('xpAgent', api)
-
-export type XpAgentApi = typeof api
+  onRecordEvent: on('record:event'),
+  onAgentLog: on('agent:log'),
+  onAgentStep: on('agent:step'),
+})
