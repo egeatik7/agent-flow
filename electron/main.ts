@@ -2,7 +2,15 @@ import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron'
 import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
-import { chooseScreenTarget, listModels, testKey } from './openrouter'
+import {
+  chooseScreenTarget,
+  listModels,
+  testKey,
+  visionCheck,
+  visionDescribe,
+  visionLocate,
+  visionRefine,
+} from './openrouter'
 import { runGraph, StoppedError, type Executor } from './runner'
 import {
   containsText,
@@ -121,6 +129,73 @@ async function scanFor(node: AgentNode, withImage: boolean): Promise<ScanResult>
   return res
 }
 
+function visionModelOrThrow(): { apiKey: string; model: string } {
+  const s = getSettings()
+  if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')
+  return { apiKey: s.apiKey, model: (s.visionModel || s.model).trim() }
+}
+
+function visionPrompt(node: AgentNode): string {
+  const p = node.prompt?.trim()
+  if (p) return p
+  const t = node.locator?.text || node.locator?.name
+  if (t) return `“${t}” yazan yere`
+  throw new Error(`“${node.title}”: görsel mod için ekranda neyin bulunacağını yaz.`)
+}
+
+/** Screenshot mode: the vision model looks at the screen, picks a marked box or a raw point, then a zoomed crop refines it. */
+async function resolveVision(node: AgentNode): Promise<{ x: number; y: number; label: string }> {
+  const { apiKey, model } = visionModelOrThrow()
+  const prompt = visionPrompt(node)
+  const s = getSettings()
+  const scanRes = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'marked', maxImageW: 1600 })
+  warnMissingWindow(scanRes)
+  log('info', `[görsel] Ekran görüntüsü ${model} modeline gönderildi (${scanRes.items.length} işaretli öğe).`)
+  const pick = await visionLocate({ apiKey, model, prompt, kind: node.kind, scan: scanRes, stepTitle: node.title })
+
+  if (pick.kind === 'item') {
+    const item = scanRes.items.find((i) => i.id === pick.id)!
+    log('info', `[görsel] Seçilen: #${item.id} “${item.text}”${pick.reason ? ` — ${pick.reason}` : ''}`)
+    return { ...center(item), label: `[görsel] “${item.text}”` }
+  }
+  if (pick.kind === 'none') {
+    throw new Error(`[görsel] Model “${prompt}” hedefini ekranda bulamadı${pick.reason ? `: ${pick.reason}` : ''}.`)
+  }
+
+  const a = scanRes.area
+  const gx = a.x + (pick.nx / 1000) * a.w
+  const gy = a.y + (pick.ny / 1000) * a.h
+  log('info', `[görsel] İlk tahmin @${Math.round(gx)},${Math.round(gy)}${pick.reason ? ` — ${pick.reason}` : ''}; yakınlaştırılıp netleştiriliyor…`)
+  try {
+    const cw = Math.min(520, a.w)
+    const ch = Math.min(340, a.h)
+    const c = await bridge.crop({ x: Math.round(gx - cw / 2), y: Math.round(gy - ch / 2), w: cw, h: ch }, 1040)
+    const r = await visionRefine({ apiKey, model, prompt, image: c.image })
+    if (r) {
+      const fx = c.area.x + (r.x / 1000) * c.area.w
+      const fy = c.area.y + (r.y / 1000) * c.area.h
+      return { x: fx, y: fy, label: '[görsel] netleştirilmiş nokta' }
+    }
+    log('warn', '[görsel] Yakın planda hedef görülmedi, ilk tahmin kullanılıyor.')
+  } catch (e) {
+    log('warn', `[görsel] Netleştirme atlandı: ${(e as Error).message}`)
+  }
+  return { x: gx, y: gy, label: '[görsel] tahmini nokta' }
+}
+
+async function visionExists(node: AgentNode, text: string): Promise<boolean> {
+  const { apiKey, model } = visionModelOrThrow()
+  const s = getSettings()
+  const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'plain', uia: false, ocr: false, maxImageW: 1400 })
+  warnMissingWindow(res)
+  if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
+  const r = await visionCheck({ apiKey, model, question: text, image: res.image })
+  log('info', `[görsel] “${text}” → ${r.answer ? 'evet' : 'hayır'}${r.reason ? ` (${r.reason})` : ''}`)
+  return r.answer
+}
+
+const findTarget = (node: AgentNode, stepNo: number) => (node.useVision ? resolveVision(node) : resolveTarget(node, stepNo))
+
 /** Resolves where to click for a Click/Type node, from the most to the least deterministic source. */
 async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: number; y: number; label: string }> {
   const s = getSettings()
@@ -207,7 +282,7 @@ const executor: Executor = {
   step: (id, status) => send('agent:step', { id, status }),
   shouldStop: () => stopRequested,
   click: async (node, stepNo) => {
-    const t = await resolveTarget(node, stepNo)
+    const t = await findTarget(node, stepNo)
     const mode = node.clickMode ?? 'left'
     await bridge.clickAt(t.x, t.y, mode)
     log('success', `${mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
@@ -215,7 +290,7 @@ const executor: Executor = {
   },
   type: async (node, stepNo) => {
     if (node.prompt?.trim() || node.locator) {
-      const t = await resolveTarget(node, stepNo)
+      const t = await findTarget(node, stepNo)
       await bridge.clickAt(t.x, t.y, 'left')
       await sleep(120)
       log('info', `Alan seçildi: ${t.label}`)
@@ -225,9 +300,18 @@ const executor: Executor = {
   },
   key: async (node) => {
     if (!node.keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
+    if (node.useVision && node.prompt?.trim()) {
+      const t = await resolveVision(node)
+      await bridge.clickAt(t.x, t.y, 'left')
+      await sleep(150)
+      log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
+      await bridge.sendKeys(node.keys)
+      return
+    }
     await bridge.sendKeys(node.keys, getSettings().targetWindow || undefined)
   },
-  exists: async (text) => {
+  exists: async (text, node) => {
+    if (node.useVision) return visionExists(node, text)
     const s = getSettings()
     const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'none' })
     warnMissingWindow(res)
@@ -334,6 +418,18 @@ app.whenReady().then(() => {
     return testKey(s.apiKey)
   })
   ipcMain.handle('openrouter:models', () => listModels())
+  ipcMain.handle('openrouter:testVision', async () => {
+    const { apiKey, model } = visionModelOrThrow()
+    const hidden = await hideSelf()
+    let shot: Awaited<ReturnType<typeof bridge.scan>>
+    try {
+      shot = await bridge.scan({ image: 'plain', uia: false, ocr: false, maxImageW: 1200 })
+    } finally {
+      if (hidden) showSelf()
+    }
+    if (!shot.image) throw new Error('Ekran görüntüsü alınamadı.')
+    return { model, text: await visionDescribe({ apiKey, model, image: shot.image }) }
+  })
 })
 
 app.on('will-quit', () => {

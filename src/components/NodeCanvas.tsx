@@ -345,6 +345,11 @@ export default function NodeCanvas(p: Props) {
               <div className="node-head" style={{ background: headerGradient(spec.color) }}>
                 <span className="node-icon">{spec.icon}</span>
                 <span className="node-title">{n.title}</span>
+                {n.useVision && (
+                  <span className="vision-badge" title="Ekran görüntüsüne bakarak çalışır">
+                    görsel
+                  </span>
+                )}
                 {st !== 'idle' && <span className={`status-chip ${st}`}>{st === 'running' ? 'çalışıyor' : st === 'done' ? 'tamam' : 'hata'}</span>}
               </div>
               <div className="node-body">

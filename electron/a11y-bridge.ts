@@ -158,28 +158,49 @@ export async function listWindows(): Promise<{ title: string; handle: string }[]
   return worker.call('listWindows', { ownPid: process.pid })
 }
 
+const PLACEHOLDER_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+
 export async function scan(opts: {
   windowTitle?: string
   image?: 'none' | 'plain' | 'marked'
   maxImageW?: number
+  /** Set false to skip UI Automation / OCR when only the screenshot is needed. */
+  uia?: boolean
+  ocr?: boolean
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
       area: { x: 0, y: 0, w: 1920, h: 1080 },
-      items: DEMO_ITEMS,
+      items: opts.uia === false && opts.ocr === false ? [] : DEMO_ITEMS,
       ocr: true,
       uiaCount: 4,
       ocrCount: 1,
-      image: null,
+      image: opts.image && opts.image !== 'none' ? { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } : null,
       window: opts.windowTitle ?? '',
     }
   }
   const r = await worker.call<ScanResult>(
     'scan',
-    { windowTitle: opts.windowTitle || '', image: opts.image ?? 'none', maxImageW: opts.maxImageW ?? 1400, ownPid: process.pid },
+    {
+      windowTitle: opts.windowTitle || '',
+      image: opts.image ?? 'none',
+      maxImageW: opts.maxImageW ?? 1400,
+      ownPid: process.pid,
+      uia: opts.uia !== false,
+      ocr: opts.ocr !== false,
+    },
     90000
   )
   return { ...r, items: Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : [] }
+}
+
+export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{
+  area: { x: number; y: number; w: number; h: number }
+  image: { data: string; w: number; h: number; mime?: string }
+}> {
+  if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
+  return worker.call('crop', { ...rect, maxW })
 }
 
 export async function clickAt(x: number, y: number, button: ClickMode = 'left'): Promise<void> {

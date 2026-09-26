@@ -42,6 +42,8 @@ export type AgentNode = {
   pressEnter?: boolean
   clearFirst?: boolean
   clickMode?: ClickMode
+  /** Execute this node by showing a screenshot to the vision model instead of text matching. */
+  useVision?: boolean
   /** Last known screen position of the target; breaks ties when the same text appears several times. */
   anchor?: { x: number; y: number }
   locator?: Locator
@@ -67,6 +69,8 @@ export type AppSettings = {
   maxSteps: number
   /** Attach a numbered screenshot to LLM requests (needs a vision-capable model). */
   sendScreenshot: boolean
+  /** Model used by nodes running in screenshot (vision) mode; same OpenRouter key. */
+  visionModel: string
   /** Minimize this app while the agent runs so it does not cover the target. */
   hideWhileRunning: boolean
 }
@@ -78,8 +82,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   stepDelayMs: 800,
   maxSteps: 500,
   sendScreenshot: true,
+  visionModel: 'google/gemini-3.8-flash',
   hideWhileRunning: true,
 }
+
+export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'waitFor', 'condition']
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'
 export type LogLevel = 'info' | 'warn' | 'error' | 'success'

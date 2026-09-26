@@ -108,6 +108,10 @@ export async function runDemo(
     shouldStop: () => demoStop,
     click: async (n) => {
       await pause(350)
+      if (n.useVision) {
+        log('success', `(demo) [görsel] ${settings.visionModel} ekran görüntüsünden seçti ve tıkladı: “${n.prompt || n.title}”`)
+        return
+      }
       const item = demoLocate(n)
       if (!item) {
         throw new Error(
@@ -125,8 +129,12 @@ export async function runDemo(
       await pause(200)
       log('info', `(demo) tuş: ${n.keys}`)
     },
-    exists: async (text) => {
+    exists: async (text, n) => {
       await pause(250)
+      if (n.useVision) {
+        log('info', `(demo) [görsel] “${text}” → evet`)
+        return true
+      }
       return containsText(ITEMS, text)
     },
   }

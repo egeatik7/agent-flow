@@ -16,6 +16,21 @@ gönderip seçtirir.
 
 Aynı yazı ekranda birden çok yerdeyse, o node’un son tıklandığı konuma en yakın olanı seçilir.
 
+## Ekran görüntüsü modu (görsel LLM)
+
+Tıkla, Yazı Yaz, Tuş Gönder, Öğeyi Bekle ve Koşul node’larında **“Ekran görüntüsüne bakarak yap”** seçeneği var.
+Açıkken node aynı işi yapar ama hedefi yazı eşleştirmesi yerine **görsel LLM** bulur:
+
+- **Tıkla / Yazı Yaz:** ekran görüntüsü (bulunan yazılar numaralı kutularla işaretli) görsel modele gider. Model bir
+  kutu numarası ya da doğrudan bir nokta verir; nokta verirse o bölge yakınlaştırılıp ikinci kez sorulur ve kesin
+  noktaya tıklanır. İkon, resim, yazısız butonlar da bulunabilir (“sağ üstteki dişli simgesine tıkla”).
+- **Tuş Gönder:** tuşlardan önce tarif edilen yere tıklayıp odaklanır (“adres çubuğu”).
+- **Öğeyi Bekle / Koşul:** her kontrolde ekran görüntüsü alınıp “bu durum var mı?” diye sorulur; serbest tarif
+  yazılabilir (“indirme çubuğu %100 olmuş”).
+
+Görsel model **Ayarlar > Görsel LLM** kısmından ayrıca seçilir ve kaydedilir; aynı OpenRouter anahtarını kullanır.
+Varsayılan `google/gemini-3.8-flash`. “Görsel Test” butonu ekranı çekip modele anlattırır.
+
 ## Exe
 
 Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok.

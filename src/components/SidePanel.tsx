@@ -1,6 +1,7 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import {
   NODE_SPECS,
+  VISION_KINDS,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -22,6 +23,7 @@ type Props = {
   models: ModelInfo[]
   onLoadModels: () => void
   onTestApi: () => void
+  onTestVision: () => void
   graph: AgentGraph
   selected: AgentNode | null
   selectedEdge: AgentEdge | null
@@ -46,6 +48,14 @@ const KEY_PRESETS: { label: string; keys: string }[] = [
   { label: 'F5', keys: '{F5}' },
   { label: '↓', keys: '{DOWN}' },
   { label: '↑', keys: '{UP}' },
+]
+
+const VISION_PRESETS = [
+  'google/gemini-3.8-flash',
+  'google/gemini-3.5-flash-lite',
+  'google/gemini-2.5-flash',
+  'anthropic/claude-sonnet-5',
+  'qwen/qwen2.5-vl-72b-instruct',
 ]
 
 const CLICK_MODES: { key: ClickMode; label: string }[] = [
@@ -98,6 +108,39 @@ function TargetBox(p: Props & { n: AgentNode }) {
   )
 }
 
+function VisionToggle(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const on = !!n.useVision
+  const model = (p.settings.visionModel || p.settings.model).trim()
+  const what: Partial<Record<AgentNode['kind'], string>> = {
+    click: 'Tıklanacak yeri görsel LLM ekran görüntüsüne bakarak bulur (ikon, resim, yazısız butonlar dahil).',
+    type: 'Yazılacak alanı görsel LLM ekran görüntüsüne bakarak bulur.',
+    key: 'Tuşlardan önce aşağıdaki yere ekran görüntüsüne bakarak tıklar (odaklanmak için).',
+    waitFor: 'Her kontrolde ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur.',
+    condition: 'Ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur.',
+  }
+  return (
+    <div className={`vision-box${on ? ' on' : ''}`}>
+      <label className="check vision-check">
+        <input type="checkbox" checked={on} onChange={(e) => p.onUpdateNode({ useVision: e.target.checked })} />
+        <span>
+          <b>Ekran görüntüsüne bakarak yap</b>
+          <small>{what[n.kind]}</small>
+        </span>
+      </label>
+      {on && (
+        <p className="hint">
+          Model: <span className="mono">{model || '—'}</span>{' '}
+          <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>
+            değiştir
+          </button>
+          {!p.settings.apiKey && <><br /><b className="warn-text">API anahtarı kayıtlı değil.</b></>}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function NodeInspector(p: Props) {
   const n = p.selected
   if (p.selectedEdge) {
@@ -145,6 +188,8 @@ function NodeInspector(p: Props) {
         <input className="xp-input" value={n.title} onChange={(e) => upd({ title: e.target.value })} />
       </div>
 
+      {VISION_KINDS.includes(n.kind) && <VisionToggle {...p} n={n} />}
+
       {n.kind === 'click' && (
         <>
           <div className="field">
@@ -152,7 +197,11 @@ function NodeInspector(p: Props) {
             <textarea
               className="xp-textarea"
               value={n.prompt ?? ''}
-              placeholder={'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'}
+              placeholder={
+              n.useVision
+                ? 'Örn: sağ üstteki dişli simgesine tıkla\nveya: ilk videonun küçük resmine bas'
+                : 'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'
+            }
               onChange={(e) => upd({ prompt: e.target.value })}
             />
           </div>
@@ -172,7 +221,7 @@ function NodeInspector(p: Props) {
             </div>
             <p className="hint">Masaüstü simgeleri genelde çift tık ister.</p>
           </div>
-          <TargetBox {...p} n={n} />
+          {!n.useVision && <TargetBox {...p} n={n} />}
         </>
       )}
 
@@ -199,7 +248,7 @@ function NodeInspector(p: Props) {
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
           </label>
-          {(n.prompt?.trim() || n.locator) && <TargetBox {...p} n={n} />}
+          {!n.useVision && (n.prompt?.trim() || n.locator) && <TargetBox {...p} n={n} />}
         </>
       )}
 
@@ -215,6 +264,17 @@ function NodeInspector(p: Props) {
             ))}
           </div>
           <p className="hint">^ = Ctrl, % = Alt, + = Shift. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir.</p>
+          {n.useVision && (
+            <>
+              <label>Önce tıklanacak yer (görsel)</label>
+              <input
+                className="xp-input"
+                value={n.prompt ?? ''}
+                placeholder="Örn: adres çubuğu"
+                onChange={(e) => upd({ prompt: e.target.value })}
+              />
+            </>
+          )}
         </div>
       )}
 
@@ -241,12 +301,19 @@ function NodeInspector(p: Props) {
 
       {(n.kind === 'waitFor' || n.kind === 'condition') && (
         <div className="field">
-          <label>Ekranda aranacak yazı</label>
+          <label>{n.useVision ? 'Ekranda ne görünmeli? (serbest tarif)' : 'Ekranda aranacak yazı'}</label>
           <div className="field-row">
-            <input className="xp-input" value={n.text ?? ''} placeholder="Örn: İndirme tamamlandı" onChange={(e) => upd({ text: e.target.value })} />
-            <button type="button" className="xp-btn" onClick={p.onOpenScanner}>
-              Ekrandan
-            </button>
+            <input
+              className="xp-input"
+              value={n.text ?? ''}
+              placeholder={n.useVision ? 'Örn: indirme çubuğu %100 olmuş' : 'Örn: İndirme tamamlandı'}
+              onChange={(e) => upd({ text: e.target.value })}
+            />
+            {!n.useVision && (
+              <button type="button" className="xp-btn" onClick={p.onOpenScanner}>
+                Ekrandan
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -289,6 +356,7 @@ function Settings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
   const model = p.models.find((m) => m.id === s.model.trim())
+  const visionInfo = p.models.find((m) => m.id === s.visionModel.trim())
   return (
     <div className="settings-grid">
       <p className="hint">Her ayarın yanındaki <b>Kaydet</b> ile kalıcı olarak saklanır.</p>
@@ -331,8 +399,52 @@ function Settings(p: Props) {
           checked={s.sendScreenshot}
           onChange={(e) => p.onSaveSettings({ sendScreenshot: e.target.checked })}
         />
-        LLM’e numaralı ekran görüntüsü de gönder
+        Normal LLM’e de numaralı ekran görüntüsü gönder
       </label>
+
+      <fieldset className="xp-group">
+        <legend>Görsel LLM (ekran görüntüsü modu)</legend>
+        <p className="hint">
+          “Ekran görüntüsüne bakarak yap” açık olan node’lar bu modeli kullanır. Aynı OpenRouter anahtarı kullanılır; model
+          görsel destekli olmalı.
+        </p>
+        <div className="field">
+          <label htmlFor="visionModel">Görsel model adı</label>
+          <SaveRow onSave={() => p.onSaveSettings({ visionModel: s.visionModel.trim() })}>
+            <input
+              id="visionModel"
+              className="xp-input"
+              list="vision-model-list"
+              value={s.visionModel}
+              placeholder="google/gemini-3.8-flash"
+              onChange={(e) => set({ visionModel: e.target.value })}
+            />
+          </SaveRow>
+          <datalist id="vision-model-list">
+            {p.models
+              .filter((m) => m.vision)
+              .map((m) => (
+                <option key={m.id} value={m.id} />
+              ))}
+          </datalist>
+          {visionInfo && !visionInfo.vision && (
+            <p className="hint warn">Bu model ekran görüntüsü göremiyor; görsel destekli bir model seç.</p>
+          )}
+          {visionInfo?.vision && <p className="hint ok">Görsel destekli model.</p>}
+          <div className="chips">
+            {VISION_PRESETS.map((m) => (
+              <button type="button" key={m} className="chip" onClick={() => set({ visionModel: m })}>
+                {m.split('/')[1]}
+              </button>
+            ))}
+          </div>
+          <div className="field-row">
+            <button type="button" className="xp-btn primary" onClick={p.onTestVision}>
+              Görsel Test (ekranı anlat)
+            </button>
+          </div>
+        </div>
+      </fieldset>
       <label className="check">
         <input
           type="checkbox"

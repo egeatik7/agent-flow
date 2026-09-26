@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),
   listModels: () => ipcRenderer.invoke('openrouter:models'),
+  testVision: () => ipcRenderer.invoke('openrouter:testVision'),
 
   onRecordEvent: on('record:event'),
   onAgentLog: on('agent:log'),

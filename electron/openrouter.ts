@@ -20,7 +20,8 @@ async function chat(apiKey: string, model: string, messages: Message[], hasImage
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 300,
+        // Reasoning models spend tokens before answering; too low a cap yields empty replies.
+        max_tokens: hasImage ? 2500 : 800,
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
@@ -120,6 +121,136 @@ Talimat: ${opts.prompt}`
     reason: String(parsed.reason ?? ''),
     usedImage,
   }
+}
+
+type Img = { data: string; w: number; h: number; mime?: string }
+
+function imagePart(img: Img) {
+  return { type: 'image_url', image_url: { url: `data:${img.mime ?? 'image/jpeg'};base64,${img.data}` } }
+}
+
+async function visionChat(apiKey: string, model: string, system: string, text: string, images: Img[]): Promise<Record<string, unknown>> {
+  try {
+    const content = await chat(
+      apiKey,
+      model,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: [{ type: 'text', text }, ...images.map(imagePart)] },
+      ],
+      true
+    )
+    return parseJson(content)
+  } catch (e) {
+    if (e instanceof ImageUnsupportedError) {
+      throw new Error(`Görsel model “${model}” ekran görüntüsü kabul etmiyor. Ayarlar > Görsel LLM’den görsel destekli bir model seç.`)
+    }
+    throw e
+  }
+}
+
+function num(v: unknown): number | null {
+  const n = typeof v === 'string' ? Number(v.replace(/[^\d.-]/g, '')) : typeof v === 'number' ? v : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+/** Reads a point the model gave on a 0–1000 normalized grid (also accepts [x,y] / point arrays). */
+function readPoint(p: Record<string, unknown>): { x: number; y: number } | null {
+  let x = num(p.x)
+  let y = num(p.y)
+  const arr = (p.point ?? p.coordinates) as unknown
+  if ((x === null || y === null) && Array.isArray(arr) && arr.length >= 2) {
+    x = num(arr[0])
+    y = num(arr[1])
+  }
+  if (x === null || y === null) return null
+  if (x <= 1 && y <= 1 && (x > 0 || y > 0)) {
+    x *= 1000
+    y *= 1000
+  }
+  return { x: Math.min(1000, Math.max(0, x)), y: Math.min(1000, Math.max(0, y)) }
+}
+
+export type VisionPick =
+  | { kind: 'item'; id: number; reason: string }
+  | { kind: 'point'; nx: number; ny: number; reason: string }
+  | { kind: 'none'; reason: string }
+
+const VISION_ACTION: Partial<Record<NodeKind, string>> = {
+  click: 'tıklanacak yeri',
+  type: 'yazı yazılacak alanı (giriş kutusu, arama çubuğu vb.)',
+  key: 'tuşlara basmadan önce odaklanmak için tıklanacak yeri',
+}
+
+export async function visionLocate(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  kind: NodeKind
+  scan: ScanResult
+  stepTitle: string
+}): Promise<VisionPick> {
+  if (!opts.scan.image) throw new Error('Ekran görüntüsü alınamadı.')
+  const list = opts.scan.items
+    .slice(0, 250)
+    .map((i) => `#${i.id} "${i.text.replace(/"/g, "'")}"`)
+    .join('\n')
+  const system = `Sen Windows ekran görüntüsüne bakarak işlem yapan bir ajansın. Görevin: talimata göre ${VISION_ACTION[opts.kind] ?? 'hedefi'} bulmak.
+Görüntüde bazı yazı/öğeler numaralı ince kutularla işaretli (mavi: uygulama öğesi, turuncu: okunan yazı). Hedef işaretsiz de olabilir (ikon, resim, boş alan).
+- Hedef numaralı bir kutuysa: {"id": <numara>, "reason": "..."}
+- Değilse hedefin ORTASINI görüntü üzerinde 0-1000 arası normalize koordinatla ver (x: soldan sağa, y: yukarıdan aşağıya): {"x": <0-1000>, "y": <0-1000>, "reason": "..."}
+- Hedef ekranda yoksa: {"found": false, "reason": "..."}
+Sadece JSON yaz.`
+  const text = `Adım: ${opts.stepTitle}
+Talimat: ${opts.prompt}
+
+İşaretli öğeler:
+${list || '(yok)'}`
+  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.scan.image])
+  const reason = String(p.reason ?? '')
+  if (p.found === false) return { kind: 'none', reason }
+  const id = num(p.id)
+  if (id !== null && opts.scan.items.some((i) => i.id === id)) return { kind: 'item', id, reason }
+  const pt = readPoint(p)
+  if (pt) return { kind: 'point', nx: pt.x, ny: pt.y, reason }
+  return { kind: 'none', reason: reason || 'model konum vermedi' }
+}
+
+/** Second pass on a zoomed crop around the first guess, for pixel-accurate clicks. */
+export async function visionRefine(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  image: Img
+}): Promise<{ x: number; y: number } | null> {
+  const system = `Bu, ekranın yakınlaştırılmış küçük bir parçası. Talimattaki hedefin tam ORTASINI 0-1000 normalize koordinatla ver: {"x": <0-1000>, "y": <0-1000>}. Hedef bu parçada yoksa {"found": false}. Sadece JSON.`
+  const p = await visionChat(opts.apiKey, opts.model, system, `Talimat: ${opts.prompt}`, [opts.image])
+  if (p.found === false) return null
+  return readPoint(p)
+}
+
+export async function visionCheck(opts: {
+  apiKey: string
+  model: string
+  question: string
+  image: Img
+}): Promise<{ answer: boolean; reason: string }> {
+  const system = `Windows ekran görüntüsüne bakıp soruyu evet/hayır olarak cevapla. Sadece JSON: {"answer": true|false, "reason": "<kısa gerekçe>"}`
+  const p = await visionChat(opts.apiKey, opts.model, system, `Ekranda şu durum var mı / görünüyor mu? ${opts.question}`, [opts.image])
+  const a = p.answer
+  const answer = a === true || (typeof a === 'string' && /^(true|evet|yes)$/i.test(a.trim()))
+  return { answer, reason: String(p.reason ?? '') }
+}
+
+export async function visionDescribe(opts: { apiKey: string; model: string; image: Img }): Promise<string> {
+  const p = await visionChat(
+    opts.apiKey,
+    opts.model,
+    'Ekran görüntüsünde ne olduğunu tek kısa Türkçe cümleyle anlat. Sadece JSON: {"text": "..."}',
+    'Bu ekranda ne görüyorsun?',
+    [opts.image]
+  )
+  return String(p.text ?? p.description ?? JSON.stringify(p)).slice(0, 300)
 }
 
 export async function testKey(apiKey: string): Promise<string> {

@@ -46,6 +46,20 @@ function Invoke-Op([string]$op, $P) {
       if ($off -or $r.IsEmpty -or $r.Width -le 0 -or [double]::IsInfinity($r.X)) { return $null }
       return [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height; name = [string]$el.Current.Name }
     }
+    'crop' {
+      $v = Get-VirtualScreen
+      $x = [Math]::Max($v.x, [int]$P.x)
+      $y = [Math]::Max($v.y, [int]$P.y)
+      $w = [Math]::Max(20, [Math]::Min([int]$P.w, $v.x + $v.w - $x))
+      $h = [Math]::Max(20, [Math]::Min([int]$P.h, $v.y + $v.h - $y))
+      $rect = [pscustomobject]@{ x = $x; y = $y; w = $w; h = $h }
+      $bmp = Get-ScreenBitmap $rect
+      $maxW = 800
+      if ($P.maxW) { $maxW = [int]$P.maxW }
+      $img = ConvertTo-JpegBase64 $bmp (New-Object System.Collections.ArrayList) $rect $false $maxW
+      $bmp.Dispose()
+      return [pscustomobject]@{ area = $rect; image = $img }
+    }
     'windowRect' {
       $win = Find-Window ([string]$P.windowTitle)
       Enter-Window $win

@@ -29,6 +29,7 @@ export type XpAgentApi = {
   stopAgent: () => Promise<boolean>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>
+  testVision: () => Promise<{ model: string; text: string }>
   onRecordEvent: (cb: (payload: unknown) => void) => () => void
   onAgentLog: (cb: (payload: unknown) => void) => () => void
   onAgentStep: (cb: (payload: unknown) => void) => () => void

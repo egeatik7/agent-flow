@@ -550,6 +550,19 @@ export default function App() {
                 pushLog('error', errText(e))
               }
             }}
+            onTestVision={async () => {
+              if (!api) {
+                pushLog('info', 'Önizlemede görsel test yapılmaz.')
+                return
+              }
+              pushLog('info', 'Ekran görüntüsü alınıp görsel modele gönderiliyor…')
+              try {
+                const r = await api.testVision()
+                pushLog('success', `Görsel model (${r.model}): ${r.text}`)
+              } catch (e) {
+                pushLog('error', errText(e))
+              }
+            }}
             graph={graph}
             selected={selected}
             selectedEdge={selectedEdge}
