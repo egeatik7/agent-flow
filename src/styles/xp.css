@@ -261,36 +261,6 @@ textarea {
   font-weight: 700;
 }
 
-.rec-dot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #c03030;
-  vertical-align: -1px;
-}
-
-.xp-btn.record-on {
-  background: linear-gradient(180deg, #ffd0d0 0%, #ff6b6b 50%, #c03030 100%);
-  color: #fff;
-  font-weight: 700;
-  animation: recordPulse 1.2s ease-in-out infinite;
-}
-
-.xp-btn.record-on .rec-dot {
-  background: #fff;
-}
-
-@keyframes recordPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(200, 40, 40, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(200, 40, 40, 0);
-  }
-}
-
 /* ---------- Dropdown + context menu ---------- */
 
 .dropdown {
@@ -1328,17 +1298,6 @@ textarea {
 .tray-item {
   font-size: 11px;
   font-weight: 700;
-}
-
-.tray-item.rec {
-  color: #ffb0b0;
-  animation: blink 1s steps(2) infinite;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0.35;
-  }
 }
 
 .clock {

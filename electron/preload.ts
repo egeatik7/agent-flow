@@ -23,9 +23,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string) => ipcRenderer.invoke('screen:scan', windowTitle),
 
-  startRecord: () => ipcRenderer.invoke('record:start'),
-  stopRecord: () => ipcRenderer.invoke('record:stop'),
-  captureAfter: (ms: number) => ipcRenderer.invoke('record:captureAfter', ms),
+  captureAfter: (ms: number) => ipcRenderer.invoke('capture:afterDelay', ms),
 
   runAgent: (graph: unknown, startId?: string) => ipcRenderer.invoke('agent:run', graph, startId),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
@@ -34,7 +32,6 @@ contextBridge.exposeInMainWorld('xpAgent', {
   listModels: () => ipcRenderer.invoke('openrouter:models'),
   testVision: () => ipcRenderer.invoke('openrouter:testVision'),
 
-  onRecordEvent: on('record:event'),
   onAgentLog: on('agent:log'),
   onAgentStep: on('agent:step'),
   onAgentAnchor: on('agent:anchor'),

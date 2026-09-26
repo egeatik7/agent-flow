@@ -65,7 +65,6 @@ export default function App() {
   const [graph, setGraph] = useState<AgentGraph>(initialGraph)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
-  const [recording, setRecording] = useState(false)
   const [running, setRunning] = useState(false)
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -80,7 +79,6 @@ export default function App() {
   graphRef.current = graph
   const selectedRef = useRef(selectedNodeId)
   selectedRef.current = selectedNodeId
-  const recordTailRef = useRef<{ id: string; port: string } | null>(null)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const fileRef = useRef<HTMLInputElement>(null)
@@ -132,29 +130,26 @@ export default function App() {
     return () => clearTimeout(t)
   }, [graph, loaded])
 
+  /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
     const g = graphRef.current
-    let tailRef = recordTailRef.current
-    if (!tailRef || !g.nodes.some((n) => n.id === tailRef!.id)) {
-      const sel = g.nodes.find((n) => n.id === selectedRef.current)
-      const port = sel ? freePort(g, sel) : null
-      const tail = chainTail(g)
-      tailRef = sel && port ? { id: sel.id, port } : tail ? { id: tail.node.id, port: tail.port } : null
-    }
-    const res = tailRef ? addAfter(g, tailRef.id, tailRef.port, 'click') : addAt(g, 'click', 300, 80)
+    const sel = g.nodes.find((n) => n.id === selectedRef.current)
+    const port = sel ? freePort(g, sel) : null
+    const tail = chainTail(g)
+    const after = sel && port ? { id: sel.id, port } : tail ? { id: tail.node.id, port: tail.port } : null
+    const res = after ? addAfter(g, after.id, after.port, 'click') : addAt(g, 'click', 300, 80)
     const next = {
       ...res.graph,
       nodes: res.graph.nodes.map((n) =>
         n.id === res.id ? { ...n, prompt: c.prompt, locator: c.locator, anchor: c.anchor, title: c.title.slice(0, 40) } : n
       ),
     }
-    recordTailRef.current = { id: res.id, port: 'next' }
     setGraph(next)
     setSelectedNodeId(res.id)
     setSelectedEdgeId(null)
   }, [])
 
-  const appendRecorded = useCallback(
+  const appendCaptured = useCallback(
     (loc: Locator) => {
       const t = locText(loc)
       appendClick({
@@ -163,7 +158,7 @@ export default function App() {
         locator: loc,
         anchor: loc.x !== undefined && loc.y !== undefined ? { x: loc.x, y: loc.y } : undefined,
       })
-      pushLog('success', `Kaydedildi: ${promptFor(loc)}${loc.windowTitle ? ` — ${loc.windowTitle}` : ''}`)
+      pushLog('success', `Yakalandı: ${promptFor(loc)}${loc.windowTitle ? ` — ${loc.windowTitle}` : ''}`)
     },
     [appendClick, pushLog]
   )
@@ -178,7 +173,6 @@ export default function App() {
       const p = payload as { id: string; status: StepStatus }
       setStepStatus((prev) => ({ ...prev, [p.id]: p.status }))
     })
-    const offRec = api.onRecordEvent((payload) => appendRecorded(payload as Locator))
     const offAnchor = api.onAgentAnchor((payload) => {
       const p = payload as { id: string; x: number; y: number }
       setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, anchor: { x: p.x, y: p.y } } : n)) }))
@@ -190,11 +184,10 @@ export default function App() {
     return () => {
       offLog()
       offStep()
-      offRec()
       offAnchor()
       offLoop()
     }
-  }, [pushLog, appendRecorded])
+  }, [pushLog])
 
   const selected = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId) ?? null, [graph.nodes, selectedNodeId])
   const selectedEdge = useMemo(() => graph.edges.find((e) => e.id === selectedEdgeId) ?? null, [graph.edges, selectedEdgeId])
@@ -278,29 +271,6 @@ export default function App() {
     pushLog('success', keys.length > 2 ? 'Tüm ayarlar kaydedildi.' : `Kaydedildi: ${keys.join(', ')}`)
   }
 
-  const toggleRecord = async () => {
-    if (recording) {
-      await api?.stopRecord()
-      setRecording(false)
-      recordTailRef.current = null
-      pushLog('info', 'Kayıt durduruldu.')
-      return
-    }
-    recordTailRef.current = null
-    setRecording(true)
-    if (api) {
-      const real = await api.startRecord()
-      pushLog(
-        'info',
-        real
-          ? 'Kayıt açık: hedef uygulamada tıkladığın her öğe sıradaki node olarak eklenecek. Bitince “Kaydı Durdur”.'
-          : 'Kayıt yalnızca Windows’ta gerçek tıklamaları yakalar.'
-      )
-    } else {
-      pushLog('info', 'Önizleme: “Öğe Yakala” ile örnek kayıt ekleyebilirsin.')
-    }
-  }
-
   const captureAfterDelay = async (): Promise<Locator | null> => {
     setCapturing(3)
     const tick = setInterval(() => setCapturing((c) => Math.max(1, c - 1)), 1000)
@@ -322,7 +292,7 @@ export default function App() {
   const captureAsNewNode = async () => {
     pushLog('info', '3 saniye içinde imleci hedef uygulamadaki öğenin üstüne götür…')
     const loc = await captureAfterDelay()
-    if (loc) appendRecorded(loc)
+    if (loc) appendCaptured(loc)
     else pushLog('warn', 'İmleç altında öğe bulunamadı.')
   }
 
@@ -398,7 +368,6 @@ export default function App() {
       updateNode(node.id, { prompt: `“${text}” yazan yere tıkla`, anchor, locator: undefined })
     } else {
       appendClick({ prompt: `“${text}” yazan yere tıkla`, title: `Tıkla: ${text}`, anchor })
-      recordTailRef.current = null
     }
     pushLog('success', `Ekrandan seçildi: “${text}”${node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'}`)
     setScanner(null)
@@ -406,7 +375,6 @@ export default function App() {
 
   const run = async (startId?: string) => {
     if (graph.nodes.length === 0) return
-    if (recording) await toggleRecord()
     setRunning(true)
     setStepStatus({})
     pushLog('info', startId ? 'Seçili node’dan çalıştırılıyor…' : 'Ajan çalışıyor…')
@@ -496,13 +464,11 @@ export default function App() {
           </span>
         </div>
         <Toolbar
-          recording={recording}
           running={running}
           hasStart={hasStart}
           hasSelection={!!selectedNodeId}
           capturing={capturing}
           onAdd={addNode}
-          onToggleRecord={toggleRecord}
           onCapture={captureAsNewNode}
           onOpenScanner={() => openScanner(null)}
           onRun={() => run()}
@@ -623,7 +589,7 @@ export default function App() {
           <LogPanel logs={logs} onClear={() => setLogs([])} />
         </div>
       </div>
-      <Taskbar recording={recording} running={running} />
+      <Taskbar running={running} />
       {scanner && (
         <ScreenScanner
           targetLabel={

@@ -17,7 +17,7 @@ export type Locator = {
   windowTitle?: string
   /** Visible text at the click point (UIA name or OCR). */
   text?: string
-  /** Screen point that was clicked when recorded. */
+  /** Screen point captured for this locator. */
   x?: number
   y?: number
   /** Click point relative to the top-left of its window. */

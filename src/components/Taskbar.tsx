@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export default function Taskbar({ recording, running }: { recording: boolean; running: boolean }) {
+export default function Taskbar({ running }: { running: boolean }) {
   const [clock, setClock] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000)
@@ -17,7 +17,6 @@ export default function Taskbar({ recording, running }: { recording: boolean; ru
         XP Agent Studio
       </div>
       <div className="tray">
-        {recording && <span className="tray-item rec">● KAYIT</span>}
         {running && <span className="tray-item run">▶ Çalışıyor</span>}
         <span className="clock">{clock.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>

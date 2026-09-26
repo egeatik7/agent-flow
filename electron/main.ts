@@ -44,7 +44,6 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph }>({
 })
 
 let mainWindow: BrowserWindow | null = null
-let recorder: bridge.Recorder | null = null
 let running = false
 let stopRequested = false
 
@@ -373,20 +372,7 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('record:start', () => {
-    recorder?.stop()
-    recorder = bridge.startRecorder(
-      (loc) => send('record:event', loc),
-      (msg) => log('error', `Kaydedici: ${msg}`)
-    )
-    return process.platform === 'win32'
-  })
-  ipcMain.handle('record:stop', () => {
-    recorder?.stop()
-    recorder = null
-    return true
-  })
-  ipcMain.handle('record:captureAfter', async (_e, ms: number) => {
+  ipcMain.handle('capture:afterDelay', async (_e, ms: number) => {
     await sleep(Math.max(0, ms))
     return bridge.captureAtCursor()
   })
@@ -455,7 +441,6 @@ app.on('will-quit', () => {
 })
 
 app.on('window-all-closed', () => {
-  recorder?.stop()
   bridge.shutdown()
   app.quit()
 })

@@ -87,7 +87,7 @@ function TargetBox(p: Props & { n: AgentNode }) {
       <label>Hedef</label>
       {loc ? (
         <p className="hint">
-          Kayıtlı: <b>“{loc.text || loc.name || loc.controlType}”</b> ({loc.controlType})
+          Yakalanan: <b>“{loc.text || loc.name || loc.controlType}”</b> ({loc.controlType})
           {loc.windowTitle ? <> — {loc.windowTitle}</> : null}
         </p>
       ) : n.anchor ? (

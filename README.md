@@ -8,11 +8,11 @@ gönderip seçtirir.
 
 ## Tıklanacak yer nasıl bulunur?
 
-1. Node kayıtla/yakalamayla oluşturulduysa önce o kayıtlı öğe denenir.
+1. Node yakalamayla oluşturulduysa önce o yakalanan öğe denenir.
 2. Prompt’ta tırnak içinde yazı varsa (`“Modeli İndir” yazan yere bas`) ekranda **birebir** aranır, LLM’e gidilmez.
 3. API anahtarı varsa LLM, ekrandaki numaralı yazılardan birini seçer (görsel destekli modellerde ekran görüntüsü de gider).
 4. Yoksa Türkçe ekleri tanıyan yazı eşleştirmesi yapılır (`operaya`, `Opera’ya` → Opera).
-5. Hâlâ bulunamazsa ve node kayıtla oluşturulduysa, kayıttaki konuma tıklanır.
+5. Hâlâ bulunamazsa ve node yakalamayla oluşturulduysa, yakalanan konuma tıklanır.
 
 Aynı yazı ekranda birden çok yerdeyse, o node’un son tıklandığı konuma en yakın olanı seçilir.
 
@@ -80,7 +80,6 @@ Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çi
 - **Sil:** node’u veya bağlantıyı seçip `Del`; bağlantıya çift tıklamak da siler. `Ctrl+D` kopyalar.
 - **Sağ tık:** boş yerde node ekleme menüsü; node üzerinde “Buradan çalıştır / Kopyala / Bağla / Sil”.
 - **Ekran Tarayıcı:** uygulama küçülür, ekranın görüntüsü alınır; bulunan her yazı kutuyla işaretlenir. Bir kutuya tıkla → seçili node’a (yoksa yeni “Tıkla” node’una) o yazı atanır. Arama kutusuyla filtreleyebilirsin.
-- **Kayıt:** açıkken başka bir uygulamada tıkladığın her yer, tıklanan yazıyla birlikte sıradaki “Tıkla” node’u olarak eklenir.
 - **İmleçle Yakala (3 sn):** 3 saniye içinde imleci hedefe götür; o yer node’a bağlanır.
 - **Tıklama türü:** tek tık, çift tık (masaüstü simgeleri) veya sağ tık.
 - Çalışırken uygulama kendini küçültür, bitince geri gelir. **Ctrl+Shift+Q** ile durdurursun.
@@ -103,7 +102,7 @@ npm run pack:win     # release/XP-Agent-Studio.exe üretir
 ```
 
 Ekran okuma ve tıklama, `a11y/` altındaki PowerShell script’leriyle yapılır (`worker.ps1` sürekli açık kalan
-tek bir süreç; `screen.ps1` ekran görüntüsü + `Windows.Media.Ocr` + UI Automation; `record.ps1` tıklama kaydı).
+tek bir süreç; `screen.ps1` ekran görüntüsü + `Windows.Media.Ocr` + UI Automation).
 Bu yüzden gerçek otomasyon yalnızca Windows 10/11’de çalışır. Linux/macOS’ta demo ekran ve simüle tıklamalar
 kullanılır. OCR, Windows’ta yüklü dil paketlerini kullanır (Türkçe/İngilizce çoğu kurulumda hazırdır).
 API anahtarı `electron-store` ile kullanıcı profiline (`%APPDATA%/xp-agent-studio`) yazılır.

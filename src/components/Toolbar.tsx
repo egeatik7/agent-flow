@@ -2,13 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { NODE_KINDS, NODE_SPECS, type NodeKind } from '../types'
 
 type Props = {
-  recording: boolean
   running: boolean
   hasStart: boolean
   hasSelection: boolean
   capturing: number
   onAdd: (kind: NodeKind) => void
-  onToggleRecord: () => void
   onCapture: () => void
   onOpenScanner: () => void
   onRun: () => void
@@ -66,15 +64,6 @@ export default function Toolbar(p: Props) {
 
       <span className="tb-sep" />
 
-      <button
-        type="button"
-        className={`xp-btn ${p.recording ? 'record-on' : ''}`}
-        onClick={p.onToggleRecord}
-        disabled={p.running}
-        title="Açıkken hedef uygulamada tıkladığın her öğe yeni bir Tıkla node’u olur"
-      >
-        <span className="rec-dot" /> {p.recording ? 'Kaydı Durdur' : 'Kayıt'}
-      </button>
       <button type="button" className="xp-btn" onClick={p.onOpenScanner} disabled={p.running} title="Ekrandaki yazıları gör, birini seçerek Tıkla node’u ekle">
         Ekran Tarayıcı
       </button>
