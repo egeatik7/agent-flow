@@ -8,12 +8,14 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit && vite build && tsc -p tsconfig.node.json --outDir dist-electron",
-    "build:electron": "vite build && tsc -p tsconfig.node.json --outDir dist-electron",
-    "preview": "vite preview",
-    "electron:dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:4521 && electron .\"",
-    "pack:win": "npm run build:electron && electron-builder --win portable --x64",
-    "pack:dir": "npm run build:electron && electron-builder --dir"
+    "dev:web": "vite --config vite.renderer.config.ts",
+    "build": "npm run build:electron",
+    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "build:main": "tsc -p tsconfig.node.json --outDir dist-electron",
+    "build:electron": "npm run build:renderer && npm run build:main",
+    "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
+    "pack:win": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
+    "pack:dir": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
   },
   "build": {
     "appId": "com.xpagentsudio.app",
@@ -41,7 +43,8 @@
         }
       ],
       "icon": "resources/icon.ico",
-      "artifactName": "XP-Agent-Studio.exe"
+      "artifactName": "XP-Agent-Studio.exe",
+      "signAndEditExecutable": false
     },
     "portable": {
       "artifactName": "XP-Agent-Studio.exe"

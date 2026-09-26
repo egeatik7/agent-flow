@@ -6,7 +6,7 @@ import {
   screen,
 } from 'electron'
 import path from 'path'
-import Store from 'electron-store'
+import ElectronStore from 'electron-store'
 import { runOpenRouterAgentStep } from './openrouter'
 import {
   captureAccessibilityTree,
@@ -43,7 +43,12 @@ export type AgentGraph = {
   edges: { id: string; from: string; to: string }[]
 }
 
-const store = new Store<{
+// electron-store CJS/ESM interop
+const StoreCtor =
+  (ElectronStore as unknown as { default?: typeof ElectronStore }).default ??
+  ElectronStore
+
+const store = new StoreCtor<{
   settings: AppSettings
   graph: AgentGraph
 }>({

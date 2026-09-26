@@ -1,11 +1,12 @@
 node_modules
 dist
 dist-electron
-release
+release/win-unpacked
+release/*.yml
+release/*.blockmap
 *.log
 .DS_Store
 out
 .env
 .env.*
-*.exe
-*.blockmap
+release/*.exe
