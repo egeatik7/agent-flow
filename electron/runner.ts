@@ -312,6 +312,20 @@ export async function runGraph(
       ex.step(loop.id, 'done')
       return 'done'
     }
+    if (!warnedLeave.has(`orphans:${loop.id}`)) {
+      warnedLeave.add(`orphans:${loop.id}`)
+      const ids = new Set(loop.members ?? [])
+      const reached = new Set<string>([first.id])
+      const q = [first.id]
+      while (q.length) {
+        const id = q.shift()!
+        for (const e of graph.edges) if (e.from === id && ids.has(e.to) && !reached.has(e.to)) reached.add(e.to) && q.push(e.to)
+      }
+      const orphans = [...ids].filter((id) => !reached.has(id)).map((id) => byId.get(id)?.title ?? id)
+      if (orphans.length) {
+        ex.log('warn', `“${loop.title}” içinde bağlı olmayan node var: ${orphans.join(', ')}. Tur “${first.title}”dan başlar, oklarla gidilmeyen node’lar çalışmaz.`)
+      }
+    }
     const failedBefore = keys.filter((k) => results[k] === 'fail').length
     if (pending.length < keys.length) {
       ex.log(
