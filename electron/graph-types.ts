@@ -1,3 +1,5 @@
+import { retargetLoopExits } from './loop-graph'
+
 export type NodeKind =
   | 'start'
   | 'click'
@@ -95,7 +97,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'waitFor', 'condition']
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'
-export type LogLevel = 'info' | 'warn' | 'error' | 'success'
+export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'chat'
 
 export type PortSpec = { key: string; label: string }
 
@@ -179,7 +181,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     color: '#8a4b16',
     hasInput: true,
     outputs: [{ key: 'loop', label: 'tekrar' }],
-    description: 'Listedeki her öğe için (veya N kez) “tekrar”a döner. Turlar bitince akış, grubun çerçevesindeki “bitti” çıkışından devam eder.',
+    description: 'Listedeki her öğe için (veya N kez) “tekrar”a döner. Turlar bitince akış döngü kartından değil, grubun son node’undaki “bitti” çıkışından devam eder.',
   },
   end: {
     label: 'Bitir',
@@ -231,7 +233,7 @@ export function outputPoint(n: AgentNode, port: string) {
 }
 
 export function portLabel(kind: NodeKind, port: string): string {
-  if (kind === 'loop' && port === 'done') return 'bitti'
+  if (port === 'done') return 'bitti'
   return NODE_SPECS[kind].outputs.find((o) => o.key === port)?.label ?? port
 }
 
@@ -394,5 +396,5 @@ export function normalizeGraph(raw: unknown): AgentGraph {
       edges.push({ id: rid(), from: start.id, fromPort: 'next', to: firstFree.id })
     }
   }
-  return { nodes, edges }
+  return retargetLoopExits({ nodes, edges })
 }

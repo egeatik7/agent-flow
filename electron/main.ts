@@ -3,12 +3,14 @@ import fs from 'fs'
 import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
-import { describeAhead, expectation, failReason, judgeScreen, type Verdict } from './confirm'
+import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { rememberShot } from './shots'
 import {
   chooseScreenTarget,
   judgeReaction,
   listModels,
+  planStall,
+  setChatLogger,
   testKey,
   visionCheck,
   visionDescribe,
@@ -63,6 +65,8 @@ function log(level: LogLevel, message: string) {
   send('agent:log', { level, message })
 }
 
+setChatLogger((line) => log('chat', line))
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** After a click, before keys: lets the field take focus. */
 const FOCUS_MS = 420
@@ -111,69 +115,142 @@ function labelOf(k: ReactionVerdict): string {
   return 'belirsiz'
 }
 
-/** After a click, type, or key: keep two frames, decide if the screen moved toward the next node, and react. */
+function firstGoal(ahead?: StepAhead): { text: string; label: string } | null {
+  for (const n of [ahead?.next, ahead?.then]) {
+    if (!n) continue
+    if (n.kind === 'loop' || n.kind === 'end' || n.kind === 'start' || n.kind === 'wait') continue
+    const text = expectation({ next: n }).trim()
+    if (!text) continue
+    return { text, label: `“${n.title}” için “${text}”` }
+  }
+  return null
+}
+
+function sees(items: ScanResult['items'], text: string): boolean {
+  if (containsText(items, text)) return true
+  return !!matchPrompt(items, text)
+}
+
+/** The next step's own target, without clicking it. Empty goal means there is nothing that should block the run. */
+async function aheadIsReady(ahead?: StepAhead): Promise<boolean> {
+  const goal = firstGoal(ahead)
+  if (!goal) {
+    log('info', 'Sırada kontrol edilecek bir öğe yok. Devam ediliyor.')
+    return true
+  }
+  const res = await bridge.scan({ image: 'none', fresh: true })
+  if (sees(res.items, goal.text)) {
+    log('success', `${goal.label} ekranda. Operasyon bozulmadan devam ediliyor.`)
+    return true
+  }
+  log('info', `${goal.label} ekranda görünmüyor.`)
+  return false
+}
+
+async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
+  const s = getSettings()
+  const model = (s.visionModel || s.model).trim()
+  if (!s.apiKey || !model) return null
+  let image: { data: string; w: number; h: number } | null = null
+  try {
+    const shot = await snap(`${node.title} plan`)
+    if (shot.image) image = { data: shot.image, w: 0, h: 0 }
+  } catch {
+    /* plan from the text of the problem */
+  }
+  try {
+    return await planStall({
+      apiKey: s.apiKey,
+      model,
+      step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
+      problem,
+      ahead: describeAhead(ahead),
+      expected: expectation(ahead),
+      image,
+    })
+  } catch (e) {
+    log('warn', `Plan alınamadı: ${(e as Error).message}`)
+    return null
+  }
+}
+
+function planLabel(action: 'continue' | 'wait' | 'stop', waitMs: number): string {
+  if (action === 'wait') return `${Math.round(waitMs / 1000)} sn bekle`
+  if (action === 'continue') return 'sıradaki adımı dene'
+  return 'dur'
+}
+
+/**
+ * After one click, type, or key. A missing reaction does not break the run:
+ * the next node's target is checked first. Only if that target cannot be reached
+ * does the agent pause, look again, and plan before stopping.
+ */
 async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, act: () => Promise<void>) {
   if (process.platform !== 'win32') {
     await act()
     return
   }
+  if (ahead?.next?.kind === 'waitFor') {
+    await act()
+    log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım öğe beklediği için kontrol edilmeden beklemeye geçiliyor.`)
+    return
+  }
+
   const pause = (ms: number) => interruptibleSleep(ms, () => stopRequested)
-
-  const read = async (before: Snap, allowMissedVision: boolean) => {
-    await pause(900)
-    const after = await snap(`${node.title} sonra`)
-    let v = judgeScreen(before.texts, after.texts, expectation(ahead))
-    if (v.kind === 'blocked' || v.kind === 'unknown' || (allowMissedVision && v.kind === 'missed')) {
-      v = await lookCloser(v, before, after, node, ahead)
-    }
-    return v
-  }
-
-  const waitOutLoading = async (before: Snap, v: Verdict) => {
-    if (v.kind !== 'loading') return v
-    log('info', `Sayfa henüz gelmedi (${v.reason}). Tekrar basılmadan bakılacak.`)
-    for (let i = 0; i < 3 && v.kind === 'loading'; i++) {
-      await pause(2000)
-      const after = await snap(`${node.title} yükleniyor`)
-      v = judgeScreen(before.texts, after.texts, expectation(ahead))
-      if (v.kind === 'unknown' || v.kind === 'blocked') v = await lookCloser(v, before, after, node, ahead)
-    }
-    return v
-  }
-
-  let before = await snap(`${node.title} önce`)
+  const expected = expectation(ahead)
+  const before = await snap(`${node.title} önce`)
   await act()
-  let verdict = await waitOutLoading(before, await read(before, false))
+
+  await pause(900)
+  const after = await snap(`${node.title} sonra`)
+  let verdict = judgeScreen(before.texts, after.texts, expected)
+  if (verdict.kind === 'loading') {
+    log('info', `Sayfa henüz oturmadı (${verdict.reason}). Basılmadan beklenecek.`)
+    for (let i = 0; i < 3 && verdict.kind === 'loading'; i++) {
+      await pause(2000)
+      const later = await snap(`${node.title} yükleniyor`)
+      verdict = judgeScreen(before.texts, later.texts, expected)
+    }
+  }
   if (verdict.kind === 'ready') {
     log('success', `Emin: ${verdict.reason}.`)
     return
   }
-  if (verdict.kind === 'missed') {
-    log('warn', `Tepki yok (${verdict.reason}). Aynı adım bir kez daha denenecek.`)
-    before = await snap(`${node.title} tekrar önce`)
-    await act()
-    verdict = await waitOutLoading(before, await read(before, true))
-    if (verdict.kind === 'ready') {
-      log('success', `Emin: ikinci denemede tepki geldi. ${verdict.reason}.`)
-      return
-    }
-  }
-  if (verdict.kind === 'unknown') {
-    log('info', 'Emin olunamadı, kısa bir bekleyişten sonra bir kez daha bakılacak.')
-    await pause(1500)
-    const after = await snap(`${node.title} tekrar bak`)
-    verdict = judgeScreen(before.texts, after.texts, expectation(ahead))
-    if (verdict.kind !== 'ready') verdict = await lookCloser(verdict, before, after, node, ahead)
-    verdict = await waitOutLoading(before, verdict)
+  if (verdict.kind === 'blocked' || verdict.kind === 'unknown') {
+    verdict = await lookCloser(verdict, before, after, node, ahead)
     if (verdict.kind === 'ready') {
       log('success', `Emin: ${verdict.reason}.`)
       return
     }
   }
-  throw new Error(failReason(node.title, verdict))
+
+  log('info', `Tepki net değil (${verdict.reason}). Akış bozulmadan sıradaki adım kontrol edilecek.`)
+  if (await aheadIsReady(ahead)) return
+
+  log('info', 'Sıradaki öğe henüz yok. Karar vermeden önce beklenecek.')
+  await pause(2500)
+  if (await aheadIsReady(ahead)) return
+
+  const plan = await askPlan(node, ahead, verdict.reason)
+  if (plan) {
+    log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
+    if (plan.action === 'wait') await pause(plan.waitMs)
+    if (plan.action !== 'stop' && (await aheadIsReady(ahead))) return
+    if (plan.action === 'continue') {
+      log('info', 'Plan sıradaki adımı denemeyi seçti. Operasyon bozulmadan devam ediliyor.')
+      return
+    }
+    if (await aheadIsReady(ahead)) return
+    throw new Error(`“${node.title}” sonrası duruldu. ${plan.reason || verdict.reason}`)
+  }
+
+  if (await aheadIsReady(ahead)) return
+  throw new Error(`“${node.title}” tepki vermedi ve sıradaki öğe ekranda yok. Beklendi, yine de bulunamadı.`)
 }
 
-async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
+let inRecover = false
+
+async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>, recover?: () => Promise<T | null>): Promise<T> {
   try {
     return await run(false)
   } catch (e) {
@@ -181,8 +258,55 @@ async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise
     log('warn', `“${title}” bulunamadı. 3 sn sonra ekran yenilenip bir kez daha denenecek.`)
     await interruptibleSleep(REFRESH_RETRY_MS, () => stopRequested)
     if (stopRequested) throw new StoppedError()
-    return await run(true)
+    try {
+      return await run(true)
+    } catch (e2) {
+      if (!(e2 instanceof NotFoundError) || stopRequested || inRecover || !recover) throw e2
+      log('warn', `“${title}” hâlâ yok. Durup düşünülecek, hemen vazgeçilmiyor.`)
+      inRecover = true
+      try {
+        const alt = await recover()
+        if (alt) return alt
+        throw e2
+      } finally {
+        inRecover = false
+      }
+    }
   }
+}
+
+/** The click/type target was not on screen. Wait, ask for a plan, then look once more before the run stops. */
+async function recoverTarget(
+  node: AgentNode,
+  ahead: StepAhead | undefined
+): Promise<{ x: number; y: number; label: string } | null> {
+  await interruptibleSleep(2000, () => stopRequested)
+  if (stopRequested) throw new StoppedError()
+  const plan = await askPlan(node, ahead, `“${node.title}” istediği öğeyi ekranda bulamadı`)
+  if (!plan) return null
+  log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
+  if (plan.action === 'wait') {
+    await interruptibleSleep(plan.waitMs, () => stopRequested)
+    if (stopRequested) throw new StoppedError()
+  }
+  const needle = plan.lookFor || expectation({ next: node }) || node.prompt?.trim() || node.locator?.text || node.locator?.name || ''
+  if (needle && plan.action !== 'stop') {
+    const res = await bridge.scan({ image: 'none', fresh: true })
+    const hit = matchText(res.items, needle) ?? matchPrompt(res.items, needle) ?? matchFuzzy(res.items, needle)
+    if (hit) {
+      log('success', `Planın yazısı bulundu: “${hit.text}”.`)
+      return { ...center(hit), label: `“${hit.text}” (plan)` }
+    }
+  }
+  if (plan.action === 'stop') return null
+  if (!node.useVision && getSettings().apiKey) {
+    try {
+      return await resolveVision(node, true)
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function createWindow() {
@@ -416,7 +540,7 @@ const executor: Executor = {
   shouldStop: () => stopRequested,
   click: async (node, stepNo, ahead) => {
     await ensureActed(node, ahead, async () => {
-      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
+      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
       await bridge.clickAt(t.x, t.y, mode)
       log('success', `${mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
@@ -426,7 +550,7 @@ const executor: Executor = {
   type: async (node, stepNo, ahead) => {
     await ensureActed(node, ahead, async () => {
       if (node.prompt?.trim() || node.locator) {
-        const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
+        const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
         await bridge.clickAt(t.x, t.y, 'left')
         await sleep(FOCUS_MS)
         log('info', `Alan seçildi: ${t.label}`)
@@ -440,7 +564,7 @@ const executor: Executor = {
     if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
     await ensureActed(node, ahead, async () => {
       if (node.useVision && node.prompt?.trim()) {
-        const t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide))
+        const t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide), () => recoverTarget(node, ahead))
         await bridge.clickAt(t.x, t.y, 'left')
         await sleep(FOCUS_MS)
         log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)

@@ -10,11 +10,45 @@ const HEADERS = (apiKey: string) => ({
 
 type Message = { role: 'system' | 'user'; content: string | object[] }
 
+let chatLogger: ((line: string) => void) | null = null
+
+/** The agent log receives every completion request and response. Images are noted, not pasted. */
+export function setChatLogger(fn: ((line: string) => void) | null) {
+  chatLogger = fn
+}
+
+function clip(s: string, n = 6000): string {
+  const t = s.trim()
+  if (t.length <= n) return t
+  return `${t.slice(0, n)}\n… (${t.length - n} karakter kısaltıldı)`
+}
+
+function describeMessages(messages: Message[]): string {
+  return messages
+    .map((m) => {
+      if (typeof m.content === 'string') return `[${m.role}]\n${m.content}`
+      const bits = (m.content as { type?: string; text?: string }[]).map((part) =>
+        part.type === 'image_url' ? '[ekran görüntüsü]' : (part.text ?? '')
+      )
+      return `[${m.role}]\n${bits.filter(Boolean).join('\n')}`
+    })
+    .join('\n\n')
+}
+
+function reportOut(model: string, messages: Message[]) {
+  chatLogger?.(`API → ${model}\n${clip(describeMessages(messages))}`)
+}
+
+function reportIn(text: string) {
+  chatLogger?.(`API ← ${clip(text.trim() || '(boş yanıt)')}`)
+}
+
 class ImageUnsupportedError extends Error {}
 
 async function chat(apiKey: string, model: string, messages: Message[], hasImage: boolean): Promise<string> {
-  const send = (json: boolean) =>
-    fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const send = async (json: boolean) => {
+    reportOut(model, messages)
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: HEADERS(apiKey),
       body: JSON.stringify({
@@ -26,23 +60,30 @@ async function chat(apiKey: string, model: string, messages: Message[], hasImage
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
     })
+    if (!res.ok) {
+      const text = await res.text()
+      reportIn(`hata ${res.status}: ${text.slice(0, 2000)}`)
+      return { ok: false as const, status: res.status, text }
+    }
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
+    const content = data.choices?.[0]?.message?.content ?? ''
+    reportIn(data.error?.message ? `hata: ${data.error.message}` : content)
+    return { ok: true as const, data, content }
+  }
 
   let res = await send(true)
-  if (res.status === 400 || res.status === 404 || res.status === 422) {
-    const text = await res.text()
-    if (hasImage && /image|vision|multimodal|modalit/i.test(text)) throw new ImageUnsupportedError(text.slice(0, 200))
+  if (!res.ok && (res.status === 400 || res.status === 404 || res.status === 422)) {
+    if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
     res = await send(false)
   }
   if (!res.ok) {
-    const text = await res.text()
-    if (hasImage && /image|vision|multimodal|modalit/i.test(text)) throw new ImageUnsupportedError(text.slice(0, 200))
+    if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
     if (res.status === 401) throw new Error('OpenRouter API anahtarı geçersiz (401).')
     if (res.status === 402) throw new Error('OpenRouter bakiyesi yetersiz (402).')
-    throw new Error(`OpenRouter ${res.status}: ${text.slice(0, 300)}`)
+    throw new Error(`OpenRouter ${res.status}: ${res.text.slice(0, 300)}`)
   }
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
-  if (data.error?.message) throw new Error(`OpenRouter: ${data.error.message}`)
-  return data.choices?.[0]?.message?.content ?? ''
+  if (res.data.error?.message) throw new Error(`OpenRouter: ${res.data.error.message}`)
+  return res.content
 }
 
 function parseJson(content: string): Record<string, unknown> {
@@ -286,19 +327,80 @@ export async function visionDescribe(opts: { apiKey: string; model: string; imag
   return String(p.text ?? p.description ?? JSON.stringify(p)).slice(0, 300)
 }
 
+export type StallPlan = {
+  action: 'continue' | 'wait' | 'stop'
+  waitMs: number
+  lookFor: string
+  reason: string
+}
+
+/** When a step did not land cleanly: look, wait if needed, and decide before the run is broken. */
+export async function planStall(opts: {
+  apiKey: string
+  model: string
+  step: string
+  problem: string
+  ahead: string
+  expected: string
+  image?: Img | null
+}): Promise<StallPlan> {
+  const system = `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
+Karar:
+- continue: sıradaki adımın istediği şey bu ekranda var ya da adım denenebilir; akış sürsün
+- wait: sayfa henüz oturmadı, kısa bekle (waitSec 1 ile 8 arası)
+- stop: istenen öğeye bu ekrandan gidilemiyor, durmak gerek
+lookFor: ekranda aranacak kısa yazı. Yoksa boş string.
+Sadece JSON: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<kısa plan>"}`
+  const text = `Adım: ${opts.step}
+Sorun: ${opts.problem}
+Sıradaki adımlar: ${opts.ahead || '(yok)'}
+Beklenen: ${opts.expected || '(yok)'}`
+  const messages: Message[] = [
+    { role: 'system', content: system },
+    {
+      role: 'user',
+      content: opts.image?.data
+        ? [{ type: 'text', text }, imagePart(opts.image)]
+        : text,
+    },
+  ]
+  const content = await chat(opts.apiKey, opts.model, messages, !!opts.image?.data)
+  const p = parseJson(content)
+  const action = p.action === 'wait' || p.action === 'stop' || p.action === 'continue' ? p.action : 'wait'
+  const sec = Math.min(8, Math.max(1, Math.round(Number(p.waitSec) || 3)))
+  return {
+    action,
+    waitMs: sec * 1000,
+    lookFor: String(p.lookFor ?? '').trim().slice(0, 80),
+    reason: String(p.reason ?? '').slice(0, 240),
+  }
+}
+
 export async function testKey(apiKey: string): Promise<string> {
+  chatLogger?.('API → GET /api/v1/key')
   const res = await fetch('https://openrouter.ai/api/v1/key', { headers: HEADERS(apiKey) })
-  if (!res.ok) throw new Error(`OpenRouter anahtarı geçersiz (${res.status}).`)
+  if (!res.ok) {
+    chatLogger?.(`API ← hata ${res.status}`)
+    throw new Error(`OpenRouter anahtarı geçersiz (${res.status}).`)
+  }
   const data = (await res.json()) as { data?: { label?: string; limit_remaining?: number | null } }
   const rem = data.data?.limit_remaining
-  return `${data.data?.label ?? 'OK'}${typeof rem === 'number' ? `, kalan limit: ${rem.toFixed(2)}` : ''}`
+  const summary = `${data.data?.label ?? 'OK'}${typeof rem === 'number' ? `, kalan limit: ${rem.toFixed(2)}` : ''}`
+  chatLogger?.(`API ← ${summary}`)
+  return summary
 }
 
 export async function listModels(): Promise<{ id: string; vision: boolean }[]> {
+  chatLogger?.('API → GET /api/v1/models')
   const res = await fetch('https://openrouter.ai/api/v1/models')
-  if (!res.ok) throw new Error(`Model listesi alınamadı (${res.status}).`)
+  if (!res.ok) {
+    chatLogger?.(`API ← hata ${res.status}`)
+    throw new Error(`Model listesi alınamadı (${res.status}).`)
+  }
   const data = (await res.json()) as { data?: { id: string; architecture?: { input_modalities?: string[] } }[] }
-  return (data.data ?? [])
+  const list = (data.data ?? [])
     .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
     .sort((a, b) => a.id.localeCompare(b.id))
+  chatLogger?.(`API ← ${list.length} model`)
+  return list
 }

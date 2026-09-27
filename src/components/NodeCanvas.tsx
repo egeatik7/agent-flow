@@ -14,9 +14,19 @@ import {
   type NodeKind,
   type StepStatus,
 } from '../types'
-import { loopBody } from '../lib/graph-ops'
+import { loopBody, loopTail } from '../lib/graph-ops'
 
-type Frame = { loop: AgentNode; ids: string[]; x: number; y: number; w: number; h: number; label: string }
+type Frame = {
+  loop: AgentNode
+  ids: string[]
+  x: number
+  y: number
+  w: number
+  h: number
+  label: string
+  tailId: string
+  exitY: number
+}
 
 const FRAME_PAD = 22
 const FRAME_HEAD = 24
@@ -39,7 +49,11 @@ function computeFrames(graph: AgentGraph): Frame[] {
     const label = items.length
       ? `${loop.title} · ${items.length} öğe · sıradaki ${idx + 1}/${items.length}`
       : `${loop.title} · ${loop.count ?? 1} kez`
-    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label })
+    const tailId = loopTail(graph, loop.id)
+    const tail = byId.get(tailId)
+    const mid = tail ? tail.y + nodeHeight(tail.kind) / 2 : (y1 + y2) / 2
+    const exitY = Math.min(y2 - 18, Math.max(y1 + 28, mid))
+    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label, tailId, exitY })
   }
   return frames.sort((a, b) => b.w * b.h - a.w * a.h)
 }
@@ -353,9 +367,9 @@ export default function NodeCanvas(p: Props) {
   }
 
   const edgeSource = (node: AgentNode, port: string) => {
-    if (node.kind === 'loop' && port === 'done') {
-      const f = frames.find((fr) => fr.loop.id === node.id)
-      if (f) return { x: f.x + f.w - 7, y: f.y + f.h / 2 }
+    if (port === 'done') {
+      const f = frames.find((fr) => fr.loop.id === node.id || fr.tailId === node.id || fr.ids.includes(node.id))
+      if (f) return { x: f.x + f.w - 7, y: f.exitY }
       return { x: node.x + NODE_W - 7, y: node.y + nodeHeight(node.kind) / 2 }
     }
     return outputPoint(node, port)
@@ -594,14 +608,14 @@ export default function NodeCanvas(p: Props) {
           <div
             key={`${f.loop.id}-exit`}
             className="loop-frame-exit"
-            style={{ left: f.x + f.w, top: f.y + f.h / 2 }}
+            style={{ left: f.x + f.w, top: f.exitY }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div
               className="node-port out frame-port"
               style={{ background: portColor('done') }}
-              title="Turlar bitince akış buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak."
-              onMouseDown={(e) => startLink(e, f.loop, 'done')}
+              title="Turlar bitince akış grubun son node’undan buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak."
+              onMouseDown={(e) => startLink(e, byId.get(f.tailId) ?? f.loop, 'done')}
             />
             <span className="port-label" style={{ color: portColor('done') }}>
               bitti
@@ -610,7 +624,7 @@ export default function NodeCanvas(p: Props) {
               type="button"
               className="add-next"
               title="Bitti çıkışından ileriye yeni node ekle"
-              onClick={(e) => openAfterMenu(e, f.loop, 'done')}
+              onClick={(e) => openAfterMenu(e, byId.get(f.tailId) ?? f.loop, 'done')}
             >
               +
             </button>

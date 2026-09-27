@@ -21,7 +21,7 @@ Aynı yazı ekranda birden çok yerdeyse, o node’un son tıklandığı konuma 
 Döngü node’una bir **liste** yazılabilir (her satır bir tur) ya da **“Klasörden doldur…”** ile bir klasördeki
 resimler listeye doldurulur (doğal sıralama: `resim2` → `resim10`). Liste doluyken tur sayısı = satır sayısı.
 
-- Döngüyü tekrar eden kısmın **sonuna** koy, “tekrar” çıkışını o kısmın **ilk** node’una bağla. Turlar bitince akış döngü kartından değil, grubun çerçevesindeki **bitti** noktasından devam eder; o noktayı dışarıdaki bir node’a bağla.
+- Döngüyü tekrar eden kısmın **sonuna** koy, “tekrar” çıkışını o kısmın **ilk** node’una bağla. Turlar bitince akış döngü kartından değil, grubun **son node’undan** çıkar: başa bağlanan, iki girişi olan ilk node’un bir önceki adımı. Çerçevenin o hizadaki **bitti** noktasını dışarıdaki bir node’a bağla.
 - Değişen yerlere yer tutucu yaz; her turda listenin sıradaki satırıyla doldurulur:
   `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
   Tıkla/Yazı Yaz prompt’larında, yazılacak metinde, tuşlarda ve bekleme yazılarında çalışır.
@@ -43,7 +43,7 @@ grup çerçevesinin “bitti” çıkışı → Bitir
 
 Tıkla, Yazı Yaz ve Tuş Gönder adımlarından hemen önce ve sonra bir ekran karesi alınır. Kareler akışa yazılmaz; en fazla **10** tanesi durur, on birincisi gelince en eskisi silinir.
 
-Yazı listesi önce karar verir. Sıradaki node’un yazısı (Öğeyi Bekle / Koşul metni, ya da bir sonraki tıklamanın tarifi) ekrana geldiyse adım tamamdır. Ekran hiç değişmediyse tuş tepki vermemiş sayılır ve aynı adım **bir kez** daha denenir. Yüklenme yazısı varsa tekrar basılmaz, birkaç kez yeniden bakılır. Başka bir pencere veya yazı açıldıysa ajan onu sıradaki adım sanmaz. Yazıyla seçilemeyen durumda cepteki iki kare görsel modele gider; cevap hazır, tepki yok, yükleniyor, başka bir şey açıldı ya da belirsiz olur.
+Yazı listesi önce karar verir. Sıradaki node **Öğeyi Bekle** ise tıklama bir kez yapılır ve kontrol edilmeden beklemeye geçilir. Sayfa değiştiyse ve sıradaki yazı ekrandaysa akış hemen devam eder. “Tepki vermedi” denince akış hemen bozulmaz: sıradaki node’un aradığı öğe ekranda mı diye bakılır, varsa devam edilir. Yoksa kısa süre beklenir, gerekirse model bir plan kurar (bekle, sıradaki adımı dene, ya da dur). İstenen öğeye gidilemiyorsa ancak bu düşünceden sonra durulur. Aynı komut yeniden basılmaz. Model konuşmaları ajan günlüğüne düşer: API’ye giden yazı `API →`, dönen yazı `API ←` satırındadır.
 
 ## Ekran görüntüsü modu (görsel LLM)
 
@@ -75,7 +75,7 @@ Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çi
 | Zamanlayıcı | N saniye bekler | sonra |
 | Öğeyi Bekle | Bir yazı ekranda görünene kadar bekler | bulundu / zaman aşımı |
 | Koşul | Ekranda bir yazı var mı? | var / yok |
-| Döngü | N kez “tekrar”a döner. “bitti” çıkışı node’da değil, grubun çerçevesindedir | tekrar (node) / bitti (çerçeve) |
+| Döngü | N kez “tekrar”a döner. “bitti” çıkışı döngü kartında değil, grubun son node’u hizasındaki çerçevededir | tekrar (node) / bitti (grubun son node’u) |
 | Bitir | Akışı sonlandırır | — |
 
 ## Kullanım

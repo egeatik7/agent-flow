@@ -1,3 +1,4 @@
+import { loopBody, loopTail } from '../../electron/loop-graph'
 import {
   NODE_SPECS,
   NODE_W,
@@ -8,6 +9,8 @@ import {
   type AgentNode,
   type NodeKind,
 } from '../types'
+
+export { loopBody, loopTail }
 
 const GAP_X = 70
 
@@ -43,8 +46,14 @@ export function addAfter(
 
   let x = from.x + NODE_W + GAP_X
   let y = from.y + portIdx * (nodeHeight(from.kind) + 30)
-  if (from.kind === 'loop' && port === 'done') {
-    const ids = new Set(loopBody(graph, from.id))
+  const loopOwner =
+    port === 'done'
+      ? from.kind === 'loop'
+        ? from
+        : graph.nodes.find((n) => n.kind === 'loop' && loopTail(graph, n.id) === from.id)
+      : undefined
+  if (loopOwner) {
+    const ids = new Set(loopBody(graph, loopOwner.id))
     const members = graph.nodes.filter((n) => ids.has(n.id))
     if (members.length) {
       x = Math.max(...members.map((n) => n.x + NODE_W)) + GAP_X + 48
@@ -58,7 +67,8 @@ export function addAfter(
 
   const node = createNode(kind, x, y, nextIndex(graph, kind))
   let next: AgentGraph = { ...graph, nodes: [...graph.nodes, node] }
-  next = connect(next, fromId, port, node.id)
+  const sourceId = from.kind === 'loop' && port === 'done' ? loopTail(graph, from.id) : fromId
+  next = connect(next, sourceId, port, node.id)
   const firstOut = NODE_SPECS[kind].outputs[0]
   if (existing && firstOut && existing.to !== node.id) {
     next = connect(next, node.id, firstOut.key, existing.to)
@@ -91,7 +101,10 @@ export function chainTail(graph: AgentGraph): { node: AgentNode; port: string } 
     const outs = NODE_SPECS[cur.kind].outputs
     if (outs.length === 0) return null
     const port = cur.kind === 'loop' ? 'done' : outs[0].key
-    const edge = graph.edges.find((e) => e.from === cur.id && e.fromPort === port)
+    const tail = cur.kind === 'loop' ? loopTail(graph, cur.id) : cur.id
+    const edge =
+      graph.edges.find((e) => e.from === tail && e.fromPort === port) ??
+      graph.edges.find((e) => e.from === cur.id && e.fromPort === port)
     if (!edge) return { node: cur, port }
     const nxt = graph.nodes.find((n) => n.id === edge.to)
     if (!nxt) return { node: cur, port }
@@ -102,41 +115,14 @@ export function chainTail(graph: AgentGraph): { node: AgentNode; port: string } 
 
 export function freePort(graph: AgentGraph, node: AgentNode): string | null {
   if (node.kind === 'loop') {
-    const doneTaken = graph.edges.some((e) => e.from === node.id && e.fromPort === 'done')
+    const tail = loopTail(graph, node.id)
+    const doneTaken = graph.edges.some((e) => e.fromPort === 'done' && (e.from === node.id || e.from === tail))
     return doneTaken ? 'loop' : 'done'
   }
   const outs = NODE_SPECS[node.kind].outputs
   if (outs.length === 0) return null
   const free = outs.find((o) => !graph.edges.some((e) => e.from === node.id && e.fromPort === o.key))
   return (free ?? outs[0]).key
-}
-
-/** Nodes on the cycle closed by a loop: reachable from its “tekrar” port and leading back to the loop. */
-export function loopBody(graph: AgentGraph, loopId: string): string[] {
-  const start = graph.edges.find((e) => e.from === loopId && e.fromPort === 'loop')?.to
-  if (!start) return []
-  const fwd = new Set<string>()
-  const q = [start]
-  while (q.length) {
-    const id = q.shift()!
-    if (id === loopId || fwd.has(id)) continue
-    fwd.add(id)
-    for (const e of graph.edges) if (e.from === id) q.push(e.to)
-  }
-  const back = new Set<string>()
-  const q2 = [loopId]
-  while (q2.length) {
-    const id = q2.shift()!
-    for (const e of graph.edges) {
-      if (e.to === id && e.from !== loopId && !back.has(e.from)) {
-        back.add(e.from)
-        q2.push(e.from)
-      }
-    }
-  }
-  const body = [...fwd].filter((id) => back.has(id))
-  if (start === loopId) return [loopId]
-  return body.length ? [...body, loopId] : []
 }
 
 /** Lays nodes out in columns by distance from the start node. */

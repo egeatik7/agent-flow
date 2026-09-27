@@ -10,6 +10,7 @@ import {
   type LogLevel,
   type StepStatus,
 } from './graph-types'
+import { loopDoneEdge, loopTail } from './loop-graph'
 
 type RunState = {
   loopCounters: Map<string, number>
@@ -115,9 +116,17 @@ export async function runGraph(
       ex.log('success', `“${node.title}” ile akış bitti (${steps} adım).`)
       return
     }
+
+    const left = leaveFinishedLoop(graph, byId, node, port, state, ex)
+    if (left === 'stop') break
+    if (left) {
+      current = left
+      continue
+    }
+
     if (NODE_SPECS[node.kind].outputs.length === 0) break
 
-    const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
+    const edge = edgeFrom(graph, node, port)
     if (!edge) {
       ex.log(
         'info',
@@ -128,6 +137,63 @@ export async function runGraph(
     current = byId.get(edge.to)
   }
   ex.log('success', `Akış tamamlandı (${steps} adım).`)
+}
+
+function edgeFrom(graph: AgentGraph, node: AgentNode, port: string) {
+  if (node.kind === 'loop' && port === 'done') return loopDoneEdge(graph, node.id)
+  return graph.edges.find((e) => e.from === node.id && e.fromPort === port)
+}
+
+/** True while another pass should go back through the loop card. */
+function loopStillGoing(node: AgentNode, state: RunState): boolean {
+  const items = listItems(node)
+  if (items.length) {
+    const cur = state.listIndex.get(node.id) ?? 0
+    return cur + 1 < items.length
+  }
+  const total = Math.max(1, node.count ?? 1)
+  return (state.loopCounters.get(node.id) ?? 0) < total
+}
+
+function closeLoop(node: AgentNode, state: RunState, ex: Executor, fromTitle: string) {
+  const items = listItems(node)
+  if (items.length) {
+    const cur = state.listIndex.get(node.id) ?? 0
+    ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
+    state.listIndex.set(node.id, 0)
+    state.vars = itemVars(items[0], 0, items.length)
+    ex.loopProgress?.(node.id, 0)
+    ex.log('success', `Döngü “${node.title}”: listedeki ${items.length} öğenin hepsi bitti. Çıkış “${fromTitle}” node’undan.`)
+    return
+  }
+  state.loopCounters.delete(node.id)
+  ex.log('info', `Döngü “${node.title}” bitti. Çıkış “${fromTitle}” node’undan.`)
+}
+
+/**
+ * The last node of the group is about to enter the loop card, and this pass was the final one.
+ * Leave from that node’s “bitti” edge instead of finishing on the loop card.
+ */
+function leaveFinishedLoop(
+  graph: AgentGraph,
+  byId: Map<string, AgentNode>,
+  node: AgentNode,
+  port: string,
+  state: RunState,
+  ex: Executor
+): AgentNode | 'stop' | null {
+  const hopEdge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
+  const dest = hopEdge ? byId.get(hopEdge.to) : undefined
+  if (!dest || dest.kind !== 'loop') return null
+  if (loopTail(graph, dest.id) !== node.id) return null
+  if (loopStillGoing(dest, state)) return null
+  closeLoop(dest, state, ex, node.title)
+  const exit = loopDoneEdge(graph, dest.id)
+  if (!exit) {
+    ex.log('info', `“${node.title}” döngünün son adımı. Turlar bitti, “bitti” çıkışı bağlı değil.`)
+    return 'stop'
+  }
+  return byId.get(exit.to) ?? 'stop'
 }
 
 function hop(graph: AgentGraph, byId: Map<string, AgentNode>, from: AgentNode, port: string, vars: Record<string, string>) {

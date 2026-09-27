@@ -474,6 +474,10 @@ textarea {
   color: #7dff7d;
 }
 
+.log-line.chat {
+  color: #9fd4ff;
+}
+
 /* ---------- Forms ---------- */
 
 .field {
