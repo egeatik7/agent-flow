@@ -170,6 +170,12 @@ export async function scan(opts: {
   ocr?: boolean
   /** Re-walk every visible window and the whole screen, without focusing the pinned target. */
   fresh?: boolean
+  /** Capture only the primary monitor (when no window is pinned). */
+  primary?: boolean
+  /** Round the image size to a multiple of this (UI-TARS wants 28). */
+  snap?: number
+  /** Also return a tiny grayscale signature to tell whether the screen changed. */
+  sig?: boolean
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
@@ -192,6 +198,9 @@ export async function scan(opts: {
       uia: opts.uia !== false,
       ocr: opts.ocr !== false,
       fresh: opts.fresh === true,
+      primary: opts.primary === true,
+      snap: opts.snap ?? 0,
+      sig: opts.sig === true,
     },
     90000
   )
@@ -233,6 +242,34 @@ export async function typeText(text: string, pressEnter: boolean, clearFirst: bo
 export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
   if (!IS_WIN) return
   await worker.call('keys', { keys, windowTitle: windowTitle || '' })
+}
+
+/** The element under a scanner box, with a picture of the box. */
+export async function pickAt(box: { x: number; y: number; w: number; h: number }): Promise<Locator | null> {
+  if (!IS_WIN) return null
+  return worker.call('pick', { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) }, 30000)
+}
+
+/** Where a saved icon picture is on screen now (score 0–1). */
+export async function findImage(icon: string, windowTitle?: string): Promise<{ x: number; y: number; score: number; window: string } | null> {
+  if (!IS_WIN) return null
+  return worker.call('findImage', { icon, windowTitle: windowTitle || '' }, 30000)
+}
+
+export async function drag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('drag', { x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2) })
+}
+
+export async function scroll(x: number, y: number, direction: 'up' | 'down' | 'left' | 'right', clicks = 5): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('scroll', { x: Math.round(x), y: Math.round(y), direction, clicks })
+}
+
+/** Real key combination (keybd_event), e.g. ['ctrl','shift','a'] or ['win']. */
+export async function hotkey(keys: string[]): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('hotkey', { keys })
 }
 
 export async function foreground(): Promise<{ title: string; pid: number } | null> {

@@ -11,6 +11,7 @@ import {
   type AgentGraph,
   type AgentNode,
   type AppSettings,
+  type PathStep,
   type ClickMode,
   type ModelInfo,
 } from '../types'
@@ -66,6 +67,8 @@ const VISION_PRESETS = [
   'qwen/qwen2.5-vl-72b-instruct',
 ]
 
+const AGENT_PRESETS = ['bytedance/ui-tars-1.5-7b', 'google/gemini-3.8-flash', 'anthropic/claude-sonnet-5']
+
 const CLICK_MODES: { key: ClickMode; label: string }[] = [
   { key: 'left', label: 'Tek tık' },
   { key: 'double', label: 'Çift tık' },
@@ -90,10 +93,20 @@ function TargetBox(p: Props & { n: AgentNode }) {
     <div className="field locator-box">
       <label>Hedef</label>
       {loc ? (
-        <p className="hint">
-          Yakalanan: <b>“{loc.text || loc.name || loc.controlType}”</b> ({loc.controlType})
-          {loc.windowTitle ? <> — {loc.windowTitle}</> : null}
-        </p>
+        <>
+          <p className="hint">
+            Yakalanan: <b>{loc.text || loc.name ? `“${loc.text || loc.name}”` : 'yazısız öğe'}</b> ({loc.controlType})
+            {loc.windowTitle ? <> — {loc.windowTitle}</> : null}
+          </p>
+          {loc.icon && (
+            <>
+              <img className="icon-preview" alt="Seçilen öğenin resmi" src={`data:image/png;base64,${loc.icon}`} />
+              <p className="hint">
+                Çalışırken sırayla: uygulamanın kendi öğesi, bu resmin ekrandaki aynısı, yazı, en son görsel model (bu resimle birlikte) denenir.
+              </p>
+            </>
+          )}
+        </>
       ) : n.anchor ? (
         <p className="hint">Son bilinen konum: {n.anchor.x}, {n.anchor.y} (aynı yazı birden çok yerdeyse buna en yakın olan seçilir)</p>
       ) : (
@@ -281,11 +294,64 @@ function MemoryBox(p: Props & { n: AgentNode }) {
   )
 }
 
+function pathLabel(st: PathStep): string {
+  const pt = st.rx !== undefined && st.ry !== undefined ? ` (%${Math.round(st.rx * 100)}, %${Math.round(st.ry * 100)})` : ''
+  switch (st.action) {
+    case 'click':
+      return `tıkla${pt}`
+    case 'double':
+      return `çift tıkla${pt}`
+    case 'right':
+      return `sağ tıkla${pt}`
+    case 'drag':
+      return `sürükle${pt}`
+    case 'hotkey':
+      return `tuş ${(st.keys ?? []).join('+')}`
+    case 'type':
+      return `yaz “${(st.text ?? '').replace(/\n/g, '⏎')}”`
+    case 'scroll':
+      return `kaydır ${st.direction ?? ''}`
+    default:
+      return 'bekle'
+  }
+}
+
 function AiEditor(p: Props & { n: AgentNode }) {
   const { n } = p
   const upd = p.onUpdateNode
+  const engine = n.engine ?? 'screen'
+  const model = (p.settings.agentModel || p.settings.visionModel || p.settings.model).trim()
   return (
     <>
+      <div className="field">
+        <label>Nasıl çalışsın?</label>
+        <div className="seg">
+          {(
+            [
+              ['screen', 'Ekrana bakarak (UI-TARS gibi)'],
+              ['list', 'Yazı listesiyle'],
+            ] as const
+          ).map(([k, label]) => (
+            <button type="button" key={k} className={`seg-btn${engine === k ? ' active' : ''}`} onClick={() => upd({ engine: k })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="hint">
+          {engine === 'screen' ? (
+            <>
+              Her adımda ekran görüntüsü alınır, model tıklanacak noktayı doğrudan verir: yazısız ikonlar, 3D görünüm, menüler dahil. Sürükleme,
+              kaydırma ve tuş kombinasyonları da yapabilir (Blender’da Shift+A gibi). Model:{' '}
+              <span className="mono">{model || '—'}</span>{' '}
+              <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>
+                değiştir
+              </button>
+            </>
+          ) : (
+            <>Ekrandaki (tarayıcıdaysa sayfadaki) yazıların numaralı listesinden seçer. Yazı ağırlıklı formlarda ve web sayfalarında hızlıdır.</>
+          )}
+        </p>
+      </div>
       <div className="field">
         <label>Hedef (ne olmasını istiyorsun?)</label>
         <textarea
@@ -302,18 +368,36 @@ function AiEditor(p: Props & { n: AgentNode }) {
           className="xp-input"
           type="number"
           min={1}
-          max={40}
-          value={n.maxActions ?? 12}
-          onChange={(e) => upd({ maxActions: Math.min(40, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
+          max={60}
+          value={n.maxActions ?? 25}
+          onChange={(e) => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
         />
       </div>
       <p className="hint">
-        Model her adımda ekrana (tarayıcıdaysa sayfanın içine) bakar, tek bir eylem seçer: tıkla, yaz, tuş, bekle ya da bitti.
-        Hedefe ulaşınca <b>tamam</b>, ulaşamazsa <b>olmadı</b> çıkışından devam eder. Başarılı bir turun eylemleri hafızaya yazılır;
-        sonraki turda model bunu ipucu olarak görür, ekran farklıysa ekrana uyar.
+        Hedefe ulaşınca <b>tamam</b>, ulaşamazsa <b>olmadı</b> çıkışından devam eder. Model “bitti” dediğinde son ekran görsel modelle ayrıca kontrol
+        edilir. Ekran birkaç adımdır değişmiyorsa modele başka yol denemesi söylenir. Ctrl+Shift+Q her an durdurur.
+        {engine === 'screen'
+          ? ' Başarılı turun adımları kaydedilir; sonraki turda önce bu yol modelsiz oynatılır, ekran kayıttakinden farklılaştığı anda model devreye girer.'
+          : ' Başarılı turun eylemleri sonraki turda modele ipucu olarak verilir.'}
       </p>
+      {engine === 'screen' && n.path?.length ? (
+        <div className="memo-box">
+          <label>Kayıtlı yol ({n.path.length} adım)</label>
+          <ol className="hint-list">
+            {n.path.map((st, i) => (
+              <li key={i}>
+                <span className="mono">{pathLabel(st)}</span>
+                {st.thought ? <> — {st.thought}</> : null}
+              </li>
+            ))}
+          </ol>
+          <button type="button" className="xp-btn" onClick={() => upd({ path: undefined })}>
+            Unut
+          </button>
+        </div>
+      ) : null}
       {!p.settings.apiKey && <p className="hint warn">API anahtarı kayıtlı değil; İnisiyatif çalışmaz.</p>}
-      {n.trace?.length ? (
+      {engine === 'list' && n.trace?.length ? (
         <div className="memo-box">
           <label>Geçen başarılı tur</label>
           <ol className="hint-list">
@@ -786,6 +870,34 @@ function Settings(p: Props) {
           </div>
         </div>
       </fieldset>
+      <fieldset className="xp-group">
+        <legend>İnisiyatif modeli</legend>
+        <p className="hint">
+          “Ekrana bakarak” çalışan İnisiyatif bu modeli kullanır (aynı OpenRouter anahtarı). UI-TARS ekran görüntüsünden doğrudan koordinat verir;
+          başka bir görsel model de yazabilirsin (Gemini, Claude, GPT). Bitti kontrolü yukarıdaki görsel modelle yapılır.
+        </p>
+        <div className="field">
+          <label htmlFor="agentModel">Model adı</label>
+          <SaveRow onSave={() => p.onSaveSettings({ agentModel: s.agentModel.trim() })}>
+            <input
+              id="agentModel"
+              className="xp-input"
+              list="vision-model-list"
+              value={s.agentModel}
+              placeholder="bytedance/ui-tars-1.5-7b"
+              onChange={(e) => set({ agentModel: e.target.value })}
+            />
+          </SaveRow>
+          <div className="chips">
+            {AGENT_PRESETS.map((m) => (
+              <button type="button" key={m} className="chip" onClick={() => set({ agentModel: m })}>
+                {m.split('/')[1]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </fieldset>
+
       <label className="check">
         <input
           type="checkbox"

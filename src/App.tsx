@@ -403,21 +403,43 @@ export default function App() {
     return api.scanScreen(windowTitle || undefined)
   }
 
-  const pickScreenItem = (item: ScreenItem) => {
+  const pickScreenItem = async (item: ScreenItem) => {
     const text = item.text.trim()
+    const letters = (text.match(/\p{L}/gu) ?? []).length
+    const meaningful = item.src === 'uia' ? letters >= 2 : letters >= 3 && letters / Math.max(1, text.length) >= 0.5
     const anchor = { x: Math.round(item.x + item.w / 2), y: Math.round(item.y + item.h / 2) }
     const node = scanner?.nodeId ? graphRef.current.nodes.find((n) => n.id === scanner.nodeId) : undefined
+    setScanner(null)
     if (node && (node.kind === 'waitFor' || node.kind === 'condition')) {
       updateNode(node.id, { text })
-    } else if (node && node.kind === 'type') {
-      updateNode(node.id, { prompt: `“${text}” alanı`, anchor, locator: undefined })
-    } else if (node && node.kind === 'click') {
-      updateNode(node.id, { prompt: `“${text}” yazan yere tıkla`, anchor, locator: undefined })
-    } else {
-      appendClick({ prompt: `“${text}” yazan yere tıkla`, title: `Tıkla: ${text}`, anchor })
+      pushLog('success', `Ekrandan seçildi: “${text}” → ${node.title}`)
+      return
     }
-    pushLog('success', `Ekrandan seçildi: “${text}”${node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'}`)
-    setScanner(null)
+    let loc: Locator | null = null
+    if (api) {
+      try {
+        loc = await api.pickScreenBox({ x: item.x, y: item.y, w: item.w, h: item.h })
+      } catch (e) {
+        pushLog('warn', `Öğe yakalanamadı, sadece yazısı kullanılacak: ${errText(e)}`)
+      }
+    }
+    if (loc) {
+      const broad = ['Pane', 'Window', 'Document', 'Point', 'Custom'].includes(loc.controlType)
+      loc = { ...loc, text: meaningful ? text : '', name: broad ? '' : loc.name }
+    }
+    const prompt = meaningful ? (node?.kind === 'type' ? `“${text}” alanı` : `“${text}” yazan yere tıkla`) : ''
+    if (node && (node.kind === 'type' || node.kind === 'click')) {
+      updateNode(node.id, { prompt, anchor, locator: loc ?? undefined, memory: undefined })
+    } else {
+      appendClick({ prompt, title: `Tıkla: ${meaningful ? text : 'simge'}`.slice(0, 40), anchor, locator: loc ?? undefined })
+    }
+    pushLog(
+      'success',
+      `Ekrandan seçildi: ${meaningful ? `“${text}”` : 'yazısız simge'}${loc?.icon ? ' (resmi de kaydedildi; yazı bulunamazsa ekranda resmi aranır)' : ''}${
+        node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'
+      }`
+    )
+    if (!meaningful && !loc?.icon) pushLog('warn', 'Bu öğenin okunabilir yazısı yok ve resmi alınamadı; node’u “Ekran görüntüsüne bakarak yap” ile çalıştır.')
   }
 
   const run = async (startId?: string) => {

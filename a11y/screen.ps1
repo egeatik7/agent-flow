@@ -278,10 +278,14 @@ function Merge-Items($uia, $ocr) {
   return , $final
 }
 
-function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW) {
+function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0) {
   $scale = [Math]::Min(1.0, $maxW / [double]$bmp.Width)
   $w = [int]($bmp.Width * $scale)
   $h = [int]($bmp.Height * $scale)
+  if ($snap -gt 1) {
+    $w = [Math]::Max($snap, [int]([Math]::Round($w / [double]$snap)) * $snap)
+    $h = [Math]::Max($snap, [int]([Math]::Round($h / [double]$snap)) * $snap)
+  }
   $out = New-Object System.Drawing.Bitmap $w, $h
   $g = [System.Drawing.Graphics]::FromImage($out)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
@@ -335,6 +339,10 @@ function Invoke-Scan($P) {
     }
   }
   $rect = Get-CaptureRect $win
+  if ($null -eq $win -and $P.primary -eq $true) {
+    $pb = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $rect = [pscustomobject]@{ x = $pb.X; y = $pb.Y; w = $pb.Width; h = $pb.Height }
+  }
   $own = 0
   if ($P.ownPid) { $own = [int]$P.ownPid }
 
@@ -355,8 +363,12 @@ function Invoke-Scan($P) {
   if ($mode -eq 'plain' -or $mode -eq 'marked') {
     $maxW = 1400
     if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
-    $img = ConvertTo-JpegBase64 $bmp $items $rect ($mode -eq 'marked') $maxW
+    $snap = 0
+    if ($P.snap) { $snap = [int]$P.snap }
+    $img = ConvertTo-JpegBase64 $bmp $items $rect ($mode -eq 'marked') $maxW $snap
   }
+  $sig = ''
+  if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
   $bmp.Dispose()
 
   return [pscustomobject]@{
@@ -368,7 +380,45 @@ function Invoke-Scan($P) {
     image  = $img
     window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
     missingWindow = $missing
+    sig    = $sig
   }
+}
+
+# A small lossless picture of what is under a screen rectangle (an icon, a button), for finding it again later.
+function Get-IconCrop($r) {
+  $v = Get-VirtualScreen
+  $pad = 3
+  $w = [Math]::Min(220, [Math]::Max(18, [int]$r.w + 2 * $pad))
+  $h = [Math]::Min(140, [Math]::Max(18, [int]$r.h + 2 * $pad))
+  $cx = [int]($r.x + $r.w / 2)
+  $cy = [int]($r.y + $r.h / 2)
+  $x = [Math]::Max($v.x, [Math]::Min($v.x + $v.w - $w, $cx - [int]($w / 2)))
+  $y = [Math]::Max($v.y, [Math]::Min($v.y + $v.h - $h, $cy - [int]($h / 2)))
+  $rect = [pscustomobject]@{ x = $x; y = $y; w = $w; h = $h }
+  $bmp = Get-ScreenBitmap $rect
+  $ms = New-Object System.IO.MemoryStream
+  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+  $b64 = [Convert]::ToBase64String($ms.ToArray())
+  $ms.Dispose()
+  return [pscustomobject]@{ data = $b64; w = $w; h = $h; dx = $cx - $x - [int]($w / 2); dy = $cy - $y - [int]($h / 2) }
+}
+
+function Invoke-FindImage($P) {
+  $bytes = [Convert]::FromBase64String([string]$P.icon)
+  $ms = New-Object System.IO.MemoryStream(, $bytes)
+  $tpl = New-Object System.Drawing.Bitmap $ms
+  $win = $null
+  if ($P.windowTitle) { $win = Find-WindowOrNull ([string]$P.windowTitle) }
+  $rect = Get-CaptureRect $win
+  $bmp = Get-ScreenBitmap $rect
+  $tpl24 = New-Object System.Drawing.Bitmap $tpl.Width, $tpl.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $g = [System.Drawing.Graphics]::FromImage($tpl24)
+  $g.DrawImage($tpl, 0, 0, $tpl.Width, $tpl.Height)
+  $g.Dispose()
+  $r = [XpImage]::Find($bmp, $tpl24)
+  $bmp.Dispose(); $tpl.Dispose(); $tpl24.Dispose(); $ms.Dispose()
+  return [pscustomobject]@{ x = [int]($rect.x + $r[0]); y = [int]($rect.y + $r[1]); score = [double]$r[2]; window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' }) }
 }
 
 function Get-TextNear([int]$px, [int]$py) {

@@ -673,11 +673,17 @@ export default function NodeCanvas(p: Props) {
                 <div className="node-summary">{summarize(n)}</div>
                 {n.locator ? (
                   <div className="node-meta" title={`${n.locator.windowTitle ?? ''} › ${n.locator.path}`}>
-                    ● {n.locator.controlType}: {n.locator.name || n.locator.path}
+                    {n.locator.icon ? <img className="icon-thumb" alt="" src={`data:image/png;base64,${n.locator.icon}`} /> : '● '}
+                    {n.locator.text || n.locator.name || (n.locator.icon ? 'seçilen simge' : n.locator.controlType)}
+                    {n.locator.windowTitle ? ` · ${n.locator.windowTitle.slice(0, 24)}` : ''}
                   </div>
                 ) : memo ? (
                   <div className="node-meta memo" title="Geçen turlarda bulunan hedef. Her tur yine taze aranır; hafıza sadece kararsız kalınca yardım eder.">
                     ◆ hafıza: {memo} tur · son “{n.memory![0].text.slice(0, 22)}”
+                  </div>
+                ) : n.kind === 'ai' && n.path?.length ? (
+                  <div className="node-meta memo" title="Sonraki turda önce bu yol oynatılır; ekran farklılaşınca model devreye girer.">
+                    ◆ kayıtlı yol: {n.path.length} adım
                   </div>
                 ) : n.kind === 'ai' && n.trace?.length ? (
                   <div className="node-meta memo" title={n.trace.join('\n')}>

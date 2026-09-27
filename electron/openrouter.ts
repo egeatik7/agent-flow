@@ -8,7 +8,7 @@ const HEADERS = (apiKey: string) => ({
   'X-Title': 'XP Agent Studio',
 })
 
-type Message = { role: 'system' | 'user'; content: string | object[] }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }
 
 let chatLogger: ((line: string) => void) | null = null
 
@@ -45,7 +45,13 @@ function reportIn(text: string) {
 
 class ImageUnsupportedError extends Error {}
 
-async function chat(apiKey: string, model: string, messages: Message[], hasImage: boolean): Promise<string> {
+async function chat(
+  apiKey: string,
+  model: string,
+  messages: Message[],
+  hasImage: boolean,
+  opts: { json?: boolean; maxTokens?: number } = {}
+): Promise<string> {
   const send = async (json: boolean) => {
     reportOut(model, messages)
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -55,7 +61,7 @@ async function chat(apiKey: string, model: string, messages: Message[], hasImage
         model,
         temperature: 0,
         // Reasoning models spend tokens before answering; too low a cap yields empty replies.
-        max_tokens: hasImage ? 2500 : 800,
+        max_tokens: opts.maxTokens ?? (hasImage ? 2500 : 800),
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
@@ -71,7 +77,7 @@ async function chat(apiKey: string, model: string, messages: Message[], hasImage
     return { ok: true as const, data, content }
   }
 
-  let res = await send(true)
+  let res = await send(opts.json !== false)
   if (!res.ok && (res.status === 400 || res.status === 404 || res.status === 422)) {
     if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
     res = await send(false)
@@ -232,6 +238,8 @@ export async function visionLocate(opts: {
   kind: NodeKind
   scan: ScanResult
   stepTitle: string
+  /** Picture of the element to find (from Ekran Tarayıcı / İmleçle Yakala). */
+  reference?: Img
 }): Promise<VisionPick> {
   if (!opts.scan.image) throw new Error('Ekran görüntüsü alınamadı.')
   const list = opts.scan.items
@@ -246,10 +254,10 @@ Görüntüde bazı yazı/öğeler numaralı ince kutularla işaretli (mavi: uygu
 Sadece JSON yaz.`
   const text = `Adım: ${opts.stepTitle}
 Talimat: ${opts.prompt}
-
+${opts.reference ? '\nİKİNCİ resim aranan öğenin kendisidir (daha önce seçilmiş simge/düğme). Birinci resimde (ekran) bunun aynısını bul.\n' : ''}
 İşaretli öğeler:
 ${list || '(yok)'}`
-  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.scan.image])
+  const p = await visionChat(opts.apiKey, opts.model, system, text, opts.reference ? [opts.scan.image, opts.reference] : [opts.scan.image])
   const reason = String(p.reason ?? '')
   if (p.found === false) return { kind: 'none', reason }
   const id = num(p.id)
@@ -396,6 +404,215 @@ ${opts.listText}`
     enter: p.enter === true || p.enter === 'true',
     reason: String(p.reason ?? '').slice(0, 240),
   }
+}
+
+// ---------- İnisiyatif (ekran): UI-TARS style computer use ----------
+
+export type GuiAction = {
+  thought: string
+  kind: 'click' | 'double' | 'right' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait' | 'finished' | 'call_user'
+  /** Points as fractions of the screenshot (0–1). */
+  x?: number
+  y?: number
+  x2?: number
+  y2?: number
+  keys?: string[]
+  text?: string
+  direction?: 'up' | 'down' | 'left' | 'right'
+  /** The model's action line as it wrote it, for the log and the next turn. */
+  raw: string
+}
+
+export type GuiTurn = { thought: string; raw: string; image?: Img; note?: string }
+
+export function isTarsModel(model: string) {
+  return /ui-?tars/i.test(model)
+}
+
+/** UI-TARS 1.5 answers in pixels of the image it saw; older UI-TARS and Doubao answer on a 0–1000 grid. */
+function tarsAbsolute(model: string) {
+  return /ui-?tars-?1\.5|ui-?tars-1_5/i.test(model) && !/doubao/i.test(model)
+}
+
+const TARS_PROMPT = (goal: string) => `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
+
+## Output Format
+\`\`\`
+Thought: ...
+Action: ...
+\`\`\`
+
+## Action Space
+
+click(start_box='<|box_start|>(x1,y1)<|box_end|>')
+left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
+right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
+drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
+hotkey(key='ctrl c') # Split keys with a space and use lowercase. Also, do not use more than 3 keys in one hotkey action.
+type(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format. If you want to submit your input, use \\n at the end of content.
+scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
+wait() #Sleep for 5s and take a screenshot to check for any changes.
+finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
+call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.
+
+## Note
+- Use Turkish in \`Thought\` part.
+- Write a small plan and finally summarize your next action (with its target element) in one sentence in \`Thought\` part.
+- The computer runs Windows. Prefer keyboard shortcuts when they are reliable (for example Blender: shift a to add objects).
+
+## User Instruction
+${goal}`
+
+const JSON_PROMPT = `Sen Windows'ta çalışan bir bilgisayar kullanım ajanısın. Her turda sana hedef, önceki adımların ve SON ekran görüntüsü verilir. Hedefe giden SIRADAKİ TEK eylemi seç.
+Koordinatlar ekran görüntüsü üzerinde 0-1000 arası normalize: x soldan sağa, y yukarıdan aşağıya. Hedefin tam ortasını ver.
+Eylemler:
+- click / double / right: {"x":..,"y":..}
+- drag: {"x":..,"y":..,"x2":..,"y2":..}
+- hotkey: {"keys":["ctrl","s"]} (küçük harf, en fazla 3 tuş; win, enter, esc, tab, f1..f12, delete, up/down/left/right kullanılabilir)
+- type: {"text":"..."} (o an odaktaki alana yazar; gönderilecekse sonuna \\n koy)
+- scroll: {"x":..,"y":..,"direction":"down|up|left|right"}
+- wait: sayfa/uygulama yükleniyorsa
+- finished: hedef ekranda gerçekleştiyse {"text":"kısa özet"}
+- call_user: hedef yapılamıyorsa ya da kullanıcı gerekiyorsa
+Kurallar: önce kısa bir plan düşün; aynı eylemi sonuç vermeden tekrarlama; güvenilir kısayollar varsa kullan (örn. Blender'da nesne eklemek için shift a).
+Sadece JSON: {"thought":"<Türkçe kısa plan ve sıradaki eylem>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
+
+function unescape(s: string) {
+  return s.replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+}
+
+function argOf(action: string, name: string): string | undefined {
+  const m = action.match(new RegExp(`${name}\\s*=\\s*(['"])([\\s\\S]*?)\\1\\s*(?:,\\s*\\w+\\s*=|\\)\\s*$)`))
+  return m ? m[2] : undefined
+}
+
+function pointOf(v: string | undefined): [number, number] | null {
+  if (!v) return null
+  const nums = (v.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+  if (nums.length >= 4) return [(nums[0] + nums[2]) / 2, (nums[1] + nums[3]) / 2]
+  if (nums.length >= 2) return [nums[0], nums[1]]
+  return null
+}
+
+/** Reads “Thought: … Action: click(start_box='(x,y)')” into an action with 0–1 coordinates. */
+export function parseTars(content: string, imgW: number, imgH: number, absolute: boolean): GuiAction {
+  const thought = (content.match(/Thought:\s*([\s\S]*?)(?:\n\s*Action:|$)/i)?.[1] ?? '').trim()
+  const raw = (content.match(/Action:\s*([\s\S]*)$/i)?.[1] ?? content).trim().split('\n')[0].trim()
+  const name = (raw.match(/^(\w+)\s*\(/)?.[1] ?? raw.replace(/\(.*$/, '')).toLowerCase()
+  const norm = (p: [number, number] | null) => {
+    if (!p) return null
+    let [x, y] = p
+    const abs = absolute && !(x <= 1 && y <= 1)
+    x = abs ? x / Math.max(1, imgW) : x / 1000
+    y = abs ? y / Math.max(1, imgH) : y / 1000
+    return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))] as [number, number]
+  }
+  const start = norm(pointOf(argOf(raw, 'start_box') ?? argOf(raw, 'point') ?? argOf(raw, 'start_point')))
+  const end = norm(pointOf(argOf(raw, 'end_box') ?? argOf(raw, 'end_point')))
+  const base = { thought, raw }
+  switch (name) {
+    case 'click':
+    case 'left_single':
+      return start ? { ...base, kind: 'click', x: start[0], y: start[1] } : { ...base, kind: 'wait' }
+    case 'left_double':
+    case 'double_click':
+      return start ? { ...base, kind: 'double', x: start[0], y: start[1] } : { ...base, kind: 'wait' }
+    case 'right_single':
+    case 'right_click':
+      return start ? { ...base, kind: 'right', x: start[0], y: start[1] } : { ...base, kind: 'wait' }
+    case 'drag':
+    case 'select':
+      return start && end ? { ...base, kind: 'drag', x: start[0], y: start[1], x2: end[0], y2: end[1] } : { ...base, kind: 'wait' }
+    case 'hotkey':
+    case 'press':
+    case 'keydown': {
+      const k = argOf(raw, 'key') ?? argOf(raw, 'keys') ?? ''
+      return { ...base, kind: 'hotkey', keys: k.toLowerCase().split(/[\s+]+/).filter(Boolean) }
+    }
+    case 'type':
+      return { ...base, kind: 'type', text: unescape(argOf(raw, 'content') ?? '') }
+    case 'scroll': {
+      const d = (argOf(raw, 'direction') ?? 'down').toLowerCase()
+      const direction = (['up', 'down', 'left', 'right'].includes(d) ? d : 'down') as GuiAction['direction']
+      return { ...base, kind: 'scroll', x: start?.[0] ?? 0.5, y: start?.[1] ?? 0.5, direction }
+    }
+    case 'finished':
+      return { ...base, kind: 'finished', text: unescape(argOf(raw, 'content') ?? '') }
+    case 'call_user':
+      return { ...base, kind: 'call_user' }
+    default:
+      return { ...base, kind: 'wait' }
+  }
+}
+
+function parseJsonAction(content: string): GuiAction {
+  const p = parseJson(content)
+  const n = (v: unknown) => {
+    const x = num(v)
+    return x === null ? undefined : Math.min(1, Math.max(0, x > 1 ? x / 1000 : x))
+  }
+  const a = String(p.action ?? '').toLowerCase()
+  const kinds = ['click', 'double', 'right', 'drag', 'hotkey', 'type', 'scroll', 'wait', 'finished', 'call_user'] as const
+  const kind = ((kinds as readonly string[]).includes(a) ? a : a === 'done' ? 'finished' : a === 'fail' ? 'call_user' : 'wait') as GuiAction['kind']
+  const keys = Array.isArray(p.keys) ? p.keys.map((k) => String(k).toLowerCase()) : typeof p.keys === 'string' ? p.keys.toLowerCase().split(/[\s+]+/) : []
+  const d = String(p.direction ?? '').toLowerCase()
+  return {
+    thought: String(p.thought ?? p.reason ?? '').trim(),
+    kind,
+    x: n(p.x),
+    y: n(p.y),
+    x2: n(p.x2),
+    y2: n(p.y2),
+    keys: keys.filter(Boolean),
+    text: String(p.text ?? p.content ?? ''),
+    direction: (['up', 'down', 'left', 'right'].includes(d) ? d : 'down') as GuiAction['direction'],
+    raw: JSON.stringify({ action: kind, x: p.x, y: p.y, x2: p.x2, y2: p.y2, keys, text: p.text, direction: p.direction }),
+  }
+}
+
+/**
+ * One turn of the computer-use loop. The last few screenshots go as images, older turns as text only,
+ * like UI-TARS Desktop does.
+ */
+export async function guiStep(opts: {
+  apiKey: string
+  model: string
+  goal: string
+  history: GuiTurn[]
+  screen: Img
+  keepImages?: number
+}): Promise<GuiAction> {
+  const keep = Math.max(1, opts.keepImages ?? 4)
+  const recent = opts.history.slice(-keep + 1)
+  const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
+  if (isTarsModel(opts.model)) {
+    const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal) }]
+    for (const t of older) {
+      messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
+      if (t.note) messages.push({ role: 'user', content: t.note })
+    }
+    for (const t of recent) {
+      if (t.image) messages.push({ role: 'user', content: [imagePart(t.image)] })
+      messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
+      if (t.note) messages.push({ role: 'user', content: t.note })
+    }
+    messages.push({ role: 'user', content: [imagePart(opts.screen)] })
+    const content = await chat(opts.apiKey, opts.model, messages, true, { json: false, maxTokens: 1000 })
+    return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(opts.model))
+  }
+  const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
+  const text = `Hedef: ${opts.goal}
+
+Önceki adımlar:
+${lines.length ? lines.join('\n') : '(henüz yok)'}
+
+Son ekran görüntüsü ektedir.`
+  const messages: Message[] = [
+    { role: 'system', content: JSON_PROMPT },
+    { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
+  ]
+  const content = await chat(opts.apiKey, opts.model, messages, true)
+  return parseJsonAction(content)
 }
 
 export type StallPlan = {

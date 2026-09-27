@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string) => ipcRenderer.invoke('screen:scan', windowTitle),
+  pickScreenBox: (box: unknown) => ipcRenderer.invoke('screen:pick', box),
 
   captureAfter: (ms: number) => ipcRenderer.invoke('capture:afterDelay', ms),
 

@@ -27,6 +27,24 @@ export type Locator = {
   /** Click point relative to the top-left of its window. */
   offsetX?: number
   offsetY?: number
+  /** PNG (base64) of the picked element, searched for on screen when nothing else finds it. */
+  icon?: string
+}
+
+/** One step of an İnisiyatif run that reached its goal; replayed first on the next lap. */
+export type PathStep = {
+  action: 'click' | 'double' | 'right' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait'
+  /** Point as a fraction of the screen (0–1). */
+  rx?: number
+  ry?: number
+  rx2?: number
+  ry2?: number
+  keys?: string[]
+  text?: string
+  direction?: 'up' | 'down' | 'left' | 'right'
+  thought?: string
+  /** Screen signature before the step; replay stops when the screen no longer looks like this. */
+  sig?: string
 }
 
 export type ClickMode = 'left' | 'double' | 'right'
@@ -78,8 +96,12 @@ export type AgentNode = {
   attempts?: number
   /** Last successful targets of this node. */
   memory?: TargetMemo[]
-  /** İnisiyatif: the actions of the last lap that reached the goal. */
+  /** İnisiyatif (liste): the actions of the last lap that reached the goal. */
   trace?: string[]
+  /** İnisiyatif (ekran): the steps of the last lap that reached the goal. */
+  path?: PathStep[]
+  /** İnisiyatif: look at the screenshot and click coordinates, or pick from the list of screen texts. */
+  engine?: 'screen' | 'list'
   maxActions?: number
   url?: string
   browser?: 'auto' | 'msedge' | 'chrome'
@@ -116,6 +138,8 @@ export type AppSettings = {
   visionModel: string
   /** Minimize this app while the agent runs so it does not cover the target. */
   hideWhileRunning: boolean
+  /** Model that drives İnisiyatif from screenshots (UI-TARS or any vision model). */
+  agentModel: string
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -127,6 +151,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendScreenshot: true,
   visionModel: 'google/gemini-3.8-flash',
   hideWhileRunning: true,
+  agentModel: 'bytedance/ui-tars-1.5-7b',
 }
 
 export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'waitFor', 'condition']
@@ -330,7 +355,7 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
     case 'loop':
       return { ...base, count: 3, members: [], onError: 'skip', attempts: 2 }
     case 'ai':
-      return { ...base, prompt: '', maxActions: 12 }
+      return { ...base, prompt: '', maxActions: 25, engine: 'screen' }
     case 'browser':
       return { ...base, url: 'https://', browser: 'auto' }
     case 'waitFile':
@@ -348,7 +373,10 @@ export function summarize(n: AgentNode): string {
       return 'Akış buradan başlar.'
     case 'click': {
       const mode = n.clickMode === 'double' ? ' (çift tık)' : n.clickMode === 'right' ? ' (sağ tık)' : ''
-      const body = n.prompt?.trim() || (n.locator ? `“${n.locator.text || n.locator.name}” yazan yere tıkla` : 'Ne yazan yere tıklanacağını yaz…')
+      const label = n.locator?.text || n.locator?.name
+      const body =
+        n.prompt?.trim() ||
+        (label ? `“${label}” yazan yere tıkla` : n.locator?.icon ? 'Seçilen simgeye tıkla' : n.locator ? 'Yakalanan yere tıkla' : 'Ne yazan yere tıklanacağını yaz…')
       return body + mode
     }
     case 'type':
@@ -369,7 +397,7 @@ export function summarize(n: AgentNode): string {
       return `${what}${done ? ` · ${done} tamam` : ''}${failed ? ` · ${failed} hatalı` : ''}`
     }
     case 'ai':
-      return n.prompt?.trim() || 'Hedefi yaz: örn. “sağdaki ayarlardan dili Türkçe yap”'
+      return n.prompt?.trim() || 'Hedefi yaz: örn. “Blender’da küp ekle ve kırmızı materyal ver”'
     case 'browser':
       return n.url?.trim() && n.url.trim() !== 'https://' ? n.url.trim() : 'Açılacak adresi yaz…'
     case 'waitFile':

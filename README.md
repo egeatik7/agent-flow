@@ -20,7 +20,8 @@ sayfanın içine bakar. Emin olamadığı yerde OpenRouter’daki modele sorar.
 Sırayla, ilk bulunan yerde durur:
 
 1. **Sayfanın kendisi.** Programın açtığı tarayıcı öndeyse, düğmeler, bağlantılar ve alanlar gerçek adlarıyla okunur.
-2. **Yakalanan öğe.** Node “İmleçle Yakala” ile oluşturulduysa önce o öğe denenir.
+2. **Yakalanan öğe.** Node Ekran Tarayıcı ya da İmleçle Yakala ile oluşturulduysa önce uygulamanın kendi öğesi, sonra öğenin
+   kayıtlı resminin ekrandaki aynısı aranır (modelsiz, hızlı).
 3. **Ekran.** Accessibility tree (UIA) ve OCR yazıları. Tırnak içi yazı birebir aranır; değilse API anahtarı varsa model
    numaralı listeden seçer, yoksa Türkçe eklere dayanıklı yazı eşleştirmesi yapılır (`Opera’ya` → Opera).
 4. **Ekran görüntüsü.** “Ekran görüntüsüne bakarak yap” açıksa (ya da yukarıdakiler bulamayıp model bir plan kurduysa)
@@ -67,12 +68,22 @@ giriş yaparsan sonra hep açık kalır.
 
 ## İnisiyatif
 
-Birkaç adımlık bir işi tek cümleyle tarif etmek için: “çıkan çerez penceresini kapat, sonra Giriş yap’a bas”. Model her
-adımda ekrana (tarayıcıdaysa sayfaya) bakıp tek bir eylem seçer: tıkla, yaz, tuş, bekle ya da bitti. Hedefe ulaşınca
-**tamam**, ulaşamazsa **olmadı** çıkışından devam eder. Aynı eylem üç kez sonuç vermezse kendisi durur.
+Birkaç aşamalı bir işi tek cümleyle tarif etmek için: “Blender’da küp ekle ve kırmızı materyal ver”. İki çalışma şekli var:
 
-Başarılı bir turun eylemleri hafızaya yazılır (`{{öğe}}` gibi değişen değerler yer tutucuya çevrilerek). Sonraki turda
-model bunu ipucu olarak görür, ekran farklıysa ekrana uyar.
+- **Ekrana bakarak (varsayılan, UI-TARS gibi):** her adımda ana ekranın görüntüsü alınır. Model (varsayılan
+  `bytedance/ui-tars-1.5-7b`, Ayarlar > İnisiyatif modeli) kısa bir düşünce yazar ve tek bir eylem verir: tıkla, çift tık, sağ tık,
+  sürükle, tuş kombinasyonu (Shift+A, Ctrl+S, Win), yaz, kaydır, bekle, bitti ya da yardım iste. Tıklama noktası
+  doğrudan ekran görüntüsünden gelir; yazısız ikonlar, 3D görünüm ve menüler dahil. Modele son birkaç ekran görüntüsü ve
+  önceki adımları birlikte gider. Başka bir görsel model de yazabilirsin (Gemini, Claude); o zaman aynı eylemler JSON olarak istenir.
+- **Yazı listesiyle:** ekrandaki (tarayıcıdaysa sayfadaki) yazıların numaralı listesinden seçer. Formlarda ve web sayfalarında hızlıdır.
+
+Güvenceler:
+
+- Model “bitti” deyince son ekran görsel modelle (Ayarlar > Görsel LLM) ayrıca kontrol edilir; hedef olmamışsa model eksik kalanı yapar.
+- Ekran 3 eylemdir değişmiyorsa modele “başka yol dene” denir; 6 eylemde durur. Eylem sınırı node’dan ayarlanır. Ctrl+Shift+Q her an durdurur.
+- Başarılı turun adımları kaydedilir (`{{öğe}}` gibi değişen yazılar yer tutucuya çevrilir). Sonraki turda önce bu yol
+  **modelsiz** oynatılır; her adımdan önce ekranın kayıttakine benzediğine bakılır. Ekran farklılaştığı anda model o noktadan devam eder.
+- Hedefe ulaşınca **tamam**, ulaşamazsa **olmadı** çıkışından devam eder.
 
 ## Emin olma
 
@@ -127,7 +138,9 @@ Başlangıç → Tarayıcıyı Aç https://site
   Kutuyu silmek içindekileri silmez.
 - **Sağ tık:** boş yerde (ya da kutunun içinde) node ekleme menüsü; node üzerinde çalıştır, kutuya al, kutudan çıkar, kopyala, sil.
 - **Ekran Tarayıcı:** ekranın görüntüsü alınır, bulunan her yazı kutuyla işaretlenir; birine tıklayınca seçili node’a atanır.
-- **İmleçle Yakala (3 sn):** imleci hedefe götür, o öğe node’a bağlanır.
+  Seçilen öğe üç yolla hatırlanır: uygulamanın kendi öğesi, öğenin küçük resmi ve (okunabiliyorsa) yazısı. Çalışırken sırayla
+  öğe, resmin ekrandaki aynısı, yazı ve en son görsel model (resimle birlikte) denenir; yazısız simgeler de böyle tıklanır.
+- **İmleçle Yakala (3 sn):** imleci hedefe götür, o öğe (resmiyle birlikte) node’a bağlanır.
 - Çalışırken uygulama kendini küçültür. **Ctrl+Shift+Q** ile durdurursun.
 - **Dışa/İçe Aktar:** akışı JSON olarak kaydet/aç. Akış ve ayarlar ayrıca otomatik kaydedilir.
 
@@ -135,9 +148,10 @@ Başlangıç → Tarayıcıyı Aç https://site
 
 1. Ayarlar → OpenRouter API Key → **Kaydet**, sonra **API Test**
 2. Model adı (listeden seçmek için “Model listesini getir”) → **Kaydet**
-3. Görsel model (İnisiyatif ve ekran görüntüsü modu bunu kullanır) → **Kaydet**
-4. Hedef pencere → **Kaydet** (boş bırakılırsa tüm ekran okunur)
-5. Node’ları diz, **▶ Ajanı Çalıştır**
+3. Görsel model (ekran görüntüsü modu ve İnisiyatif’in bitti kontrolü bunu kullanır) → **Kaydet**
+4. İnisiyatif modeli (varsayılan `bytedance/ui-tars-1.5-7b`) → **Kaydet**
+5. Hedef pencere → **Kaydet** (boş bırakılırsa tüm ekran okunur)
+6. Node’ları diz, **▶ Ajanı Çalıştır**
 
 API anahtarı olmadan da çalışır: yazı eşleştirmesi, tarayıcı modu, kutular ve dosya node’ları modelsiz çalışır. İnisiyatif ve
 görsel mod anahtar ister.

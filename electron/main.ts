@@ -140,6 +140,15 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('screen:pick', async (_e, box: { x: number; y: number; w: number; h: number }) => {
+    const hidden = await hideSelf()
+    try {
+      return await bridge.pickAt(box)
+    } finally {
+      if (hidden) showSelf()
+    }
+  })
+
   ipcMain.handle('capture:afterDelay', async (_e, ms: number) => {
     await sleep(Math.max(0, ms))
     return bridge.captureAtCursor()

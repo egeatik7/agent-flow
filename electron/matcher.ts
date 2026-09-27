@@ -23,6 +23,8 @@ export type ScanResult = {
   window: string
   /** Set when the configured target window was not open and the whole screen was read instead. */
   missingWindow?: string
+  /** 32x18 grayscale thumbnail (base64) when requested. */
+  sig?: string
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }

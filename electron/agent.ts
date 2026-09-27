@@ -1,10 +1,10 @@
-import { app } from 'electron'
+import { app, screen as electronScreen } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { renderTemplate, type AgentNode, type AppSettings, type LogLevel, type TargetMemo } from './graph-types'
+import { renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
   describeItems,
@@ -22,8 +22,12 @@ import {
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import {
   chooseScreenTarget,
+  guiStep,
+  isTarsModel,
   judgeReaction,
   nextAction,
+  type GuiAction,
+  type GuiTurn,
   planStall,
   visionCheck,
   visionLocate,
@@ -49,6 +53,23 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const FOCUS_MS = 420
 /** Built-in: if a target is missing, wait, rescan the whole screen, try once more. */
 const REFRESH_RETRY_MS = 3000
+/** Mean grey difference (0–255) of two 32x18 signatures below which the screen counts as unchanged. */
+const STILL_DIFF = 1.5
+/** Above this, a replayed step no longer sees the screen it was recorded on. */
+const REPLAY_DIFF = 14
+
+function sigDiff(a?: string, b?: string): number {
+  if (!a || !b) return 255
+  const x = Buffer.from(a, 'base64')
+  const y = Buffer.from(b, 'base64')
+  if (!x.length || x.length !== y.length) return 255
+  let sum = 0
+  for (let i = 0; i < x.length; i++) sum += Math.abs(x[i] - y[i])
+  return sum / x.length
+}
+
+/** Normalized correlation above which a saved icon picture counts as found. */
+const ICON_MIN = 0.82
 const TEMP_FILE = /\.(crdownload|part|partial|tmp|download|opdownload|xpas-part)$/i
 
 function center(t: { x: number; y: number; w: number; h: number }) {
@@ -118,6 +139,13 @@ export function createAgent(ctx: AgentContext) {
 
   const runMemo = new Map<string, TargetMemo[]>()
   const runTrace = new Map<string, string[]>()
+  const runPath = new Map<string, PathStep[]>()
+
+  function screenArea() {
+    const d = electronScreen.getPrimaryDisplay()
+    const f = d.scaleFactor || 1
+    return { x: Math.round(d.bounds.x * f), y: Math.round(d.bounds.y * f), w: Math.max(1, Math.round(d.bounds.width * f)), h: Math.max(1, Math.round(d.bounds.height * f)) }
+  }
   const baselines = new Map<string, Map<string, number>>()
   const warnedMissing = new Set<string>()
 
@@ -135,6 +163,7 @@ export function createAgent(ctx: AgentContext) {
   function beginRun(folders: string[]) {
     runMemo.clear()
     runTrace.clear()
+    runPath.clear()
     warnedMissing.clear()
     baselines.clear()
     for (const f of new Set([downloadsDir(), ...folders.filter((x) => x && !x.includes('{{'))])) baselines.set(f, listFiles(f))
@@ -167,13 +196,13 @@ export function createAgent(ctx: AgentContext) {
 
   // ---------- finding targets ----------
 
-  type Pick = { item: ScreenItem; target: Target; memo: TargetMemo; how: string }
+  type TargetPick = { item: ScreenItem; target: Target; memo: TargetMemo; how: string }
 
   /**
    * Fresh search on this lap's screen. Memory only breaks ties between near-equal matches,
    * and a pick that clearly disagrees with the recent laps is looked at twice.
    */
-  async function pickFrom(node: AgentNode, scan: ScanResult, win: string, allowLlm: boolean): Promise<Pick | null> {
+  async function pickFrom(node: AgentNode, scan: ScanResult, win: string, allowLlm: boolean): Promise<TargetPick | null> {
     const s = getSettings()
     const items = scan.items
     const area = scan.area
@@ -280,7 +309,9 @@ export function createAgent(ctx: AgentContext) {
     const s = getSettings()
     const prompt = node.prompt?.trim() ?? ''
 
-    if (await browserInFront()) {
+    const loc = node.locator
+    const pickedInBrowser = !loc || /edge|chrome|firefox|opera/i.test(loc.windowTitle ?? '')
+    if (pickedInBrowser && (await browserInFront())) {
       const d = await browser.items()
       log('info', `[sayfa] ${d.items.length} öğe okundu${d.host ? ` (${d.host})` : ''}.`)
       const pick = await pickFrom(node, pseudoScan(d.items, d.area, d.host), `web:${d.host}`, true)
@@ -288,20 +319,50 @@ export function createAgent(ctx: AgentContext) {
       log('info', '[sayfa] Sayfada bulunamadı; ekran okunuyor (açılır pencere ya da sistem penceresi olabilir).')
     }
 
-    const loc = node.locator
     const win = s.targetWindow || loc?.windowTitle || ''
-    if (loc && win && (loc.automationId || loc.name)) {
+    if (loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)) {
       try {
         const r = await bridge.locate(loc, win)
-        if (r) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
+        if (r && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
       } catch {
-        /* fall through to reading the screen */
+        /* fall through to the picture and the screen text */
       }
     }
 
+    if (loc?.icon) {
+      try {
+        const hit = (await bridge.findImage(loc.icon, loc.windowTitle)) ?? null
+        const again = hit && hit.score < ICON_MIN && loc.windowTitle ? await bridge.findImage(loc.icon) : null
+        const best = again && hit && again.score > hit.score ? again : hit
+        if (best && best.score >= ICON_MIN) {
+          log('info', `[simge] Kayıtlı resim ekranda bulundu (%${Math.round(best.score * 100)} benzer).`)
+          const sa = screenArea()
+          return {
+            x: best.x,
+            y: best.y,
+            label: '[simge] kayıtlı resim',
+            memo: { win: best.window || win, type: 'Simge', src: 'ocr', rx: (best.x - sa.x) / sa.w, ry: (best.y - sa.y) / sa.h, text: loc.text || 'simge', at: Date.now() },
+          }
+        }
+        if (best) log('info', `[simge] Kayıtlı resim ekranda net değil (en iyi %${Math.round(best.score * 100)}).`)
+      } catch (e) {
+        log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
+      }
+    }
+
+    const hasText = !!prompt || !!(loc?.text || loc?.name)?.trim()
     const scanRes = await scanFor(!!s.apiKey && !!prompt && s.sendScreenshot, wide)
-    const pick = await pickFrom(node, scanRes, scanRes.window || win, true)
+    const pick = hasText ? await pickFrom(node, scanRes, scanRes.window || win, true) : null
     if (pick) return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${pick.how})` }
+
+    if (loc?.icon && s.apiKey) {
+      try {
+        log('info', '[simge] Görsel modele kayıtlı resimle soruluyor.')
+        return await resolveVision(node, true)
+      } catch (e) {
+        log('warn', `[simge] Görsel model de bulamadı: ${(e as Error).message}`)
+      }
+    }
 
     if (loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
       try {
@@ -331,6 +392,7 @@ export function createAgent(ctx: AgentContext) {
   function visionPrompt(node: AgentNode): string {
     const p = node.prompt?.trim()
     if (p) return p
+    if (node.locator?.icon) return 'İkinci resimdeki simgenin/düğmenin ekrandaki yerini bul'
     const t = node.locator?.text || node.locator?.name
     if (t) return `“${t}” yazan yere`
     throw new Error(`“${node.title}”: görsel mod için ekranda neyin bulunacağını yaz.`)
@@ -358,6 +420,7 @@ export function createAgent(ctx: AgentContext) {
       kind: node.kind,
       scan: scanRes,
       stepTitle: node.title,
+      reference: node.locator?.icon ? { data: node.locator.icon, w: 0, h: 0, mime: 'image/png' } : undefined,
     })
     const win = scanRes.window || ''
 
@@ -777,6 +840,250 @@ export function createAgent(ctx: AgentContext) {
     return false
   }
 
+  // ---------- İnisiyatif: screenshots in, coordinates out (UI-TARS style) ----------
+
+  type Shot = { img: { data: string; w: number; h: number; mime?: string }; area: { x: number; y: number; w: number; h: number }; sig: string }
+
+  async function agentShot(tars: boolean, label: string): Promise<Shot> {
+    const res = await bridge.scan({
+      image: 'plain',
+      uia: false,
+      ocr: false,
+      fresh: true,
+      primary: true,
+      maxImageW: tars ? 1456 : 1400,
+      snap: tars ? 28 : 0,
+      sig: true,
+    })
+    if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
+    rememberShot(res.image.data, label)
+    return { img: res.image, area: res.area, sig: res.sig ?? '' }
+  }
+
+  type Doable = Pick<GuiAction, 'kind' | 'x' | 'y' | 'x2' | 'y2' | 'keys' | 'text' | 'direction'>
+
+  function describeGui(a: Doable): string {
+    const pt = (x?: number, y?: number) => (x === undefined || y === undefined ? '' : ` (%${Math.round(x * 100)}, %${Math.round(y * 100)})`)
+    switch (a.kind) {
+      case 'click':
+        return `tıkla${pt(a.x, a.y)}`
+      case 'double':
+        return `çift tıkla${pt(a.x, a.y)}`
+      case 'right':
+        return `sağ tıkla${pt(a.x, a.y)}`
+      case 'drag':
+        return `sürükle${pt(a.x, a.y)} →${pt(a.x2, a.y2)}`
+      case 'hotkey':
+        return `tuş ${(a.keys ?? []).join('+')}`
+      case 'type':
+        return `yaz “${(a.text ?? '').replace(/\n/g, '⏎')}”`
+      case 'scroll':
+        return `kaydır ${a.direction ?? 'down'}${pt(a.x, a.y)}`
+      case 'wait':
+        return 'bekle'
+      default:
+        return a.kind
+    }
+  }
+
+  async function doGui(a: Doable, area: Shot['area']) {
+    const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
+    switch (a.kind) {
+      case 'click':
+      case 'double':
+      case 'right': {
+        const p = at(a.x, a.y)
+        await bridge.clickAt(p.x, p.y, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left')
+        return
+      }
+      case 'drag': {
+        const p = at(a.x, a.y)
+        const q = at(a.x2, a.y2)
+        await bridge.drag(p.x, p.y, q.x, q.y)
+        return
+      }
+      case 'hotkey':
+        if (a.keys?.length) await bridge.hotkey(a.keys)
+        return
+      case 'type': {
+        const raw = a.text ?? ''
+        const enter = /\n$/.test(raw)
+        const body = raw.replace(/\n+$/, '')
+        if (browser.isOpen() && (await browser.feedChooser(body))) return
+        await bridge.typeText(body, enter, false)
+        return
+      }
+      case 'scroll': {
+        const p = at(a.x, a.y)
+        await bridge.scroll(p.x, p.y, a.direction ?? 'down', 5)
+        return
+      }
+      case 'wait':
+        await pause(5000)
+        return
+    }
+  }
+
+  /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
+  async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string }> {
+    const s = getSettings()
+    const model = (s.visionModel || '').trim()
+    if (!s.apiKey || !model) return { ok: true, reason: 'kontrol modeli yok' }
+    try {
+      await pause(800)
+      const shot = await agentShot(tars, 'inisiyatif kontrol')
+      const r = await visionCheck({
+        apiKey: s.apiKey,
+        model,
+        question: `Şu görev bu ekranda tamamlanmış görünüyor mu (son hâline bak)? Görev: ${goal}`,
+        image: shot.img,
+      })
+      return { ok: r.answer, reason: r.reason }
+    } catch (e) {
+      log('warn', `Bitti kontrolü yapılamadı, modelin sözüne güveniliyor: ${(e as Error).message}`)
+      return { ok: true, reason: '' }
+    }
+  }
+
+  /** Replays the last good lap without the model while the screen still looks like it did then. */
+  async function replayPath(steps: PathStep[], vars: Record<string, string>, tars: boolean): Promise<{ ok: boolean; done: PathStep[] }> {
+    log('info', `Kayıtlı yol deneniyor (${steps.length} adım, model çağrılmadan).`)
+    const done: PathStep[] = []
+    for (const [i, st] of steps.entries()) {
+      if (stopped()) throw new StoppedError()
+      const shot = await agentShot(tars, `kayıtlı yol ${i + 1}`)
+      const diff = sigDiff(st.sig, shot.sig)
+      if (st.sig && diff > REPLAY_DIFF) {
+        log('info', `Kayıtlı yol ${i + 1}. adımda ayrıldı (ekran kayıttakinden farklı). Model buradan devam edecek.`)
+        return { ok: false, done }
+      }
+      const a: Doable = {
+        kind: st.action,
+        x: st.rx,
+        y: st.ry,
+        x2: st.rx2,
+        y2: st.ry2,
+        keys: st.keys,
+        text: renderTemplate(st.text, vars),
+        direction: st.direction,
+      }
+      log('info', `[kayıtlı yol ${i + 1}/${steps.length}] ${describeGui(a)}`)
+      await doGui(a, shot.area)
+      done.push(st)
+      await pause(a.kind === 'wait' ? 0 : a.kind === 'type' || a.kind === 'hotkey' ? 700 : 1000)
+    }
+    return { ok: true, done }
+  }
+
+  function savePath(node: AgentNode, steps: PathStep[], vars: Record<string, string>) {
+    const out = steps.map((st) => (st.text ? { ...st, text: generalize(st.text, vars) } : st))
+    runPath.set(node.id, out)
+    send('agent:patch', { id: node.id, patch: { path: out } })
+  }
+
+  async function initiativeScreen(node: AgentNode, _stepNo: number, _ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
+    const s = getSettings()
+    if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
+    const model = (s.agentModel || s.visionModel || s.model).trim()
+    const tars = isTarsModel(model)
+    const goal = node.prompt!.trim()
+    const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
+    const history: GuiTurn[] = []
+    let path: PathStep[] = []
+    log('info', `İnisiyatif (${model}${tars ? ', UI-TARS biçimi' : ''}): ${goal}`)
+    if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
+
+    const saved = runPath.get(node.id) ?? node.path
+    if (saved?.length) {
+      const r = await replayPath(saved, vars, tars)
+      path = [...r.done]
+      if (r.ok) {
+        const v = await verifyGoal(goal, tars)
+        if (v.ok) {
+          log('success', `Kayıtlı yol hedefe ulaştı (${saved.length} adım).`)
+          return true
+        }
+        log('info', `Kayıtlı yol bitti ama hedef tamam görünmüyor${v.reason ? ` (${v.reason})` : ''}. Model devam ediyor.`)
+      }
+      if (r.done.length) {
+        history.push({
+          thought: `Önceki turun kaydından ${r.done.length} adım oynatıldı: ${r.done.map((st) => describeGui({ ...st, kind: st.action })).join(', ')}`,
+          raw: 'wait()',
+          note: 'Kayıt buraya kadar oynatıldı. Ekrana bak ve görevin kalanını tamamla.',
+        })
+      }
+    }
+
+    let prev: Shot | null = null
+    let lastKind: GuiAction['kind'] | null = null
+    let still = 0
+    let rejected = 0
+    for (let i = 1; i <= max; i++) {
+      if (stopped()) throw new StoppedError()
+      const shot = await agentShot(tars, `inisiyatif ${i}`)
+      if (prev && lastKind !== 'wait' && sigDiff(prev.sig, shot.sig) < STILL_DIFF) still++
+      else still = 0
+      if (still >= 6) {
+        log('warn', 'Ekran 6 eylemdir değişmiyor. İnisiyatif burada duruyor.')
+        return false
+      }
+      if (still === 3 && history.length) {
+        history[history.length - 1].note = 'Ekran son 3 eylemde hiç değişmedi. Aynı şeyi tekrar etme, başka bir yol dene (kısayol, başka menü, kaydırma).'
+        log('info', 'Ekran 3 eylemdir değişmedi; modele başka yol denemesi söylendi.')
+      }
+
+      const a = await guiStep({ apiKey: s.apiKey, model, goal, history, screen: shot.img })
+      log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
+
+      if (a.kind === 'finished') {
+        const v = await verifyGoal(goal, tars)
+        if (v.ok) {
+          savePath(node, path, vars)
+          log('success', `İnisiyatif hedefe ulaştı (${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
+          return true
+        }
+        rejected++
+        log('warn', `Model “bitti” dedi ama kontrol onaylamadı${v.reason ? `: ${v.reason}` : ''}.`)
+        if (rejected >= 2) return false
+        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: `Kontrol: görev henüz tamamlanmamış görünüyor (${v.reason || 'eksik adım var'}). Eksik kalanı yap.` })
+        prev = shot
+        lastKind = 'wait'
+        continue
+      }
+      if (a.kind === 'call_user') {
+        log('warn', `Model yardım istedi, İnisiyatif duruyor: ${a.thought || 'gerekçe yok'}`)
+        return false
+      }
+
+      const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img }
+      try {
+        await doGui(a, shot.area)
+        path.push({
+          action: a.kind as PathStep['action'],
+          rx: a.x,
+          ry: a.y,
+          rx2: a.x2,
+          ry2: a.y2,
+          keys: a.keys,
+          text: a.text,
+          direction: a.direction,
+          thought: a.thought.slice(0, 160),
+          sig: shot.sig,
+        })
+      } catch (e) {
+        if (e instanceof StoppedError) throw e
+        turn.note = `Bu eylem yapılamadı: ${(e as Error).message.split('\n')[0]}`
+        log('warn', turn.note)
+      }
+      history.push(turn)
+      prev = shot
+      lastKind = a.kind
+      await pause(a.kind === 'wait' ? 0 : a.kind === 'type' || a.kind === 'hotkey' ? 700 : 1000)
+    }
+    log('warn', `İnisiyatif ${max} eylemde hedefe ulaşamadı.`)
+    return false
+  }
+
   // ---------- files ----------
 
   async function waitFile(node: AgentNode, stepNo: number): Promise<string | null> {
@@ -919,7 +1226,8 @@ export function createAgent(ctx: AgentContext) {
       log('info', `Ekran yenilendi: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})`)
       return containsText(res.items, text)
     },
-    initiative,
+    initiative: (node, stepNo, ahead, vars) =>
+      node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),
     openBrowser: async (node) => {
       await browser.open({
         url: node.url ?? '',

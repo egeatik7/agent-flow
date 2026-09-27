@@ -35,6 +35,214 @@ public static class XpNative {
 }
 [void][XpNative]::SetProcessDPIAware()
 
+if (-not ('XpInput' -as [type])) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class XpInput {
+  [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+
+  public static void Wheel(int x, int y, int clicks, bool horizontal) {
+    SetCursorPos(x, y);
+    Thread.Sleep(40);
+    int step = clicks >= 0 ? 120 : -120;
+    for (int i = 0; i < Math.Abs(clicks); i++) {
+      mouse_event(horizontal ? 0x01000u : 0x0800u, 0, 0, unchecked((uint)step), UIntPtr.Zero);
+      Thread.Sleep(30);
+    }
+  }
+
+  public static void Drag(int x1, int y1, int x2, int y2) {
+    SetCursorPos(x1, y1);
+    Thread.Sleep(80);
+    mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+    Thread.Sleep(120);
+    int steps = 18;
+    for (int i = 1; i <= steps; i++) {
+      SetCursorPos(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps);
+      Thread.Sleep(15);
+    }
+    Thread.Sleep(80);
+    mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+  }
+
+  static readonly Dictionary<string, int> Named = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) {
+    {"ctrl",0x11},{"control",0x11},{"shift",0x10},{"alt",0x12},{"win",0x5B},{"meta",0x5B},{"cmd",0x5B},{"super",0x5B},
+    {"enter",0x0D},{"return",0x0D},{"esc",0x1B},{"escape",0x1B},{"tab",0x09},{"space",0x20},{"backspace",0x08},
+    {"delete",0x2E},{"del",0x2E},{"insert",0x2D},{"home",0x24},{"end",0x23},{"pageup",0x21},{"pagedown",0x22},
+    {"left",0x25},{"up",0x26},{"right",0x27},{"down",0x28},{"arrowleft",0x25},{"arrowup",0x26},{"arrowright",0x27},{"arrowdown",0x28},
+    {"minus",0xBD},{"-",0xBD},{"plus",0xBB},{"=",0xBB},{"comma",0xBC},{",",0xBC},{"period",0xBE},{".",0xBE},{"slash",0xBF},{"/",0xBF},
+    {"capslock",0x14},{"printscreen",0x2C},{"numpad0",0x60},{"numpad1",0x61},{"numpad2",0x62},{"numpad3",0x63},{"numpad4",0x64},
+    {"numpad5",0x65},{"numpad6",0x66},{"numpad7",0x67},{"numpad8",0x68},{"numpad9",0x69}
+  };
+  static readonly HashSet<int> Extended = new HashSet<int> { 0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B };
+
+  static int Vk(string name) {
+    int v;
+    if (Named.TryGetValue(name, out v)) return v;
+    if (name.Length == 1) {
+      char c = char.ToUpperInvariant(name[0]);
+      if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return c;
+    }
+    if (name.Length >= 2 && (name[0] == 'f' || name[0] == 'F')) {
+      int n;
+      if (int.TryParse(name.Substring(1), out n) && n >= 1 && n <= 24) return 0x70 + n - 1;
+    }
+    return -1;
+  }
+
+  /// Presses a combination like ["ctrl","shift","a"]: modifiers down, key tap, modifiers up.
+  public static string Combo(string[] names) {
+    var codes = new List<int>();
+    foreach (var raw in names) {
+      var n = raw.Trim();
+      if (n.Length == 0) continue;
+      int v = Vk(n);
+      if (v < 0) return "UNKNOWN_KEY: " + n;
+      codes.Add(v);
+    }
+    if (codes.Count == 0) return "EMPTY";
+    foreach (var c in codes) { keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero); Thread.Sleep(25); }
+    for (int i = codes.Count - 1; i >= 0; i--) { keybd_event((byte)codes[i], 0, (Extended.Contains(codes[i]) ? 1u : 0u) | 2u, UIntPtr.Zero); Thread.Sleep(20); }
+    return "";
+  }
+}
+"@
+}
+
+if (-not ('XpImage' -as [type])) {
+  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+public static class XpImage {
+  static float[] Gray(Bitmap b) {
+    var r = new Rectangle(0, 0, b.Width, b.Height);
+    var d = b.LockBits(r, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+    var bytes = new byte[d.Stride * b.Height];
+    Marshal.Copy(d.Scan0, bytes, 0, bytes.Length);
+    b.UnlockBits(d);
+    var g = new float[b.Width * b.Height];
+    for (int y = 0; y < b.Height; y++) {
+      int row = y * d.Stride;
+      for (int x = 0; x < b.Width; x++) {
+        int i = row + x * 3;
+        g[y * b.Width + x] = 0.114f * bytes[i] + 0.587f * bytes[i + 1] + 0.299f * bytes[i + 2];
+      }
+    }
+    return g;
+  }
+
+  static float[] Shrink(float[] s, int w, int h, int f, out int nw, out int nh) {
+    nw = Math.Max(1, w / f); nh = Math.Max(1, h / f);
+    var o = new float[nw * nh];
+    for (int y = 0; y < nh; y++)
+      for (int x = 0; x < nw; x++) {
+        float sum = 0;
+        for (int j = 0; j < f; j++) for (int i = 0; i < f; i++) sum += s[(y * f + j) * w + (x * f + i)];
+        o[y * nw + x] = sum / (f * f);
+      }
+    return o;
+  }
+
+  static double Ncc(float[] S, int sw, float[] T, int tw, int th, double tMean, double tNorm, int ox, int oy) {
+    double sum = 0, sum2 = 0, cross = 0;
+    int n = tw * th;
+    for (int y = 0; y < th; y++) {
+      int srow = (oy + y) * sw + ox;
+      int trow = y * tw;
+      for (int x = 0; x < tw; x++) {
+        double v = S[srow + x];
+        sum += v; sum2 += v * v; cross += v * T[trow + x];
+      }
+    }
+    double mean = sum / n;
+    double varS = sum2 - n * mean * mean;
+    if (varS < 1e-3) return 0;
+    return (cross - n * mean * tMean) / (Math.Sqrt(varS) * tNorm);
+  }
+
+  static void Stats(float[] T, out double mean, out double norm) {
+    double s = 0, s2 = 0;
+    foreach (var v in T) { s += v; s2 += v * v; }
+    mean = s / T.Length;
+    norm = Math.Sqrt(Math.Max(0, s2 - T.Length * mean * mean));
+  }
+
+  /// Best normalized cross-correlation of the template inside the screen. Returns {cx, cy, score}.
+  public static double[] Find(Bitmap screen, Bitmap tpl) {
+    int sw = screen.Width, sh = screen.Height, tw = tpl.Width, th = tpl.Height;
+    if (tw >= sw || th >= sh || tw < 4 || th < 4) return new double[] { 0, 0, 0 };
+    var S = Gray(screen);
+    var T = Gray(tpl);
+    double tm, tn;
+    Stats(T, out tm, out tn);
+    if (tn < 1) return new double[] { 0, 0, 0 };
+
+    int f = Math.Max(1, Math.Min(tw, th) / 12);
+    f = Math.Max(f, (int)Math.Ceiling(sw / 800.0));
+    f = Math.Min(f, Math.Max(1, Math.Min(tw, th) / 4));
+    int cw, ch, ctw, cth;
+    var S1 = Shrink(S, sw, sh, f, out cw, out ch);
+    var T1 = Shrink(T, tw, th, f, out ctw, out cth);
+    double tm1, tn1;
+    Stats(T1, out tm1, out tn1);
+    if (tn1 < 1) { S1 = S; T1 = T; cw = sw; ch = sh; ctw = tw; cth = th; tm1 = tm; tn1 = tn; f = 1; }
+
+    var cands = new List<double[]>();
+    for (int y = 0; y + cth <= ch; y++)
+      for (int x = 0; x + ctw <= cw; x++) {
+        double sc = Ncc(S1, cw, T1, ctw, cth, tm1, tn1, x, y);
+        if (sc < 0.5) continue;
+        cands.Add(new double[] { x, y, sc });
+      }
+    cands.Sort((a, b) => b[2].CompareTo(a[2]));
+    var picked = new List<double[]>();
+    foreach (var c in cands) {
+      bool near = false;
+      foreach (var p in picked) if (Math.Abs(p[0] - c[0]) < ctw && Math.Abs(p[1] - c[1]) < cth) { near = true; break; }
+      if (near) continue;
+      picked.Add(c);
+      if (picked.Count >= 6) break;
+    }
+
+    double bx = 0, by = 0, best = 0;
+    foreach (var c in picked) {
+      int x0 = (int)c[0] * f, y0 = (int)c[1] * f, r = f * 2;
+      for (int y = Math.Max(0, y0 - r); y <= Math.Min(sh - th, y0 + r); y++)
+        for (int x = Math.Max(0, x0 - r); x <= Math.Min(sw - tw, x0 + r); x++) {
+          double sc = Ncc(S, sw, T, tw, th, tm, tn, x, y);
+          if (sc > best) { best = sc; bx = x; by = y; }
+        }
+    }
+    return new double[] { bx + tw / 2.0, by + th / 2.0, best };
+  }
+
+  /// 32x18 grayscale thumbnail, used to tell whether the screen changed.
+  public static byte[] Signature(Bitmap b) {
+    var g = Gray(b);
+    int w = b.Width, h = b.Height;
+    var o = new byte[32 * 18];
+    for (int y = 0; y < 18; y++)
+      for (int x = 0; x < 32; x++) {
+        int x0 = x * w / 32, x1 = Math.Max(x0 + 1, (x + 1) * w / 32);
+        int y0 = y * h / 18, y1 = Math.Max(y0 + 1, (y + 1) * h / 18);
+        double s = 0; int n = 0;
+        for (int yy = y0; yy < y1; yy += 2) for (int xx = x0; xx < x1; xx += 2) { s += g[yy * w + xx]; n++; }
+        o[y * 32 + x] = (byte)Math.Max(0, Math.Min(255, s / Math.Max(1, n)));
+      }
+    return o;
+  }
+}
+"@
+}
+
 $script:AE = [System.Windows.Automation.AutomationElement]
 $script:Walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 

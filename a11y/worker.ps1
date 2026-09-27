@@ -120,7 +120,52 @@ function Invoke-Op([string]$op, $P) {
       $el = $script:AE::FromPoint((New-Object System.Windows.Point($pt.X, $pt.Y)))
       if ($null -eq $el) { return $null }
       $top = Get-TopLevel $el
-      return (New-Locator $el $top $pt.X $pt.Y)
+      $loc = New-Locator $el $top $pt.X $pt.Y
+      $er = $el.Current.BoundingRectangle
+      $box = [pscustomobject]@{ x = $pt.X - 20; y = $pt.Y - 20; w = 40; h = 40 }
+      if (-not $er.IsEmpty -and $er.Width -le 220 -and $er.Height -le 140) { $box = [pscustomobject]@{ x = $er.X; y = $er.Y; w = $er.Width; h = $er.Height } }
+      $icon = Get-IconCrop $box
+      $loc | Add-Member -NotePropertyName icon -NotePropertyValue $icon.data -Force
+      return $loc
+    }
+    'pick' {
+      # A box chosen in the screen scanner: the element under its centre, plus a picture of the box itself.
+      $cx = [int]($P.x + $P.w / 2)
+      $cy = [int]($P.y + $P.h / 2)
+      $el = $null
+      try { $el = $script:AE::FromPoint((New-Object System.Windows.Point($cx, $cy))) } catch {}
+      $loc = $null
+      if ($null -ne $el) {
+        $top = Get-TopLevel $el
+        $loc = New-Locator $el $top $cx $cy
+      } else {
+        $loc = [pscustomobject]@{ name = ''; text = ''; controlType = 'Point'; path = ''; x = $cx; y = $cy }
+      }
+      $icon = Get-IconCrop ([pscustomobject]@{ x = [int]$P.x; y = [int]$P.y; w = [int]$P.w; h = [int]$P.h })
+      $loc | Add-Member -NotePropertyName icon -NotePropertyValue $icon.data -Force
+      return $loc
+    }
+    'findImage' {
+      return (Invoke-FindImage $P)
+    }
+    'drag' {
+      [XpInput]::Drag([int]$P.x1, [int]$P.y1, [int]$P.x2, [int]$P.y2)
+      return $true
+    }
+    'scroll' {
+      $clicks = 5
+      if ($P.clicks) { $clicks = [int]$P.clicks }
+      $dir = [string]$P.direction
+      $horizontal = ($dir -eq 'left' -or $dir -eq 'right')
+      if ($dir -eq 'down' -or $dir -eq 'left') { $clicks = -$clicks }
+      [XpInput]::Wheel([int]$P.x, [int]$P.y, $clicks, $horizontal)
+      return $true
+    }
+    'hotkey' {
+      $names = @($P.keys | ForEach-Object { [string]$_ })
+      $err = [XpInput]::Combo($names)
+      if ($err) { throw $err }
+      return $true
     }
     default { throw "UNKNOWN_OP: $op" }
   }

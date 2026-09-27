@@ -22,6 +22,7 @@ export type XpAgentApi = {
   saveGraph: (graph: AgentGraph) => Promise<boolean>
   listWindows: () => Promise<{ title: string; handle: string }[]>
   scanScreen: (windowTitle?: string) => Promise<ScanResult>
+  pickScreenBox: (box: { x: number; y: number; w: number; h: number }) => Promise<Locator | null>
   captureAfter: (ms: number) => Promise<Locator | null>
   runAgent: (graph: AgentGraph, startId?: string) => Promise<{ ok: boolean; stopped?: boolean }>
   stopAgent: () => Promise<boolean>
