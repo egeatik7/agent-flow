@@ -54,7 +54,8 @@
     "asar": true
   },
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "playwright-core": "^1.63.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",

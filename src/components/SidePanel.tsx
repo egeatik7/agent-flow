@@ -6,6 +6,7 @@ import {
   VISION_KINDS,
   baseName,
   listItems,
+  loopKeys,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -38,6 +39,7 @@ type Props = {
   onCaptureForNode: () => void
   onOpenScanner: () => void
   onFillFromFolder: (extensions: string[]) => void
+  onPickDir: () => Promise<string | null>
   capturing: number
 }
 
@@ -138,11 +140,20 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   const { n } = p
   const [imagesOnly, setImagesOnly] = useState(true)
   const items = listItems(n)
-  const idx = items.length ? Math.min(Math.max(0, n.loopIndex ?? 0), items.length - 1) : 0
+  const keys = loopKeys(n)
+  const results = n.results ?? {}
+  const ok = keys.filter((k) => results[k] === 'ok').length
+  const bad = keys.filter((k) => results[k] === 'fail').length
+  const members = (n.members ?? []).length
   return (
     <>
+      <p className="hint">
+        Kutunun içine koyduğun node’lar her öğe için baştan sona bir kez çalışır. İlk adım, kutunun içinde kimsenin bağlanmadığı node’dur.
+        Değişen yerlere <span className="mono">{'{{öğe}}'}</span> yaz; <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi).
+      </p>
+      {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
       <div className="field">
-        <label>Liste (her satır bir tur)</label>
+        <label>Liste (her satır bir öğe)</label>
         <textarea
           className="xp-textarea mono list-area"
           value={(n.items ?? []).join('\n')}
@@ -158,7 +169,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             sadece resimler
           </label>
           {items.length > 0 && (
-            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, loopIndex: 0 })}>
+            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, loopIndex: 0, results: undefined })}>
               Listeyi temizle
             </button>
           )}
@@ -166,23 +177,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         {n.folder && <p className="hint mono">{n.folder}</p>}
       </div>
 
-      {items.length > 0 ? (
-        <div className="field loop-progress">
-          <label>İlerleme</label>
-          <div className="progress">
-            <div className="progress-bar" style={{ width: `${(idx / items.length) * 100}%` }} />
-          </div>
-          <p className="hint">
-            Sıradaki: <b>{idx + 1}/{items.length}</b> — {baseName(items[idx])}
-            {idx > 0 ? ' (öncekiler bitti, kaldığı yerden devam eder)' : ''}
-          </p>
-          {idx > 0 && (
-            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ loopIndex: 0 })}>
-              Baştan başla
-            </button>
-          )}
-        </div>
-      ) : (
+      {items.length === 0 && (
         <div className="field">
           <label>Tekrar sayısı (liste boşken)</label>
           <input
@@ -195,10 +190,246 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         </div>
       )}
 
+      <div className="field">
+        <label>Bir öğe takılırsa</label>
+        <div className="seg">
+          {(
+            [
+              ['skip', 'Kurtar, atla, devam et'],
+              ['stop', 'Akışı durdur'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              type="button"
+              key={k}
+              className={`seg-btn${(n.onError ?? 'skip') === k ? ' active' : ''}`}
+              onClick={() => p.onUpdateNode({ onError: k })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {(n.onError ?? 'skip') === 'skip' && (
+          <>
+            <label className="sub-label">Her öğe için deneme sayısı</label>
+            <input
+              className="xp-input"
+              type="number"
+              min={1}
+              max={5}
+              value={n.attempts ?? 2}
+              onChange={(e) => p.onUpdateNode({ attempts: Math.min(5, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
+            />
+            <p className="hint">
+              Takılınca çerçevedeki <b>hata olursa</b> çıkışına bağladığın adımlar çalışır (örn. F5 → ana sayfayı bekle), sonra öğe baştan denenir.
+              Yine olmazsa işaretlenir ve sıradaki öğeye geçilir.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="field loop-progress">
+        <label>
+          Durum: {ok} tamam · {bad} hatalı · {keys.length - ok - bad} bekliyor
+        </label>
+        <div className="progress">
+          <div className="progress-bar" style={{ width: `${keys.length ? (ok / keys.length) * 100 : 0}%` }} />
+        </div>
+        {(ok > 0 || bad > 0) && (
+          <div className="result-list">
+            {keys.map((k) => {
+              const r = results[k]
+              return (
+                <div key={k} className={r ?? 'pending'}>
+                  <span>{r === 'ok' ? '✓' : r === 'fail' ? '✗' : '·'}</span>
+                  <span className="mono">{items.length ? baseName(k) : k}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <p className="hint">
+          Tamamlananlar kaydedilir. Tekrar çalıştırınca yalnızca bekleyen ve hatalı öğeler çalışır. Hepsi bitince durum kendiliğinden sıfırlanır.
+        </p>
+        {(ok > 0 || bad > 0) && (
+          <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ results: undefined, loopIndex: 0 })}>
+            Baştan başla (durumu sil)
+          </button>
+        )}
+      </div>
+    </>
+  )
+}
+
+function MemoryBox(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const m = n.memory ?? []
+  if (!m.length) return null
+  const last = m[0]
+  return (
+    <div className="memo-box">
+      <label>Hafıza</label>
       <p className="hint">
-        Döngü kartını tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Öğe sayısı, o ilk node’a geri dönen <b>son adım</b> bitince ilerler; döngü kartına uğramak sayacı artırmaz. Turlar bitince akış o son adımın sağındaki <b>bitti</b> noktasından çıkar. Değişen yerlere{' '}
-        <span className="mono">{'{{öğe}}'}</span> yaz: her turda listenin sıradaki satırı gelir.{' '}
-        <span className="mono">{'{{öğe.isim}}'}</span> uzantısız dosya adıdır (kedi.png → kedi).
+        Son {m.length} turda bulunan hedef: <b>{last.src === 'ocr' ? 'yazı' : last.type}</b> “{last.text}”
+        {last.win ? <> — {last.win.replace(/^web:/, 'sayfa: ')}</> : null}. Her tur ekran yine taze okunur; hafıza sadece benzer adaylar arasında
+        karar verirken ve bu tur çok farklı bir şey bulunduğunda devreye girer.
+      </p>
+      <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ memory: undefined })}>
+        Unut
+      </button>
+    </div>
+  )
+}
+
+function AiEditor(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const upd = p.onUpdateNode
+  return (
+    <>
+      <div className="field">
+        <label>Hedef (ne olmasını istiyorsun?)</label>
+        <textarea
+          className="xp-textarea"
+          value={n.prompt ?? ''}
+          placeholder={'Örn: Ayarlar’dan dili Türkçe yap ve kaydet\nveya: çıkan çerez penceresini kapat, sonra “Giriş yap”a bas'}
+          onChange={(e) => upd({ prompt: e.target.value })}
+        />
+        <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
+      </div>
+      <div className="field">
+        <label>En fazla eylem</label>
+        <input
+          className="xp-input"
+          type="number"
+          min={1}
+          max={40}
+          value={n.maxActions ?? 12}
+          onChange={(e) => upd({ maxActions: Math.min(40, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
+        />
+      </div>
+      <p className="hint">
+        Model her adımda ekrana (tarayıcıdaysa sayfanın içine) bakar, tek bir eylem seçer: tıkla, yaz, tuş, bekle ya da bitti.
+        Hedefe ulaşınca <b>tamam</b>, ulaşamazsa <b>olmadı</b> çıkışından devam eder. Başarılı bir turun eylemleri hafızaya yazılır;
+        sonraki turda model bunu ipucu olarak görür, ekran farklıysa ekrana uyar.
+      </p>
+      {!p.settings.apiKey && <p className="hint warn">API anahtarı kayıtlı değil; İnisiyatif çalışmaz.</p>}
+      {n.trace?.length ? (
+        <div className="memo-box">
+          <label>Geçen başarılı tur</label>
+          <ol className="hint-list">
+            {n.trace.map((t, i) => (
+              <li key={i} className="mono">{t}</li>
+            ))}
+          </ol>
+          <button type="button" className="xp-btn" onClick={() => upd({ trace: undefined })}>
+            Unut
+          </button>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function BrowserEditor(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const upd = p.onUpdateNode
+  return (
+    <>
+      <div className="field">
+        <label>Adres</label>
+        <input className="xp-input mono" value={n.url ?? ''} placeholder="https://..." onChange={(e) => upd({ url: e.target.value })} />
+        <VarChips onInsert={(v) => upd({ url: append(n.url, v) })} />
+      </div>
+      <div className="field">
+        <label>Tarayıcı</label>
+        <div className="seg">
+          {(
+            [
+              ['auto', 'Otomatik'],
+              ['msedge', 'Edge'],
+              ['chrome', 'Chrome'],
+            ] as const
+          ).map(([k, label]) => (
+            <button type="button" key={k} className={`seg-btn${(n.browser ?? 'auto') === k ? ' active' : ''}`} onClick={() => upd({ browser: k })}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="hint">
+        Tarayıcı programın kendi profiliyle açılır; siteye bir kez elle giriş yaparsan sonra hep açık kalır. Bu tarayıcı öndeyken Tıkla ve
+        Yazı Yaz hedefi sayfanın içinden bulur; bulamazsa ekrana bakar. Dosya seçme penceresine yol doğrudan verilir. İndirmeler
+        İndirilenler klasörüne düşer; <b>Dosyayı Bekle</b> ve <b>Dosyayı Taşı</b> ile ad verebilirsin. Açıkken aynı node tekrar gelirse sadece adrese gider.
+      </p>
+    </>
+  )
+}
+
+function WaitFileEditor(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const upd = p.onUpdateNode
+  return (
+    <>
+      <div className="field">
+        <label>Klasör (boşsa İndirilenler)</label>
+        <div className="field-row">
+          <input className="xp-input mono" value={n.folder ?? ''} placeholder="İndirilenler" onChange={(e) => upd({ folder: e.target.value })} />
+          <button
+            type="button"
+            className="xp-btn"
+            onClick={async () => {
+              const d = await p.onPickDir()
+              if (d) upd({ folder: d })
+            }}
+          >
+            Seç…
+          </button>
+        </div>
+      </div>
+      <div className="field">
+        <label>Dosya türü (boşsa her dosya)</label>
+        <input className="xp-input mono" value={n.pattern ?? ''} placeholder="*.glb; *.zip" onChange={(e) => upd({ pattern: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>En fazla bekleme (saniye)</label>
+        <input
+          className="xp-input"
+          type="number"
+          min={1}
+          value={Math.round((n.timeoutMs ?? 300000) / 1000)}
+          onChange={(e) => upd({ timeoutMs: Math.max(1, Number(e.target.value) || 1) * 1000 })}
+        />
+      </div>
+      <p className="hint">
+        Akış başladığında klasörde olan dosyalar sayılmaz. Yeni gelen dosya yarım (.crdownload, .part) değilse ve boyutu durduysa hazır sayılır;
+        sonraki adımlarda <span className="mono">{'{{dosya}}'}</span> olarak kullanılır.
+      </p>
+    </>
+  )
+}
+
+function MoveFileEditor(p: Props & { n: AgentNode }) {
+  const { n } = p
+  const upd = p.onUpdateNode
+  return (
+    <>
+      <div className="field">
+        <label>Hangi dosya?</label>
+        <input className="xp-input mono" value={n.source ?? ''} placeholder="{{dosya}}" onChange={(e) => upd({ source: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>Nereye, hangi adla?</label>
+        <input
+          className="xp-input mono"
+          value={n.text ?? ''}
+          placeholder="D:\\Modeller\\{{öğe.isim}}.glb"
+          onChange={(e) => upd({ text: e.target.value })}
+        />
+        <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
+      </div>
+      <p className="hint">
+        Klasör yoksa oluşturulur. Uzantı yazmazsan dosyanın kendi uzantısı kalır. Aynı adda dosya varsa sonuna (2) eklenir. Sonuna \ koyarsan
+        dosya o klasöre kendi adıyla gider.
       </p>
     </>
   )
@@ -263,7 +494,9 @@ function NodeInspector(p: Props) {
           <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
           <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
           <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
-          <li>Son node’u ilk aşamaya bağlarsan akış başa döner; sayılı tekrar için <b>Döngü</b>.</li>
+          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Takılan öğe atlanır, gerisi devam eder.</li>
+          <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
+          <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
           <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
         </ul>
       </div>
@@ -324,6 +557,7 @@ function NodeInspector(p: Props) {
             <p className="hint">Masaüstü simgeleri genelde çift tık ister.</p>
           </div>
           {!n.useVision && <TargetBox {...p} n={n} />}
+          <MemoryBox {...p} n={n} />
         </>
       )}
 
@@ -352,12 +586,16 @@ function NodeInspector(p: Props) {
             <input type="checkbox" checked={n.clearFirst !== false} onChange={(e) => upd({ clearFirst: e.target.checked })} />
             Önce alandaki yazıyı sil (Ctrl+A)
           </label>
-          <p className="hint">Tıklama, silme ve yazma arasında kısa beklemeler var. Yazı harf harf, yavaşça gider.</p>
+          <p className="hint">
+            Tıklama, silme ve yazma arasında kısa beklemeler var. Yazdıktan sonra alanın içi okunur; başka bir şey yazıyorsa bir kez daha yazılır.
+            Tarayıcıda dosya penceresi açıksa ve metin bir dosya yoluysa, yol pencereye doğrudan verilir.
+          </p>
           <label className="check">
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
           </label>
           {!n.useVision && (n.prompt?.trim() || n.locator) && <TargetBox {...p} n={n} />}
+          <MemoryBox {...p} n={n} />
         </>
       )}
 
@@ -443,9 +681,13 @@ function NodeInspector(p: Props) {
       )}
 
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
+      {n.kind === 'ai' && <AiEditor {...p} n={n} />}
+      {n.kind === 'browser' && <BrowserEditor {...p} n={n} />}
+      {n.kind === 'waitFile' && <WaitFileEditor {...p} n={n} />}
+      {n.kind === 'moveFile' && <MoveFileEditor {...p} n={n} />}
 
       <button type="button" className="xp-btn danger block" onClick={p.onDeleteNode}>
-        Node’u Sil (Del)
+        {n.kind === 'loop' ? 'Kutuyu Sil (içindekiler kalır)' : 'Node’u Sil (Del)'}
       </button>
     </div>
   )

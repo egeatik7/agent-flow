@@ -1,31 +1,19 @@
 import {
   NODE_SPECS,
   baseName,
+  fileVars,
   itemVars,
   listItems,
+  loopKeys,
   portLabel,
   renderTemplate,
   type AgentGraph,
   type AgentNode,
+  type ItemStatus,
   type LogLevel,
   type StepStatus,
 } from './graph-types'
-import { loopDoneEdge, loopTail } from './loop-graph'
-
-type RunState = {
-  loopCounters: Map<string, number>
-  listIndex: Map<string, number>
-  vars: Record<string, string>
-}
-
-function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
-  return {
-    ...node,
-    prompt: renderTemplate(node.prompt, vars),
-    text: renderTemplate(node.text, vars),
-    keys: renderTemplate(node.keys, vars),
-  }
-}
+import { firstMember, ownerOf } from './groups'
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -38,8 +26,15 @@ export type Executor = {
   type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
   key: (node: AgentNode, ahead?: StepAhead) => Promise<void>
   exists: (text: string, node: AgentNode) => Promise<boolean>
-  /** Called when a list loop moves to another item, so the index can be persisted for resuming. */
-  loopProgress?: (id: string, index: number) => void
+  /** İnisiyatif: reach the goal in a few actions. */
+  initiative?: (node: AgentNode, stepNo: number, ahead?: StepAhead, vars?: Record<string, string>) => Promise<boolean>
+  openBrowser?: (node: AgentNode) => Promise<void>
+  /** Returns the finished file, or null on timeout. */
+  waitFile?: (node: AgentNode, stepNo: number) => Promise<string | null>
+  /** Returns the final path. */
+  moveFile?: (from: string, to: string, node: AgentNode) => Promise<string>
+  /** Persist a change to a node (loop progress, results, memory) in the editor. */
+  patchNode?: (id: string, patch: Partial<AgentNode>) => void
 }
 
 export class StoppedError extends Error {
@@ -47,6 +42,12 @@ export class StoppedError extends Error {
     super('Kullanıcı tarafından durduruldu.')
   }
 }
+
+/** A step ended on a failure port that leads nowhere (zaman aşımı, olmadı). */
+export class StepFailedError extends Error {}
+
+class EndFlow extends Error {}
+class StepLimitError extends Error {}
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
   const end = Date.now() + ms
@@ -58,10 +59,26 @@ export async function interruptibleSleep(ms: number, shouldStop: () => boolean) 
 
 export function findEntry(graph: AgentGraph, startId?: string): AgentNode | undefined {
   if (startId) return graph.nodes.find((n) => n.id === startId)
-  return (
-    graph.nodes.find((n) => n.kind === 'start') ??
-    graph.nodes.find((n) => !graph.edges.some((e) => e.to === n.id))
-  )
+  return graph.nodes.find((n) => n.kind === 'start') ?? graph.nodes.find((n) => !graph.edges.some((e) => e.to === n.id))
+}
+
+function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
+  return {
+    ...node,
+    prompt: renderTemplate(node.prompt, vars),
+    text: renderTemplate(node.text, vars),
+    keys: renderTemplate(node.keys, vars),
+    url: renderTemplate(node.url, vars),
+    folder: node.kind === 'loop' ? node.folder : renderTemplate(node.folder, vars),
+    pattern: renderTemplate(node.pattern, vars),
+    source: renderTemplate(node.source, vars),
+  }
+}
+
+const FAIL_PORTS = new Set(['timeout', 'fail'])
+
+function isFatal(e: unknown) {
+  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError
 }
 
 export async function runGraph(
@@ -70,240 +87,319 @@ export async function runGraph(
   opts: { maxSteps: number; stepDelayMs: number; startId?: string }
 ): Promise<void> {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
-  let current = findEntry(graph, opts.startId)
-  if (!current) throw new Error('Başlangıç node’u bulunamadı.')
+  const entry = findEntry(graph, opts.startId)
+  if (!entry) throw new Error('Başlangıç node’u bulunamadı.')
 
-  const state: RunState = { loopCounters: new Map(), listIndex: new Map(), vars: { sira: '1' } }
-  for (const n of graph.nodes) {
-    const items = n.kind === 'loop' ? listItems(n) : []
-    if (!items.length) continue
-    const idx = (n.loopIndex ?? 0) >= 0 && (n.loopIndex ?? 0) < items.length ? n.loopIndex ?? 0 : 0
-    state.listIndex.set(n.id, idx)
-    if (Object.keys(state.vars).length <= 1) {
-      state.vars = itemVars(items[idx], idx, items.length)
-      ex.log(
-        'info',
-        idx > 0
-          ? `“${n.title}” kaldığı yerden devam ediyor: ${idx + 1}/${items.length} (${baseName(items[idx])})`
-          : `“${n.title}”: ${items.length} öğe, ilki ${baseName(items[0])}`
-      )
-    }
-  }
+  let vars: Record<string, string> = { sira: '1' }
   let steps = 0
+  const warnedLeave = new Set<string>()
 
-  while (current) {
-    const node: AgentNode = current
-    if (ex.shouldStop()) throw new StoppedError()
-    if (steps >= opts.maxSteps) {
-      throw new Error(
-        `En fazla ${opts.maxSteps} adım çalıştırıldı ve durduruldu. Sonsuz döngü olabilir; Ayarlar’dan “Maks. adım” değerini artırabilirsin.`
-      )
-    }
-    steps++
-    ex.step(node.id, 'running')
-
-    let port = 'next'
-    try {
-      const live = node.kind === 'loop' ? node : renderNode(node, state.vars)
-      port = await execNode(live, ex, state, steps, opts.stepDelayMs, peekAhead(graph, byId, live, state.vars))
-    } catch (e) {
-      ex.step(node.id, 'error')
-      throw e
-    }
-    ex.step(node.id, 'done')
-
-    if (node.kind === 'end') {
-      ex.log('success', `“${node.title}” ile akış bitti (${steps} adım).`)
-      return
-    }
-
-    if (node.kind === 'loop' && loopTail(graph, node.id) === node.id) {
-      if (loopStillGoing(node, state)) {
-        advanceLoop(node, state, ex)
-        port = 'loop'
-      } else {
-        closeLoop(node, state, ex, node.title)
-        port = 'done'
-      }
-    }
-
-    const left = leaveFinishedLoop(graph, byId, node, port, state, ex)
-    if (left === 'stop') break
-    if (left) {
-      current = left
-      continue
-    }
-
-    if (NODE_SPECS[node.kind].outputs.length === 0) break
-
-    const edge = edgeFrom(graph, node, port)
-    if (!edge) {
-      ex.log(
-        'info',
-        `“${node.title}” node’unun “${portLabel(node.kind, port)}” çıkışı bağlı değil, akış burada bitti.`
-      )
-      break
-    }
-    current = byId.get(edge.to)
+  const patch = (id: string, p: Partial<AgentNode>) => {
+    const n = byId.get(id)
+    if (n) Object.assign(n, p)
+    ex.patchNode?.(id, p)
   }
-  ex.log('success', `Akış tamamlandı (${steps} adım).`)
-}
 
-function edgeFrom(graph: AgentGraph, node: AgentNode, port: string) {
-  if (node.kind === 'loop' && port === 'done') return loopDoneEdge(graph, node.id)
-  return graph.edges.find((e) => e.from === node.id && e.fromPort === port)
-}
-
-/** True while the item just finished is not the last one. The index is the item in progress. */
-function loopStillGoing(node: AgentNode, state: RunState): boolean {
-  const items = listItems(node)
-  if (items.length) {
-    const cur = state.listIndex.get(node.id) ?? 0
-    return cur + 1 < items.length
-  }
-  const total = Math.max(1, node.count ?? 1)
-  return (state.loopCounters.get(node.id) ?? 0) + 1 < total
-}
-
-/** One full lap just finished and another item remains. Move the index forward once. */
-function advanceLoop(node: AgentNode, state: RunState, ex: Executor) {
-  const items = listItems(node)
-  if (items.length) {
-    const cur = state.listIndex.get(node.id) ?? 0
-    const next = cur + 1
-    ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
-    state.listIndex.set(node.id, next)
-    state.vars = itemVars(items[next], next, items.length)
-    ex.loopProgress?.(node.id, next)
-    ex.log('info', `Sıradaki öğe ${next + 1}/${items.length}: ${baseName(items[next])}`)
-    return
-  }
-  const total = Math.max(1, node.count ?? 1)
-  const done = (state.loopCounters.get(node.id) ?? 0) + 1
-  state.loopCounters.set(node.id, done)
-  state.vars = { ...state.vars, sira: String(done + 1) }
-  ex.log('info', `Döngü “${node.title}”: ${done}/${total} bitti, sıradaki ${done + 1}/${total}`)
-}
-
-function closeLoop(node: AgentNode, state: RunState, ex: Executor, fromTitle: string) {
-  const items = listItems(node)
-  if (items.length) {
-    const cur = state.listIndex.get(node.id) ?? 0
-    ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
-    state.listIndex.set(node.id, 0)
-    state.vars = itemVars(items[0], 0, items.length)
-    ex.loopProgress?.(node.id, 0)
-    ex.log('success', `Döngü “${node.title}”: listedeki ${items.length} öğenin hepsi bitti. Çıkış “${fromTitle}” node’undan.`)
-    return
-  }
-  state.loopCounters.delete(node.id)
-  ex.log('info', `Döngü “${node.title}” bitti. Çıkış “${fromTitle}” node’undan.`)
-}
-
-/**
- * The last node of the group is about to enter the loop card, and this pass was the final one.
- * Leave from that node’s “bitti” edge instead of finishing on the loop card.
- */
-function leaveFinishedLoop(
-  graph: AgentGraph,
-  byId: Map<string, AgentNode>,
-  node: AgentNode,
-  port: string,
-  state: RunState,
-  ex: Executor
-): AgentNode | 'stop' | null {
-  const hopEdge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
-  const dest = hopEdge ? byId.get(hopEdge.to) : undefined
-  if (!dest || dest.kind !== 'loop') return null
-  if (loopTail(graph, dest.id) !== node.id) return null
-  if (loopStillGoing(dest, state)) {
-    advanceLoop(dest, state, ex)
+  /** The node to run when an edge points at `id` from inside `scope`: itself, the box in scope that holds it, or null if it lies outside. */
+  const enterable = (id: string, scope: AgentNode | null): AgentNode | null => {
+    let cur = byId.get(id)
+    const seen = new Set<string>()
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      const owner = ownerOf(graph, cur.id)
+      if ((owner?.id ?? null) === (scope?.id ?? null)) return cur
+      if (!owner) return null
+      cur = owner
+    }
     return null
   }
-  closeLoop(dest, state, ex, node.title)
-  const exit = loopDoneEdge(graph, dest.id)
-  if (!exit) {
-    ex.log('info', `“${node.title}” döngünün son adımı. Turlar bitti, “bitti” çıkışı bağlı değil.`)
-    return 'stop'
+
+  const lapStart = (loop: AgentNode) => firstMember(graph, loop)
+
+  const primaryPort = (n: AgentNode) =>
+    n.kind === 'waitFor' || n.kind === 'waitFile' ? 'found' : n.kind === 'condition' ? 'true' : n.kind === 'loop' ? 'done' : 'next'
+
+  /** Where the flow goes after `node` if all goes well, as the executor should expect it. */
+  const nextAfter = (node: AgentNode, scope: AgentNode | null): AgentNode | undefined => {
+    const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === primaryPort(node))
+    let n = edge ? enterable(edge.to, scope) ?? undefined : undefined
+    if (!n && scope) n = lapStart(scope)
+    let guard = 0
+    while (n?.kind === 'loop' && guard++ < 6) n = lapStart(n) ?? n
+    return n
   }
-  return byId.get(exit.to) ?? 'stop'
-}
 
-function hop(graph: AgentGraph, byId: Map<string, AgentNode>, from: AgentNode, port: string, vars: Record<string, string>) {
-  const edge = graph.edges.find((e) => e.from === from.id && e.fromPort === port)
-  const raw = edge ? byId.get(edge.to) : undefined
-  return raw ? renderNode(raw, vars) : undefined
-}
+  const peekAhead = (node: AgentNode, scope: AgentNode | null): StepAhead => {
+    const next = nextAfter(node, scope)
+    if (!next) return {}
+    const nextScope = ownerOf(graph, next.id) ?? null
+    const then = nextAfter(next, nextScope)
+    return { next: renderNode(next, vars), then: then ? renderNode(then, vars) : undefined }
+  }
 
-function peekAhead(graph: AgentGraph, byId: Map<string, AgentNode>, node: AgentNode, vars: Record<string, string>): StepAhead {
-  const next = hop(graph, byId, node, 'next', vars)
-  if (!next) return {}
-  const port = next.kind === 'loop' ? 'loop' : next.kind === 'waitFor' ? 'found' : next.kind === 'condition' ? 'true' : 'next'
-  return { next, then: hop(graph, byId, next, port, vars) }
-}
+  const settle = () => interruptibleSleep(opts.stepDelayMs, ex.shouldStop)
 
-async function execNode(
-  node: AgentNode,
-  ex: Executor,
-  state: RunState,
-  stepNo: number,
-  stepDelayMs: number,
-  ahead: StepAhead
-): Promise<string> {
-  const settle = () => interruptibleSleep(stepDelayMs, ex.shouldStop)
-  switch (node.kind) {
-    case 'start':
-      ex.log('info', 'Akış başladı.')
-      return 'next'
-    case 'click':
-      ex.log('info', `[${stepNo}] Tıkla: ${node.prompt || node.locator?.name || node.title}`)
-      await ex.click(node, stepNo, ahead)
-      await settle()
-      return 'next'
-    case 'type':
-      ex.log('info', `[${stepNo}] Yaz: “${node.text ?? ''}”`)
-      await ex.type(node, stepNo, ahead)
-      await settle()
-      return 'next'
-    case 'key':
-      ex.log('info', `[${stepNo}] Tuş: ${node.keys}`)
-      await ex.key(node, ahead)
-      await settle()
-      return 'next'
-    case 'wait': {
-      const ms = Math.max(0, node.ms ?? 0)
-      ex.log('info', `[${stepNo}] Zamanlayıcı: ${(ms / 1000).toLocaleString('tr-TR')} sn`)
-      await interruptibleSleep(ms, ex.shouldStop)
-      return 'next'
-    }
-    case 'waitFor': {
-      const text = (node.text ?? '').trim()
-      if (!text) throw new Error(`“${node.title}”: beklenecek öğe metni boş.`)
-      const timeout = Math.max(500, node.timeoutMs ?? 15000)
-      const until = Date.now() + timeout
-      ex.log('info', `[${stepNo}] “${text}” bekleniyor…`)
-      while (Date.now() < until) {
-        if (await ex.exists(text, node)) {
-          ex.log('info', `“${text}” bulundu.`)
-          return 'found'
-        }
-        await interruptibleSleep(700, ex.shouldStop)
+  const execStep = async (node: AgentNode, live: AgentNode, stepNo: number, ahead: StepAhead): Promise<string> => {
+    switch (node.kind) {
+      case 'start':
+        ex.log('info', 'Akış başladı.')
+        return 'next'
+      case 'click':
+        ex.log('info', `[${stepNo}] Tıkla: ${live.prompt || live.locator?.name || live.title}`)
+        await ex.click(live, stepNo, ahead)
+        await settle()
+        return 'next'
+      case 'type':
+        ex.log('info', `[${stepNo}] Yaz: “${live.text ?? ''}”`)
+        await ex.type(live, stepNo, ahead)
+        await settle()
+        return 'next'
+      case 'key':
+        ex.log('info', `[${stepNo}] Tuş: ${live.keys}`)
+        await ex.key(live, ahead)
+        await settle()
+        return 'next'
+      case 'wait': {
+        const ms = Math.max(0, live.ms ?? 0)
+        ex.log('info', `[${stepNo}] Zamanlayıcı: ${(ms / 1000).toLocaleString('tr-TR')} sn`)
+        await interruptibleSleep(ms, ex.shouldStop)
+        return 'next'
       }
-      ex.log('warn', `“${text}” ${Math.round(timeout / 1000)} sn içinde görünmedi.`)
-      return 'timeout'
+      case 'waitFor': {
+        const text = (live.text ?? '').trim()
+        if (!text) throw new Error(`“${live.title}”: beklenecek öğe metni boş.`)
+        const timeout = Math.max(500, live.timeoutMs ?? 15000)
+        const until = Date.now() + timeout
+        ex.log('info', `[${stepNo}] “${text}” bekleniyor…`)
+        while (Date.now() < until) {
+          if (await ex.exists(text, live)) {
+            ex.log('info', `“${text}” bulundu.`)
+            return 'found'
+          }
+          await interruptibleSleep(700, ex.shouldStop)
+        }
+        ex.log('warn', `“${text}” ${Math.round(timeout / 1000)} sn içinde görünmedi.`)
+        return 'timeout'
+      }
+      case 'condition': {
+        const text = (live.text ?? '').trim()
+        if (!text) throw new Error(`“${live.title}”: koşul metni boş.`)
+        const found = await ex.exists(text, live)
+        ex.log('info', `[${stepNo}] Koşul “${text}”: ${found ? 'var' : 'yok'}`)
+        return found ? 'true' : 'false'
+      }
+      case 'ai': {
+        if (!live.prompt?.trim()) throw new Error(`“${live.title}”: İnisiyatif için hedefi yaz.`)
+        if (!ex.initiative) throw new Error('İnisiyatif bu ortamda çalışmıyor.')
+        ex.log('info', `[${stepNo}] İnisiyatif: ${live.prompt.trim()}`)
+        const ok = await ex.initiative(live, stepNo, ahead, vars)
+        await settle()
+        return ok ? 'next' : 'fail'
+      }
+      case 'browser':
+        if (!ex.openBrowser) throw new Error('Tarayıcı modu bu ortamda çalışmıyor.')
+        ex.log('info', `[${stepNo}] Tarayıcı: ${live.url || '(boş sayfa)'}`)
+        await ex.openBrowser(live)
+        await settle()
+        return 'next'
+      case 'waitFile': {
+        if (!ex.waitFile) throw new Error('Dosyayı Bekle bu ortamda çalışmıyor.')
+        const file = await ex.waitFile(live, stepNo)
+        if (!file) return 'timeout'
+        vars = { ...vars, ...fileVars(file) }
+        return 'found'
+      }
+      case 'moveFile': {
+        if (!ex.moveFile) throw new Error('Dosyayı Taşı bu ortamda çalışmıyor.')
+        const from = (live.source?.trim() || renderTemplate('{{dosya}}', vars) || '').trim()
+        const to = (live.text ?? '').trim()
+        if (!from || from.includes('{{')) throw new Error(`“${live.title}”: taşınacak dosya yok. Önce Dosyayı Bekle çalışmalı.`)
+        if (!to) throw new Error(`“${live.title}”: hedef yolu boş.`)
+        const final = await ex.moveFile(from, to, live)
+        vars = { ...vars, ...fileVars(final) }
+        return 'next'
+      }
+      case 'end':
+        return 'end'
+      case 'loop':
+        return 'done'
     }
-    case 'condition': {
-      const text = (node.text ?? '').trim()
-      if (!text) throw new Error(`“${node.title}”: koşul metni boş.`)
-      const found = await ex.exists(text, node)
-      ex.log('info', `[${stepNo}] Koşul “${text}”: ${found ? 'var' : 'yok'}`)
-      return found ? 'true' : 'false'
-    }
-    case 'loop':
-      // The card only sends the flow back along “tekrar”. The item number moves
-      // when the lap actually finishes, at the last node of the group.
-      return 'loop'
-    case 'end':
-      return 'end'
   }
+
+  /** Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes. */
+  const runChain = async (start: AgentNode, scope: AgentNode | null, stopAt?: Set<string>): Promise<void> => {
+    let cur: AgentNode | null = start
+    while (cur) {
+      const node: AgentNode = cur
+      if (stopAt?.has(node.id)) return
+      if (ex.shouldStop()) throw new StoppedError()
+
+      let port: string
+      if (node.kind === 'loop') {
+        port = await runLoop(node, scope)
+      } else {
+        if (steps >= opts.maxSteps) {
+          throw new StepLimitError(
+            `En fazla ${opts.maxSteps} adım çalıştırıldı ve durduruldu. Sonsuz döngü olabilir; Ayarlar’dan “Maks. adım” değerini artırabilirsin.`
+          )
+        }
+        steps++
+        ex.step(node.id, 'running')
+        try {
+          const live = renderNode(node, vars)
+          port = await execStep(node, live, steps, peekAhead(node, scope))
+        } catch (e) {
+          ex.step(node.id, 'error')
+          throw e
+        }
+        ex.step(node.id, 'done')
+        if (port === 'end') {
+          ex.log('success', `“${node.title}” ile akış bitti (${steps} adım).`)
+          throw new EndFlow()
+        }
+      }
+
+      if (NODE_SPECS[node.kind].outputs.length === 0) return
+      const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
+      if (!edge) {
+        if (FAIL_PORTS.has(port)) {
+          throw new StepFailedError(`“${node.title}”: ${portLabel(node.kind, port)}. Bu çıkış bir yere bağlı değil.`)
+        }
+        if (!scope && !stopAt) ex.log('info', `“${node.title}” node’unun “${portLabel(node.kind, port)}” çıkışı bağlı değil, akış burada bitti.`)
+        return
+      }
+      const nxt = enterable(edge.to, scope)
+      if (!nxt) {
+        if (scope && !warnedLeave.has(edge.id)) {
+          warnedLeave.add(edge.id)
+          ex.log('info', `“${node.title}” kutunun dışına bağlı. Tur burada biter; kutudan çıkış “bitti” noktasındadır.`)
+        }
+        return
+      }
+      cur = nxt
+    }
+  }
+
+  const runRecovery = async (loop: AgentNode, scope: AgentNode | null) => {
+    const edge = graph.edges.find((e) => e.from === loop.id && e.fromPort === 'error')
+    if (!edge) return
+    const start = enterable(edge.to, scope)
+    if (!start || start.id === loop.id) return
+    ex.log('info', `Kurtarma zinciri çalışıyor (“${loop.title}” → hata olursa).`)
+    try {
+      await runChain(start, scope, new Set([loop.id]))
+    } catch (e) {
+      if (isFatal(e)) throw e
+      throw new Error(`Kurtarma zinciri de başarısız oldu: ${(e as Error).message}`)
+    }
+  }
+
+  /** Runs every pending item of a box. Returns the port to leave by. */
+  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
+    ex.step(loop.id, 'running')
+    const keys = loopKeys(loop)
+    const isList = listItems(loop).length > 0
+    let results: Record<string, ItemStatus> = { ...(loop.results ?? {}) }
+    for (const k of Object.keys(results)) if (!keys.includes(k)) delete results[k]
+    let pending = keys.map((_, i) => i).filter((i) => results[keys[i]] !== 'ok')
+    if (!pending.length) {
+      results = {}
+      pending = keys.map((_, i) => i)
+    }
+    const first = lapStart(loop)
+    if (!first) {
+      ex.log('warn', `“${loop.title}” kutusu boş. İçine node sürükle.`)
+      ex.step(loop.id, 'done')
+      return 'done'
+    }
+    const failedBefore = keys.filter((k) => results[k] === 'fail').length
+    if (pending.length < keys.length) {
+      ex.log(
+        'info',
+        `“${loop.title}”: ${keys.length - pending.length} öğe önceki çalıştırmada tamamlanmış${
+          failedBefore ? `, ${failedBefore} hatalı öğe tekrar denenecek` : ''
+        }. Kalan ${pending.length} öğe çalışacak.`
+      )
+    } else {
+      ex.log('info', `“${loop.title}”: ${keys.length} ${isList ? 'öğe' : 'tur'} çalışacak.`)
+    }
+
+    const outer = vars
+    const attempts = Math.max(1, Math.floor(loop.attempts ?? 2))
+    let entry: AgentNode | undefined = startAt
+    try {
+      for (const idx of pending) {
+        const key = keys[idx]
+        const label = isList ? baseName(key) : `${idx + 1}. tur`
+        vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
+        patch(loop.id, { loopIndex: idx })
+        ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
+        let ok = false
+        for (let t = 1; t <= attempts && !ok; t++) {
+          try {
+            await runChain(entry ?? first, loop)
+            ok = true
+          } catch (e) {
+            if (isFatal(e)) throw e
+            ex.log('error', `${label}: ${(e as Error).message}`)
+            if (loop.onError === 'stop') {
+              results[key] = 'fail'
+              patch(loop.id, { results: { ...results } })
+              throw e
+            }
+            await runRecovery(loop, scope)
+            if (t < attempts) ex.log('info', `${label} baştan bir kez daha denenecek (${t + 1}/${attempts}).`)
+          }
+          entry = undefined
+        }
+        results[key] = ok ? 'ok' : 'fail'
+        patch(loop.id, { results: { ...results } })
+        if (ok) ex.log('success', `✓ ${label} tamam (${idx + 1}/${keys.length}).`)
+        else ex.log('warn', `✗ ${label} atlandı; sıradakine geçiliyor.`)
+      }
+    } finally {
+      vars = outer
+    }
+
+    const failed = keys.filter((k) => results[k] === 'fail')
+    const okCount = keys.filter((k) => results[k] === 'ok').length
+    if (failed.length) {
+      ex.log(
+        'warn',
+        `“${loop.title}” bitti: ${okCount} tamam, ${failed.length} hatalı (${failed.map((k) => (isList ? baseName(k) : k)).slice(0, 8).join(', ')}${
+          failed.length > 8 ? '…' : ''
+        }). Tekrar çalıştırınca yalnızca bunlar denenir.`
+      )
+      patch(loop.id, { results: { ...results }, loopIndex: 0 })
+    } else {
+      ex.log('success', `“${loop.title}” bitti: ${okCount} öğenin hepsi tamam.`)
+      patch(loop.id, { results: undefined, loopIndex: 0 })
+    }
+    ex.step(loop.id, failed.length ? 'error' : 'done')
+    return 'done'
+  }
+
+  /** After a box started from inside, continue by its “bitti” exit on the level above. */
+  const continueAfter = async (loop: AgentNode) => {
+    const scope = ownerOf(graph, loop.id) ?? null
+    const edge = graph.edges.find((e) => e.from === loop.id && e.fromPort === 'done')
+    const nxt = edge ? enterable(edge.to, scope) : null
+    if (nxt) await runChain(nxt, scope)
+    if (scope) await continueAfter(scope)
+  }
+
+  try {
+    const owner = ownerOf(graph, entry.id)
+    if (owner) {
+      ex.log('info', `“${entry.title}”, “${owner.title}” kutusunun içinde. Kutu bu node’dan başlıyor.`)
+      await runLoop(owner, ownerOf(graph, owner.id) ?? null, entry)
+      await continueAfter(owner)
+    } else {
+      await runChain(entry, null)
+    }
+  } catch (e) {
+    if (e instanceof EndFlow) return
+    throw e
+  }
+  ex.log('success', `Akış tamamlandı (${steps} adım).`)
 }

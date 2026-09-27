@@ -108,6 +108,8 @@ export async function chooseScreenTarget(opts: {
   stepTitle: string
   sendImage: boolean
   onImageFallback?: (msg: string) => void
+  /** What worked on earlier laps, or why this lap looks different. */
+  hint?: string
 }): Promise<ScreenChoice> {
   const { scan } = opts
   const action =
@@ -126,7 +128,7 @@ Uygun öğe yoksa id=null ver.`
 ${describeItems(scan.items)}
 
 Adım: ${opts.stepTitle}
-Talimat: ${opts.prompt}`
+Talimat: ${opts.prompt}${opts.hint ? `\n\nHafıza: ${opts.hint}\nHafıza sadece ipucudur; ekran farklıysa ekrana göre seç.` : ''}`
 
   const withImage = opts.sendImage && !!scan.image
   const build = (img: boolean): Message[] => [
@@ -325,6 +327,75 @@ export async function visionDescribe(opts: { apiKey: string; model: string; imag
     [opts.image]
   )
   return String(p.text ?? p.description ?? JSON.stringify(p)).slice(0, 300)
+}
+
+export type AgentAction = {
+  action: 'click' | 'double' | 'right' | 'type' | 'key' | 'wait' | 'done' | 'fail'
+  id: number | null
+  text: string
+  keys: string
+  seconds: number
+  enter: boolean
+  reason: string
+}
+
+/** İnisiyatif: one action at a time toward a goal, from the numbered screen list (and screenshot). */
+export async function nextAction(opts: {
+  apiKey: string
+  model: string
+  goal: string
+  stepTitle: string
+  history: string[]
+  lastLap: string[]
+  listText: string
+  image?: Img | null
+  next?: string
+}): Promise<AgentAction> {
+  const system = `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
+Ekrandaki öğeler numaralı listede verilir. Tıklama ve yazma hedefi listeden bir numara olmalı.
+Eylemler:
+- click / double / right: {"id": <numara>}
+- type: {"id": <yazılacak alanın numarası veya null = o an odaktaki alan>, "text": "...", "enter": true|false}
+- key: {"keys": "SendKeys biçimi, örn {ENTER}, {TAB}, ^a, %{F4}"}
+- wait: {"seconds": 1-10} (sayfa yükleniyorsa)
+- done: hedef ekranda gerçekleşmişse
+- fail: hedef bu ekrandan yapılamıyorsa
+Kurallar: aynı eylemi sonuç vermeden üst üste tekrarlama; emin değilsen önce wait kullan; hedef olduysa hemen done de.
+Sadece JSON: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<kısa gerekçe>"}`
+  const text = `Hedef: ${opts.goal}
+Adım adı: ${opts.stepTitle}
+${opts.next ? `Bu hedeften sonra akış şuna geçecek: ${opts.next}\n` : ''}${
+    opts.lastLap.length ? `Geçen başarılı turda şu sırayla yapıldı (ipucu, ekran farklıysa ekrana uy):\n${opts.lastLap.map((l, i) => `${i + 1}. ${l}`).join('\n')}\n` : ''
+  }Şimdiye kadar bu turda yapılanlar:
+${opts.history.length ? opts.history.map((l, i) => `${i + 1}. ${l}`).join('\n') : '(henüz yok)'}
+
+Ekrandaki öğeler:
+${opts.listText}`
+  const messages: Message[] = [
+    { role: 'system', content: system },
+    { role: 'user', content: opts.image?.data ? [{ type: 'text', text }, imagePart(opts.image)] : text },
+  ]
+  let content: string
+  try {
+    content = await chat(opts.apiKey, opts.model, messages, !!opts.image?.data)
+  } catch (e) {
+    if (!(e instanceof ImageUnsupportedError)) throw e
+    content = await chat(opts.apiKey, opts.model, [messages[0], { role: 'user', content: text }], false)
+  }
+  const p = parseJson(content)
+  const raw = String(p.action ?? '').toLowerCase()
+  const allowed = ['click', 'double', 'right', 'type', 'key', 'wait', 'done', 'fail'] as const
+  const action = (allowed as readonly string[]).includes(raw) ? (raw as AgentAction['action']) : 'wait'
+  const id = num(p.id)
+  return {
+    action,
+    id: id === null ? null : Math.round(id),
+    text: String(p.text ?? ''),
+    keys: String(p.keys ?? ''),
+    seconds: Math.min(10, Math.max(1, Math.round(Number(p.seconds) || 2))),
+    enter: p.enter === true || p.enter === 'true',
+    reason: String(p.reason ?? '').slice(0, 240),
+  }
 }
 
 export type StallPlan = {

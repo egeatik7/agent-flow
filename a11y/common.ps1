@@ -22,6 +22,7 @@ public static class XpNative {
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
   public static bool IsCloaked(IntPtr hWnd) {
     int v = 0;

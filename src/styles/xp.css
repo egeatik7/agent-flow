@@ -664,62 +664,163 @@ textarea {
 
 .loop-frame {
   position: absolute;
-  z-index: 0;
-  border: 1.5px dashed rgba(138, 75, 22, 0.55);
+  border: 1.5px dashed rgba(138, 75, 22, 0.6);
   border-radius: 8px;
   background: rgba(210, 122, 0, 0.07);
   pointer-events: none;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.loop-frame.active {
-  background: rgba(210, 122, 0, 0.12);
-  border-color: rgba(138, 75, 22, 0.85);
+.loop-frame.selected {
+  background: rgba(210, 122, 0, 0.13);
+  border-color: rgba(138, 75, 22, 0.95);
+  border-style: solid;
+}
+
+.loop-frame.drop,
+.loop-frame.drop-target {
+  background: rgba(47, 138, 47, 0.12);
+  border-color: #2f8a2f;
+  border-style: solid;
 }
 
 .loop-frame.running {
   border-style: solid;
-  border-color: rgba(22, 101, 202, 0.7);
+  border-color: rgba(22, 101, 202, 0.75);
   background: rgba(22, 101, 202, 0.06);
+}
+
+.loop-frame.failed {
+  border-color: rgba(176, 58, 58, 0.8);
 }
 
 .loop-frame-head {
   pointer-events: auto;
-  height: 24px;
-  line-height: 24px;
-  padding: 0 10px;
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 14px;
   border-radius: 7px 7px 0 0;
-  background: rgba(138, 75, 22, 0.16);
+  background: rgba(138, 75, 22, 0.18);
   color: #5a3008;
   font-weight: 700;
   font-size: 11px;
   cursor: move;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   user-select: none;
 }
 
+.loop-frame-head .frame-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loop-frame-head .frame-sub {
+  font-weight: 400;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loop-frame-head .frame-in {
+  position: absolute;
+  left: -7px;
+  top: 7px;
+}
+
 .loop-frame.running .loop-frame-head {
-  background: rgba(22, 101, 202, 0.16);
+  background: rgba(22, 101, 202, 0.18);
   color: #0a3a8a;
 }
 
-.loop-frame-exit {
+.frame-empty {
   position: absolute;
-  z-index: 5;
+  inset: 40px 12px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: rgba(90, 48, 8, 0.7);
+  font-size: 11px;
+  border: 1px dashed rgba(138, 75, 22, 0.35);
+  border-radius: 6px;
+}
+
+.frame-out {
+  position: absolute;
+  right: -9px;
   display: flex;
   align-items: center;
   gap: 4px;
-  transform: translate(-9px, -50%);
+  transform: translateY(-50%);
   pointer-events: auto;
+  flex-direction: row;
 }
 
-.loop-frame-exit .frame-port {
+.frame-out .port-label {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.frame-out .frame-port {
   position: relative;
   right: auto;
   top: auto;
   flex: none;
+}
+
+.canvas-inner.dragging .agent-node.selected {
+  opacity: 0.85;
+}
+
+.node-meta.memo {
+  color: #6b3fa0;
+}
+
+.log-line.chat {
+  color: #9fd4ff;
+}
+
+.result-list {
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid #c5c2b2;
+  background: #fff;
+  font-size: 11px;
+  margin: 4px 0 6px;
+}
+
+.result-list div {
+  display: flex;
+  gap: 6px;
+  padding: 1px 6px;
+  border-bottom: 1px solid #f0efe8;
+}
+
+.result-list .ok {
+  color: #2f7a2f;
+}
+
+.result-list .fail {
+  color: #b03a3a;
+}
+
+.result-list .pending {
+  color: #777;
+}
+
+.memo-box {
+  border: 1px solid #d6c8ea;
+  background: #faf6ff;
+  padding: 6px;
+  border-radius: 3px;
+  margin-bottom: 9px;
 }
 
 .var-chips {

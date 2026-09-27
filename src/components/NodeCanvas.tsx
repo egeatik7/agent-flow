@@ -3,8 +3,10 @@ import {
   NODE_KINDS,
   NODE_SPECS,
   NODE_W,
+  baseName,
   inputPoint,
   listItems,
+  loopKeys,
   nodeHeight,
   outputPoint,
   portLabel,
@@ -14,49 +16,31 @@ import {
   type NodeKind,
   type StepStatus,
 } from '../types'
-import { loopBody, loopTail } from '../lib/graph-ops'
+import { allMembers, ancestors, frameInput, frameOutput, frameRect, ownerOf, type Rect } from '../../electron/groups'
 
-type Frame = {
-  loop: AgentNode
-  ids: string[]
-  x: number
-  y: number
-  w: number
-  h: number
-  label: string
-  tailId: string
-  exitX: number
-  exitY: number
-}
+type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
 
-const FRAME_PAD = 22
-const FRAME_HEAD = 24
-const FRAME_BOTTOM = 128
-
-function computeFrames(graph: AgentGraph): Frame[] {
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[] {
   const frames: Frame[] = []
   for (const loop of graph.nodes) {
     if (loop.kind !== 'loop') continue
-    const ids = loopBody(graph, loop.id)
-    if (!ids.length) continue
-    const nodes = ids.map((id) => byId.get(id)!).filter(Boolean)
-    const x1 = Math.min(...nodes.map((n) => n.x)) - FRAME_PAD
-    const y1 = Math.min(...nodes.map((n) => n.y)) - FRAME_PAD - FRAME_HEAD
-    const x2 = Math.max(...nodes.map((n) => n.x + NODE_W)) + FRAME_PAD
-    const y2 = Math.max(...nodes.map((n) => n.y + nodeHeight(n.kind))) + FRAME_BOTTOM
-    const items = listItems(loop)
-    const idx = items.length ? Math.min(Math.max(0, loop.loopIndex ?? 0), items.length - 1) : 0
-    const label = items.length
-      ? `${loop.title} · ${items.length} öğe · sıradaki ${idx + 1}/${items.length}`
-      : `${loop.title} · ${loop.count ?? 1} kez`
-    const tailId = loopTail(graph, loop.id)
-    const tail = byId.get(tailId)
-    const exitX = tail ? tail.x + NODE_W : x2
-    const exitY = tail ? tail.y + nodeHeight(tail.kind) / 2 : (y1 + y2) / 2
-    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label, tailId, exitX, exitY })
+    const rect = override?.get(loop.id) ?? frameRect(graph, loop)
+    const keys = loopKeys(loop)
+    const isList = listItems(loop).length > 0
+    const ok = keys.filter((k) => loop.results?.[k] === 'ok').length
+    const bad = keys.filter((k) => loop.results?.[k] === 'fail').length
+    const cur = Math.min(Math.max(0, loop.loopIndex ?? 0), keys.length - 1)
+    const label = `${loop.title} · ${isList ? `${keys.length} öğe` : `${keys.length} kez`}`
+    const sub = [
+      ok ? `${ok} tamam` : '',
+      bad ? `${bad} hatalı` : '',
+      isList && (ok || bad) ? `sıradaki: ${baseName(keys[cur] ?? '')}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    frames.push({ loop, rect, depth: ancestors(graph, loop.id).length, label, sub })
   }
-  return frames.sort((a, b) => b.w * b.h - a.w * a.h)
+  return frames.sort((a, b) => a.depth - b.depth)
 }
 
 type Props = {
@@ -68,8 +52,9 @@ type Props = {
   running: boolean
   onSelectNode: (id: string | null, additive?: boolean) => void
   onSelectEdge: (id: string | null) => void
-  onMoveNode: (id: string, x: number, y: number) => void
   onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void
+  onSetMembership: (ids: string[], loopId: string | null) => void
+  onWrap: (ids: string[]) => void
   onConnect: (from: string, port: string, to: string) => void
   onAddAfter: (fromId: string, port: string, kind: NodeKind) => void
   onAddAt: (kind: NodeKind, x: number, y: number) => void
@@ -86,14 +71,17 @@ type Menu =
   | { mode: 'after'; x: number; y: number; fromId: string; port: string }
   | { mode: 'node'; x: number; y: number; nodeId: string }
 
+type Drag = { ids: string[]; frozen: Map<string, Rect>; over: string | null; skip: Set<string> }
+
 const PORT_COLORS: Record<string, string> = {
   next: '#0a246a',
-  loop: '#d27a00',
   done: '#0a246a',
+  error: '#b03a3a',
   true: '#2f8a2f',
   found: '#2f8a2f',
   false: '#b03a3a',
   timeout: '#b03a3a',
+  fail: '#b03a3a',
 }
 
 const portColor = (p: string) => PORT_COLORS[p] ?? '#0a246a'
@@ -123,6 +111,10 @@ type View = { x: number; y: number; z: number }
 const MIN_Z = 0.25
 const MAX_Z = 2.5
 
+function inside(r: Rect, x: number, y: number) {
+  return x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h
+}
+
 export default function NodeCanvas(p: Props) {
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -134,12 +126,17 @@ export default function NodeCanvas(p: Props) {
   const viewRef = useRef(view)
   viewRef.current = view
   const [panning, setPanning] = useState(false)
+  const [drag, setDrag] = useState<Drag | null>(null)
+  const dragRef = useRef<Drag | null>(null)
   const graphRef = useRef(p.graph)
   graphRef.current = p.graph
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
   const hasStart = p.graph.nodes.some((n) => n.kind === 'start')
   const addableKinds = NODE_KINDS.filter((k) => k !== 'start' || !hasStart)
+
+  const frames = useMemo(() => computeFrames(p.graph, drag?.frozen), [p.graph, drag?.frozen])
+  const frameById = useMemo(() => new Map(frames.map((f) => [f.loop.id, f])), [frames])
 
   const size = useMemo(() => {
     let w = 2400
@@ -148,8 +145,12 @@ export default function NodeCanvas(p: Props) {
       w = Math.max(w, n.x + NODE_W + 600)
       h = Math.max(h, n.y + nodeHeight(n.kind) + 500)
     }
+    for (const f of frames) {
+      w = Math.max(w, f.rect.x + f.rect.w + 400)
+      h = Math.max(h, f.rect.y + f.rect.h + 400)
+    }
     return { w, h }
-  }, [p.graph.nodes])
+  }, [p.graph.nodes, frames])
 
   const toCanvas = (clientX: number, clientY: number) => {
     const r = scrollRef.current!.getBoundingClientRect()
@@ -177,7 +178,7 @@ export default function NodeCanvas(p: Props) {
   const reveal = (id: string) => {
     const n = graphRef.current.nodes.find((x) => x.id === id)
     const el = scrollRef.current
-    if (!n || !el) return
+    if (!n || !el || n.kind === 'loop') return
     const v = viewRef.current
     const left = v.x + n.x * v.z
     const top = v.y + n.y * v.z
@@ -237,11 +238,10 @@ export default function NodeCanvas(p: Props) {
 
   useEffect(() => {
     if (p.selectedNodeId) reveal(p.selectedNodeId)
-    // reveal reads refs; only jump when the selection changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.selectedNodeId])
 
-  const runningId = Object.keys(p.stepStatus).find((id) => p.stepStatus[id] === 'running')
+  const runningId = Object.keys(p.stepStatus).find((id) => p.stepStatus[id] === 'running' && byId.get(id)?.kind !== 'loop')
   useEffect(() => {
     if (runningId) reveal(runningId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -277,6 +277,75 @@ export default function NodeCanvas(p: Props) {
     return () => window.removeEventListener('keydown', key)
   }, [])
 
+  /**
+   * Drags nodes (and boxes with everything inside them). Box frames are frozen while dragging,
+   * so a node can be pulled out of its box; on release it joins the box under it.
+   */
+  const beginDrag = (e: React.MouseEvent, ids: string[], lead: string) => {
+    const g = graphRef.current
+    const moving = new Set<string>()
+    for (const id of ids) {
+      moving.add(id)
+      for (const m of allMembers(g, id)) moving.add(m)
+    }
+    const without: AgentGraph = {
+      ...g,
+      nodes: g.nodes.map((n) => (n.kind === 'loop' && n.members ? { ...n, members: n.members.filter((m) => !ids.includes(m)) } : n)),
+    }
+    const frozen = new Map<string, Rect>()
+    for (const n of g.nodes) if (n.kind === 'loop' && !moving.has(n.id)) frozen.set(n.id, frameRect(without, n))
+    const skip = new Set(moving)
+    const leadNode = byId.get(lead)
+    const leadRect = leadNode?.kind === 'loop' ? frameRect(g, leadNode) : { x: leadNode?.x ?? 0, y: leadNode?.y ?? 0, w: NODE_W, h: 40 }
+    const start = toCanvas(e.clientX, e.clientY)
+    const orig = Object.fromEntries([...moving].map((id) => [id, { x: byId.get(id)?.x ?? 0, y: byId.get(id)?.y ?? 0 }]))
+    const d0: Drag = { ids, frozen, over: ownerOf(g, lead)?.id ?? null, skip }
+    dragRef.current = d0
+    let moved = false
+
+    const move = (ev: MouseEvent) => {
+      autoScroll(ev.clientX, ev.clientY)
+      const c = toCanvas(ev.clientX, ev.clientY)
+      const dx = Math.round((c.x - start.x) / 8) * 8
+      const dy = Math.round((c.y - start.y) / 8) * 8
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return
+      if (!moved) {
+        moved = true
+        setDrag(d0)
+      }
+      const next: Record<string, { x: number; y: number }> = {}
+      for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
+      p.onMoveNodes(next)
+      const px = leadRect.x + dx + Math.min(leadRect.w, NODE_W) / 2
+      const py = leadRect.y + dy + 16
+      let over: string | null = null
+      let area = Infinity
+      for (const [id, r] of frozen) {
+        if (skip.has(id) || !inside(r, px, py)) continue
+        if (r.w * r.h < area) {
+          area = r.w * r.h
+          over = id
+        }
+      }
+      if (over !== dragRef.current?.over) {
+        dragRef.current = { ...d0, over }
+        setDrag(dragRef.current)
+      }
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      const d = dragRef.current
+      dragRef.current = null
+      setDrag(null)
+      if (!moved || !d) return
+      const changed = ids.filter((id) => (ownerOf(graphRef.current, id)?.id ?? null) !== d.over)
+      if (changed.length) p.onSetMembership(changed, d.over)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
   const startNodeDrag = (e: React.MouseEvent, n: AgentNode) => {
     if (e.button !== 0) return
     const l = linkRef.current
@@ -297,59 +366,7 @@ export default function NodeCanvas(p: Props) {
     setMenu(null)
     const group = p.selectedIds.includes(n.id) ? p.selectedIds : [n.id]
     if (!p.selectedIds.includes(n.id)) p.onSelectNode(n.id)
-    const start = toCanvas(e.clientX, e.clientY)
-    const orig = Object.fromEntries(
-      group.map((id) => {
-        const node = byId.get(id)
-        return [id, { x: node?.x ?? 0, y: node?.y ?? 0 }]
-      })
-    )
-    const move = (ev: MouseEvent) => {
-      autoScroll(ev.clientX, ev.clientY)
-      const c = toCanvas(ev.clientX, ev.clientY)
-      const dx = Math.round((c.x - start.x) / 8) * 8
-      const dy = Math.round((c.y - start.y) / 8) * 8
-      const next: Record<string, { x: number; y: number }> = {}
-      for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
-      p.onMoveNodes(next)
-    }
-    const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
-
-  const frames = useMemo(() => computeFrames(p.graph), [p.graph])
-
-  const startFrameDrag = (e: React.MouseEvent, f: Frame) => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    setMenu(null)
-    p.onSelectNode(f.loop.id)
-    const start = toCanvas(e.clientX, e.clientY)
-    const orig = Object.fromEntries(
-      f.ids.map((id) => {
-        const n = byId.get(id)!
-        return [id, { x: n.x, y: n.y }]
-      })
-    )
-    const move = (ev: MouseEvent) => {
-      autoScroll(ev.clientX, ev.clientY)
-      const c = toCanvas(ev.clientX, ev.clientY)
-      const dx = Math.round((c.x - start.x) / 8) * 8
-      const dy = Math.round((c.y - start.y) / 8) * 8
-      const next: Record<string, { x: number; y: number }> = {}
-      for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
-      p.onMoveNodes(next)
-    }
-    const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    beginDrag(e, group, n.id)
   }
 
   const startLink = (e: React.MouseEvent, n: AgentNode, port: string) => {
@@ -368,12 +385,23 @@ export default function NodeCanvas(p: Props) {
   }
 
   const edgeSource = (node: AgentNode, port: string) => {
-    if (port === 'done') {
-      const f = frames.find((fr) => fr.loop.id === node.id || fr.tailId === node.id || fr.ids.includes(node.id))
-      if (f) return { x: f.exitX - 7, y: f.exitY }
-      return { x: node.x + NODE_W - 7, y: node.y + nodeHeight(node.kind) / 2 }
+    if (node.kind === 'loop') {
+      const f = frameById.get(node.id)
+      if (f) {
+        const idx = port === 'error' ? 1 : 0
+        return { x: f.rect.x + f.rect.w, y: f.rect.y + 28 + 18 + idx * 28 }
+      }
+      return frameOutput(p.graph, node, port)
     }
     return outputPoint(node, port)
+  }
+
+  const edgeTarget = (node: AgentNode) => {
+    if (node.kind === 'loop') {
+      const f = frameById.get(node.id)
+      return f ? { x: f.rect.x, y: f.rect.y + 14 } : frameInput(p.graph, node)
+    }
+    return inputPoint(node)
   }
 
   const linkFrom = linking ? byId.get(linking.from) : undefined
@@ -390,14 +418,18 @@ export default function NodeCanvas(p: Props) {
     setViewNow({ x: cx - canvasX, y: cy - canvasY, z: 1 })
   }
 
+  const menuNode = menu?.mode === 'node' ? byId.get(menu.nodeId) : undefined
+  const menuOwner = menuNode ? ownerOf(p.graph, menuNode.id) : undefined
+  const multi = p.selectedIds.length > 1
+
   return (
-      <div
-        ref={scrollRef}
-        className={`canvas-scroll${panning ? ' panning' : ''}`}
-        style={{
-          backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
-          backgroundPosition: `${view.x}px ${view.y}px`,
-        }}
+    <div
+      ref={scrollRef}
+      className={`canvas-scroll${panning ? ' panning' : ''}`}
+      style={{
+        backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
+        backgroundPosition: `${view.x}px ${view.y}px`,
+      }}
       onMouseDown={(e) => {
         if (e.button === 1) {
           e.preventDefault()
@@ -438,7 +470,7 @@ export default function NodeCanvas(p: Props) {
     >
       <div
         ref={innerRef}
-        className={`canvas-inner${linking ? ' linking' : ''}`}
+        className={`canvas-inner${linking ? ' linking' : ''}${drag ? ' dragging' : ''}`}
         style={{
           width: size.w,
           height: size.h,
@@ -451,25 +483,92 @@ export default function NodeCanvas(p: Props) {
             <br />
             sarı çıkış noktasından sürükleyip başka bir node’un üstüne bırakarak bağla.
             <br />
-            Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin. Ctrl ile birden fazla node seçip birlikte sürükleyebilirsin.
+            Tekrar edecek adımları <b>Her Öğe İçin</b> kutusuna sürükle (ya da seçip <b>Ctrl+G</b>).
             <br />
             Tekerlek yakınlaştırır, orta tuş kaydırır.
           </div>
         )}
 
-        {frames.map((f) => (
-          <div
-            key={f.loop.id}
-            className={`loop-frame${p.selectedIds.some((id) => f.ids.includes(id)) ? ' active' : ''}${
-              p.stepStatus[f.loop.id] === 'running' || f.ids.some((id) => p.stepStatus[id] === 'running') ? ' running' : ''
-            }`}
-            style={{ left: f.x, top: f.y, width: f.w, height: f.h }}
-          >
-            <div className="loop-frame-head" onMouseDown={(e) => startFrameDrag(e, f)} title="Sürükle: gruptaki tüm node’ları taşı">
-              ↻ {f.label}
+        {frames.map((f) => {
+          const st = p.stepStatus[f.loop.id]
+          const empty = !(f.loop.members ?? []).length
+          const cls = [
+            'loop-frame',
+            p.selectedIds.includes(f.loop.id) ? 'selected' : '',
+            drag?.over === f.loop.id ? 'drop' : '',
+            st === 'running' ? 'running' : '',
+            st === 'error' ? 'failed' : '',
+            hoverTarget === f.loop.id ? 'drop-target' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+          return (
+            <div key={f.loop.id} className={cls} style={{ left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth }}>
+              <div
+                className="loop-frame-head"
+                data-node-id={f.loop.id}
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return
+                  const l = linkRef.current
+                  if (l) {
+                    if (f.loop.id !== l.from) p.onConnect(l.from, l.port, f.loop.id)
+                    setLink(null)
+                    setHoverTarget(null)
+                    e.stopPropagation()
+                    return
+                  }
+                  e.stopPropagation()
+                  setMenu(null)
+                  if (e.ctrlKey || e.metaKey) {
+                    p.onSelectNode(f.loop.id, true)
+                    return
+                  }
+                  p.onSelectNode(f.loop.id)
+                  beginDrag(e, [f.loop.id], f.loop.id)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  p.onSelectNode(f.loop.id)
+                  const c = toCanvas(e.clientX, e.clientY)
+                  setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: f.loop.id })
+                }}
+                title="Sürükle: kutuyu içindekilerle taşı · Sağ tık: menü"
+              >
+                <span className="frame-in node-port in" title="Giriş: akış kutuya buradan girer" />
+                <span className="frame-title">↻ {f.label}</span>
+                {f.sub && <span className="frame-sub">{f.sub}</span>}
+                {st === 'running' && <span className="status-chip running">çalışıyor</span>}
+              </div>
+              {empty && <div className="frame-empty">Tekrar edecek node’ları buraya sürükle</div>}
+              {NODE_SPECS.loop.outputs.map((o, idx) => (
+                <div
+                  key={o.key}
+                  className={`frame-out ${o.key}`}
+                  style={{ top: 28 + 18 + idx * 28 }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <span className="port-label" style={{ color: portColor(o.key) }}>
+                    {o.label}
+                  </span>
+                  <button type="button" className="add-next" title="Buradan ileriye yeni node ekle" onClick={(e) => openAfterMenu(e, f.loop, o.key)}>
+                    +
+                  </button>
+                  <div
+                    className="node-port out frame-port"
+                    style={{ background: o.key === 'done' ? '#ffd24a' : portColor(o.key) }}
+                    title={
+                      o.key === 'done'
+                        ? 'Bütün öğeler bitince akış buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak.'
+                        : 'Bir öğe takılırsa buraya bağladığın kurtarma adımları çalışır (örn. F5, ana sayfayı bekle), sonra sıradaki öğeye geçilir.'
+                    }
+                    onMouseDown={(e) => startLink(e, f.loop, o.key)}
+                  />
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         <svg className="edge-layer" width={size.w} height={size.h}>
           <defs>
@@ -487,7 +586,7 @@ export default function NodeCanvas(p: Props) {
             const b = byId.get(e.to)
             if (!a || !b) return null
             const s = edgeSource(a, e.fromPort)
-            const t = inputPoint(b)
+            const t = edgeTarget(b)
             const { d, mx, my } = edgePath(s.x + 7, s.y, t.x - 7, t.y)
             const sel = p.selectedEdgeId === e.id
             const color = sel ? '#e05a00' : portColor(e.fromPort)
@@ -532,6 +631,7 @@ export default function NodeCanvas(p: Props) {
         </svg>
 
         {p.graph.nodes.map((n) => {
+          if (n.kind === 'loop') return null
           const spec = NODE_SPECS[n.kind]
           const st = p.stepStatus[n.id] ?? 'idle'
           const cls = [
@@ -543,17 +643,18 @@ export default function NodeCanvas(p: Props) {
           ]
             .filter(Boolean)
             .join(' ')
+          const memo = n.memory?.length ?? 0
           return (
             <div
               key={n.id}
               data-node-id={n.id}
               className={cls}
-              style={{ left: n.x, top: n.y, width: NODE_W, height: nodeHeight(n.kind) }}
+              style={{ left: n.x, top: n.y, width: NODE_W, height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length }}
               onMouseDown={(e) => startNodeDrag(e, n)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                p.onSelectNode(n.id)
+                if (!p.selectedIds.includes(n.id)) p.onSelectNode(n.id)
                 const c = toCanvas(e.clientX, e.clientY)
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
@@ -570,11 +671,19 @@ export default function NodeCanvas(p: Props) {
               </div>
               <div className="node-body">
                 <div className="node-summary">{summarize(n)}</div>
-                {n.locator && (
+                {n.locator ? (
                   <div className="node-meta" title={`${n.locator.windowTitle ?? ''} › ${n.locator.path}`}>
                     ● {n.locator.controlType}: {n.locator.name || n.locator.path}
                   </div>
-                )}
+                ) : memo ? (
+                  <div className="node-meta memo" title="Geçen turlarda bulunan hedef. Her tur yine taze aranır; hafıza sadece kararsız kalınca yardım eder.">
+                    ◆ hafıza: {memo} tur · son “{n.memory![0].text.slice(0, 22)}”
+                  </div>
+                ) : n.kind === 'ai' && n.trace?.length ? (
+                  <div className="node-meta memo" title={n.trace.join('\n')}>
+                    ◆ geçen tur {n.trace.length} eylemde oldu
+                  </div>
+                ) : null}
               </div>
               <div className="node-outputs">
                 {spec.outputs.map((o) => (
@@ -605,33 +714,6 @@ export default function NodeCanvas(p: Props) {
           )
         })}
 
-        {frames.map((f) => (
-          <div
-            key={`${f.loop.id}-exit`}
-            className="loop-frame-exit"
-            style={{ left: f.exitX, top: f.exitY }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div
-              className="node-port out frame-port"
-              style={{ background: portColor('done') }}
-              title="Turlar bitince akış grubun son node’undan buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak."
-              onMouseDown={(e) => startLink(e, byId.get(f.tailId) ?? f.loop, 'done')}
-            />
-            <span className="port-label" style={{ color: portColor('done') }}>
-              bitti
-            </span>
-            <button
-              type="button"
-              className="add-next"
-              title="Bitti çıkışından ileriye yeni node ekle"
-              onClick={(e) => openAfterMenu(e, byId.get(f.tailId) ?? f.loop, 'done')}
-            >
-              +
-            </button>
-          </div>
-        ))}
-
         {menu && (
           <div
             className="ctx-menu"
@@ -641,28 +723,45 @@ export default function NodeCanvas(p: Props) {
           >
             {menu.mode === 'node' ? (
               <>
-                <div className="ctx-title">{byId.get(menu.nodeId)?.title}</div>
-                <button type="button" onClick={() => { p.onRunFrom(menu.nodeId); setMenu(null) }}>
-                  ▶ Buradan çalıştır
-                </button>
-                {byId.get(menu.nodeId)?.kind !== 'start' && (
+                <div className="ctx-title">{multi ? `${p.selectedIds.length} node seçili` : menuNode?.title}</div>
+                {!multi && (
+                  <button type="button" onClick={() => { p.onRunFrom(menu.nodeId); setMenu(null) }}>
+                    ▶ Buradan çalıştır
+                  </button>
+                )}
+                {(multi || menuNode?.kind !== 'start') && (
+                  <button type="button" onClick={() => { p.onWrap(multi ? p.selectedIds : [menu.nodeId]); setMenu(null) }}>
+                    ↻ {multi ? 'Seçilenleri' : 'Bunu'} kutuya al (Ctrl+G)
+                  </button>
+                )}
+                {!multi && menuOwner && (
+                  <button type="button" onClick={() => { p.onSetMembership([menu.nodeId], ownerOf(p.graph, menuOwner.id)?.id ?? null); setMenu(null) }}>
+                    Kutudan çıkar (“{menuOwner.title}”)
+                  </button>
+                )}
+                {!multi && menuNode?.kind !== 'start' && (
                   <button type="button" onClick={() => { p.onDuplicate(menu.nodeId); setMenu(null) }}>
                     Kopyala
                   </button>
                 )}
-                <button type="button" onClick={() => {
-                  const n = byId.get(menu.nodeId)
-                  const port = n ? NODE_SPECS[n.kind].outputs[0]?.key : undefined
-                  if (n && port) {
-                    const c = outputPoint(n, port)
-                    setLink({ from: n.id, port, mx: c.x + 40, my: c.y, sx: -999, sy: -999, moved: false })
-                  }
+                {!multi && menuNode && (
+                  <button type="button" onClick={() => {
+                    const port = NODE_SPECS[menuNode.kind].outputs[0]?.key
+                    if (port) {
+                      const c = edgeSource(menuNode, port)
+                      setLink({ from: menuNode.id, port, mx: c.x + 40, my: c.y, sx: -999, sy: -999, moved: false })
+                    }
+                    setMenu(null)
+                  }}>
+                    Bağla… (hedefe tıkla)
+                  </button>
+                )}
+                <button type="button" className="danger" onClick={() => {
+                  if (multi) p.selectedIds.forEach((id) => p.onDeleteNode(id))
+                  else p.onDeleteNode(menu.nodeId)
                   setMenu(null)
                 }}>
-                  Bağla… (hedefe tıkla)
-                </button>
-                <button type="button" className="danger" onClick={() => { p.onDeleteNode(menu.nodeId); setMenu(null) }}>
-                  Sil
+                  {menuNode?.kind === 'loop' && !multi ? 'Kutuyu sil (içindekiler kalır)' : 'Sil'}
                 </button>
               </>
             ) : (

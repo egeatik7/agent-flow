@@ -4,7 +4,7 @@ export type ScreenItem = {
   id: number
   text: string
   type: string
-  src: 'uia' | 'ocr'
+  src: 'uia' | 'ocr' | 'dom'
   x: number
   y: number
   w: number
@@ -102,11 +102,19 @@ function toTarget(item: ScreenItem, box?: { x: number; y: number; w: number; h: 
 
 type Scored = { item: ScreenItem; score: number; box: { x: number; y: number; w: number; h: number } | null }
 
-function pickBest(scored: Scored[], anchor?: { x: number; y: number }): Scored | null {
+/** 0–1 likeness to what worked on earlier laps; only breaks ties between near-equal matches. */
+export type Prefer = (item: ScreenItem) => number
+
+function pickBest(scored: Scored[], anchor?: { x: number; y: number }, prefer?: Prefer): Scored | null {
   if (!scored.length) return null
   const top = Math.max(...scored.map((s) => s.score))
   const best = scored.filter((s) => s.score >= top - 4)
+  const like = new Map(prefer ? best.map((s) => [s, prefer(s.item)] as const) : [])
   best.sort((a, b) => {
+    if (prefer) {
+      const d = (like.get(b) ?? 0) - (like.get(a) ?? 0)
+      if (Math.abs(d) > 0.08) return d
+    }
     if (anchor) {
       const da = Math.hypot(center(a.item).cx - anchor.x, center(a.item).cy - anchor.y)
       const db = Math.hypot(center(b.item).cx - anchor.x, center(b.item).cy - anchor.y)
@@ -119,8 +127,8 @@ function pickBest(scored: Scored[], anchor?: { x: number; y: number }): Scored |
 }
 
 function typeBonus(item: ScreenItem): number {
-  if (item.src === 'uia' && CLICKABLE.has(item.type)) return 6
-  if (item.src === 'uia') return 2
+  if (item.src !== 'ocr' && CLICKABLE.has(item.type)) return item.src === 'dom' ? 8 : 6
+  if (item.src !== 'ocr') return 2
   return 0
 }
 
@@ -128,7 +136,7 @@ function typeBonus(item: ScreenItem): number {
 export function matchText(
   items: ScreenItem[],
   text: string,
-  opts: { anchor?: { x: number; y: number }; minScore?: number } = {}
+  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer } = {}
 ): Target | null {
   const q = norm(text)
   if (!q) return null
@@ -148,13 +156,18 @@ export function matchText(
     } else if (t.length >= 3 && q.includes(t) && t.length >= q.length * 0.6) score = 35
     if (score) scored.push({ item, score: score + typeBonus(item), box })
   }
-  const best = pickBest(scored, opts.anchor)
+  const best = pickBest(scored, opts.anchor, opts.prefer)
   if (!best || best.score < (opts.minScore ?? 30)) return null
   return toTarget(best.item, best.box)
 }
 
 /** Matches free-form Turkish/English prompts like "operaya tıkla" against on-screen text, tolerating suffixes. */
-export function matchPrompt(items: ScreenItem[], prompt: string, anchor?: { x: number; y: number }): Target | null {
+export function matchPrompt(
+  items: ScreenItem[],
+  prompt: string,
+  anchor?: { x: number; y: number },
+  prefer?: Prefer
+): Target | null {
   const pw = norm(prompt)
     .split(' ')
     .filter(Boolean)
@@ -211,7 +224,7 @@ export function matchPrompt(items: ScreenItem[], prompt: string, anchor?: { x: n
       }
     }
   }
-  const best = pickBest(scored, anchor)
+  const best = pickBest(scored, anchor, prefer)
   if (!best || best.score < 12) return null
   return toTarget(best.item, best.box)
 }
@@ -249,7 +262,7 @@ function wordSimilarity(q: string, w: string): number {
 export function matchFuzzy(
   items: ScreenItem[],
   text: string,
-  opts: { anchor?: { x: number; y: number }; minScore?: number } = {}
+  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer } = {}
 ): Target | null {
   const qw = norm(text)
     .split(' ')
@@ -285,7 +298,7 @@ export function matchFuzzy(
     const extra = iw.length - used.size
     scored.push({ item, score: coverage * 100 - extra * 2 + typeBonus(item), box: null })
   }
-  const best = pickBest(scored, opts.anchor)
+  const best = pickBest(scored, opts.anchor, opts.prefer)
   if (!best || best.score < (opts.minScore ?? 50)) return null
   return toTarget(best.item, best.box)
 }
@@ -307,7 +320,7 @@ export function refineTarget(item: ScreenItem, text?: string): Target {
 export function describeItems(items: ScreenItem[], limit = 400): string {
   return items
     .slice(0, limit)
-    .map((i) => `#${i.id} ${i.src === 'uia' ? i.type : 'Yazı'} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}`)
+    .map((i) => `#${i.id} ${i.src === 'ocr' ? 'Yazı' : i.type} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}`)
     .join('\n')
 }
 

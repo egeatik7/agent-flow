@@ -100,13 +100,13 @@ export async function runDemo(
   log: (l: LogLevel, m: string) => void,
   step: (id: string, s: StepStatus) => void,
   startId?: string,
-  loopProgress?: (id: string, index: number) => void
+  patchNode?: (id: string, patch: Partial<AgentNode>) => void
 ) {
   demoStop = false
   const ex: Executor = {
     log,
     step,
-    loopProgress,
+    patchNode,
     shouldStop: () => demoStop,
     click: async (n) => {
       const attempt = async () => {
@@ -141,6 +141,29 @@ export async function runDemo(
     key: async (n) => {
       await pause(200)
       log('info', `(demo) tuş: ${n.keys}`)
+    },
+    initiative: async (n) => {
+      await pause(600)
+      log('info', `(demo) [inisiyatif 1/${n.maxActions ?? 12}] tıkla “Model Seç” — hedefe giden ilk adım`)
+      await pause(500)
+      log('info', '(demo) [inisiyatif 2] done — hedef ekranda görünüyor')
+      patchNode?.(n.id, { trace: ['tıkla “Model Seç”'] })
+      return true
+    },
+    openBrowser: async (n) => {
+      await pause(400)
+      log('success', `(demo) [tarayıcı] Edge açıldı: ${n.url || 'boş sayfa'} (gerçek otomasyon Windows exe’de)`)
+    },
+    waitFile: async (n) => {
+      await pause(700)
+      const name = `model-${Date.now().toString(36).slice(-4)}${(n.pattern ?? '').replace(/^\*/, '').split(/[;,]/)[0]?.trim() || '.glb'}`
+      log('success', `(demo) Dosya geldi: ${name}`)
+      return `C:\\Users\\demo\\Downloads\\${name}`
+    },
+    moveFile: async (from, to) => {
+      await pause(200)
+      log('success', `(demo) Taşındı: ${from} → ${to}`)
+      return to
     },
     exists: async (text, n) => {
       await pause(250)

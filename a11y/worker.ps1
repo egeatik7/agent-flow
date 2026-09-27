@@ -99,6 +99,22 @@ function Invoke-Op([string]$op, $P) {
       [System.Windows.Forms.SendKeys]::SendWait([string]$P.keys)
       return $true
     }
+    'foreground' {
+      $h = [XpNative]::GetForegroundWindow()
+      if ($h -eq [IntPtr]::Zero) { return $null }
+      $el = $script:AE::FromHandle($h)
+      if ($null -eq $el) { return $null }
+      return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId }
+    }
+    'focusedValue' {
+      $el = $script:AE::FocusedElement
+      if ($null -eq $el) { return $null }
+      $vp = $null
+      if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+        return [pscustomobject]@{ value = [string]$vp.Current.Value; type = (Get-CT $el) }
+      }
+      return $null
+    }
     'capture' {
       $pt = Get-CursorPoint
       $el = $script:AE::FromPoint((New-Object System.Windows.Point($pt.X, $pt.Y)))

@@ -32,6 +32,8 @@ import {
   duplicateNode,
   freePort,
   removeNode,
+  setMembership,
+  wrapInLoop,
 } from './lib/graph-ops'
 import { DEMO_CAPTURE, demoScan, runDemo, stopDemo } from './lib/demo'
 
@@ -87,7 +89,11 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const pushLog = useCallback((level: LogLevel, message: string) => {
-    setLogs((prev) => [...prev.slice(-300), { id: newId(), level, message, at: Date.now() }])
+    setLogs((prev) => [...prev.slice(-400), { id: newId(), level, message, at: Date.now() }])
+  }, [])
+
+  const patchNode = useCallback((id: string, patch: Partial<AgentNode>) => {
+    setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }))
   }, [])
 
   const refreshWindows = useCallback(async () => {
@@ -176,21 +182,16 @@ export default function App() {
       const p = payload as { id: string; status: StepStatus }
       setStepStatus((prev) => ({ ...prev, [p.id]: p.status }))
     })
-    const offAnchor = api.onAgentAnchor((payload) => {
-      const p = payload as { id: string; x: number; y: number }
-      setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, anchor: { x: p.x, y: p.y } } : n)) }))
-    })
-    const offLoop = api.onAgentLoop((payload) => {
-      const p = payload as { id: string; index: number }
-      setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === p.id ? { ...n, loopIndex: p.index } : n)) }))
+    const offPatch = api.onAgentPatch((payload) => {
+      const p = payload as { id: string; patch: Partial<AgentNode> }
+      patchNode(p.id, p.patch)
     })
     return () => {
       offLog()
       offStep()
-      offAnchor()
-      offLoop()
+      offPatch()
     }
-  }, [pushLog])
+  }, [pushLog, patchNode])
 
   const selected = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId) ?? null, [graph.nodes, selectedNodeId])
   const selectedEdge = useMemo(() => graph.edges.find((e) => e.id === selectedEdgeId) ?? null, [graph.edges, selectedEdgeId])
@@ -229,6 +230,14 @@ export default function App() {
 
   const updateNode = (id: string, patch: Partial<AgentNode>) =>
     setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }))
+
+  const wrapSelection = (ids: string[]) => {
+    const r = wrapInLoop(graphRef.current, ids)
+    if (!r) return
+    setGraph(r.graph)
+    selectNode(r.id)
+    pushLog('success', 'Seçilenler “Her Öğe İçin” kutusuna alındı. Sağ panelden listeyi doldur.')
+  }
 
   const addNode = (kind: NodeKind) => {
     const g = graphRef.current
@@ -275,6 +284,10 @@ export default function App() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
         else if (selectedIdsRef.current.length || selectedNodeId) deleteSelection()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault()
+        const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedNodeId ? [selectedNodeId] : []
+        if (ids.length) wrapSelection(ids)
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedNodeId) {
         e.preventDefault()
         const r = duplicateNode(graphRef.current, selectedNodeId)
@@ -373,7 +386,7 @@ export default function App() {
     try {
       const r = await pickFolder(extensions)
       if (!r) return
-      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0 })
+      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0, results: undefined })
       pushLog(
         r.files.length ? 'success' : 'warn',
         r.files.length ? `Klasörden ${r.files.length} dosya listeye eklendi: ${r.folder}` : `Klasörde uygun dosya yok: ${r.folder}`
@@ -416,14 +429,7 @@ export default function App() {
     try {
       if (api) await api.runAgent(graph, startId)
       else
-        await runDemo(
-          graph,
-          settings,
-          pushLog,
-          (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })),
-          startId,
-          (id, index) => setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, loopIndex: index } : n)) }))
-        )
+        await runDemo(graph, settings, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode)
     } catch (e) {
       pushLog('error', errText(e))
     } finally {
@@ -525,10 +531,18 @@ export default function App() {
               running={running}
               onSelectNode={selectNode}
               onSelectEdge={selectEdge}
-              onMoveNode={(id, x, y) => updateNode(id, { x, y })}
               onMoveNodes={(pos) =>
                 setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)) }))
               }
+              onSetMembership={(ids, loopId) => {
+                const g = graphRef.current
+                const next = setMembership(g, ids, loopId)
+                if (next === g) return
+                setGraph(next)
+                const box = loopId ? g.nodes.find((n) => n.id === loopId) : null
+                pushLog('info', box ? `${ids.length} node “${box.title}” kutusuna girdi.` : `${ids.length} node kutudan çıktı.`)
+              }}
+              onWrap={wrapSelection}
               onConnect={(from, port, to) => {
                 const g = graphRef.current
                 const target = g.nodes.find((n) => n.id === to)
@@ -623,6 +637,10 @@ export default function App() {
             onCaptureForNode={captureForSelected}
             onOpenScanner={() => openScanner(selectedNodeId)}
             onFillFromFolder={(exts) => selectedNodeId && fillLoopFromFolder(selectedNodeId, exts)}
+            onPickDir={async () => {
+              if (api) return api.pickDir()
+              return window.prompt('Klasör yolu') || null
+            }}
             capturing={capturing}
           />
           <LogPanel logs={logs} onClear={() => setLogs([])} />

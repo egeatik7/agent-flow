@@ -226,12 +226,33 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
 
 export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<void> {
   if (!IS_WIN) return
+  if (!text && !pressEnter && !clearFirst) return
   await worker.call('typeText', { text, pressEnter, clearFirst })
 }
 
 export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
   if (!IS_WIN) return
   await worker.call('keys', { keys, windowTitle: windowTitle || '' })
+}
+
+export async function foreground(): Promise<{ title: string; pid: number } | null> {
+  if (!IS_WIN) return null
+  try {
+    return await worker.call('foreground', {}, 10000)
+  } catch {
+    return null
+  }
+}
+
+/** What the focused field holds, or null when it does not expose a value. */
+export async function focusedValue(): Promise<string | null> {
+  if (!IS_WIN) return null
+  try {
+    const r = await worker.call<{ value: string } | null>('focusedValue', {}, 10000)
+    return r ? r.value : null
+  } catch {
+    return null
+  }
 }
 
 export async function captureAtCursor(): Promise<Locator | null> {

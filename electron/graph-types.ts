@@ -1,5 +1,3 @@
-import { retargetLoopExits } from './loop-graph'
-
 export type NodeKind =
   | 'start'
   | 'click'
@@ -9,6 +7,10 @@ export type NodeKind =
   | 'waitFor'
   | 'condition'
   | 'loop'
+  | 'ai'
+  | 'browser'
+  | 'waitFile'
+  | 'moveFile'
   | 'end'
 
 export type Locator = {
@@ -29,6 +31,20 @@ export type Locator = {
 
 export type ClickMode = 'left' | 'double' | 'right'
 
+/** What a target looked like on a lap that worked. A hint for the next lap, never an answer. */
+export type TargetMemo = {
+  win: string
+  type: string
+  src: 'uia' | 'ocr' | 'dom'
+  /** Centre of the target as a fraction of the scanned area (0–1). */
+  rx: number
+  ry: number
+  text: string
+  at: number
+}
+
+export type ItemStatus = 'ok' | 'fail'
+
 export type AgentNode = {
   id: string
   kind: NodeKind
@@ -46,12 +62,31 @@ export type AgentNode = {
   clickMode?: ClickMode
   /** Execute this node by showing a screenshot to the vision model instead of text matching. */
   useVision?: boolean
-  /** Loop list mode: one value per turn, exposed as {{öğe}} while the body runs. */
+  /** Loop: one value per lap, exposed as {{öğe}} while the members run. */
   items?: string[]
-  /** Index of the list item currently being processed; persisted so a stopped run resumes there. */
+  /** Loop: item being processed right now (display only; resume comes from `results`). */
   loopIndex?: number
-  /** Folder the list was filled from (display only). */
+  /** Loop: folder the list was filled from. Dosyayı Bekle: folder to watch. */
   folder?: string
+  /** Loop: nodes that belong to this box and repeat once per item. */
+  members?: string[]
+  /** Loop: outcome per item key. Failed and missing items run again; a clean finish clears it. */
+  results?: Record<string, ItemStatus>
+  /** Loop: what to do when an item fails after its tries. */
+  onError?: 'skip' | 'stop'
+  /** Loop: tries per item (recovery chain runs between tries). */
+  attempts?: number
+  /** Last successful targets of this node. */
+  memory?: TargetMemo[]
+  /** İnisiyatif: the actions of the last lap that reached the goal. */
+  trace?: string[]
+  maxActions?: number
+  url?: string
+  browser?: 'auto' | 'msedge' | 'chrome'
+  /** Dosyayı Bekle: e.g. *.glb (empty = any file). */
+  pattern?: string
+  /** Dosyayı Taşı: source path (default {{dosya}}). */
+  source?: string
   /** Last known screen position of the target; breaks ties when the same text appears several times. */
   anchor?: { x: number; y: number }
   locator?: Locator
@@ -88,7 +123,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: 'openai/gpt-4o-mini',
   targetWindow: '',
   stepDelayMs: 800,
-  maxSteps: 500,
+  maxSteps: 2000,
   sendScreenshot: true,
   visionModel: 'google/gemini-3.8-flash',
   hideWhileRunning: true,
@@ -176,12 +211,53 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     description: 'Öğe varsa/yoksa farklı yola gider.',
   },
   loop: {
-    label: 'Döngü',
+    label: 'Her Öğe İçin',
     icon: '↻',
     color: '#8a4b16',
     hasInput: true,
-    outputs: [{ key: 'loop', label: 'tekrar' }],
-    description: 'Listedeki her öğe için (veya N kez) “tekrar”a döner. Turlar bitince akış döngü kartından değil, grubun son node’undaki “bitti” çıkışından devam eder.',
+    outputs: [
+      { key: 'done', label: 'bitti' },
+      { key: 'error', label: 'hata olursa' },
+    ],
+    description: 'Bir kutu. İçine koyduğun node’lar listedeki her öğe için (veya N kez) sırayla çalışır.',
+  },
+  ai: {
+    label: 'İnisiyatif',
+    icon: '✦',
+    color: '#b0306a',
+    hasInput: true,
+    outputs: [
+      { key: 'next', label: 'tamam' },
+      { key: 'fail', label: 'olmadı' },
+    ],
+    description: 'Hedefi yaz, birkaç adımlık işi model ekrana bakarak kendisi yapar.',
+  },
+  browser: {
+    label: 'Tarayıcıyı Aç',
+    icon: '◎',
+    color: '#0b7a75',
+    hasInput: true,
+    outputs: NEXT,
+    description: 'Edge/Chrome’u programın profiliyle açar. Sonraki adımlar sayfanın içini görerek çalışır.',
+  },
+  waitFile: {
+    label: 'Dosyayı Bekle',
+    icon: '⇣',
+    color: '#4a6b1f',
+    hasInput: true,
+    outputs: [
+      { key: 'found', label: 'geldi' },
+      { key: 'timeout', label: 'zaman aşımı' },
+    ],
+    description: 'Klasöre yeni bir dosya inip tamamlanana kadar bekler. Dosya {{dosya}} olur.',
+  },
+  moveFile: {
+    label: 'Dosyayı Taşı',
+    icon: '⇢',
+    color: '#5b5f1f',
+    hasInput: true,
+    outputs: NEXT,
+    description: 'Bir dosyayı yeni adıyla başka yere taşır (örn. D:\\Modeller\\{{öğe.isim}}.glb).',
   },
   end: {
     label: 'Bitir',
@@ -202,13 +278,7 @@ export const NODE_BODY = 58
 export const NODE_PORT_ROW = 22
 
 export function nodeHeight(kind: NodeKind): number {
-  return (
-    NODE_BORDER * 2 +
-    NODE_HEADER +
-    NODE_BODY +
-    Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW +
-    4
-  )
+  return NODE_BORDER * 2 + NODE_HEADER + NODE_BODY + Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW + 4
 }
 
 export function inputPoint(n: AgentNode) {
@@ -222,35 +292,21 @@ export function outputPoint(n: AgentNode, port: string) {
   )
   return {
     x: n.x + NODE_W - NODE_BORDER,
-    y:
-      n.y +
-      NODE_BORDER +
-      NODE_HEADER +
-      NODE_BODY +
-      idx * NODE_PORT_ROW +
-      NODE_PORT_ROW / 2,
+    y: n.y + NODE_BORDER + NODE_HEADER + NODE_BODY + idx * NODE_PORT_ROW + NODE_PORT_ROW / 2,
   }
 }
 
 export function portLabel(kind: NodeKind, port: string): string {
-  if (port === 'done') return 'bitti'
   return NODE_SPECS[kind].outputs.find((o) => o.key === port)?.label ?? port
 }
 
 function rid(): string {
-  return (
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
-  )
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
 }
 
 export const newId = rid
 
-export function createNode(
-  kind: NodeKind,
-  x: number,
-  y: number,
-  index = 1
-): AgentNode {
+export function createNode(kind: NodeKind, x: number, y: number, index = 1): AgentNode {
   const base: AgentNode = {
     id: rid(),
     kind,
@@ -272,7 +328,15 @@ export function createNode(
     case 'condition':
       return { ...base, text: '' }
     case 'loop':
-      return { ...base, count: 3 }
+      return { ...base, count: 3, members: [], onError: 'skip', attempts: 2 }
+    case 'ai':
+      return { ...base, prompt: '', maxActions: 12 }
+    case 'browser':
+      return { ...base, url: 'https://', browser: 'auto' }
+    case 'waitFile':
+      return { ...base, folder: '', pattern: '', timeoutMs: 300000 }
+    case 'moveFile':
+      return { ...base, source: '{{dosya}}', text: '' }
     default:
       return base
   }
@@ -298,11 +362,20 @@ export function summarize(n: AgentNode): string {
     case 'condition':
       return `Ekranda “${n.text || '—'}” var mı?`
     case 'loop': {
-      const items = listItems(n)
-      if (!items.length) return `${n.count ?? 1} kez tekrarla`
-      const i = Math.min(Math.max(0, n.loopIndex ?? 0), items.length - 1)
-      return `${items.length} öğe · sıradaki ${i + 1}/${items.length}: ${baseName(items[i])}`
+      const keys = loopKeys(n)
+      const done = keys.filter((k) => n.results?.[k] === 'ok').length
+      const failed = keys.filter((k) => n.results?.[k] === 'fail').length
+      const what = listItems(n).length ? `${keys.length} öğe` : `${keys.length} kez`
+      return `${what}${done ? ` · ${done} tamam` : ''}${failed ? ` · ${failed} hatalı` : ''}`
     }
+    case 'ai':
+      return n.prompt?.trim() || 'Hedefi yaz: örn. “sağdaki ayarlardan dili Türkçe yap”'
+    case 'browser':
+      return n.url?.trim() && n.url.trim() !== 'https://' ? n.url.trim() : 'Açılacak adresi yaz…'
+    case 'waitFile':
+      return `${n.folder?.trim() || 'İndirilenler'}${n.pattern?.trim() ? ` · ${n.pattern.trim()}` : ''} (en çok ${Math.round((n.timeoutMs ?? 0) / 1000)} sn)`
+    case 'moveFile':
+      return `${n.source?.trim() || '{{dosya}}'} → ${n.text?.trim() || 'hedef yolu yaz…'}`
     case 'end':
       return 'Akışı bitir.'
   }
@@ -310,6 +383,14 @@ export function summarize(n: AgentNode): string {
 
 export function listItems(n: AgentNode): string[] {
   return (n.items ?? []).map((s) => s.trim()).filter(Boolean)
+}
+
+/** One key per lap: the list rows, or #1…#N in count mode. */
+export function loopKeys(n: AgentNode): string[] {
+  const items = listItems(n)
+  if (items.length) return items
+  const total = Math.max(1, n.count ?? 1)
+  return Array.from({ length: total }, (_, i) => `#${i + 1}`)
 }
 
 export function baseName(p: string): string {
@@ -339,7 +420,20 @@ export function itemVars(item: string, index: number, total: number): Record<str
   return Object.fromEntries(Object.entries(vars).map(([k, v]) => [keyNorm(k), v]))
 }
 
-export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}']
+/** {{dosya}}, {{dosya.ad}}, {{dosya.isim}}, {{dosya.uzantı}} for the last file Dosyayı Bekle saw. */
+export function fileVars(file: string): Record<string, string> {
+  const ad = baseName(file)
+  const ext = ad.includes('.') ? ad.slice(ad.lastIndexOf('.')) : ''
+  const vars: Record<string, string> = {
+    dosya: file,
+    'dosya.ad': ad,
+    'dosya.isim': ext ? ad.slice(0, -ext.length) : ad,
+    'dosya.uzantı': ext,
+  }
+  return Object.fromEntries(Object.entries(vars).map(([k, v]) => [keyNorm(k), v]))
+}
+
+export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}', '{{dosya}}']
 
 /** Replaces {{name}} placeholders; accepts ASCII spellings too ({{oge.isim}}, {{sira}}). Unknown names stay as-is. */
 export function renderTemplate(s: string | undefined, vars: Record<string, string>): string | undefined {
@@ -347,8 +441,100 @@ export function renderTemplate(s: string | undefined, vars: Record<string, strin
   return s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (m, k: string) => vars[keyNorm(k)] ?? m)
 }
 
+export function hasTemplate(s: string | undefined): boolean {
+  return !!s && /\{\{[^{}]+\}\}/.test(s)
+}
+
 type LegacyNode = Partial<AgentNode> & {
   recorded?: Locator
+}
+
+/** The cycle an old loop card closed with its “tekrar” edge. */
+function legacyLoopBody(edges: AgentEdge[], loopId: string): string[] {
+  const start = edges.find((e) => e.from === loopId && e.fromPort === 'loop')?.to
+  if (!start || start === loopId) return []
+  const fwd = new Set<string>()
+  const q = [start]
+  while (q.length) {
+    const id = q.shift()!
+    if (id === loopId || fwd.has(id)) continue
+    fwd.add(id)
+    for (const e of edges) if (e.from === id) q.push(e.to)
+  }
+  const back = new Set<string>()
+  const q2 = [loopId]
+  while (q2.length) {
+    const id = q2.shift()!
+    for (const e of edges) {
+      if (e.to === id && e.from !== loopId && !back.has(e.from)) {
+        back.add(e.from)
+        q2.push(e.from)
+      }
+    }
+  }
+  return [...fwd].filter((id) => back.has(id))
+}
+
+/** Old flows: a loop card at the end of a cycle. Turn it into a box that holds the cycle. */
+function migrateLegacyLoops(nodes: AgentNode[], edges: AgentEdge[]): AgentEdge[] {
+  let out = edges
+  for (const loop of nodes) {
+    if (loop.kind !== 'loop' || Array.isArray(loop.members)) continue
+    const head = out.find((e) => e.from === loop.id && e.fromPort === 'loop')?.to
+    const body = legacyLoopBody(out, loop.id)
+    const inBody = new Set(body)
+    loop.members = body
+    loop.onError = 'skip'
+    loop.attempts = 2
+    const items = listItems(loop)
+    if (items.length && (loop.loopIndex ?? 0) > 0) {
+      loop.results = Object.fromEntries(items.slice(0, loop.loopIndex).map((k) => [k, 'ok' as ItemStatus]))
+    }
+    out = out
+      .filter((e) => !(e.from === loop.id && e.fromPort === 'loop'))
+      .filter((e) => !(inBody.has(e.from) && (e.to === loop.id || e.to === head)))
+      .map((e) => {
+        if (head && e.to === head && !inBody.has(e.from) && e.from !== loop.id) return { ...e, to: loop.id }
+        if (e.fromPort === 'done' && (inBody.has(e.from) || e.from === loop.id)) return { ...e, from: loop.id }
+        return e
+      })
+    const members = nodes.filter((n) => inBody.has(n.id))
+    if (members.length) {
+      loop.x = Math.min(...members.map((n) => n.x)) - 24
+      loop.y = Math.min(...members.map((n) => n.y)) - 52
+    }
+  }
+  return out
+}
+
+/** Every node sits in at most one box, and a box never contains itself. */
+function sanitizeMembers(nodes: AgentNode[]) {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const owner = new Map<string, string>()
+  for (const loop of nodes) {
+    if (loop.kind !== 'loop') continue
+    loop.members = (loop.members ?? []).filter((id) => {
+      const m = byId.get(id)
+      if (!m || id === loop.id || m.kind === 'start' || owner.has(id)) return false
+      owner.set(id, loop.id)
+      return true
+    })
+  }
+  for (const loop of nodes) {
+    if (loop.kind !== 'loop') continue
+    const seen = new Set<string>()
+    let up = owner.get(loop.id)
+    while (up && !seen.has(up)) {
+      if (up === loop.id) break
+      seen.add(up)
+      up = owner.get(up)
+    }
+    if (up === loop.id) {
+      const parent = byId.get(owner.get(loop.id)!)
+      if (parent) parent.members = (parent.members ?? []).filter((id) => id !== loop.id)
+      owner.delete(loop.id)
+    }
+  }
 }
 
 export function normalizeGraph(raw: unknown): AgentGraph {
@@ -356,11 +542,10 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   const nodes: AgentNode[] = (g.nodes ?? [])
     .filter((n) => n && n.id)
     .map((n) => {
-      const kind: NodeKind =
-        n.kind && n.kind in NODE_SPECS ? (n.kind as NodeKind) : 'click'
+      const kind: NodeKind = n.kind && n.kind in NODE_SPECS ? (n.kind as NodeKind) : 'click'
       const fallback = createNode(kind, n.x ?? 60, n.y ?? 60)
       const { recorded, ...rest } = n
-      return {
+      const node = {
         ...fallback,
         ...rest,
         id: n.id!,
@@ -368,9 +553,11 @@ export function normalizeGraph(raw: unknown): AgentGraph {
         title: n.title || fallback.title,
         locator: n.locator ?? recorded,
       } as AgentNode
+      if (kind === 'loop' && !Array.isArray(n.members)) delete node.members
+      return node
     })
   const ids = new Set(nodes.map((n) => n.id))
-  const edges: AgentEdge[] = (g.edges ?? [])
+  let edges: AgentEdge[] = (g.edges ?? [])
     .filter((e) => e && e.from && e.to && ids.has(e.from) && ids.has(e.to))
     .map((e) => ({
       id: e.id || rid(),
@@ -379,14 +566,23 @@ export function normalizeGraph(raw: unknown): AgentGraph {
       fromPort: e.fromPort || 'next',
     }))
 
+  edges = migrateLegacyLoops(nodes, edges)
+  sanitizeMembers(nodes)
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const seenPort = new Set<string>()
+  edges = edges.filter((e) => {
+    const from = byId.get(e.from)
+    if (!from || !NODE_SPECS[from.kind].outputs.some((o) => o.key === e.fromPort)) return false
+    const key = `${e.from}:${e.fromPort}`
+    if (seenPort.has(key)) return false
+    seenPort.add(key)
+    return true
+  })
+
   if (!nodes.some((n) => n.kind === 'start')) {
     const firstFree = nodes.find((n) => !edges.some((e) => e.to === n.id))
     const minX = nodes.length ? Math.min(...nodes.map((n) => n.x)) : 300
-    const start = createNode(
-      'start',
-      Math.max(20, minX - NODE_W - 60),
-      firstFree ? firstFree.y : 80
-    )
+    const start = createNode('start', Math.max(20, minX - NODE_W - 60), firstFree ? firstFree.y : 80)
     if (start.x + NODE_W + 40 > minX && nodes.length) {
       for (const n of nodes) n.x += NODE_W + 80
       start.x = 20
@@ -396,5 +592,5 @@ export function normalizeGraph(raw: unknown): AgentGraph {
       edges.push({ id: rid(), from: start.id, fromPort: 'next', to: firstFree.id })
     }
   }
-  return retargetLoopExits({ nodes, edges })
+  return { nodes, edges }
 }

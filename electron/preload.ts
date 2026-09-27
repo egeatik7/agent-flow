@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   onAgentLog: on('agent:log'),
   onAgentStep: on('agent:step'),
-  onAgentAnchor: on('agent:anchor'),
-  onAgentLoop: on('agent:loop'),
+  onAgentPatch: on('agent:patch'),
   pickFolder: (extensions: string[]) => ipcRenderer.invoke('dialog:pickFolder', extensions),
+  pickDir: () => ipcRenderer.invoke('dialog:pickDir'),
 })
