@@ -2,6 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import {
   NODE_SPECS,
   TEMPLATE_VARS,
+  portLabel,
   VISION_KINDS,
   baseName,
   listItems,
@@ -194,7 +195,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
       )}
 
       <p className="hint">
-        Döngüyü tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Değişen yerlere{' '}
+        Döngüyü tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Turlar bitince akış, grubun sağındaki <b>bitti</b> noktasından dışarıdaki node’a gider. Değişen yerlere{' '}
         <span className="mono">{'{{öğe}}'}</span> yaz: her turda listenin sıradaki satırı gelir.{' '}
         <span className="mono">{'{{öğe.isim}}'}</span> uzantısız dosya adıdır (kedi.png → kedi).
       </p>
@@ -240,7 +241,7 @@ function NodeInspector(p: Props) {
   if (p.selectedEdge) {
     const from = p.graph.nodes.find((x) => x.id === p.selectedEdge!.from)
     const to = p.graph.nodes.find((x) => x.id === p.selectedEdge!.to)
-    const port = from ? NODE_SPECS[from.kind].outputs.find((o) => o.key === p.selectedEdge!.fromPort)?.label : ''
+    const port = from ? portLabel(from.kind, p.selectedEdge!.fromPort) : ''
     return (
       <div>
         <p className="hint">

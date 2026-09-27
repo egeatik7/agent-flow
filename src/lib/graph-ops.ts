@@ -43,6 +43,14 @@ export function addAfter(
 
   let x = from.x + NODE_W + GAP_X
   let y = from.y + portIdx * (nodeHeight(from.kind) + 30)
+  if (from.kind === 'loop' && port === 'done') {
+    const ids = new Set(loopBody(graph, from.id))
+    const members = graph.nodes.filter((n) => ids.has(n.id))
+    if (members.length) {
+      x = Math.max(...members.map((n) => n.x + NODE_W)) + GAP_X + 48
+      y = Math.min(...members.map((n) => n.y))
+    }
+  }
   const occupied = (px: number, py: number) =>
     graph.nodes.some((n) => Math.abs(n.x - px) < NODE_W - 20 && Math.abs(n.y - py) < 90)
   let guard = 0
@@ -93,6 +101,10 @@ export function chainTail(graph: AgentGraph): { node: AgentNode; port: string } 
 }
 
 export function freePort(graph: AgentGraph, node: AgentNode): string | null {
+  if (node.kind === 'loop') {
+    const doneTaken = graph.edges.some((e) => e.from === node.id && e.fromPort === 'done')
+    return doneTaken ? 'loop' : 'done'
+  }
   const outs = NODE_SPECS[node.kind].outputs
   if (outs.length === 0) return null
   const free = outs.find((o) => !graph.edges.some((e) => e.from === node.id && e.fromPort === o.key))

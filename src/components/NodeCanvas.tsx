@@ -7,6 +7,7 @@ import {
   listItems,
   nodeHeight,
   outputPoint,
+  portLabel,
   summarize,
   type AgentGraph,
   type AgentNode,
@@ -101,6 +102,11 @@ function headerGradient(color: string) {
   return `linear-gradient(180deg, ${color}cc 0%, ${color} 55%, ${color}ee 100%)`
 }
 
+type View = { x: number; y: number; z: number }
+
+const MIN_Z = 0.25
+const MAX_Z = 2.5
+
 export default function NodeCanvas(p: Props) {
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -108,6 +114,12 @@ export default function NodeCanvas(p: Props) {
   const linkRef = useRef<Linking | null>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
   const [hoverTarget, setHoverTarget] = useState<string | null>(null)
+  const [view, setView] = useState<View>({ x: 24, y: 24, z: 1 })
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const [panning, setPanning] = useState(false)
+  const graphRef = useRef(p.graph)
+  graphRef.current = p.graph
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
   const hasStart = p.graph.nodes.some((n) => n.kind === 'start')
@@ -124,8 +136,14 @@ export default function NodeCanvas(p: Props) {
   }, [p.graph.nodes])
 
   const toCanvas = (clientX: number, clientY: number) => {
-    const r = innerRef.current!.getBoundingClientRect()
-    return { x: clientX - r.left, y: clientY - r.top }
+    const r = scrollRef.current!.getBoundingClientRect()
+    const v = viewRef.current
+    return { x: (clientX - r.left - v.x) / v.z, y: (clientY - r.top - v.y) / v.z }
+  }
+
+  const setViewNow = (next: View) => {
+    viewRef.current = next
+    setView(next)
   }
 
   const autoScroll = (clientX: number, clientY: number) => {
@@ -133,9 +151,33 @@ export default function NodeCanvas(p: Props) {
     if (!s) return
     const r = s.getBoundingClientRect()
     const edge = 36
-    const dx = clientX < r.left + edge ? -18 : clientX > r.right - edge ? 18 : 0
-    const dy = clientY < r.top + edge ? -18 : clientY > r.bottom - edge ? 18 : 0
-    if (dx || dy) s.scrollBy(dx, dy)
+    const dx = clientX < r.left + edge ? 16 : clientX > r.right - edge ? -16 : 0
+    const dy = clientY < r.top + edge ? 16 : clientY > r.bottom - edge ? -16 : 0
+    if (!dx && !dy) return
+    const v = viewRef.current
+    setViewNow({ ...v, x: v.x + dx, y: v.y + dy })
+  }
+
+  const reveal = (id: string) => {
+    const n = graphRef.current.nodes.find((x) => x.id === id)
+    const el = scrollRef.current
+    if (!n || !el) return
+    const v = viewRef.current
+    const left = v.x + n.x * v.z
+    const top = v.y + n.y * v.z
+    const right = left + NODE_W * v.z
+    const bottom = top + nodeHeight(n.kind) * v.z
+    const m = 56
+    const vw = el.clientWidth
+    const vh = el.clientHeight
+    let x = v.x
+    let y = v.y
+    if (left < m) x += m - left
+    else if (right > vw - m) x -= right - (vw - m)
+    if (top < m) y += m - top
+    else if (bottom > vh - m) y -= bottom - (vh - m)
+    if (Math.abs(x - v.x) < 1 && Math.abs(y - v.y) < 1) return
+    setViewNow({ ...v, x, y })
   }
 
   const setLink = (l: Linking | null) => {
@@ -178,17 +220,34 @@ export default function NodeCanvas(p: Props) {
   }, [!!linking])
 
   useEffect(() => {
-    if (!p.selectedNodeId) return
-    const el = innerRef.current?.querySelector<HTMLElement>(`[data-node-id="${p.selectedNodeId}"]`)
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    if (p.selectedNodeId) reveal(p.selectedNodeId)
+    // reveal reads refs; only jump when the selection changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.selectedNodeId])
 
   const runningId = Object.keys(p.stepStatus).find((id) => p.stepStatus[id] === 'running')
   useEffect(() => {
-    if (!runningId) return
-    const el = innerRef.current?.querySelector<HTMLElement>(`[data-node-id="${runningId}"]`)
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    if (runningId) reveal(runningId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const v = viewRef.current
+      const z = Math.min(MAX_Z, Math.max(MIN_Z, v.z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)))
+      const rect = el.getBoundingClientRect()
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      const cx = (px - v.x) / v.z
+      const cy = (py - v.y) / v.z
+      setViewNow({ x: px - cx * z, y: py - cy * z, z })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -265,6 +324,7 @@ export default function NodeCanvas(p: Props) {
   }
 
   const startLink = (e: React.MouseEvent, n: AgentNode, port: string) => {
+    if (e.button !== 0) return
     e.stopPropagation()
     e.preventDefault()
     setMenu(null)
@@ -278,14 +338,56 @@ export default function NodeCanvas(p: Props) {
     setMenu({ mode: 'after', x: c.x + 8, y: c.y - 10, fromId: n.id, port })
   }
 
+  const edgeSource = (node: AgentNode, port: string) => {
+    if (node.kind === 'loop' && port === 'done') {
+      const f = frames.find((fr) => fr.loop.id === node.id)
+      if (f) return { x: f.x + f.w - 7, y: f.y + f.h / 2 }
+      return { x: node.x + NODE_W - 7, y: node.y + nodeHeight(node.kind) / 2 }
+    }
+    return outputPoint(node, port)
+  }
+
   const linkFrom = linking ? byId.get(linking.from) : undefined
-  const linkStart = linkFrom && linking ? outputPoint(linkFrom, linking.port) : null
+  const linkStart = linkFrom && linking ? edgeSource(linkFrom, linking.port) : null
+
+  const resetZoom = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const v = viewRef.current
+    const cx = el.clientWidth / 2
+    const cy = el.clientHeight / 2
+    const canvasX = (cx - v.x) / v.z
+    const canvasY = (cy - v.y) / v.z
+    setViewNow({ x: cx - canvasX, y: cy - canvasY, z: 1 })
+  }
 
   return (
-    <div
-      ref={scrollRef}
-      className="canvas-scroll"
+      <div
+        ref={scrollRef}
+        className={`canvas-scroll${panning ? ' panning' : ''}`}
+        style={{
+          backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
+          backgroundPosition: `${view.x}px ${view.y}px`,
+        }}
       onMouseDown={(e) => {
+        if (e.button === 1) {
+          e.preventDefault()
+          setPanning(true)
+          const startX = e.clientX
+          const startY = e.clientY
+          const orig = viewRef.current
+          const move = (ev: MouseEvent) => {
+            setViewNow({ ...orig, x: orig.x + ev.clientX - startX, y: orig.y + ev.clientY - startY })
+          }
+          const up = () => {
+            setPanning(false)
+            window.removeEventListener('mousemove', move)
+            window.removeEventListener('mouseup', up)
+          }
+          window.addEventListener('mousemove', move)
+          window.addEventListener('mouseup', up)
+          return
+        }
         if (e.button !== 0) return
         if (linkRef.current) {
           setLink(null)
@@ -294,6 +396,9 @@ export default function NodeCanvas(p: Props) {
         setMenu(null)
         p.onSelectNode(null)
         p.onSelectEdge(null)
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) e.preventDefault()
       }}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -305,7 +410,11 @@ export default function NodeCanvas(p: Props) {
       <div
         ref={innerRef}
         className={`canvas-inner${linking ? ' linking' : ''}`}
-        style={{ width: size.w, height: size.h }}
+        style={{
+          width: size.w,
+          height: size.h,
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
+        }}
       >
         {p.graph.nodes.length <= 1 && (
           <div className="empty-canvas">
@@ -313,7 +422,7 @@ export default function NodeCanvas(p: Props) {
             <br />
             sarı çıkış noktasından sürükleyip başka bir node’un üstüne bırakarak bağla.
             <br />
-            Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin.
+            Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin. Tekerlek yakınlaştırır, orta tuş kaydırır.
           </div>
         )}
 
@@ -346,12 +455,12 @@ export default function NodeCanvas(p: Props) {
             const a = byId.get(e.from)
             const b = byId.get(e.to)
             if (!a || !b) return null
-            const s = outputPoint(a, e.fromPort)
+            const s = edgeSource(a, e.fromPort)
             const t = inputPoint(b)
             const { d, mx, my } = edgePath(s.x + 7, s.y, t.x - 7, t.y)
             const sel = p.selectedEdgeId === e.id
             const color = sel ? '#e05a00' : portColor(e.fromPort)
-            const label = e.fromPort !== 'next' ? NODE_SPECS[a.kind].outputs.find((o) => o.key === e.fromPort)?.label : null
+            const label = e.fromPort !== 'next' ? portLabel(a.kind, e.fromPort) : null
             return (
               <g key={e.id} className="edge">
                 <path
@@ -465,6 +574,33 @@ export default function NodeCanvas(p: Props) {
           )
         })}
 
+        {frames.map((f) => (
+          <div
+            key={`${f.loop.id}-exit`}
+            className="loop-frame-exit"
+            style={{ left: f.x + f.w, top: f.y + f.h / 2 }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div
+              className="node-port out frame-port"
+              style={{ background: portColor('done') }}
+              title="Turlar bitince akış buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak."
+              onMouseDown={(e) => startLink(e, f.loop, 'done')}
+            />
+            <span className="port-label" style={{ color: portColor('done') }}>
+              bitti
+            </span>
+            <button
+              type="button"
+              className="add-next"
+              title="Bitti çıkışından ileriye yeni node ekle"
+              onClick={(e) => openAfterMenu(e, f.loop, 'done')}
+            >
+              +
+            </button>
+          </div>
+        ))}
+
         {menu && (
           <div
             className="ctx-menu"
@@ -525,6 +661,9 @@ export default function NodeCanvas(p: Props) {
           </div>
         )}
       </div>
+      <button type="button" className="canvas-zoom" title="Tekerlek: yakınlaştır · Orta tuş: kaydır · Tıkla: 100%" onMouseDown={(e) => e.stopPropagation()} onClick={resetZoom}>
+        {Math.round(view.z * 100)}%
+      </button>
     </div>
   )
 }

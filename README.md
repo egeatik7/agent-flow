@@ -21,7 +21,7 @@ Aynı yazı ekranda birden çok yerdeyse, o node’un son tıklandığı konuma 
 Döngü node’una bir **liste** yazılabilir (her satır bir tur) ya da **“Klasörden doldur…”** ile bir klasördeki
 resimler listeye doldurulur (doğal sıralama: `resim2` → `resim10`). Liste doluyken tur sayısı = satır sayısı.
 
-- Döngüyü tekrar eden kısmın **sonuna** koy, “tekrar” çıkışını o kısmın **ilk** node’una bağla.
+- Döngüyü tekrar eden kısmın **sonuna** koy, “tekrar” çıkışını o kısmın **ilk** node’una bağla. Turlar bitince akış döngü kartından değil, grubun çerçevesindeki **bitti** noktasından devam eder; o noktayı dışarıdaki bir node’a bağla.
 - Değişen yerlere yer tutucu yaz; her turda listenin sıradaki satırıyla doldurulur:
   `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
   Tıkla/Yazı Yaz prompt’larında, yazılacak metinde, tuşlarda ve bekleme yazılarında çalışır.
@@ -36,7 +36,7 @@ sor” açık olmalı):
 ```
 Başlangıç → Tıkla “Resim yükle” → Yazı Yaz {{öğe}} + Enter → Tıkla “Oluştur” → Öğeyi Bekle “İndir”
           → Tıkla “İndir” → Yazı Yaz D:\Modeller\{{öğe.isim}}.glb + Enter → Döngü (tekrar → “Resim yükle”)
-                                                                              └ bitti → Bitir
+grup çerçevesinin “bitti” çıkışı → Bitir
 ```
 
 ## Ekran görüntüsü modu (görsel LLM)
@@ -69,13 +69,14 @@ Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çi
 | Zamanlayıcı | N saniye bekler | sonra |
 | Öğeyi Bekle | Bir yazı ekranda görünene kadar bekler | bulundu / zaman aşımı |
 | Koşul | Ekranda bir yazı var mı? | var / yok |
-| Döngü | N kez “tekrar”a, sonra “bitti”ye gider | tekrar / bitti |
+| Döngü | N kez “tekrar”a döner. “bitti” çıkışı node’da değil, grubun çerçevesindedir | tekrar (node) / bitti (çerçeve) |
 | Bitir | Akışı sonlandırır | — |
 
 ## Kullanım
 
 - **İleriye ekle:** node’un sağındaki yeşil **+** → tür seç. Arada bağlantı varsa yeni node araya girer.
 - **Bağla:** renkli çıkış noktasını sürükleyip başka bir node’un üstüne bırak (ya da noktaya tıkla, sonra hedef node’a tıkla). Ekran kenarına gelince canvas kayar.
+- **Tuval:** tekerlek yakınlaştırır/uzaklaştırır, orta tuşla basılı tutup sürüklemek kaydırır. Köşedeki yüzdeye tıklayınca yakınlaştırma 100% olur.
 - **Başa dön:** son node’un çıkışını ilk aşamaya bağla. Sayılı tekrar için **Döngü** node’u kullan. Sonsuz döngüye karşı “Maks. adım” koruması var.
 - **Sil:** node’u veya bağlantıyı seçip `Del`; bağlantıya çift tıklamak da siler. `Ctrl+D` kopyalar.
 - **Sağ tık:** boş yerde node ekleme menüsü; node üzerinde “Buradan çalıştır / Kopyala / Bağla / Sil”.

@@ -178,11 +178,8 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     icon: '↻',
     color: '#8a4b16',
     hasInput: true,
-    outputs: [
-      { key: 'loop', label: 'tekrar' },
-      { key: 'done', label: 'bitti' },
-    ],
-    description: 'Listedeki her öğe için (veya N kez) “tekrar”a, sonra “bitti”ye gider.',
+    outputs: [{ key: 'loop', label: 'tekrar' }],
+    description: 'Listedeki her öğe için (veya N kez) “tekrar”a döner. Turlar bitince akış, grubun çerçevesindeki “bitti” çıkışından devam eder.',
   },
   end: {
     label: 'Bitir',
@@ -234,6 +231,7 @@ export function outputPoint(n: AgentNode, port: string) {
 }
 
 export function portLabel(kind: NodeKind, port: string): string {
+  if (kind === 'loop' && port === 'done') return 'bitti'
   return NODE_SPECS[kind].outputs.find((o) => o.key === port)?.label ?? port
 }
 
