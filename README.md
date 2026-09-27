@@ -39,6 +39,12 @@ Başlangıç → Tıkla “Resim yükle” → Yazı Yaz {{öğe}} + Enter → T
 grup çerçevesinin “bitti” çıkışı → Bitir
 ```
 
+## Emin olma
+
+Tıkla, Yazı Yaz ve Tuş Gönder adımlarından hemen önce ve sonra bir ekran karesi alınır. Kareler akışa yazılmaz; en fazla **10** tanesi durur, on birincisi gelince en eskisi silinir.
+
+Yazı listesi önce karar verir. Sıradaki node’un yazısı (Öğeyi Bekle / Koşul metni, ya da bir sonraki tıklamanın tarifi) ekrana geldiyse adım tamamdır. Ekran hiç değişmediyse tuş tepki vermemiş sayılır ve aynı adım **bir kez** daha denenir. Yüklenme yazısı varsa tekrar basılmaz, birkaç kez yeniden bakılır. Başka bir pencere veya yazı açıldıysa ajan onu sıradaki adım sanmaz. Yazıyla seçilemeyen durumda cepteki iki kare görsel modele gider; cevap hazır, tepki yok, yükleniyor, başka bir şey açıldı ya da belirsiz olur.
+
 ## Ekran görüntüsü modu (görsel LLM)
 
 Tıkla, Yazı Yaz, Tuş Gönder, Öğeyi Bekle ve Koşul node’larında **“Ekran görüntüsüne bakarak yap”** seçeneği var.

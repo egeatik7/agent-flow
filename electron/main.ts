@@ -3,16 +3,20 @@ import fs from 'fs'
 import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
+import { describeAhead, expectation, failReason, judgeScreen, type Verdict } from './confirm'
+import { rememberShot } from './shots'
 import {
   chooseScreenTarget,
+  judgeReaction,
   listModels,
   testKey,
   visionCheck,
   visionDescribe,
   visionLocate,
   visionRefine,
+  type ReactionVerdict,
 } from './openrouter'
-import { interruptibleSleep, runGraph, StoppedError, type Executor } from './runner'
+import { interruptibleSleep, runGraph, StoppedError, type Executor, type StepAhead } from './runner'
 import {
   containsText,
   extractTarget,
@@ -66,6 +70,108 @@ const FOCUS_MS = 420
 const REFRESH_RETRY_MS = 3000
 
 class NotFoundError extends Error {}
+
+type Snap = { texts: string[]; image: string | null }
+
+async function snap(label: string): Promise<Snap> {
+  const res = await bridge.scan({ image: 'plain', fresh: true, maxImageW: 1100 })
+  if (res.image?.data) rememberShot(res.image.data, label)
+  return { texts: res.items.map((i) => i.text), image: res.image?.data ?? null }
+}
+
+async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
+  const s = getSettings()
+  const model = (s.visionModel || s.model).trim()
+  if (!s.apiKey || !model || !before.image || !after.image) return v
+  if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
+  try {
+    const r = await judgeReaction({
+      apiKey: s.apiKey,
+      model,
+      step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
+      expected: v.expected,
+      ahead: describeAhead(ahead),
+      fresh: v.fresh,
+      before: { data: before.image, w: 0, h: 0 },
+      after: { data: after.image, w: 0, h: 0 },
+    })
+    log('info', `Görsel yorum (${labelOf(r.verdict)}): ${r.reason || 'gerekçe yok'}`)
+    return { ...v, kind: r.verdict, reason: r.reason || v.reason }
+  } catch (e) {
+    log('warn', `Görsel yorum atlandı: ${(e as Error).message}`)
+    return v
+  }
+}
+
+function labelOf(k: ReactionVerdict): string {
+  if (k === 'ready') return 'hazır'
+  if (k === 'missed') return 'tepki yok'
+  if (k === 'loading') return 'yükleniyor'
+  if (k === 'blocked') return 'başka bir şey açıldı'
+  return 'belirsiz'
+}
+
+/** After a click, type, or key: keep two frames, decide if the screen moved toward the next node, and react. */
+async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, act: () => Promise<void>) {
+  if (process.platform !== 'win32') {
+    await act()
+    return
+  }
+  const pause = (ms: number) => interruptibleSleep(ms, () => stopRequested)
+
+  const read = async (before: Snap, allowMissedVision: boolean) => {
+    await pause(900)
+    const after = await snap(`${node.title} sonra`)
+    let v = judgeScreen(before.texts, after.texts, expectation(ahead))
+    if (v.kind === 'blocked' || v.kind === 'unknown' || (allowMissedVision && v.kind === 'missed')) {
+      v = await lookCloser(v, before, after, node, ahead)
+    }
+    return v
+  }
+
+  const waitOutLoading = async (before: Snap, v: Verdict) => {
+    if (v.kind !== 'loading') return v
+    log('info', `Sayfa henüz gelmedi (${v.reason}). Tekrar basılmadan bakılacak.`)
+    for (let i = 0; i < 3 && v.kind === 'loading'; i++) {
+      await pause(2000)
+      const after = await snap(`${node.title} yükleniyor`)
+      v = judgeScreen(before.texts, after.texts, expectation(ahead))
+      if (v.kind === 'unknown' || v.kind === 'blocked') v = await lookCloser(v, before, after, node, ahead)
+    }
+    return v
+  }
+
+  let before = await snap(`${node.title} önce`)
+  await act()
+  let verdict = await waitOutLoading(before, await read(before, false))
+  if (verdict.kind === 'ready') {
+    log('success', `Emin: ${verdict.reason}.`)
+    return
+  }
+  if (verdict.kind === 'missed') {
+    log('warn', `Tepki yok (${verdict.reason}). Aynı adım bir kez daha denenecek.`)
+    before = await snap(`${node.title} tekrar önce`)
+    await act()
+    verdict = await waitOutLoading(before, await read(before, true))
+    if (verdict.kind === 'ready') {
+      log('success', `Emin: ikinci denemede tepki geldi. ${verdict.reason}.`)
+      return
+    }
+  }
+  if (verdict.kind === 'unknown') {
+    log('info', 'Emin olunamadı, kısa bir bekleyişten sonra bir kez daha bakılacak.')
+    await pause(1500)
+    const after = await snap(`${node.title} tekrar bak`)
+    verdict = judgeScreen(before.texts, after.texts, expectation(ahead))
+    if (verdict.kind !== 'ready') verdict = await lookCloser(verdict, before, after, node, ahead)
+    verdict = await waitOutLoading(before, verdict)
+    if (verdict.kind === 'ready') {
+      log('success', `Emin: ${verdict.reason}.`)
+      return
+    }
+  }
+  throw new Error(failReason(node.title, verdict))
+}
 
 async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
   try {
@@ -308,34 +414,41 @@ const executor: Executor = {
   step: (id, status) => send('agent:step', { id, status }),
   loopProgress: (id, index) => send('agent:loop', { id, index }),
   shouldStop: () => stopRequested,
-  click: async (node, stepNo) => {
-    const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
-    const mode = node.clickMode ?? 'left'
-    await bridge.clickAt(t.x, t.y, mode)
-    log('success', `${mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
-    send('agent:anchor', { id: node.id, x: Math.round(t.x), y: Math.round(t.y) })
-  },
-  type: async (node, stepNo) => {
-    if (node.prompt?.trim() || node.locator) {
+  click: async (node, stepNo, ahead) => {
+    await ensureActed(node, ahead, async () => {
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
-      await bridge.clickAt(t.x, t.y, 'left')
-      await sleep(FOCUS_MS)
-      log('info', `Alan seçildi: ${t.label}`)
+      const mode = node.clickMode ?? 'left'
+      await bridge.clickAt(t.x, t.y, mode)
+      log('success', `${mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       send('agent:anchor', { id: node.id, x: Math.round(t.x), y: Math.round(t.y) })
-    }
-    await bridge.typeText(node.text ?? '', !!node.pressEnter, node.clearFirst !== false)
+    })
   },
-  key: async (node) => {
-    if (!node.keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
-    if (node.useVision && node.prompt?.trim()) {
-      const t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide))
-      await bridge.clickAt(t.x, t.y, 'left')
-      await sleep(FOCUS_MS)
-      log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
-      await bridge.sendKeys(node.keys)
-      return
-    }
-    await bridge.sendKeys(node.keys, getSettings().targetWindow || undefined)
+  type: async (node, stepNo, ahead) => {
+    await ensureActed(node, ahead, async () => {
+      if (node.prompt?.trim() || node.locator) {
+        const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
+        await bridge.clickAt(t.x, t.y, 'left')
+        await sleep(FOCUS_MS)
+        log('info', `Alan seçildi: ${t.label}`)
+        send('agent:anchor', { id: node.id, x: Math.round(t.x), y: Math.round(t.y) })
+      }
+      await bridge.typeText(node.text ?? '', !!node.pressEnter, node.clearFirst !== false)
+    })
+  },
+  key: async (node, ahead) => {
+    const keys = node.keys
+    if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
+    await ensureActed(node, ahead, async () => {
+      if (node.useVision && node.prompt?.trim()) {
+        const t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide))
+        await bridge.clickAt(t.x, t.y, 'left')
+        await sleep(FOCUS_MS)
+        log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
+        await bridge.sendKeys(keys)
+        return
+      }
+      await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
+    })
   },
   exists: async (text, node) => {
     if (node.useVision) return visionExists(node, text)

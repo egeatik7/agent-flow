@@ -229,6 +229,39 @@ export async function visionRefine(opts: {
   return readPoint(p)
 }
 
+export type ReactionVerdict = 'ready' | 'missed' | 'loading' | 'blocked' | 'unknown'
+
+/** Two pocket frames: did the action move the screen toward the next step? */
+export async function judgeReaction(opts: {
+  apiKey: string
+  model: string
+  step: string
+  expected: string
+  ahead: string
+  fresh: string[]
+  before: Img
+  after: Img
+}): Promise<{ verdict: ReactionVerdict; reason: string }> {
+  const system = `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
+Tek bir verdict seç:
+- ready: sıradaki adımın hedefi görünüyor ya da ekran o adıma hazır
+- missed: ekran pratikte aynı, tıklama veya tuş tepki vermemiş
+- loading: sayfa veya içerik hâlâ yükleniyor, hedef henüz gelmedi
+- blocked: tıklama bir şey açtı (diyalog, uyarı, başka sayfa) ama bu, sıradaki adımın istediği şey değil
+- unknown: bu dördünden hiçbiri seçilemiyor
+Sadece JSON: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<kısa gerekçe>"}`
+  const text = `Yapılan adım: ${opts.step}
+Sıradaki adımlar: ${opts.ahead || '(yok)'}
+Beklenen yazı veya hedef: ${opts.expected || '(yok)'}
+Sonra ekrana yeni gelen yazılar: ${opts.fresh.length ? opts.fresh.join(' | ') : '(yok)'}
+İlk görüntü adımdan önce, ikinci görüntü adımdan sonradır.`
+  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.before, opts.after])
+  const raw = String(p.verdict ?? p.status ?? '').toLowerCase()
+  const verdict: ReactionVerdict =
+    raw === 'ready' || raw === 'missed' || raw === 'loading' || raw === 'blocked' || raw === 'unknown' ? raw : 'unknown'
+  return { verdict, reason: String(p.reason ?? '').slice(0, 240) }
+}
+
 export async function visionCheck(opts: {
   apiKey: string
   model: string

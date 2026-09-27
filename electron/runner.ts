@@ -26,13 +26,16 @@ function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
   }
 }
 
+/** The next one or two nodes, already filled with the current loop variables. */
+export type StepAhead = { next?: AgentNode; then?: AgentNode }
+
 export type Executor = {
   log: (level: LogLevel, message: string) => void
   step: (id: string, status: StepStatus) => void
   shouldStop: () => boolean
-  click: (node: AgentNode, stepNo: number) => Promise<void>
-  type: (node: AgentNode, stepNo: number) => Promise<void>
-  key: (node: AgentNode) => Promise<void>
+  click: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
+  type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
+  key: (node: AgentNode, ahead?: StepAhead) => Promise<void>
   exists: (text: string, node: AgentNode) => Promise<boolean>
   /** Called when a list loop moves to another item, so the index can be persisted for resuming. */
   loopProgress?: (id: string, index: number) => void
@@ -100,7 +103,8 @@ export async function runGraph(
 
     let port = 'next'
     try {
-      port = await execNode(node.kind === 'loop' ? node : renderNode(node, state.vars), ex, state, steps, opts.stepDelayMs)
+      const live = node.kind === 'loop' ? node : renderNode(node, state.vars)
+      port = await execNode(live, ex, state, steps, opts.stepDelayMs, peekAhead(graph, byId, live, state.vars))
     } catch (e) {
       ex.step(node.id, 'error')
       throw e
@@ -126,12 +130,26 @@ export async function runGraph(
   ex.log('success', `Akış tamamlandı (${steps} adım).`)
 }
 
+function hop(graph: AgentGraph, byId: Map<string, AgentNode>, from: AgentNode, port: string, vars: Record<string, string>) {
+  const edge = graph.edges.find((e) => e.from === from.id && e.fromPort === port)
+  const raw = edge ? byId.get(edge.to) : undefined
+  return raw ? renderNode(raw, vars) : undefined
+}
+
+function peekAhead(graph: AgentGraph, byId: Map<string, AgentNode>, node: AgentNode, vars: Record<string, string>): StepAhead {
+  const next = hop(graph, byId, node, 'next', vars)
+  if (!next) return {}
+  const port = next.kind === 'loop' ? 'loop' : next.kind === 'waitFor' ? 'found' : next.kind === 'condition' ? 'true' : 'next'
+  return { next, then: hop(graph, byId, next, port, vars) }
+}
+
 async function execNode(
   node: AgentNode,
   ex: Executor,
   state: RunState,
   stepNo: number,
-  stepDelayMs: number
+  stepDelayMs: number,
+  ahead: StepAhead
 ): Promise<string> {
   const { loopCounters, listIndex } = state
   const settle = () => interruptibleSleep(stepDelayMs, ex.shouldStop)
@@ -141,17 +159,17 @@ async function execNode(
       return 'next'
     case 'click':
       ex.log('info', `[${stepNo}] Tıkla: ${node.prompt || node.locator?.name || node.title}`)
-      await ex.click(node, stepNo)
+      await ex.click(node, stepNo, ahead)
       await settle()
       return 'next'
     case 'type':
       ex.log('info', `[${stepNo}] Yaz: “${node.text ?? ''}”`)
-      await ex.type(node, stepNo)
+      await ex.type(node, stepNo, ahead)
       await settle()
       return 'next'
     case 'key':
       ex.log('info', `[${stepNo}] Tuş: ${node.keys}`)
-      await ex.key(node)
+      await ex.key(node, ahead)
       await settle()
       return 'next'
     case 'wait': {
