@@ -45,7 +45,7 @@ Tekrar eden adımlar bir **kutunun** içine konur. Kutu tuvalde yarı saydam bir
 
 **Bir öğe takılırsa** (hedef yok, bekleme zaman aşımına uğradı, İnisiyatif olmadı dedi):
 
-1. Çerçevenin **hata olursa** çıkışına bağladığın kurtarma adımları çalışır. Örnek: `Tuş F5 → Öğeyi Bekle “Resim yükle”`.
+1. Çerçevenin **hata olursa** çıkışına bağladığın kurtarma adımları çalışır. Örnek: `Tuş F5 → Koşul “Resim yükle” (30 sn bekle)`.
 2. Öğe baştan bir kez daha denenir. Deneme sayısı kutudan ayarlanır.
 3. Yine olmazsa öğe **hatalı** işaretlenir ve sıradaki öğeye geçilir. İstersen “Akışı durdur” seçilebilir.
 
@@ -59,7 +59,7 @@ Eski akışlardaki “Döngü kartı + geri dönen ok” yapısı açılırken o
 **Tarayıcıyı Aç** node’u Edge’i (yoksa Chrome’u) programın kendi profiliyle açar ve adrese gider. Siteye bir kez elle
 giriş yaparsan sonra hep açık kalır.
 
-- Bu tarayıcı öndeyken Tıkla, Yazı Yaz, Öğeyi Bekle ve Koşul önce sayfanın içine bakar. Bulamazsa (örn. sistem
+- Bu tarayıcı öndeyken Tıkla, Yazı Yaz ve Koşul önce sayfanın içine bakar. Bulamazsa (örn. sistem
   penceresi açıldıysa) ekrana döner.
 - Sayfa bir dosya seçme penceresi açarsa pencere görünmez; sıradaki **Yazı Yaz** adımındaki yol (`{{öğe}}`) doğrudan verilir.
 - İndirmeler **İndirilenler** klasörüne düşer, “Farklı kaydet” penceresi çıkmaz. Ad vermek için **Dosyayı Bekle** +
@@ -87,7 +87,7 @@ Güvenceler:
 
 ## Emin olma
 
-- Sıradaki node **Öğeyi Bekle** ya da **Dosyayı Bekle** ise eylem bir kez yapılır ve kontrol edilmeden beklemeye geçilir.
+- Sıradaki node **Koşul** ya da **Dosyayı Bekle** ise eylem bir kez yapılır ve kontrol edilmeden geçilir; o node ekrana kendisi bakar.
 - Tarayıcıda: sayfanın yüklenmesi beklenir, sıradaki adımın yazısı sayfada mı diye bakılır.
 - Ekranda: eylemden önce ve sonra bir kare alınır. Sayfa değiştiyse ve sıradaki yazı geldiyse devam edilir. Tepki net
   değilse akış hemen bozulmaz: sıradaki adımın hedefi ekranda mı diye bakılır, yoksa beklenir, gerekirse model plan kurar.
@@ -106,8 +106,7 @@ Güvenceler:
 | Yazı Yaz | Bir alana (veya o an seçili alana) yazar, alanı okuyup doğrular, isteğe bağlı Enter | sonra |
 | Tuş Gönder | Kısayol/tuş (`{ENTER}`, `^a`, `%{F4}` …) | sonra |
 | Zamanlayıcı | N saniye bekler | sonra |
-| Öğeyi Bekle | Bir yazı görünene kadar bekler | bulundu / zaman aşımı |
-| Koşul | Ekranda bir yazı var mı? | var / yok |
+| Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için çalıştırır | bitti / hata olursa |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
 | Tarayıcıyı Aç | Edge/Chrome’u açar, adrese gider; sonraki adımlar sayfanın içini görür | sonra |
@@ -115,7 +114,7 @@ Güvenceler:
 | Dosyayı Taşı | Dosyayı yeni adıyla taşır (`D:\Modeller\{{öğe.isim}}.glb`) | sonra |
 | Bitir | Akışı sonlandırır | — |
 
-“Zaman aşımı” ve “olmadı” çıkışları bir yere bağlı değilse adım hata sayılır. Kutunun içindeyse o öğe kurtarılır ve atlanır.
+“Zaman aşımı” ve “olmadı” çıkışları, bir de bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata sayılır. Kutunun içindeyse o öğe kurtarılır ve atlanır.
 
 ## Örnek: klasördeki her resimden 3D model
 
@@ -123,10 +122,10 @@ Güvenceler:
 Başlangıç → Tarayıcıyı Aç https://site
           → [Her Öğe İçin: C:\Resimler klasörü]
                Tıkla “Resim yükle” → Yazı Yaz {{öğe}} → Tıkla “Oluştur”
-               → Öğeyi Bekle “İndir” (10 dk) → Tıkla “İndir”
+               → Koşul “İndir” (10 dk bekle) → Tıkla “İndir”
                → Dosyayı Bekle *.glb → Dosyayı Taşı D:\Modeller\{{öğe.isim}}.glb
             bitti → Bitir
-            hata olursa → Tuş {F5} → Öğeyi Bekle “Resim yükle”
+            hata olursa → Tuş {F5} → Koşul “Resim yükle” (30 sn bekle)
 ```
 
 ## Kullanım
@@ -141,6 +140,8 @@ Başlangıç → Tarayıcıyı Aç https://site
   Seçilen öğe üç yolla hatırlanır: uygulamanın kendi öğesi, öğenin küçük resmi ve (okunabiliyorsa) yazısı. Çalışırken sırayla
   öğe, resmin ekrandaki aynısı, yazı ve en son görsel model (resimle birlikte) denenir; yazısız simgeler de böyle tıklanır.
 - **İmleçle Yakala (3 sn):** imleci hedefe götür, o öğe (resmiyle birlikte) node’a bağlanır.
+- **Beklemek:** Koşul’a “görünene kadar bekle” süresi ver, ya da “yok” çıkışını Zamanlayıcı’ya, Zamanlayıcı’yı tekrar Koşul’a bağla.
+  Koşul’a Ekrandan Seç / İmleçle Yakala ile bir simge de seçilebilir; yazısı olmasa da resmi ekranda aranır.
 - Çalışırken uygulama kendini küçültür. **Ctrl+Shift+Q** ile durdurursun.
 - **Dışa/İçe Aktar:** akışı JSON olarak kaydet/aç. Akış ve ayarlar ayrıca otomatik kaydedilir.
 

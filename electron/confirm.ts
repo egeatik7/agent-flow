@@ -18,7 +18,7 @@ const LOADING = /yuklen|loading|please wait|lutfen bekle|isleniyor|bekleyin|proc
 export function expectation(ahead?: StepAhead): string {
   const n = ahead?.next
   if (!n) return ''
-  if (n.kind === 'waitFor' || n.kind === 'condition') return (n.text || '').trim()
+  if (n.kind === 'condition') return (n.text || n.locator?.text || '').trim()
   if (n.kind === 'click' || n.kind === 'type' || n.kind === 'key') {
     const quoted = (n.prompt || '').match(/[“"«„]([^”"»“]{1,80})[”"»“]/)
     if (quoted?.[1]?.trim()) return quoted[1].trim()

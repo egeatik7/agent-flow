@@ -588,10 +588,10 @@ export function createAgent(ctx: AgentContext) {
    * Page actions confirm through the page; screen actions compare two frames and then check the next target.
    */
   async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, onPage: boolean, act: () => Promise<void>) {
-    if (ahead?.next?.kind === 'waitFor' || ahead?.next?.kind === 'waitFile') {
+    if (ahead?.next?.kind === 'condition' || ahead?.next?.kind === 'waitFile') {
       await act()
       if (onPage) await browser.settle(1500)
-      log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım zaten beklediği için kontrol edilmeden geçiliyor.`)
+      log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım (${ahead.next.title}) ekrana kendisi baktığı için kontrol edilmeden geçiliyor.`)
       return
     }
     if (onPage) {
@@ -707,6 +707,29 @@ export function createAgent(ctx: AgentContext) {
       }
     }
     return null
+  }
+
+  /** Koşul with a picked element: its own UI element, or its saved picture, is on screen right now. */
+  async function savedTargetVisible(node: AgentNode): Promise<boolean> {
+    const loc = node.locator!
+    const win = loc.windowTitle || getSettings().targetWindow || ''
+    if (win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point', 'Custom'].includes(loc.controlType)) {
+      try {
+        const r = await bridge.locate(loc, win)
+        if (r && r.w * r.h < 600 * 400) return true
+      } catch {
+        /* not there, try the picture */
+      }
+    }
+    if (loc.icon) {
+      try {
+        const hit = await bridge.findImage(loc.icon)
+        if (hit && hit.score >= ICON_MIN) return true
+      } catch (e) {
+        log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
+      }
+    }
+    return false
   }
 
   // ---------- typing ----------
@@ -1220,8 +1243,10 @@ export function createAgent(ctx: AgentContext) {
       saveMemo(node, t?.memo)
     },
     exists: async (text, node) => {
-      if (node.useVision) return visionExists(text)
-      if (browser.isOpen() && (await browser.hasText(text))) return true
+      if (node.useVision && text) return visionExists(text)
+      if (text && browser.isOpen() && (await browser.hasText(text))) return true
+      if (node.locator && (await savedTargetVisible(node))) return true
+      if (!text) return false
       const res = await bridge.scan({ image: 'none', fresh: true })
       log('info', `Ekran yenilendi: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})`)
       return containsText(res.items, text)

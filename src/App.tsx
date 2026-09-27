@@ -354,8 +354,8 @@ export default function App() {
     }
     const node = graphRef.current.nodes.find((n) => n.id === id)
     const anchor = loc.x !== undefined && loc.y !== undefined ? { x: loc.x, y: loc.y } : undefined
-    if (node?.kind === 'waitFor' || node?.kind === 'condition') {
-      updateNode(id, { text: locText(loc) })
+    if (node?.kind === 'condition') {
+      updateNode(id, { text: node.text?.trim() ? node.text : locText(loc), locator: loc })
     } else {
       updateNode(id, { locator: loc, anchor, prompt: node?.prompt?.trim() ? node.prompt : promptFor(loc) })
     }
@@ -410,11 +410,6 @@ export default function App() {
     const anchor = { x: Math.round(item.x + item.w / 2), y: Math.round(item.y + item.h / 2) }
     const node = scanner?.nodeId ? graphRef.current.nodes.find((n) => n.id === scanner.nodeId) : undefined
     setScanner(null)
-    if (node && (node.kind === 'waitFor' || node.kind === 'condition')) {
-      updateNode(node.id, { text })
-      pushLog('success', `Ekrandan seçildi: “${text}” → ${node.title}`)
-      return
-    }
     let loc: Locator | null = null
     if (api) {
       try {
@@ -428,7 +423,9 @@ export default function App() {
       loc = { ...loc, text: meaningful ? text : '', name: broad ? '' : loc.name }
     }
     const prompt = meaningful ? (node?.kind === 'type' ? `“${text}” alanı` : `“${text}” yazan yere tıkla`) : ''
-    if (node && (node.kind === 'type' || node.kind === 'click')) {
+    if (node?.kind === 'condition') {
+      updateNode(node.id, { text: meaningful ? text : '', locator: loc ?? undefined })
+    } else if (node && (node.kind === 'type' || node.kind === 'click')) {
       updateNode(node.id, { prompt, anchor, locator: loc ?? undefined, memory: undefined })
     } else {
       appendClick({ prompt, title: `Tıkla: ${meaningful ? text : 'simge'}`.slice(0, 40), anchor, locator: loc ?? undefined })

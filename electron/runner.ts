@@ -117,7 +117,7 @@ export async function runGraph(
   const lapStart = (loop: AgentNode) => firstMember(graph, loop)
 
   const primaryPort = (n: AgentNode) =>
-    n.kind === 'waitFor' || n.kind === 'waitFile' ? 'found' : n.kind === 'condition' ? 'true' : n.kind === 'loop' ? 'done' : 'next'
+    n.kind === 'waitFile' ? 'found' : n.kind === 'condition' ? 'true' : n.kind === 'loop' ? 'done' : 'next'
 
   /** Where the flow goes after `node` if all goes well, as the executor should expect it. */
   const nextAfter = (node: AgentNode, scope: AgentNode | null): AgentNode | undefined => {
@@ -165,28 +165,23 @@ export async function runGraph(
         await interruptibleSleep(ms, ex.shouldStop)
         return 'next'
       }
-      case 'waitFor': {
-        const text = (live.text ?? '').trim()
-        if (!text) throw new Error(`“${live.title}”: beklenecek öğe metni boş.`)
-        const timeout = Math.max(500, live.timeoutMs ?? 15000)
-        const until = Date.now() + timeout
-        ex.log('info', `[${stepNo}] “${text}” bekleniyor…`)
-        while (Date.now() < until) {
-          if (await ex.exists(text, live)) {
-            ex.log('info', `“${text}” bulundu.`)
-            return 'found'
-          }
-          await interruptibleSleep(700, ex.shouldStop)
-        }
-        ex.log('warn', `“${text}” ${Math.round(timeout / 1000)} sn içinde görünmedi.`)
-        return 'timeout'
-      }
       case 'condition': {
         const text = (live.text ?? '').trim()
-        if (!text) throw new Error(`“${live.title}”: koşul metni boş.`)
-        const found = await ex.exists(text, live)
-        ex.log('info', `[${stepNo}] Koşul “${text}”: ${found ? 'var' : 'yok'}`)
-        return found ? 'true' : 'false'
+        if (!text && !live.locator) throw new Error(`“${live.title}”: koşul için yazı gir ya da Ekrandan Seç ile bir öğe seç.`)
+        const label = text ? `“${text}”` : 'seçilen öğe'
+        const wait = Math.max(0, live.timeoutMs ?? 0)
+        const until = Date.now() + wait
+        if (wait > 0) ex.log('info', `[${stepNo}] ${label} bekleniyor (en çok ${Math.round(wait / 1000)} sn)…`)
+        for (;;) {
+          if (await ex.exists(text, live)) {
+            ex.log('info', `[${stepNo}] Koşul ${label}: var`)
+            return 'true'
+          }
+          if (Date.now() >= until) break
+          await interruptibleSleep(700, ex.shouldStop)
+        }
+        ex.log('info', `[${stepNo}] Koşul ${label}: yok${wait > 0 ? ` (${Math.round(wait / 1000)} sn beklendi)` : ''}`)
+        return wait > 0 ? 'timeout' : 'false'
       }
       case 'ai': {
         if (!live.prompt?.trim()) throw new Error(`“${live.title}”: İnisiyatif için hedefi yaz.`)
@@ -260,8 +255,11 @@ export async function runGraph(
       }
 
       if (NODE_SPECS[node.kind].outputs.length === 0) return
+      const waitedOut = node.kind === 'condition' && port === 'timeout'
+      if (waitedOut) port = 'false'
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {
+        if (waitedOut) throw new StepFailedError(`“${node.title}”: beklenen öğe süresi içinde görünmedi ve “yok” çıkışı bağlı değil.`)
         if (FAIL_PORTS.has(port)) {
           throw new StepFailedError(`“${node.title}”: ${portLabel(node.kind, port)}. Bu çıkış bir yere bağlı değil.`)
         }

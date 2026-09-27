@@ -4,7 +4,6 @@ export type NodeKind =
   | 'type'
   | 'key'
   | 'wait'
-  | 'waitFor'
   | 'condition'
   | 'loop'
   | 'ai'
@@ -154,7 +153,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentModel: 'bytedance/ui-tars-1.5-7b',
 }
 
-export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'waitFor', 'condition']
+export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'condition']
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'
 export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'chat'
@@ -213,17 +212,6 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     outputs: NEXT,
     description: 'Belirtilen süre kadar bekler.',
   },
-  waitFor: {
-    label: 'Öğeyi Bekle',
-    icon: '…',
-    color: '#9a7b00',
-    hasInput: true,
-    outputs: [
-      { key: 'found', label: 'bulundu' },
-      { key: 'timeout', label: 'zaman aşımı' },
-    ],
-    description: 'Bir öğe ekranda görünene kadar bekler.',
-  },
   condition: {
     label: 'Koşul',
     icon: '?',
@@ -233,7 +221,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
       { key: 'true', label: 'var' },
       { key: 'false', label: 'yok' },
     ],
-    description: 'Öğe varsa/yoksa farklı yola gider.',
+    description: 'Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler.',
   },
   loop: {
     label: 'Her Öğe İçin',
@@ -348,10 +336,8 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
       return { ...base, keys: '{ENTER}' }
     case 'wait':
       return { ...base, ms: 2000 }
-    case 'waitFor':
-      return { ...base, text: '', timeoutMs: 15000 }
     case 'condition':
-      return { ...base, text: '' }
+      return { ...base, text: '', timeoutMs: 0 }
     case 'loop':
       return { ...base, count: 3, members: [], onError: 'skip', attempts: 2 }
     case 'ai':
@@ -385,10 +371,11 @@ export function summarize(n: AgentNode): string {
       return `Tuş: ${n.keys || '—'}`
     case 'wait':
       return `${((n.ms ?? 0) / 1000).toLocaleString('tr-TR')} sn bekle`
-    case 'waitFor':
-      return `“${n.text || '—'}” görünene kadar bekle (en çok ${Math.round((n.timeoutMs ?? 0) / 1000)} sn)`
-    case 'condition':
-      return `Ekranda “${n.text || '—'}” var mı?`
+    case 'condition': {
+      const what = n.text?.trim() ? `“${n.text.trim()}”` : n.locator ? 'seçilen öğe' : '“—”'
+      const wait = Math.round((n.timeoutMs ?? 0) / 1000)
+      return wait > 0 ? `${what} görünene kadar bekle (en çok ${wait} sn)` : `Ekranda ${what} var mı?`
+    }
     case 'loop': {
       const keys = loopKeys(n)
       const done = keys.filter((k) => n.results?.[k] === 'ok').length
@@ -567,9 +554,14 @@ function sanitizeMembers(nodes: AgentNode[]) {
 
 export function normalizeGraph(raw: unknown): AgentGraph {
   const g = (raw ?? {}) as { nodes?: LegacyNode[]; edges?: Partial<AgentEdge>[] }
+  const waitIds = new Set<string>()
   const nodes: AgentNode[] = (g.nodes ?? [])
     .filter((n) => n && n.id)
     .map((n) => {
+      if ((n.kind as string) === 'waitFor') {
+        waitIds.add(n.id!)
+        n = { ...n, kind: 'condition', timeoutMs: n.timeoutMs ?? 15000 }
+      }
       const kind: NodeKind = n.kind && n.kind in NODE_SPECS ? (n.kind as NodeKind) : 'click'
       const fallback = createNode(kind, n.x ?? 60, n.y ?? 60)
       const { recorded, ...rest } = n
@@ -587,12 +579,11 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   const ids = new Set(nodes.map((n) => n.id))
   let edges: AgentEdge[] = (g.edges ?? [])
     .filter((e) => e && e.from && e.to && ids.has(e.from) && ids.has(e.to))
-    .map((e) => ({
-      id: e.id || rid(),
-      from: e.from!,
-      to: e.to!,
-      fromPort: e.fromPort || 'next',
-    }))
+    .map((e) => {
+      let fromPort = e.fromPort || 'next'
+      if (waitIds.has(e.from!)) fromPort = fromPort === 'found' ? 'true' : fromPort === 'timeout' ? 'false' : fromPort
+      return { id: e.id || rid(), from: e.from!, to: e.to!, fromPort }
+    })
 
   edges = migrateLegacyLoops(nodes, edges)
   sanitizeMembers(nodes)

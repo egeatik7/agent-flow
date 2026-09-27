@@ -527,8 +527,7 @@ function VisionToggle(p: Props & { n: AgentNode }) {
     click: 'Tıklanacak yeri görsel LLM ekran görüntüsüne bakarak bulur (ikon, resim, yazısız butonlar dahil).',
     type: 'Yazılacak alanı görsel LLM ekran görüntüsüne bakarak bulur.',
     key: 'Tuşlardan önce aşağıdaki yere ekran görüntüsüne bakarak tıklar (odaklanmak için).',
-    waitFor: 'Her kontrolde ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur.',
-    condition: 'Ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur.',
+    condition: 'Her kontrolde ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur (serbest tarif yazılabilir).',
   }
   return (
     <div className={`vision-box${on ? ' on' : ''}`}>
@@ -731,37 +730,42 @@ function NodeInspector(p: Props) {
         </div>
       )}
 
-      {(n.kind === 'waitFor' || n.kind === 'condition') && (
-        <div className="field">
-          <label>{n.useVision ? 'Ekranda ne görünmeli? (serbest tarif)' : 'Ekranda aranacak yazı'}</label>
-          <div className="field-row">
+      {n.kind === 'condition' && (
+        <>
+          <div className="field">
+            <label>{n.useVision ? 'Ekranda ne görünmeli? (serbest tarif)' : 'Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)'}</label>
             <input
               className="xp-input"
               value={n.text ?? ''}
               placeholder={n.useVision ? 'Örn: indirme çubuğu %100 olmuş' : 'Örn: İndirme tamamlandı'}
               onChange={(e) => upd({ text: e.target.value })}
             />
-            {!n.useVision && (
-              <button type="button" className="xp-btn" onClick={p.onOpenScanner}>
-                Ekrandan
-              </button>
-            )}
+            <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
           </div>
-          <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
-        </div>
-      )}
-
-      {n.kind === 'waitFor' && (
-        <div className="field">
-          <label>En fazla bekleme (saniye)</label>
-          <input
-            className="xp-input"
-            type="number"
-            min={1}
-            value={Math.round((n.timeoutMs ?? 15000) / 1000)}
-            onChange={(e) => upd({ timeoutMs: Math.max(1, Number(e.target.value) || 1) * 1000 })}
-          />
-        </div>
+          {!n.useVision && <TargetBox {...p} n={n} />}
+          <div className="field">
+            <label>Görünene kadar bekle (saniye, 0 = bir kez bak)</label>
+            <input
+              className="xp-input"
+              type="number"
+              min={0}
+              value={Math.round((n.timeoutMs ?? 0) / 1000)}
+              onChange={(e) => upd({ timeoutMs: Math.max(0, Number(e.target.value) || 0) * 1000 })}
+            />
+            <div className="chips">
+              {[0, 10, 30, 60, 300, 600].map((sec) => (
+                <button type="button" key={sec} className="chip" onClick={() => upd({ timeoutMs: sec * 1000 })}>
+                  {sec === 0 ? 'bir kez' : sec >= 60 ? `${sec / 60} dk` : `${sec} sn`}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              Yazı ya da seçilen öğe (uygulamanın kendi öğesi veya resmi) görünürse <b>var</b>, görünmezse <b>yok</b> çıkışından devam eder.
+              Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata sayılır (kutunun içindeyse o öğe kurtarılır).
+              Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul.
+            </p>
+          </div>
+        </>
       )}
 
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
