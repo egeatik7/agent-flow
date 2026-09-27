@@ -318,9 +318,14 @@ export async function visionCheck(opts: {
   model: string
   question: string
   image: Img
+  /** Picture of the element that should be present. */
+  reference?: Img
 }): Promise<{ answer: boolean; reason: string }> {
-  const system = `Windows ekran görüntüsüne bakıp soruyu evet/hayır olarak cevapla. Sadece JSON: {"answer": true|false, "reason": "<kısa gerekçe>"}`
-  const p = await visionChat(opts.apiKey, opts.model, system, `Ekranda şu durum var mı / görünüyor mu? ${opts.question}`, [opts.image])
+  const system = `Windows ekran görüntüsüne bakıp soruyu evet/hayır olarak cevapla. Soluk/pasif (tıklanamaz) görünen düğmeler “yok” sayılır. Sadece JSON: {"answer": true|false, "reason": "<kısa gerekçe>"}`
+  const q = opts.reference
+    ? `İkinci resimdeki öğe birinci resimde (ekran) görünüyor ve kullanılabilir durumda mı?${opts.question ? ` Ek bilgi: ${opts.question}` : ''}`
+    : `Ekranda şu durum var mı / görünüyor mu? ${opts.question}`
+  const p = await visionChat(opts.apiKey, opts.model, system, q, opts.reference ? [opts.image, opts.reference] : [opts.image])
   const a = p.answer
   const answer = a === true || (typeof a === 'string' && /^(true|evet|yes)$/i.test(a.trim()))
   return { answer, reason: String(p.reason ?? '') }

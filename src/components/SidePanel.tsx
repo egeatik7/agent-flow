@@ -527,7 +527,7 @@ function VisionToggle(p: Props & { n: AgentNode }) {
     click: 'Tıklanacak yeri görsel LLM ekran görüntüsüne bakarak bulur (ikon, resim, yazısız butonlar dahil).',
     type: 'Yazılacak alanı görsel LLM ekran görüntüsüne bakarak bulur.',
     key: 'Tuşlardan önce aşağıdaki yere ekran görüntüsüne bakarak tıklar (odaklanmak için).',
-    condition: 'Her kontrolde ekran görüntüsü alınır, görsel LLM’e “bu durum var mı?” diye sorulur (serbest tarif yazılabilir).',
+    condition: 'Önce yazı, seçilen öğe ve simge resmi aranır; bulunamazsa görsel LLM’e (seçilen simgenin resmiyle) sorulur. Beklerken en fazla 5 sn’de bir sorar.',
   }
   return (
     <div className={`vision-box${on ? ' on' : ''}`}>
@@ -733,7 +733,7 @@ function NodeInspector(p: Props) {
       {n.kind === 'condition' && (
         <>
           <div className="field">
-            <label>{n.useVision ? 'Ekranda ne görünmeli? (serbest tarif)' : 'Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)'}</label>
+            <label>{n.useVision ? 'Ekranda ne görünmeli? (yazı ya da serbest tarif)' : 'Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)'}</label>
             <input
               className="xp-input"
               value={n.text ?? ''}
@@ -762,7 +762,9 @@ function NodeInspector(p: Props) {
             <p className="hint">
               Yazı ya da seçilen öğe (uygulamanın kendi öğesi veya resmi) görünürse <b>var</b>, görünmezse <b>yok</b> çıkışından devam eder.
               Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata sayılır (kutunun içindeyse o öğe kurtarılır).
-              Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul.
+              Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul; ama süre vermek daha hızlı tepki verir (her saniye bakar).
+              Pasif (soluk) düğmeler “var” sayılmaz. Yazı alanına ekranda gerçekten görünen yazıyı yaz; öğe adındaki “caret-down” gibi ekler ekranda görünmez.
+              Günlükte “… gördü:” satırı neyin “var” dediğini gösterir.
             </p>
           </div>
         </>

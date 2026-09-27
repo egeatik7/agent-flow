@@ -52,7 +52,9 @@ function Invoke-Op([string]$op, $P) {
       try { $off = $el.Current.IsOffscreen } catch {}
       $r = $el.Current.BoundingRectangle
       if ($off -or $r.IsEmpty -or $r.Width -le 0 -or [double]::IsInfinity($r.X)) { return $null }
-      return [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height; name = [string]$el.Current.Name }
+      $enabled = $true
+      try { $enabled = [bool]$el.Current.IsEnabled } catch {}
+      return [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height; name = [string]$el.Current.Name; enabled = $enabled }
     }
     'crop' {
       $v = Get-VirtualScreen

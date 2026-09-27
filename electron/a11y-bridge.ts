@@ -223,7 +223,7 @@ export async function clickAt(x: number, y: number, button: ClickMode = 'left'):
 export async function locate(
   locator: Locator,
   windowTitle: string
-): Promise<{ x: number; y: number; w: number; h: number; name: string } | null> {
+): Promise<{ x: number; y: number; w: number; h: number; name: string; enabled?: boolean } | null> {
   if (!IS_WIN) return null
   return worker.call('locate', { locator, windowTitle }, 30000)
 }

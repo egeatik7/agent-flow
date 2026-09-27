@@ -70,6 +70,8 @@ function sigDiff(a?: string, b?: string): number {
 
 /** Normalized correlation above which a saved icon picture counts as found. */
 const ICON_MIN = 0.82
+/** Koşul decides a branch on the picture alone, so it asks for a closer match. */
+const ICON_CHECK_MIN = 0.88
 const TEMP_FILE = /\.(crdownload|part|partial|tmp|download|opdownload|xpas-part)$/i
 
 function center(t: { x: number; y: number; w: number; h: number }) {
@@ -164,6 +166,8 @@ export function createAgent(ctx: AgentContext) {
     runMemo.clear()
     runTrace.clear()
     runPath.clear()
+    noted.clear()
+    lastVisionAt.clear()
     warnedMissing.clear()
     baselines.clear()
     for (const f of new Set([downloadsDir(), ...folders.filter((x) => x && !x.includes('{{'))])) baselines.set(f, listFiles(f))
@@ -463,12 +467,19 @@ export function createAgent(ctx: AgentContext) {
     return { x: gx, y: gy, memo: pointMemo(gx, gy), label: '[görsel] tahmini nokta' }
   }
 
-  async function visionExists(text: string): Promise<boolean> {
+  async function visionExists(text: string, node?: AgentNode): Promise<boolean> {
     const { apiKey, model } = visionModelOrThrow()
     const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, maxImageW: 1400, fresh: true })
     if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
-    const r = await visionCheck({ apiKey, model, question: text, image: res.image })
-    log('info', `[görsel] “${text}” → ${r.answer ? 'evet' : 'hayır'}${r.reason ? ` (${r.reason})` : ''}`)
+    const icon = node?.locator?.icon
+    const r = await visionCheck({
+      apiKey,
+      model,
+      question: text,
+      image: res.image,
+      reference: icon ? { data: icon, w: 0, h: 0, mime: 'image/png' } : undefined,
+    })
+    log('info', `[görsel] ${text ? `“${text}”` : 'seçilen öğe'} → ${r.answer ? 'evet' : 'hayır'}${r.reason ? ` (${r.reason})` : ''}`)
     return r.answer
   }
 
@@ -709,14 +720,21 @@ export function createAgent(ctx: AgentContext) {
     return null
   }
 
-  /** Koşul with a picked element: its own UI element, or its saved picture, is on screen right now. */
-  async function savedTargetVisible(node: AgentNode): Promise<boolean> {
+  /**
+   * Koşul with a picked element: its own UI element (enabled), or its saved picture, is on screen right now.
+   * Returns how it was seen, or null.
+   */
+  async function savedTargetVisible(node: AgentNode): Promise<string | null> {
     const loc = node.locator!
     const win = loc.windowTitle || getSettings().targetWindow || ''
     if (win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point', 'Custom'].includes(loc.controlType)) {
       try {
         const r = await bridge.locate(loc, win)
-        if (r && r.w * r.h < 600 * 400) return true
+        if (r && r.w * r.h < 600 * 400) {
+          if (r.enabled === false) {
+            noteOnce(node.id, 'disabled', `“${r.name || loc.name}” ekranda ama pasif (tıklanamaz); hazır sayılmıyor.`)
+          } else return `uygulama öğesi “${r.name || loc.name}”`
+        }
       } catch {
         /* not there, try the picture */
       }
@@ -724,13 +742,23 @@ export function createAgent(ctx: AgentContext) {
     if (loc.icon) {
       try {
         const hit = await bridge.findImage(loc.icon)
-        if (hit && hit.score >= ICON_MIN) return true
+        if (hit && hit.score >= ICON_CHECK_MIN) return `simge resmi (%${Math.round(hit.score * 100)} benzer, @${hit.x},${hit.y})`
       } catch (e) {
         log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
       }
     }
-    return false
+    return null
   }
+
+  const noted = new Set<string>()
+  function noteOnce(id: string, key: string, msg: string) {
+    const k = `${id}:${key}`
+    if (noted.has(k)) return
+    noted.add(k)
+    log('info', msg)
+  }
+
+  const lastVisionAt = new Map<string, number>()
 
   // ---------- typing ----------
 
@@ -1243,13 +1271,30 @@ export function createAgent(ctx: AgentContext) {
       saveMemo(node, t?.memo)
     },
     exists: async (text, node) => {
-      if (node.useVision && text) return visionExists(text)
-      if (text && browser.isOpen() && (await browser.hasText(text))) return true
-      if (node.locator && (await savedTargetVisible(node))) return true
-      if (!text) return false
-      const res = await bridge.scan({ image: 'none', fresh: true })
-      log('info', `Ekran yenilendi: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})`)
-      return containsText(res.items, text)
+      const found = (how: string) => {
+        log('info', `“${node.title}” gördü: ${how}.`)
+        return true
+      }
+      if (text && browser.isOpen() && (await browser.hasText(text))) return found(`sayfada “${text}” yazısı`)
+      if (node.locator) {
+        const how = await savedTargetVisible(node)
+        if (how) return found(how)
+      }
+      if (text && process.platform === 'win32') {
+        const res = await bridge.scan({ image: 'none', fresh: true })
+        const hit = res.items.find((i) => containsText([i], text))
+        if (hit) return found(`ekranda “${hit.text}” (${hit.src === 'ocr' ? 'okunan yazı' : hit.type})`)
+      } else if (text) {
+        const res = await bridge.scan({ image: 'none', fresh: true })
+        if (containsText(res.items, text)) return found(`ekranda “${text}”`)
+      }
+      if (node.useVision && (text || node.locator?.icon)) {
+        const last = lastVisionAt.get(node.id) ?? 0
+        if (Date.now() - last < 5000) return false
+        lastVisionAt.set(node.id, Date.now())
+        if (await visionExists(text, node)) return found('görsel model')
+      }
+      return false
     },
     initiative: (node, stepNo, ahead, vars) =>
       node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),
