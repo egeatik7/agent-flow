@@ -168,6 +168,8 @@ export async function scan(opts: {
   /** Set false to skip UI Automation / OCR when only the screenshot is needed. */
   uia?: boolean
   ocr?: boolean
+  /** Re-walk every visible window and the whole screen, without focusing the pinned target. */
+  fresh?: boolean
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
@@ -189,6 +191,7 @@ export async function scan(opts: {
       ownPid: process.pid,
       uia: opts.uia !== false,
       ocr: opts.ocr !== false,
+      fresh: opts.fresh === true,
     },
     90000
   )

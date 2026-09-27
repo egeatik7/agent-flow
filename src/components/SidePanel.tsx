@@ -30,6 +30,7 @@ type Props = {
   onTestVision: () => void
   graph: AgentGraph
   selected: AgentNode | null
+  selectedCount?: number
   selectedEdge: AgentEdge | null
   onUpdateNode: (patch: Partial<AgentNode>) => void
   onDeleteNode: () => void
@@ -273,6 +274,11 @@ function NodeInspector(p: Props) {
 
   return (
     <div>
+      {(p.selectedCount ?? 1) > 1 && (
+        <p className="hint">
+          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Ctrl ile seçime ekle ya da çıkar.
+        </p>
+      )}
       <div className="inspector-kind" style={{ background: spec.color }}>
         {spec.icon} {spec.label}
       </div>

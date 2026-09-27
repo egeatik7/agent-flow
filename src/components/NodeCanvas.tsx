@@ -47,10 +47,11 @@ function computeFrames(graph: AgentGraph): Frame[] {
 type Props = {
   graph: AgentGraph
   selectedNodeId: string | null
+  selectedIds: string[]
   selectedEdgeId: string | null
   stepStatus: Record<string, StepStatus>
   running: boolean
-  onSelectNode: (id: string | null) => void
+  onSelectNode: (id: string | null, additive?: boolean) => void
   onSelectEdge: (id: string | null) => void
   onMoveNode: (id: string, x: number, y: number) => void
   onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void
@@ -271,18 +272,31 @@ export default function NodeCanvas(p: Props) {
       e.stopPropagation()
       return
     }
+    if (e.ctrlKey || e.metaKey) {
+      e.stopPropagation()
+      setMenu(null)
+      p.onSelectNode(n.id, true)
+      return
+    }
     e.stopPropagation()
     setMenu(null)
-    p.onSelectNode(n.id)
+    const group = p.selectedIds.includes(n.id) ? p.selectedIds : [n.id]
+    if (!p.selectedIds.includes(n.id)) p.onSelectNode(n.id)
     const start = toCanvas(e.clientX, e.clientY)
-    const offX = start.x - n.x
-    const offY = start.y - n.y
+    const orig = Object.fromEntries(
+      group.map((id) => {
+        const node = byId.get(id)
+        return [id, { x: node?.x ?? 0, y: node?.y ?? 0 }]
+      })
+    )
     const move = (ev: MouseEvent) => {
       autoScroll(ev.clientX, ev.clientY)
       const c = toCanvas(ev.clientX, ev.clientY)
-      const x = Math.round((c.x - offX) / 8) * 8
-      const y = Math.round((c.y - offY) / 8) * 8
-      p.onMoveNode(n.id, Math.max(0, x), Math.max(0, y))
+      const dx = Math.round((c.x - start.x) / 8) * 8
+      const dy = Math.round((c.y - start.y) / 8) * 8
+      const next: Record<string, { x: number; y: number }> = {}
+      for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
+      p.onMoveNodes(next)
     }
     const up = () => {
       window.removeEventListener('mousemove', move)
@@ -422,14 +436,16 @@ export default function NodeCanvas(p: Props) {
             <br />
             sarı çıkış noktasından sürükleyip başka bir node’un üstüne bırakarak bağla.
             <br />
-            Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin. Tekerlek yakınlaştırır, orta tuş kaydırır.
+            Boş yere sağ tıklayarak istediğin türde node ekleyebilirsin. Ctrl ile birden fazla node seçip birlikte sürükleyebilirsin.
+            <br />
+            Tekerlek yakınlaştırır, orta tuş kaydırır.
           </div>
         )}
 
         {frames.map((f) => (
           <div
             key={f.loop.id}
-            className={`loop-frame${p.selectedNodeId && f.ids.includes(p.selectedNodeId) ? ' active' : ''}${
+            className={`loop-frame${p.selectedIds.some((id) => f.ids.includes(id)) ? ' active' : ''}${
               p.stepStatus[f.loop.id] === 'running' || f.ids.some((id) => p.stepStatus[id] === 'running') ? ' running' : ''
             }`}
             style={{ left: f.x, top: f.y, width: f.w, height: f.h }}
@@ -506,7 +522,7 @@ export default function NodeCanvas(p: Props) {
           const cls = [
             'agent-node',
             `kind-${n.kind}`,
-            p.selectedNodeId === n.id ? 'selected' : '',
+            p.selectedIds.includes(n.id) ? 'selected' : '',
             hoverTarget === n.id ? 'drop-target' : '',
             st !== 'idle' ? st : '',
           ]

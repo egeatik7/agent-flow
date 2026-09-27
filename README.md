@@ -78,7 +78,9 @@ Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çi
 - **Bağla:** renkli çıkış noktasını sürükleyip başka bir node’un üstüne bırak (ya da noktaya tıkla, sonra hedef node’a tıkla). Ekran kenarına gelince canvas kayar.
 - **Tuval:** tekerlek yakınlaştırır/uzaklaştırır, orta tuşla basılı tutup sürüklemek kaydırır. Köşedeki yüzdeye tıklayınca yakınlaştırma 100% olur.
 - **Başa dön:** son node’un çıkışını ilk aşamaya bağla. Sayılı tekrar için **Döngü** node’u kullan. Sonsuz döngüye karşı “Maks. adım” koruması var.
-- **Sil:** node’u veya bağlantıyı seçip `Del`; bağlantıya çift tıklamak da siler. `Ctrl+D` kopyalar.
+- **Sil:** node’u veya bağlantıyı seçip `Del`; bağlantıya çift tıklamak da siler. `Ctrl` ile birden fazla node seçilir, sürükleyince birlikte gider, `Del` hepsini siler. `Ctrl+D` kopyalar.
+- **Bulunamazsa:** tıklama veya yazma hedefi ekranda yoksa ajan 3 saniye bekler, tüm ekranı yeniden okur ve aynı node’u bir kez daha dener. Bunun düğmesi yok.
+- **Öğeyi Bekle / Koşul:** her kontrolde ekran baştan okunur (yalnızca kayıtlı hedef pencere değil), yeni açılan pencere ve diyalog da görülsün diye.
 - **Sağ tık:** boş yerde node ekleme menüsü; node üzerinde “Buradan çalıştır / Kopyala / Bağla / Sil”.
 - **Ekran Tarayıcı:** uygulama küçülür, ekranın görüntüsü alınır; bulunan her yazı kutuyla işaretlenir. Bir kutuya tıkla → seçili node’a (yoksa yeni “Tıkla” node’una) o yazı atanır. Arama kutusuyla filtreleyebilirsin.
 - **İmleçle Yakala (3 sn):** 3 saniye içinde imleci hedefe götür; o yer node’a bağlanır.

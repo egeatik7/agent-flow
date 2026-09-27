@@ -109,18 +109,29 @@ export async function runDemo(
     loopProgress,
     shouldStop: () => demoStop,
     click: async (n) => {
-      await pause(350)
-      if (n.useVision) {
-        log('success', `(demo) [görsel] ${settings.visionModel} ekran görüntüsünden seçti ve tıkladı: “${n.prompt || n.title}”`)
-        return
+      const attempt = async () => {
+        await pause(350)
+        if (n.useVision) {
+          log('success', `(demo) [görsel] ${settings.visionModel} ekran görüntüsünden seçti ve tıkladı: “${n.prompt || n.title}”`)
+          return
+        }
+        const item = demoLocate(n)
+        if (!item) {
+          throw new Error(
+            `(demo) “${n.prompt || n.title}” demo ekranda bulunamadı. Gerçek çalıştırmada LLM de devreye girer.`
+          )
+        }
+        log('success', `(demo) Tıklandı: “${item.text}” @${item.x + item.w / 2},${item.y + item.h / 2}`)
       }
-      const item = demoLocate(n)
-      if (!item) {
-        throw new Error(
-          `(demo) “${n.prompt || n.title}” demo ekranda bulunamadı. Gerçek çalıştırmada LLM de devreye girer.`
-        )
+      try {
+        await attempt()
+      } catch (e) {
+        if (demoStop) throw e
+        log('warn', `“${n.title}” bulunamadı. 3 sn sonra ekran yenilenip bir kez daha denenecek.`)
+        await pause(3000)
+        if (demoStop) throw new StoppedError()
+        await attempt()
       }
-      log('success', `(demo) Tıklandı: “${item.text}” @${item.x + item.w / 2},${item.y + item.h / 2}`)
     },
     type: async (n) => {
       await pause(350)

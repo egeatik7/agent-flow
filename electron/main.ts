@@ -12,7 +12,7 @@ import {
   visionLocate,
   visionRefine,
 } from './openrouter'
-import { runGraph, StoppedError, type Executor } from './runner'
+import { interruptibleSleep, runGraph, StoppedError, type Executor } from './runner'
 import {
   containsText,
   extractTarget,
@@ -62,6 +62,22 @@ function log(level: LogLevel, message: string) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** After a click, before keys: lets the field take focus. */
 const FOCUS_MS = 420
+/** Built-in: if a target is missing, wait, rescan the whole screen, try once more. */
+const REFRESH_RETRY_MS = 3000
+
+class NotFoundError extends Error {}
+
+async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
+  try {
+    return await run(false)
+  } catch (e) {
+    if (!(e instanceof NotFoundError) || stopRequested) throw e
+    log('warn', `“${title}” bulunamadı. 3 sn sonra ekran yenilenip bir kez daha denenecek.`)
+    await interruptibleSleep(REFRESH_RETRY_MS, () => stopRequested)
+    if (stopRequested) throw new StoppedError()
+    return await run(true)
+  }
+}
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
@@ -119,9 +135,13 @@ function warnMissingWindow(res: ScanResult) {
   )
 }
 
-async function scanFor(node: AgentNode, withImage: boolean): Promise<ScanResult> {
+async function scanFor(node: AgentNode, withImage: boolean, wide = false): Promise<ScanResult> {
   const s = getSettings()
-  const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: withImage ? 'marked' : 'none' })
+  const res = await bridge.scan({
+    windowTitle: wide ? undefined : s.targetWindow || undefined,
+    image: withImage ? 'marked' : 'none',
+    fresh: wide,
+  })
   warnMissingWindow(res)
   log(
     'info',
@@ -146,11 +166,16 @@ function visionPrompt(node: AgentNode): string {
 }
 
 /** Screenshot mode: the vision model looks at the screen, picks a marked box or a raw point, then a zoomed crop refines it. */
-async function resolveVision(node: AgentNode): Promise<{ x: number; y: number; label: string }> {
+async function resolveVision(node: AgentNode, wide = false): Promise<{ x: number; y: number; label: string }> {
   const { apiKey, model } = visionModelOrThrow()
   const prompt = visionPrompt(node)
   const s = getSettings()
-  const scanRes = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'marked', maxImageW: 1600 })
+  const scanRes = await bridge.scan({
+    windowTitle: wide ? undefined : s.targetWindow || undefined,
+    image: 'marked',
+    maxImageW: 1600,
+    fresh: wide,
+  })
   warnMissingWindow(scanRes)
   log('info', `[görsel] Ekran görüntüsü ${model} modeline gönderildi (${scanRes.items.length} işaretli öğe).`)
   const pick = await visionLocate({ apiKey, model, prompt, kind: node.kind, scan: scanRes, stepTitle: node.title })
@@ -161,7 +186,7 @@ async function resolveVision(node: AgentNode): Promise<{ x: number; y: number; l
     return { ...center(item), label: `[görsel] “${item.text}”` }
   }
   if (pick.kind === 'none') {
-    throw new Error(`[görsel] Model “${prompt}” hedefini ekranda bulamadı${pick.reason ? `: ${pick.reason}` : ''}.`)
+    throw new NotFoundError(`[görsel] Model “${prompt}” hedefini ekranda bulamadı${pick.reason ? `: ${pick.reason}` : ''}.`)
   }
 
   const a = scanRes.area
@@ -187,19 +212,18 @@ async function resolveVision(node: AgentNode): Promise<{ x: number; y: number; l
 
 async function visionExists(node: AgentNode, text: string): Promise<boolean> {
   const { apiKey, model } = visionModelOrThrow()
-  const s = getSettings()
-  const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'plain', uia: false, ocr: false, maxImageW: 1400 })
-  warnMissingWindow(res)
+  const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, maxImageW: 1400, fresh: true })
   if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
   const r = await visionCheck({ apiKey, model, question: text, image: res.image })
   log('info', `[görsel] “${text}” → ${r.answer ? 'evet' : 'hayır'}${r.reason ? ` (${r.reason})` : ''}`)
   return r.answer
 }
 
-const findTarget = (node: AgentNode, stepNo: number) => (node.useVision ? resolveVision(node) : resolveTarget(node, stepNo))
+const findTarget = (node: AgentNode, stepNo: number, wide = false) =>
+  node.useVision ? resolveVision(node, wide) : resolveTarget(node, stepNo, wide)
 
 /** Resolves where to click for a Click/Type node, from the most to the least deterministic source. */
-async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: number; y: number; label: string }> {
+async function resolveTarget(node: AgentNode, stepNo: number, wide = false): Promise<{ x: number; y: number; label: string }> {
   const s = getSettings()
   const loc = node.locator
   const win = s.targetWindow || loc?.windowTitle || ''
@@ -217,7 +241,7 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
   const explicit = extractTarget(prompt)
   const recordedText = loc?.text || loc?.name || ''
   const wantLlm = !!s.apiKey && !!prompt
-  const scanRes = await scanFor(node, wantLlm && s.sendScreenshot)
+  const scanRes = await scanFor(node, wantLlm && s.sendScreenshot, wide)
   const anchor = node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
 
   let hit: Target | null = null
@@ -272,7 +296,7 @@ async function resolveTarget(node: AgentNode, stepNo: number): Promise<{ x: numb
   }
 
   const seen = sampleTexts(scanRes.items)
-  throw new Error(
+  throw new NotFoundError(
     `“${explicit?.text || prompt || recordedText || node.title}” ekranda bulunamadı.${
       s.apiKey ? '' : ' (API anahtarı yok, sadece yazı eşleşmesi denendi.)'
     }${seen ? ` Ekranda görülenlerden bazıları: ${seen}` : ''}`
@@ -285,7 +309,7 @@ const executor: Executor = {
   loopProgress: (id, index) => send('agent:loop', { id, index }),
   shouldStop: () => stopRequested,
   click: async (node, stepNo) => {
-    const t = await findTarget(node, stepNo)
+    const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
     const mode = node.clickMode ?? 'left'
     await bridge.clickAt(t.x, t.y, mode)
     log('success', `${mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
@@ -293,7 +317,7 @@ const executor: Executor = {
   },
   type: async (node, stepNo) => {
     if (node.prompt?.trim() || node.locator) {
-      const t = await findTarget(node, stepNo)
+      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       await bridge.clickAt(t.x, t.y, 'left')
       await sleep(FOCUS_MS)
       log('info', `Alan seçildi: ${t.label}`)
@@ -304,7 +328,7 @@ const executor: Executor = {
   key: async (node) => {
     if (!node.keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
     if (node.useVision && node.prompt?.trim()) {
-      const t = await resolveVision(node)
+      const t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide))
       await bridge.clickAt(t.x, t.y, 'left')
       await sleep(FOCUS_MS)
       log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
@@ -315,9 +339,8 @@ const executor: Executor = {
   },
   exists: async (text, node) => {
     if (node.useVision) return visionExists(node, text)
-    const s = getSettings()
-    const res = await bridge.scan({ windowTitle: s.targetWindow || undefined, image: 'none' })
-    warnMissingWindow(res)
+    const res = await bridge.scan({ image: 'none', fresh: true })
+    log('info', `Ekran yenilendi: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})`)
     return containsText(res.items, text)
   },
 }

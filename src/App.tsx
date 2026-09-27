@@ -64,6 +64,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [graph, setGraph] = useState<AgentGraph>(initialGraph)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [capturing, setCapturing] = useState(0)
@@ -79,6 +80,8 @@ export default function App() {
   graphRef.current = graph
   const selectedRef = useRef(selectedNodeId)
   selectedRef.current = selectedNodeId
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const fileRef = useRef<HTMLInputElement>(null)
@@ -192,17 +195,34 @@ export default function App() {
   const selected = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId) ?? null, [graph.nodes, selectedNodeId])
   const selectedEdge = useMemo(() => graph.edges.find((e) => e.id === selectedEdgeId) ?? null, [graph.edges, selectedEdgeId])
 
-  const selectNode = (id: string | null) => {
-    setSelectedNodeId(id)
-    if (id) {
-      setSelectedEdgeId(null)
-      setSideTab('node')
+  const selectNode = (id: string | null, additive = false) => {
+    setSelectedEdgeId(null)
+    if (!id) {
+      setSelectedNodeId(null)
+      setSelectedIds([])
+      selectedIdsRef.current = []
+      return
     }
+    setSideTab('node')
+    if (!additive) {
+      setSelectedNodeId(id)
+      setSelectedIds([id])
+      selectedIdsRef.current = [id]
+      return
+    }
+    const prev = selectedIdsRef.current
+    const has = prev.includes(id)
+    const next = has ? prev.filter((x) => x !== id) : [...prev, id]
+    selectedIdsRef.current = next
+    setSelectedIds(next)
+    setSelectedNodeId(has ? (next[next.length - 1] ?? null) : id)
   }
   const selectEdge = (id: string | null) => {
     setSelectedEdgeId(id)
     if (id) {
       setSelectedNodeId(null)
+      setSelectedIds([])
+      selectedIdsRef.current = []
       setSideTab('node')
     }
   }
@@ -225,7 +245,22 @@ export default function App() {
 
   const deleteNode = (id: string) => {
     setGraph((g) => removeNode(g, id))
-    if (selectedNodeId === id) setSelectedNodeId(null)
+    const next = selectedIdsRef.current.filter((x) => x !== id)
+    selectedIdsRef.current = next
+    setSelectedIds(next)
+    if (selectedNodeId === id) setSelectedNodeId(next[next.length - 1] ?? null)
+  }
+
+  const deleteSelection = () => {
+    const ids = selectedIdsRef.current
+    if (!ids.length) {
+      if (selectedNodeId) deleteNode(selectedNodeId)
+      return
+    }
+    setGraph((g) => ids.reduce((acc, id) => removeNode(acc, id), g))
+    selectedIdsRef.current = []
+    setSelectedIds([])
+    setSelectedNodeId(null)
   }
 
   const deleteEdge = (id: string) => {
@@ -239,7 +274,7 @@ export default function App() {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
-        else if (selectedNodeId) deleteNode(selectedNodeId)
+        else if (selectedIdsRef.current.length || selectedNodeId) deleteSelection()
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedNodeId) {
         e.preventDefault()
         const r = duplicateNode(graphRef.current, selectedNodeId)
@@ -426,6 +461,8 @@ export default function App() {
     if (graph.nodes.length > 1 && !window.confirm('Mevcut akış silinsin mi?')) return
     setGraph(initialGraph())
     setSelectedNodeId(null)
+    setSelectedIds([])
+    selectedIdsRef.current = []
     setSelectedEdgeId(null)
     setStepStatus({})
   }
@@ -482,6 +519,7 @@ export default function App() {
             <NodeCanvas
               graph={graph}
               selectedNodeId={selectedNodeId}
+              selectedIds={selectedIds}
               selectedEdgeId={selectedEdgeId}
               stepStatus={stepStatus}
               running={running}
@@ -577,6 +615,7 @@ export default function App() {
             }}
             graph={graph}
             selected={selected}
+            selectedCount={selectedIds.length}
             selectedEdge={selectedEdge}
             onUpdateNode={(patch) => selected && updateNode(selected.id, patch)}
             onDeleteNode={() => selected && deleteNode(selected.id)}

@@ -136,12 +136,13 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   return , $result
 }
 
-function Get-ScanRoots($win, [int]$ownPid) {
+function Get-ScanRoots($win, [int]$ownPid, [bool]$fresh) {
   $roots = New-Object System.Collections.ArrayList
   if ($null -ne $win) {
     [void]$roots.Add($win)
     return , $roots
   }
+  $cap = $(if ($fresh) { 12 } else { 3 })
   $root = $script:AE::RootElement
   $tray = $null
   $desk = $null
@@ -153,7 +154,7 @@ function Get-ScanRoots($win, [int]$ownPid) {
       $cls = [string]$cur.ClassName
       if ($cls -eq 'Shell_TrayWnd') { $tray = $c }
       elseif ($cls -eq 'Progman' -or $cls -eq 'WorkerW') { if ($null -eq $desk -and $cls -eq 'Progman') { $desk = $c } }
-      elseif ($normal.Count -lt 3 -and $cur.ProcessId -ne $ownPid -and -not $cur.IsOffscreen) {
+      elseif ($normal.Count -lt $cap -and $cur.ProcessId -ne $ownPid -and -not $cur.IsOffscreen) {
         $h = [IntPtr]$cur.NativeWindowHandle
         $r = $cur.BoundingRectangle
         if ($h -ne [IntPtr]::Zero -and [XpNative]::IsWindowVisible($h) -and -not [XpNative]::IsIconic($h) -and -not [XpNative]::IsCloaked($h) -and $r.Width -gt 80 -and $r.Height -gt 60) {
@@ -318,9 +319,13 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW) {
 }
 
 function Invoke-Scan($P) {
+  $fresh = $false
+  if ($P.fresh -eq $true) { $fresh = $true }
   $win = $null
   $missing = ''
-  if ($P.windowTitle) {
+  # A fresh scan ignores the pinned target window and does not steal focus,
+  # so a dialog or page that just appeared is part of the tree and the OCR.
+  if (-not $fresh -and $P.windowTitle) {
     $win = Find-WindowOrNull ([string]$P.windowTitle)
     if ($null -eq $win) {
       $missing = [string]$P.windowTitle
@@ -334,7 +339,7 @@ function Invoke-Scan($P) {
   if ($P.ownPid) { $own = [int]$P.ownPid }
 
   $uia = New-Object System.Collections.ArrayList
-  if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own) $rect }
+  if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
   $bmp = Get-ScreenBitmap $rect
   $ocr = New-Object System.Collections.ArrayList
