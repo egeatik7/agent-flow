@@ -53,25 +53,22 @@ function deepest(graph: AgentGraph, head: string, candidates: string[], loopId: 
 }
 
 /**
- * Where the group leaves when the rounds are over.
- * The head is the node “tekrar” points at (it has two inputs: the way in, and the way back).
- * The exit is the node just before that head — the one whose edge returns to it.
- * If that edge is the loop card’s own “tekrar”, the exit is the last step that feeds the card,
- * so the flow does not finish on the loop card.
+ * Last step of the repeating group: the furthest node from the head that closes the cycle.
+ * The head is the node “tekrar” points at (it receives the way in and the way back).
+ * A node in the middle that also points back must not win over the real end of the chain.
+ * If only the loop card points back, the last step is the node that feeds that card.
  */
 export function loopTail(graph: AgentGraph, loopId: string): string {
   const head = graph.edges.find((e) => e.from === loopId && e.fromPort === 'loop')?.to
   if (!head) return loopId
   const body = new Set(loopBody(graph, loopId))
-
-  const toHead = graph.edges.filter((e) => e.to === head && e.from !== loopId && body.has(e.from))
-  if (toHead.length === 1) return toHead[0].from
-  if (toHead.length > 1) return deepest(graph, head, toHead.map((e) => e.from), loopId)
-
-  const intoLoop = graph.edges.filter((e) => e.to === loopId && e.from !== loopId && body.has(e.from))
-  if (intoLoop.length === 1) return intoLoop[0].from
-  if (intoLoop.length > 1) return deepest(graph, head, intoLoop.map((e) => e.from), loopId)
-  return loopId
+  const froms = new Set<string>()
+  for (const e of graph.edges) {
+    if (e.from === loopId || !body.has(e.from)) continue
+    if (e.to === head || e.to === loopId) froms.add(e.from)
+  }
+  if (!froms.size) return loopId
+  return deepest(graph, head, [...froms], loopId)
 }
 
 /** “bitti” belongs on the group’s last node. Move an exit that was stored on the loop card or an older step. */

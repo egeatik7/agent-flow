@@ -25,6 +25,7 @@ type Frame = {
   h: number
   label: string
   tailId: string
+  exitX: number
   exitY: number
 }
 
@@ -51,9 +52,9 @@ function computeFrames(graph: AgentGraph): Frame[] {
       : `${loop.title} · ${loop.count ?? 1} kez`
     const tailId = loopTail(graph, loop.id)
     const tail = byId.get(tailId)
-    const mid = tail ? tail.y + nodeHeight(tail.kind) / 2 : (y1 + y2) / 2
-    const exitY = Math.min(y2 - 18, Math.max(y1 + 28, mid))
-    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label, tailId, exitY })
+    const exitX = tail ? tail.x + NODE_W : x2
+    const exitY = tail ? tail.y + nodeHeight(tail.kind) / 2 : (y1 + y2) / 2
+    frames.push({ loop, ids, x: x1, y: y1, w: x2 - x1, h: y2 - y1, label, tailId, exitX, exitY })
   }
   return frames.sort((a, b) => b.w * b.h - a.w * a.h)
 }
@@ -369,7 +370,7 @@ export default function NodeCanvas(p: Props) {
   const edgeSource = (node: AgentNode, port: string) => {
     if (port === 'done') {
       const f = frames.find((fr) => fr.loop.id === node.id || fr.tailId === node.id || fr.ids.includes(node.id))
-      if (f) return { x: f.x + f.w - 7, y: f.exitY }
+      if (f) return { x: f.exitX - 7, y: f.exitY }
       return { x: node.x + NODE_W - 7, y: node.y + nodeHeight(node.kind) / 2 }
     }
     return outputPoint(node, port)
@@ -608,7 +609,7 @@ export default function NodeCanvas(p: Props) {
           <div
             key={`${f.loop.id}-exit`}
             className="loop-frame-exit"
-            style={{ left: f.x + f.w, top: f.exitY }}
+            style={{ left: f.exitX, top: f.exitY }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div

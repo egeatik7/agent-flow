@@ -117,6 +117,16 @@ export async function runGraph(
       return
     }
 
+    if (node.kind === 'loop' && loopTail(graph, node.id) === node.id) {
+      if (loopStillGoing(node, state)) {
+        advanceLoop(node, state, ex)
+        port = 'loop'
+      } else {
+        closeLoop(node, state, ex, node.title)
+        port = 'done'
+      }
+    }
+
     const left = leaveFinishedLoop(graph, byId, node, port, state, ex)
     if (left === 'stop') break
     if (left) {
@@ -144,7 +154,7 @@ function edgeFrom(graph: AgentGraph, node: AgentNode, port: string) {
   return graph.edges.find((e) => e.from === node.id && e.fromPort === port)
 }
 
-/** True while another pass should go back through the loop card. */
+/** True while the item just finished is not the last one. The index is the item in progress. */
 function loopStillGoing(node: AgentNode, state: RunState): boolean {
   const items = listItems(node)
   if (items.length) {
@@ -152,7 +162,27 @@ function loopStillGoing(node: AgentNode, state: RunState): boolean {
     return cur + 1 < items.length
   }
   const total = Math.max(1, node.count ?? 1)
-  return (state.loopCounters.get(node.id) ?? 0) < total
+  return (state.loopCounters.get(node.id) ?? 0) + 1 < total
+}
+
+/** One full lap just finished and another item remains. Move the index forward once. */
+function advanceLoop(node: AgentNode, state: RunState, ex: Executor) {
+  const items = listItems(node)
+  if (items.length) {
+    const cur = state.listIndex.get(node.id) ?? 0
+    const next = cur + 1
+    ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
+    state.listIndex.set(node.id, next)
+    state.vars = itemVars(items[next], next, items.length)
+    ex.loopProgress?.(node.id, next)
+    ex.log('info', `Sıradaki öğe ${next + 1}/${items.length}: ${baseName(items[next])}`)
+    return
+  }
+  const total = Math.max(1, node.count ?? 1)
+  const done = (state.loopCounters.get(node.id) ?? 0) + 1
+  state.loopCounters.set(node.id, done)
+  state.vars = { ...state.vars, sira: String(done + 1) }
+  ex.log('info', `Döngü “${node.title}”: ${done}/${total} bitti, sıradaki ${done + 1}/${total}`)
 }
 
 function closeLoop(node: AgentNode, state: RunState, ex: Executor, fromTitle: string) {
@@ -186,7 +216,10 @@ function leaveFinishedLoop(
   const dest = hopEdge ? byId.get(hopEdge.to) : undefined
   if (!dest || dest.kind !== 'loop') return null
   if (loopTail(graph, dest.id) !== node.id) return null
-  if (loopStillGoing(dest, state)) return null
+  if (loopStillGoing(dest, state)) {
+    advanceLoop(dest, state, ex)
+    return null
+  }
   closeLoop(dest, state, ex, node.title)
   const exit = loopDoneEdge(graph, dest.id)
   if (!exit) {
@@ -217,7 +250,6 @@ async function execNode(
   stepDelayMs: number,
   ahead: StepAhead
 ): Promise<string> {
-  const { loopCounters, listIndex } = state
   const settle = () => interruptibleSleep(stepDelayMs, ex.shouldStop)
   switch (node.kind) {
     case 'start':
@@ -267,38 +299,10 @@ async function execNode(
       ex.log('info', `[${stepNo}] Koşul “${text}”: ${found ? 'var' : 'yok'}`)
       return found ? 'true' : 'false'
     }
-    case 'loop': {
-      const items = listItems(node)
-      if (items.length) {
-        // The loop node sits at the end of its body: arriving here means the current item is finished.
-        const cur = listIndex.get(node.id) ?? 0
-        ex.log('success', `Döngü “${node.title}”: ${cur + 1}/${items.length} bitti (${baseName(items[cur] ?? '')})`)
-        const next = cur + 1
-        if (next < items.length) {
-          listIndex.set(node.id, next)
-          state.vars = itemVars(items[next], next, items.length)
-          ex.loopProgress?.(node.id, next)
-          ex.log('info', `Sıradaki öğe ${next + 1}/${items.length}: ${baseName(items[next])}`)
-          return 'loop'
-        }
-        listIndex.set(node.id, 0)
-        state.vars = itemVars(items[0], 0, items.length)
-        ex.loopProgress?.(node.id, 0)
-        ex.log('success', `Döngü “${node.title}”: listedeki ${items.length} öğenin hepsi bitti.`)
-        return 'done'
-      }
-      const total = Math.max(1, node.count ?? 1)
-      const done = loopCounters.get(node.id) ?? 0
-      if (done < total) {
-        loopCounters.set(node.id, done + 1)
-        state.vars = { ...state.vars, sira: String(done + 2) }
-        ex.log('info', `Döngü “${node.title}”: ${done + 1}/${total}`)
-        return 'loop'
-      }
-      loopCounters.delete(node.id)
-      ex.log('info', `Döngü “${node.title}” bitti.`)
-      return 'done'
-    }
+    case 'loop':
+      // The card only sends the flow back along “tekrar”. The item number moves
+      // when the lap actually finishes, at the last node of the group.
+      return 'loop'
     case 'end':
       return 'end'
   }

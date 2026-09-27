@@ -196,7 +196,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
       )}
 
       <p className="hint">
-        Döngüyü tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Turlar bitince akış döngü kartından değil, gruptaki <b>son adımdan</b> (başa dönen bağlantının geldiği node) çıkar; çerçevenin o hizadaki <b>bitti</b> noktasını dışarıdaki node’a bağla. Değişen yerlere{' '}
+        Döngü kartını tekrar eden kısmın <b>sonuna</b> koy, “tekrar” çıkışını o kısmın <b>ilk</b> node’una bağla. Öğe sayısı, o ilk node’a geri dönen <b>son adım</b> bitince ilerler; döngü kartına uğramak sayacı artırmaz. Turlar bitince akış o son adımın sağındaki <b>bitti</b> noktasından çıkar. Değişen yerlere{' '}
         <span className="mono">{'{{öğe}}'}</span> yaz: her turda listenin sıradaki satırı gelir.{' '}
         <span className="mono">{'{{öğe.isim}}'}</span> uzantısız dosya adıdır (kedi.png → kedi).
       </p>
