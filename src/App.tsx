@@ -4,7 +4,6 @@ import Toolbar from './components/Toolbar'
 import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
-import Taskbar from './components/Taskbar'
 import ScreenScanner from './components/ScreenScanner'
 import {
   DEFAULT_SETTINGS,
@@ -646,7 +645,6 @@ export default function App() {
           <LogPanel logs={logs} onClear={() => setLogs([])} />
         </div>
       </div>
-      <Taskbar running={running} />
       {scanner && (
         <ScreenScanner
           targetLabel={

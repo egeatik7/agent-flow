@@ -7,7 +7,6 @@
   --xp-border-dark: #404040;
   --xp-border-mid: #808080;
   --xp-green: #2f8a2f;
-  --xp-taskbar: linear-gradient(180deg, #3168d5 0%, #245edb 8%, #1941a5 100%);
   --font-ui: Tahoma, 'Segoe UI', Geneva, Verdana, sans-serif;
   --font-mono: Consolas, 'Lucida Console', 'Courier New', monospace;
 }
@@ -46,20 +45,19 @@ textarea {
   font-size: 11px;
 }
 
-/* ---------- Desktop + window ---------- */
+/* ---------- Window ---------- */
+
+body {
+  background: var(--xp-face);
+}
 
 .desktop {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(ellipse 140% 70% at 30% 110%, #4f8a2a 0%, transparent 60%),
-    radial-gradient(ellipse 120% 60% at 80% 100%, #6aa43a 0%, transparent 55%),
-    linear-gradient(180deg, #3a78d8 0%, #6aa0e8 38%, #9cc6f0 52%, #5e9a34 53%, #4a7f26 100%);
 }
 
 .xp-window {
-  margin: 12px 12px 8px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -67,21 +65,7 @@ textarea {
   background: var(--xp-face);
   border: 3px solid #0842c6;
   border-top: none;
-  border-radius: 8px 8px 0 0;
-  box-shadow: 2px 4px 14px rgba(0, 0, 0, 0.4);
   overflow: hidden;
-  animation: windowIn 0.3s ease-out;
-}
-
-@keyframes windowIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 .titlebar {
@@ -92,7 +76,6 @@ textarea {
   justify-content: space-between;
   padding: 0 5px 0 8px;
   background: linear-gradient(180deg, #0997ff 0%, #0053ee 8%, #0050ee 40%, #06f 88%, #06f 93%, #005bff 95%, #003dd7 96%, #003dd7 100%);
-  border-radius: 7px 7px 0 0;
   color: #fff;
   -webkit-app-region: drag;
 }
@@ -1363,89 +1346,6 @@ textarea {
   box-shadow: inset 0 1px 0 #aca899;
   color: #333;
   font-size: 11px;
-}
-
-/* ---------- Taskbar ---------- */
-
-.taskbar {
-  height: 34px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 0;
-  background: var(--xp-taskbar);
-  box-shadow: inset 0 1px 0 #6a93e8;
-}
-
-.start-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 100%;
-  padding: 0 18px 0 10px;
-  border: none;
-  border-radius: 0 12px 12px 0;
-  background: linear-gradient(180deg, #5fba4a 0%, #3c8a2a 55%, #2a6a18 100%);
-  color: #fff;
-  font-weight: 700;
-  font-style: italic;
-  font-size: 15px;
-  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
-}
-
-.start-logo {
-  width: 18px;
-  height: 18px;
-  background:
-    linear-gradient(90deg, #f25022 0 48%, transparent 48% 52%, #7fba00 52%) top / 100% 48% no-repeat,
-    linear-gradient(90deg, #00a4ef 0 48%, transparent 48% 52%, #ffb900 52%) bottom / 100% 48% no-repeat;
-  transform: skewY(-6deg);
-}
-
-.task-pill {
-  height: 26px;
-  min-width: 170px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: linear-gradient(180deg, #1e52b7, #1a4aa8);
-  border: 1px solid #0a3a8a;
-  border-radius: 3px;
-  color: #fff;
-  box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-.task-icon {
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-  background: linear-gradient(135deg, #fff, #ffd24a, #e08a00);
-}
-
-.tray {
-  margin-left: auto;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: linear-gradient(180deg, #0c9ef0, #0a7bd6 50%, #0c67c4);
-  border-left: 1px solid #0a3a8a;
-  box-shadow: inset 1px 0 0 #1cb0f7;
-  color: #fff;
-}
-
-.tray-item {
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.clock {
-  min-width: 40px;
-  text-align: center;
 }
 
 @media (max-width: 1000px) {
