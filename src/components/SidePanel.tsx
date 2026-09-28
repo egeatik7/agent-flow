@@ -605,7 +605,7 @@ function NodeInspector(p: Props) {
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
           </label>
-          {!n.useVision && (n.prompt?.trim() || n.locator) && <TargetBox {...p} n={n} />}
+          {!n.useVision && <TargetBox {...p} n={n} />}
           <MemoryBox {...p} n={n} />
         </>
       )}
