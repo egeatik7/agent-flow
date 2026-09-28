@@ -149,7 +149,7 @@ Başlangıç → Tarayıcıyı Aç https://site
 - **İleriye ekle:** node’un sağındaki yeşil **+** → tür seç. Arada bağlantı varsa yeni node araya girer ve aynı kutuya katılır.
 - **Bağla:** renkli çıkış noktasını sürükleyip başka bir node’un (ya da kutu başlığının) üstüne bırak.
 - **Tuval:** tekerlek yakınlaştırır/uzaklaştırır, orta tuşla sürüklemek kaydırır. Köşedeki yüzde 100%’e döner.
-- **Seç:** `Ctrl` ile birden fazla node seçilir, sürükleyince birlikte gider. `Ctrl+G` kutuya alır, `Del` siler, `Ctrl+D` kopyalar.
+- **Seç:** boş yerde sürüklemek kutu çizerek seçer. `Shift` ile tıklamak seçime ekler ya da çıkarır; `Shift` basılıyken çizilen kutu da seçime eklenir. Seçililer birlikte sürüklenir. `Ctrl+G` kutuya alır, `Del` siler, `Ctrl+D` kopyalar.
   Kutuyu silmek içindekileri silmez.
 - **Sağ tık:** boş yerde (ya da kutunun içinde) node ekleme menüsü; node üzerinde çalıştır, kutuya al, kutudan çıkar, kopyala, sil.
 - **Ekran Tarayıcı:** ekranın görüntüsü alınır, bulunan her yazı kutuyla işaretlenir; birine tıklayınca seçili node’a atanır.

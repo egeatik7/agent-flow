@@ -217,6 +217,17 @@ export default function App() {
     setSelectedIds(next)
     setSelectedNodeId(has ? (next[next.length - 1] ?? null) : id)
   }
+
+  const selectMany = (ids: string[], mode: 'replace' | 'add') => {
+    setSelectedEdgeId(null)
+    const prev = selectedIdsRef.current
+    const next = mode === 'add' ? [...prev, ...ids.filter((id) => !prev.includes(id))] : [...ids]
+    selectedIdsRef.current = next
+    setSelectedIds(next)
+    const cur = selectedRef.current
+    setSelectedNodeId(cur && next.includes(cur) ? cur : (next[next.length - 1] ?? null))
+    if (next.length) setSideTab('node')
+  }
   const selectEdge = (id: string | null) => {
     setSelectedEdgeId(id)
     if (id) {
@@ -563,6 +574,7 @@ export default function App() {
               stepStatus={stepStatus}
               running={running}
               onSelectNode={selectNode}
+              onSelectMany={selectMany}
               onSelectEdge={selectEdge}
               onMoveNodes={(pos) =>
                 setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)) }))

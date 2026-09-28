@@ -44,6 +44,7 @@ type Props = {
   stepStatus: Record<string, StepStatus>
   running: boolean
   onSelectNode: (id: string | null, additive?: boolean) => void
+  onSelectMany: (ids: string[], mode: 'replace' | 'add') => void
   onSelectEdge: (id: string | null) => void
   onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void
   onSetMembership: (ids: string[], loopId: string | null) => void
@@ -65,6 +66,8 @@ type Menu =
   | { mode: 'node'; x: number; y: number; nodeId: string }
 
 type Drag = { ids: string[]; frozen: Map<string, Rect>; over: string | null; skip: Set<string> }
+
+type Marquee = { x: number; y: number; w: number; h: number }
 
 const PORT_COLORS: Record<string, string> = {
   next: '#0a246a',
@@ -108,6 +111,10 @@ function inside(r: Rect, x: number, y: number) {
   return x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h
 }
 
+function overlaps(a: Rect, b: Rect) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
 export default function NodeCanvas(p: Props) {
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -121,6 +128,7 @@ export default function NodeCanvas(p: Props) {
   const [panning, setPanning] = useState(false)
   const [drag, setDrag] = useState<Drag | null>(null)
   const dragRef = useRef<Drag | null>(null)
+  const [marquee, setMarquee] = useState<Marquee | null>(null)
   const graphRef = useRef(p.graph)
   graphRef.current = p.graph
 
@@ -349,7 +357,7 @@ export default function NodeCanvas(p: Props) {
       e.stopPropagation()
       return
     }
-    if (e.ctrlKey || e.metaKey) {
+    if (e.shiftKey) {
       e.stopPropagation()
       setMenu(null)
       p.onSelectNode(n.id, true)
@@ -418,7 +426,7 @@ export default function NodeCanvas(p: Props) {
   return (
     <div
       ref={scrollRef}
-      className={`canvas-scroll${panning ? ' panning' : ''}`}
+      className={`canvas-scroll${panning ? ' panning' : ''}${marquee ? ' selecting' : ''}`}
       style={{
         backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
@@ -448,8 +456,48 @@ export default function NodeCanvas(p: Props) {
           setHoverTarget(null)
         }
         setMenu(null)
-        p.onSelectNode(null)
-        p.onSelectEdge(null)
+        const origin = toCanvas(e.clientX, e.clientY)
+        const additive = e.shiftKey
+        const sx = e.clientX
+        const sy = e.clientY
+        let box: Marquee | null = null
+        const move = (ev: MouseEvent) => {
+          if (!box && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return
+          const cur = toCanvas(ev.clientX, ev.clientY)
+          box = {
+            x: Math.min(origin.x, cur.x),
+            y: Math.min(origin.y, cur.y),
+            w: Math.abs(cur.x - origin.x),
+            h: Math.abs(cur.y - origin.y),
+          }
+          setMarquee(box)
+        }
+        const up = () => {
+          window.removeEventListener('mousemove', move)
+          window.removeEventListener('mouseup', up)
+          const drawn = box
+          setMarquee(null)
+          if (!drawn || (drawn.w < 3 && drawn.h < 3)) {
+            if (!additive) {
+              p.onSelectNode(null)
+              p.onSelectEdge(null)
+            }
+            return
+          }
+          const hits: string[] = []
+          for (const n of graphRef.current.nodes) {
+            if (n.kind === 'loop') {
+              const f = frameById.get(n.id)
+              if (f && overlaps({ x: f.rect.x, y: f.rect.y, w: f.rect.w, h: 28 }, drawn)) hits.push(n.id)
+            } else if (overlaps({ x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }, drawn)) {
+              hits.push(n.id)
+            }
+          }
+          p.onSelectMany(hits, additive ? 'add' : 'replace')
+          p.onSelectEdge(null)
+        }
+        window.addEventListener('mousemove', move)
+        window.addEventListener('mouseup', up)
       }}
       onAuxClick={(e) => {
         if (e.button === 1) e.preventDefault()
@@ -512,7 +560,7 @@ export default function NodeCanvas(p: Props) {
                   }
                   e.stopPropagation()
                   setMenu(null)
-                  if (e.ctrlKey || e.metaKey) {
+                  if (e.shiftKey) {
                     p.onSelectNode(f.loop.id, true)
                     return
                   }
@@ -708,6 +756,13 @@ export default function NodeCanvas(p: Props) {
             </div>
           )
         })}
+
+        {marquee && (
+          <div
+            className="marquee"
+            style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
+          />
+        )}
 
         {menu && (
           <div

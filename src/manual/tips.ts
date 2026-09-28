@@ -405,7 +405,7 @@ function regionTip(el: Element): Tip | null {
     return { title: 'Boş tuval', text: 'Sağ tıkla veya Node Ekle ile ilk adımı koy. Node’ları oklarla bağla. Her Öğe İçin kutusuna sürüklenen node, listedeki her dosya için tekrar eder.' }
   }
   if (el.classList.contains('canvas-scroll') || el.classList.contains('canvas-inner')) {
-    return { title: 'Tuval', text: 'Akışın durduğu yer. Boş yere sağ tıkla, node ekle. Tekerlek yakınlaştırır, orta tuş kaydırır. Node’u bir çerçevenin içine bırakınca o kutuya girer, dışına bırakınca çıkar. Ctrl ile birden fazla node seçilir.' }
+    return { title: 'Tuval', text: 'Akışın durduğu yer. Boş yere sağ tıkla, node ekle. Tekerlek yakınlaştırır, orta tuş kaydırır. Boş yerde sürüklemek kutu çizerek seçer. Shift ile tıklamak, ya da Shift basılıyken yeni bir kutu çizmek, seçime ekler. Node’u bir çerçevenin içine bırakınca o kutuya girer, dışına bırakınca çıkar.' }
   }
   if (el.classList.contains('hint-block') || el.classList.contains('hint-list')) {
     return { title: 'Nasıl kullanılır', text: 'Henüz bir node seçilmedi. Tuvalde bir node’a tıklayınca onun ayarları burada açılır. Soldaki liste de aynı işi anlatır.' }

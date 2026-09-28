@@ -559,7 +559,7 @@ function NodeInspector(p: Props) {
     <div>
       {(p.selectedCount ?? 1) > 1 && (
         <p className="hint">
-          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Ctrl ile seçime ekle ya da çıkar.
+          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Shift ile tıklayınca seçime eklenir ya da çıkar. Boş yerde sürüklemek kutu çizer; Shift basılıyken çizilen kutu seçime eklenir.
         </p>
       )}
       <div className="inspector-kind" style={{ background: spec.color }}>

@@ -363,6 +363,20 @@ body {
   cursor: grabbing !important;
 }
 
+.canvas-scroll.selecting,
+.canvas-scroll.selecting * {
+  cursor: crosshair !important;
+}
+
+.marquee {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  background: rgba(49, 106, 197, 0.18);
+  border: 1px solid #316ac5;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+}
+
 .canvas-zoom {
   position: absolute;
   right: 8px;
