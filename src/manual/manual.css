@@ -1,0 +1,36 @@
+.xpas-manual {
+  position: fixed;
+  z-index: 500;
+  width: 300px;
+  pointer-events: none;
+  background: #fff8dc;
+  color: #1a1a1a;
+  border: 1px solid #003c74;
+  border-radius: 3px;
+  box-shadow: 3px 3px 0 rgba(0, 40, 90, 0.25);
+  font-family: Tahoma, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.xpas-manual-bar {
+  padding: 2px 8px;
+  background: linear-gradient(180deg, #f6e27a 0%, #e2c14a 100%);
+  border-bottom: 1px solid #8a6a10;
+  color: #3d2e04;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.xpas-manual-title {
+  padding: 7px 10px 0;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.xpas-manual-text {
+  margin: 0;
+  padding: 4px 10px 10px;
+}
