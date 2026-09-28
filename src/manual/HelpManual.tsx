@@ -18,6 +18,13 @@ function place(el: Element, x: number, y: number, cardW: number, cardH: number):
   return { left, top }
 }
 
+const STILL_MS = 650
+const STILL_PX = 5
+
+function inCanvas(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest('.canvas-wrap, .canvas-scroll')
+}
+
 /** A read-only card. It never takes clicks, never stops events, never reads app state. */
 export default function HelpManual() {
   const [tip, setTip] = useState<Tip | null>(null)
@@ -26,10 +33,13 @@ export default function HelpManual() {
   const anchor = useRef<{ el: Element; x: number; y: number } | null>(null)
 
   useEffect(() => {
-    let showTimer = 0
+    let restTimer = 0
     let hideTimer = 0
     let shown = false
     let current: Element | null = null
+    let pendingEl: Element | null = null
+    let lastX = Number.NaN
+    let lastY = Number.NaN
 
     const hide = () => {
       shown = false
@@ -38,30 +48,61 @@ export default function HelpManual() {
       setTip(null)
     }
 
-    const onOver = (e: Event) => {
+    const show = (found: { el: Element; tip: Tip }, x: number, y: number) => {
+      const under = document.elementFromPoint(x, y)
+      if (inCanvas(under)) return
+      const now = findTip(under)
+      if (!now || now.el !== found.el) return
+      current = found.el
+      shown = true
+      anchor.current = { el: found.el, x, y }
+      setTip(found.tip)
+      const c = card.current
+      setPos(place(found.el, x, y, c?.offsetWidth || 300, c?.offsetHeight || 150))
+    }
+
+    const onPoint = (e: Event) => {
       const pe = e as PointerEvent
+      if (inCanvas(e.target)) {
+        window.clearTimeout(restTimer)
+        window.clearTimeout(hideTimer)
+        restTimer = 0
+        pendingEl = null
+        if (shown) hide()
+        lastX = pe.clientX
+        lastY = pe.clientY
+        return
+      }
       const found = findTip(e.target)
-      if (found && found.el === current) {
+      const dist = Math.hypot(pe.clientX - lastX, pe.clientY - lastY)
+      const moved = Number.isFinite(lastX) && dist >= STILL_PX
+      lastX = pe.clientX
+      lastY = pe.clientY
+      if (shown && found && found.el === current && !moved) {
         window.clearTimeout(hideTimer)
         anchor.current = { el: found.el, x: pe.clientX, y: pe.clientY }
         return
       }
-      window.clearTimeout(showTimer)
       window.clearTimeout(hideTimer)
       if (!found) {
-        if (shown) hideTimer = window.setTimeout(hide, 140)
+        window.clearTimeout(restTimer)
+        restTimer = 0
+        pendingEl = null
+        if (shown) hideTimer = window.setTimeout(hide, 120)
         return
       }
-      const apply = () => {
-        current = found.el
-        shown = true
-        anchor.current = { el: found.el, x: pe.clientX, y: pe.clientY }
-        setTip(found.tip)
-        const c = card.current
-        setPos(place(found.el, pe.clientX, pe.clientY, c?.offsetWidth || 300, c?.offsetHeight || 150))
-      }
-      if (shown) apply()
-      else showTimer = window.setTimeout(apply, 280)
+      if (shown && found.el !== current) hide()
+      if (!moved && restTimer && pendingEl === found.el) return
+      pendingEl = found.el
+      window.clearTimeout(restTimer)
+      const shot = { el: found.el, tip: found.tip }
+      const x = pe.clientX
+      const y = pe.clientY
+      restTimer = window.setTimeout(() => {
+        restTimer = 0
+        pendingEl = null
+        show(shot, x, y)
+      }, STILL_MS)
     }
 
     const onScroll = () => {
@@ -71,13 +112,15 @@ export default function HelpManual() {
       setPos(place(a.el, a.x, a.y, c?.offsetWidth || 300, c?.offsetHeight || 150))
     }
 
-    document.addEventListener('pointerover', onOver, true)
+    document.addEventListener('pointerover', onPoint, true)
+    document.addEventListener('pointermove', onPoint, true)
     document.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
     return () => {
-      window.clearTimeout(showTimer)
+      window.clearTimeout(restTimer)
       window.clearTimeout(hideTimer)
-      document.removeEventListener('pointerover', onOver, true)
+      document.removeEventListener('pointerover', onPoint, true)
+      document.removeEventListener('pointermove', onPoint, true)
       document.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
