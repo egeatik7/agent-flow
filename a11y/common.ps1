@@ -114,6 +114,64 @@ public static class XpInput {
 "@
 }
 
+if (-not ('XpText' -as [type])) {
+  Add-Type -ReferencedAssemblies System.Windows.Forms, UIAutomationClient, UIAutomationTypes, WindowsBase -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Windows.Automation;
+public static class XpText {
+  [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
+
+  /// Every character can be produced by the current keyboard layout (so SendKeys can type it).
+  public static bool CanType(string s) {
+    foreach (char c in s) {
+      if (c == '\n' || c == '\r' || c == '\t') continue;
+      if (VkKeyScan(c) == -1) return false;
+    }
+    return true;
+  }
+
+  /// Puts text on the clipboard from an STA thread; returns the previous text (or null).
+  public static string SetClipboard(string text) {
+    string old = null;
+    var t = new Thread(() => {
+      try { if (System.Windows.Forms.Clipboard.ContainsText()) old = System.Windows.Forms.Clipboard.GetText(); } catch { }
+      for (int i = 0; i < 5; i++) {
+        try { System.Windows.Forms.Clipboard.SetText(text); break; } catch { Thread.Sleep(60); }
+      }
+    });
+    t.SetApartmentState(ApartmentState.STA);
+    t.Start();
+    t.Join(3000);
+    return old;
+  }
+
+  public static void RestoreClipboard(string text) {
+    if (text == null) return;
+    var t = new Thread(() => { try { System.Windows.Forms.Clipboard.SetText(text); } catch { } });
+    t.SetApartmentState(ApartmentState.STA);
+    t.Start();
+    t.Join(2000);
+  }
+
+  /// FindAll with a time limit. Huge trees (browsers) are dropped instead of stalling the whole scan.
+  public static AutomationElementCollection FindAllBounded(AutomationElement root, Condition cond, CacheRequest cr, int timeoutMs) {
+    AutomationElementCollection result = null;
+    var t = new Thread(() => {
+      try {
+        using (cr.Activate()) { result = root.FindAll(TreeScope.Descendants, cond); }
+      } catch { }
+    });
+    t.IsBackground = true;
+    t.Start();
+    if (!t.Join(timeoutMs)) return null;
+    return result;
+  }
+}
+"@
+}
+
 if (-not ('XpImage' -as [type])) {
   Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
 using System;

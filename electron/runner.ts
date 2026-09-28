@@ -35,6 +35,8 @@ export type Executor = {
   moveFile?: (from: string, to: string, node: AgentNode) => Promise<string>
   /** Persist a change to a node (loop progress, results, memory) in the editor. */
   patchNode?: (id: string, patch: Partial<AgentNode>) => void
+  /** An item of a box failed: keep a picture of the screen for later. */
+  captureFailure?: (label: string) => Promise<void>
 }
 
 export class StoppedError extends Error {
@@ -48,6 +50,11 @@ export class StepFailedError extends Error {}
 
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
+/** A single lap went over the step budget: that item fails, the run goes on. */
+class LapLimitError extends Error {}
+class RecoveryError extends Error {}
+
+type Budget = { used: number }
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
   const end = Date.now() + ms
@@ -222,7 +229,13 @@ export async function runGraph(
   }
 
   /** Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes. */
-  const runChain = async (start: AgentNode, scope: AgentNode | null, stopAt?: Set<string>): Promise<void> => {
+  const topBudget: Budget = { used: 0 }
+
+  /**
+   * Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes.
+   * Steps count against `budget`: the whole top level, or one lap of a box.
+   */
+  const runChain = async (start: AgentNode, scope: AgentNode | null, stopAt?: Set<string>, budget: Budget = topBudget): Promise<void> => {
     let cur: AgentNode | null = start
     while (cur) {
       const node: AgentNode = cur
@@ -233,11 +246,15 @@ export async function runGraph(
       if (node.kind === 'loop') {
         port = await runLoop(node, scope)
       } else {
-        if (steps >= opts.maxSteps) {
-          throw new StepLimitError(
-            `En fazla ${opts.maxSteps} adım çalıştırıldı ve durduruldu. Sonsuz döngü olabilir; Ayarlar’dan “Maks. adım” değerini artırabilirsin.`
-          )
+        if (budget.used >= opts.maxSteps) {
+          if (budget === topBudget) {
+            throw new StepLimitError(
+              `Kutuların dışında ${opts.maxSteps} adım çalıştırıldı ve durduruldu. Sonsuz döngü olabilir; Ayarlar’dan “Maks. adım” değerini artırabilirsin.`
+            )
+          }
+          throw new LapLimitError(`Bu tur ${opts.maxSteps} adımı geçti (sonsuz döngü olabilir: örn. Koşul → Zamanlayıcı döngüsü hiç bitmedi).`)
         }
+        budget.used++
         steps++
         ex.step(node.id, 'running')
         try {
@@ -285,10 +302,10 @@ export async function runGraph(
     if (!start || start.id === loop.id) return
     ex.log('info', `Kurtarma zinciri çalışıyor (“${loop.title}” → hata olursa).`)
     try {
-      await runChain(start, scope, new Set([loop.id]))
+      await runChain(start, scope, new Set([loop.id]), { used: 0 })
     } catch (e) {
       if (isFatal(e)) throw e
-      throw new Error(`Kurtarma zinciri de başarısız oldu: ${(e as Error).message}`)
+      throw new RecoveryError(`Kurtarma zinciri başarısız oldu: ${(e as Error).message}`)
     }
   }
 
@@ -339,6 +356,26 @@ export async function runGraph(
     const outer = vars
     const attempts = Math.max(1, Math.floor(loop.attempts ?? 2))
     let entry: AgentNode | undefined = startAt
+    let recoveryFails = 0
+    let recoverFirst = false
+
+    /** Runs the recovery chain; a failing chain marks the item and is retried before the next item, three in a row stop the run. */
+    const recover = async (): Promise<boolean> => {
+      try {
+        await runRecovery(loop, scope)
+        recoveryFails = 0
+        recoverFirst = false
+        return true
+      } catch (e) {
+        if (isFatal(e) || !(e instanceof RecoveryError)) throw e
+        recoveryFails++
+        ex.log('error', `${e.message} (${recoveryFails}/3)`)
+        if (recoveryFails >= 3) throw new Error(`“${loop.title}”: kurtarma zinciri üst üste 3 kez başarısız oldu, akış durduruldu.`)
+        recoverFirst = true
+        return false
+      }
+    }
+
     try {
       for (const idx of pending) {
         const key = keys[idx]
@@ -346,20 +383,26 @@ export async function runGraph(
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
         patch(loop.id, { loopIndex: idx })
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
+        if (recoverFirst) {
+          ex.log('info', 'Önceki kurtarma yarım kaldı; bu öğeden önce bir kez daha deneniyor.')
+          await recover()
+        }
         let ok = false
         for (let t = 1; t <= attempts && !ok; t++) {
           try {
-            await runChain(entry ?? first, loop)
+            await runChain(entry ?? first, loop, undefined, { used: 0 })
             ok = true
           } catch (e) {
             if (isFatal(e)) throw e
             ex.log('error', `${label}: ${(e as Error).message}`)
+            await ex.captureFailure?.(label).catch(() => {})
             if (loop.onError === 'stop') {
               results[key] = 'fail'
               patch(loop.id, { results: { ...results } })
               throw e
             }
-            await runRecovery(loop, scope)
+            const recovered = await recover()
+            if (!recovered) break
             if (t < attempts) ex.log('info', `${label} baştan bir kez daha denenecek (${t + 1}/${attempts}).`)
           }
           entry = undefined

@@ -1,10 +1,10 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
-import { listModels, setChatLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import { DEFAULT_SETTINGS, normalizeGraph, type AgentGraph, type AppSettings, type LogLevel } from './graph-types'
 
@@ -31,11 +31,42 @@ function send(channel: string, payload: unknown) {
   mainWindow?.webContents.send(channel, payload)
 }
 
+let runLog = ''
+
+function logsDir() {
+  return path.join(app.getPath('userData'), 'logs')
+}
+
+/** One text file per run under %APPDATA%/xp-agent-studio/logs; only the last 30 runs are kept. */
+function openRunLog() {
+  const dir = logsDir()
+  fs.mkdirSync(dir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  runLog = path.join(dir, `calistirma-${stamp}.txt`)
+  const runs = fs
+    .readdirSync(dir)
+    .filter((f) => f.startsWith('calistirma-'))
+    .sort()
+  for (const old of runs.slice(0, Math.max(0, runs.length - 29))) fs.rmSync(path.join(dir, old), { force: true })
+  const shots = fs
+    .readdirSync(dir)
+    .filter((f) => f.startsWith('hata-'))
+    .sort()
+  for (const old of shots.slice(0, Math.max(0, shots.length - 100))) fs.rmSync(path.join(dir, old), { force: true })
+}
+
 function log(level: LogLevel, message: string) {
   send('agent:log', { level, message })
+  if (!runLog) return
+  try {
+    fs.appendFileSync(runLog, `[${new Date().toLocaleTimeString('tr-TR')}] ${level.toUpperCase().padEnd(7)} ${message}\n`)
+  } catch {
+    /* disk full or locked; the on-screen log still has it */
+  }
 }
 
 setChatLogger((line) => log('chat', line))
+setStopCheck(() => running && stopRequested)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -161,10 +192,20 @@ app.whenReady().then(() => {
     const graph = normalizeGraph(raw)
     store.set('graph', graph)
     const s = getSettings()
-    agent.beginRun(graph.nodes.filter((n) => n.kind === 'waitFile').map((n) => n.folder?.trim() ?? ''))
+    try {
+      openRunLog()
+    } catch {
+      runLog = ''
+    }
+    agent.beginRun(
+      graph.nodes.filter((n) => n.kind === 'waitFile').map((n) => n.folder?.trim() ?? ''),
+      runLog ? logsDir() : ''
+    )
     globalShortcut.register(STOP_HOTKEY, () => {
       stopRequested = true
     })
+    const awake = powerSaveBlocker.start('prevent-display-sleep')
+    if (runLog) log('info', `Günlük dosyası: ${runLog}`)
     let hidden = false
     try {
       if (s.hideWhileRunning) {
@@ -182,12 +223,20 @@ app.whenReady().then(() => {
         log('warn', 'Ajan durduruldu.')
         return { ok: false, stopped: true }
       }
+      log('error', (e as Error).message)
       throw e
     } finally {
       globalShortcut.unregister(STOP_HOTKEY)
+      if (powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
       running = false
+      runLog = ''
       if (hidden) showSelf()
     }
+  })
+  ipcMain.handle('logs:open', async () => {
+    fs.mkdirSync(logsDir(), { recursive: true })
+    await shell.openPath(logsDir())
+    return logsDir()
   })
   ipcMain.handle('agent:stop', () => {
     stopRequested = true

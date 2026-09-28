@@ -1,5 +1,51 @@
 import type { NodeKind } from './graph-types'
 import { describeItems, type ScanResult } from './matcher'
+import { StoppedError } from './runner'
+
+/** A model request that has not answered by then is abandoned (and retried once). */
+const REQUEST_TIMEOUT_MS = 90000
+
+let stopCheck: () => boolean = () => false
+
+/** Lets Ctrl+Shift+Q cut a pending model request instead of waiting for it. */
+export function setStopCheck(fn: () => boolean) {
+  stopCheck = fn
+}
+
+class TransientError extends Error {}
+
+/** fetch + body read, with a time limit and the stop hotkey. */
+async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<{ ok: boolean; status: number; text: string }> {
+  const ctrl = new AbortController()
+  let byUser = false
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  const poll = setInterval(() => {
+    if (stopCheck()) {
+      byUser = true
+      ctrl.abort()
+    }
+  }, 250)
+  try {
+    const res = await fetch(url, { ...init, signal: ctrl.signal })
+    const text = await res.text()
+    return { ok: res.ok, status: res.status, text }
+  } catch (e) {
+    if (byUser) throw new StoppedError()
+    if (ctrl.signal.aborted) throw new TransientError(`Model ${Math.round(timeoutMs / 1000)} sn içinde cevap vermedi.`)
+    throw new TransientError(`Bağlantı hatası: ${(e as Error).message}`)
+  } finally {
+    clearTimeout(timer)
+    clearInterval(poll)
+  }
+}
+
+async function stoppableWait(ms: number) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (stopCheck()) throw new StoppedError()
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
 
 const HEADERS = (apiKey: string) => ({
   Authorization: `Bearer ${apiKey}`,
@@ -52,9 +98,9 @@ async function chat(
   hasImage: boolean,
   opts: { json?: boolean; maxTokens?: number } = {}
 ): Promise<string> {
-  const send = async (json: boolean) => {
+  const once = async (json: boolean) => {
     reportOut(model, messages)
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await guardedFetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: HEADERS(apiKey),
       body: JSON.stringify({
@@ -67,14 +113,34 @@ async function chat(
       }),
     })
     if (!res.ok) {
-      const text = await res.text()
-      reportIn(`hata ${res.status}: ${text.slice(0, 2000)}`)
-      return { ok: false as const, status: res.status, text }
+      reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
+      if (res.status === 429 || res.status >= 500) throw new TransientError(`OpenRouter ${res.status}: ${res.text.slice(0, 200)}`)
+      return { ok: false as const, status: res.status, text: res.text }
     }
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
+    let data: { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
+    try {
+      data = JSON.parse(res.text)
+    } catch {
+      throw new TransientError('OpenRouter yanıtı okunamadı.')
+    }
     const content = data.choices?.[0]?.message?.content ?? ''
     reportIn(data.error?.message ? `hata: ${data.error.message}` : content)
     return { ok: true as const, data, content }
+  }
+  const send = async (json: boolean) => {
+    try {
+      return await once(json)
+    } catch (e) {
+      if (!(e instanceof TransientError)) throw e
+      chatLogger?.(`API ⟳ ${e.message} 3 sn sonra bir kez daha deneniyor.`)
+      await stoppableWait(3000)
+      try {
+        return await once(json)
+      } catch (e2) {
+        if (e2 instanceof TransientError) throw new Error(e2.message)
+        throw e2
+      }
+    }
   }
 
   let res = await send(opts.json !== false)
@@ -671,12 +737,12 @@ Beklenen: ${opts.expected || '(yok)'}`
 
 export async function testKey(apiKey: string): Promise<string> {
   chatLogger?.('API → GET /api/v1/key')
-  const res = await fetch('https://openrouter.ai/api/v1/key', { headers: HEADERS(apiKey) })
+  const res = await guardedFetch('https://openrouter.ai/api/v1/key', { headers: HEADERS(apiKey) }, 20000)
   if (!res.ok) {
     chatLogger?.(`API ← hata ${res.status}`)
     throw new Error(`OpenRouter anahtarı geçersiz (${res.status}).`)
   }
-  const data = (await res.json()) as { data?: { label?: string; limit_remaining?: number | null } }
+  const data = JSON.parse(res.text) as { data?: { label?: string; limit_remaining?: number | null } }
   const rem = data.data?.limit_remaining
   const summary = `${data.data?.label ?? 'OK'}${typeof rem === 'number' ? `, kalan limit: ${rem.toFixed(2)}` : ''}`
   chatLogger?.(`API ← ${summary}`)
@@ -685,12 +751,12 @@ export async function testKey(apiKey: string): Promise<string> {
 
 export async function listModels(): Promise<{ id: string; vision: boolean }[]> {
   chatLogger?.('API → GET /api/v1/models')
-  const res = await fetch('https://openrouter.ai/api/v1/models')
+  const res = await guardedFetch('https://openrouter.ai/api/v1/models', {}, 30000)
   if (!res.ok) {
     chatLogger?.(`API ← hata ${res.status}`)
     throw new Error(`Model listesi alınamadı (${res.status}).`)
   }
-  const data = (await res.json()) as { data?: { id: string; architecture?: { input_modalities?: string[] } }[] }
+  const data = JSON.parse(res.text) as { data?: { id: string; architecture?: { input_modalities?: string[] } }[] }
   const list = (data.data ?? [])
     .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
     .sort((a, b) => a.id.localeCompare(b.id))

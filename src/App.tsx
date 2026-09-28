@@ -661,7 +661,17 @@ export default function App() {
             }}
             capturing={capturing}
           />
-          <LogPanel logs={logs} onClear={() => setLogs([])} />
+          <LogPanel
+            logs={logs}
+            onClear={() => setLogs([])}
+            onOpenFolder={
+              api
+                ? () => {
+                    void api.openLogs().catch((e) => pushLog('error', errText(e)))
+                  }
+                : undefined
+            }
+          />
         </div>
       </div>
       {scanner && (

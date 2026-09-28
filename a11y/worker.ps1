@@ -78,20 +78,59 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = '' }
+      $focus = $null
+      try { $focus = $script:AE::FocusedElement } catch {}
+      if ($null -ne $focus) { $out.focusType = Get-CT $focus }
       if ($P.clearFirst) {
-        Start-Sleep -Milliseconds 120
-        [System.Windows.Forms.SendKeys]::SendWait('^a')
-        Start-Sleep -Milliseconds 280
-        [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
-        Start-Sleep -Milliseconds 200
+        # Ctrl+A / Delete only inside a text field; elsewhere it would select and delete the app's content.
+        $textLike = $false
+        if ($null -ne $focus) {
+          $vp = $null
+          if ($focus.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $textLike = $true }
+          if (@('Edit', 'Document', 'ComboBox') -contains $out.focusType) { $textLike = $true }
+        }
+        if ($textLike) {
+          Start-Sleep -Milliseconds 120
+          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          Start-Sleep -Milliseconds 280
+          [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+          Start-Sleep -Milliseconds 200
+          $out.cleared = $true
+        } else {
+          $out.skippedClear = $true
+        }
       }
       $text = [string]$P.text
-      if ($text.Length -gt 0) { Send-TextPaced $text 20 }
+      if ($text.Length -gt 0) {
+        if ([XpText]::CanType($text)) {
+          Send-TextPaced $text 20
+        } else {
+          $old = [XpText]::SetClipboard($text)
+          Start-Sleep -Milliseconds 80
+          [System.Windows.Forms.SendKeys]::SendWait('^v')
+          Start-Sleep -Milliseconds 250
+          [XpText]::RestoreClipboard($old)
+          $out.pasted = $true
+        }
+      }
       if ($P.pressEnter) {
         Start-Sleep -Milliseconds 240
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
       }
-      return $true
+      return [pscustomobject]$out
+    }
+    'locked' {
+      # The lock screen / UAC secure desktop: screenshots are black and input goes nowhere.
+      return [bool](Get-Process -Name LogonUI -ErrorAction SilentlyContinue)
+    }
+    'ocrInfo' {
+      return (Get-OcrInfo)
+    }
+    'patch' {
+      $size = 64
+      if ($P.size) { $size = [int]$P.size }
+      return (Get-PatchAt ([int]$P.x) ([int]$P.y) $size)
     }
     'keys' {
       if ($P.windowTitle) {
@@ -106,7 +145,9 @@ function Invoke-Op([string]$op, $P) {
       if ($h -eq [IntPtr]::Zero) { return $null }
       $el = $script:AE::FromHandle($h)
       if ($null -eq $el) { return $null }
-      return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId }
+      $procName = ''
+      try { $procName = (Get-Process -Id ([int]$el.Current.ProcessId) -ErrorAction Stop).ProcessName } catch {}
+      return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId; proc = $procName }
     }
     'focusedValue' {
       $el = $script:AE::FocusedElement

@@ -44,6 +44,8 @@ export type PathStep = {
   thought?: string
   /** Screen signature before the step; replay stops when the screen no longer looks like this. */
   sig?: string
+  /** Picture (PNG base64) around the click point when recorded; replay clicks only where this is found again. */
+  patch?: string
 }
 
 export type ClickMode = 'left' | 'double' | 'right'

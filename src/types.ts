@@ -26,6 +26,7 @@ export type XpAgentApi = {
   captureAfter: (ms: number) => Promise<Locator | null>
   runAgent: (graph: AgentGraph, startId?: string) => Promise<{ ok: boolean; stopped?: boolean }>
   stopAgent: () => Promise<boolean>
+  openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>
   testVision: () => Promise<{ model: string; text: string }>

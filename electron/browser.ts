@@ -58,12 +58,23 @@ async function saveDownload(d: Download) {
 function wire(p: Page) {
   p.on('download', (d) => void saveDownload(d))
   p.on('filechooser', (fc) => {
-    chooser = { fc, at: Date.now() }
+    const entry = { fc, at: Date.now() }
+    chooser = entry
     log('info', '[tarayıcı] Dosya seçme penceresi açıldı; sıradaki Yazı Yaz adımındaki yol doğrudan verilecek.')
+    setTimeout(() => {
+      if (chooser !== entry) return
+      chooser = null
+      log('warn', '[tarayıcı] Dosya seçme penceresine 60 sn içinde yol verilmedi; pencere iptal edildi.')
+      void fc.setFiles([]).catch(() => {})
+    }, 60000)
   })
   p.on('close', () => {
     if (page === p) page = ctx?.pages().filter((x) => !x.isClosed()).pop() ?? null
   })
+}
+
+export function hasPendingChooser(): boolean {
+  return !!chooser
 }
 
 export function isOpen(): boolean {
@@ -248,19 +259,48 @@ export async function items(): Promise<Collected> {
     w: d.w,
     h: d.h,
   }))
+  lastItems = new Map(list.map((i) => [i.id, i]))
   return { items: list, area: { x: 0, y: 0, w: data.vw, h: data.vh }, host }
 }
 
-function loc(id: number) {
+let lastItems = new Map<number, ScreenItem>()
+
+/**
+ * The numbered element, even if the page re-rendered since it was read:
+ * by its number, else by the same text and kind, else null (then the caller clicks its last position).
+ */
+async function locate(id: number) {
   if (!page) throw new Error('Tarayıcı açık değil.')
-  return page.locator(`[data-xpas="${id}"]`).first()
+  const direct = page.locator(`[data-xpas="${id}"]`).first()
+  if ((await direct.count().catch(() => 0)) > 0) return direct
+  const was = lastItems.get(id)
+  if (!was) return null
+  log('info', `[tarayıcı] Sayfa yeniden çizilmiş; “${was.text}” yeniden aranıyor.`)
+  const again = await items().catch(() => null)
+  const same = again?.items.find((i) => i.type === was.type && norm(i.text) === norm(was.text)) ?? again?.items.find((i) => norm(i.text) === norm(was.text))
+  if (!same) return null
+  return page.locator(`[data-xpas="${same.id}"]`).first()
+}
+
+async function clickAtRect(id: number, mode: 'left' | 'double' | 'right') {
+  const was = lastItems.get(id)
+  if (!page || !was) throw new Error('Sayfadaki öğe artık yok.')
+  log('warn', `[tarayıcı] “${was.text}” yeniden bulunamadı; son görüldüğü yere tıklanıyor.`)
+  await page.mouse.click(was.x + was.w / 2, was.y + was.h / 2, { button: mode === 'right' ? 'right' : 'left', clickCount: mode === 'double' ? 2 : 1 })
 }
 
 export async function clickItem(id: number, mode: 'left' | 'double' | 'right') {
   await page?.bringToFront()
-  const l = loc(id)
+  const l = await locate(id)
+  if (!l) return clickAtRect(id, mode)
   await l.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => {})
-  await l.click({ button: mode === 'right' ? 'right' : 'left', clickCount: mode === 'double' ? 2 : 1, timeout: 8000 })
+  try {
+    await l.click({ button: mode === 'right' ? 'right' : 'left', clickCount: mode === 'double' ? 2 : 1, timeout: 6000 })
+  } catch (e) {
+    const again = await locate(id)
+    if (!again) return clickAtRect(id, mode)
+    await again.click({ button: mode === 'right' ? 'right' : 'left', clickCount: mode === 'double' ? 2 : 1, timeout: 6000, force: true }).catch(() => clickAtRect(id, mode))
+  }
 }
 
 function pathsIn(text: string): string[] | null {
@@ -287,7 +327,8 @@ export async function feedChooser(text: string): Promise<boolean> {
 /** Types into a numbered element. Returns what the field holds afterwards (null if unreadable). */
 export async function fillItem(id: number, text: string, clear: boolean, enter: boolean): Promise<string | null> {
   await page?.bringToFront()
-  const l = loc(id)
+  const l = await locate(id)
+  if (!l) throw new Error(`Sayfadaki alan artık yok (“${lastItems.get(id)?.text ?? id}”).`)
   const info = await l.evaluate((el) => ({ tag: el.tagName.toLowerCase(), type: String((el as HTMLInputElement).type || '').toLowerCase() }))
   if (info.tag === 'input' && info.type === 'file') {
     const files = pathsIn(text)

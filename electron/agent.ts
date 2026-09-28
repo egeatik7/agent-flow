@@ -7,6 +7,7 @@ import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm
 import { renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
+  containsTextStrict,
   describeItems,
   extractTarget,
   matchFuzzy,
@@ -58,15 +59,21 @@ const STILL_DIFF = 1.5
 /** Above this, a replayed step no longer sees the screen it was recorded on. */
 const REPLAY_DIFF = 14
 
+/** Mean grey difference of two 32x18 signatures. The bottom row (taskbar, clock) is left out. */
 function sigDiff(a?: string, b?: string): number {
   if (!a || !b) return 255
   const x = Buffer.from(a, 'base64')
   const y = Buffer.from(b, 'base64')
   if (!x.length || x.length !== y.length) return 255
+  const n = x.length === 32 * 18 ? 32 * 17 : x.length
   let sum = 0
-  for (let i = 0; i < x.length; i++) sum += Math.abs(x[i] - y[i])
-  return sum / x.length
+  for (let i = 0; i < n; i++) sum += Math.abs(x[i] - y[i])
+  return sum / n
 }
+
+/** A replayed click only goes ahead when the recorded picture around the point is found this close to it. */
+const PATCH_MIN = 0.85
+const PATCH_RADIUS = 90
 
 /** Normalized correlation above which a saved icon picture counts as found. */
 const ICON_MIN = 0.82
@@ -161,13 +168,17 @@ export function createAgent(ctx: AgentContext) {
 
   const downloadsDir = () => app.getPath('downloads')
 
+  let failDir = ''
+
   /** Called when a run starts: forget this run's memory copies, note which files already exist. */
-  function beginRun(folders: string[]) {
+  function beginRun(folders: string[], logDir = '') {
+    failDir = logDir
     runMemo.clear()
     runTrace.clear()
     runPath.clear()
     noted.clear()
     lastVisionAt.clear()
+    lastFg = null
     warnedMissing.clear()
     baselines.clear()
     for (const f of new Set([downloadsDir(), ...folders.filter((x) => x && !x.includes('{{'))])) baselines.set(f, listFiles(f))
@@ -193,6 +204,7 @@ export function createAgent(ctx: AgentContext) {
       fresh: wide,
     })
     warnMissingWindow(res)
+    noteCjk(res, 'scan')
     log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})${res.window ? ` — ${res.window}` : ''}`)
     if (!res.ocr) log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
     return res
@@ -598,26 +610,31 @@ export function createAgent(ctx: AgentContext) {
    * After one click, type, or key. The same command is never pressed twice here.
    * Page actions confirm through the page; screen actions compare two frames and then check the next target.
    */
-  async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, onPage: boolean, act: () => Promise<void>) {
+  /**
+   * After one click, type, or key. The same command is never pressed twice here, and this never fails the step:
+   * if the reaction cannot be confirmed, the next step looks for its own target, waits, and recovers.
+   * Returns whether the reaction was confirmed (only confirmed targets go into memory).
+   */
+  async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, onPage: boolean, act: () => Promise<void>): Promise<boolean> {
     if (ahead?.next?.kind === 'condition' || ahead?.next?.kind === 'waitFile') {
       await act()
       if (onPage) await browser.settle(1500)
       log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım (${ahead.next.title}) ekrana kendisi baktığı için kontrol edilmeden geçiliyor.`)
-      return
+      return true
     }
     if (onPage) {
       await act()
       await browser.settle()
-      if (await aheadIsReady(ahead, true)) return
+      if (await aheadIsReady(ahead, true)) return true
       await pause(2000)
       await browser.settle()
-      if (await aheadIsReady(ahead, true)) return
+      if (await aheadIsReady(ahead, true)) return true
       log('info', 'Sayfada sıradaki öğe henüz yok; sıradaki adım kendisi arayıp bekleyecek.')
-      return
+      return false
     }
     if (process.platform !== 'win32') {
       await act()
-      return
+      return true
     }
 
     const expected = expectation(ahead)
@@ -637,38 +654,31 @@ export function createAgent(ctx: AgentContext) {
     }
     if (verdict.kind === 'ready') {
       log('success', `Emin: ${verdict.reason}.`)
-      return
+      return true
     }
     if (verdict.kind === 'blocked' || verdict.kind === 'unknown') {
       verdict = await lookCloser(verdict, before, after, node, ahead)
       if (verdict.kind === 'ready') {
         log('success', `Emin: ${verdict.reason}.`)
-        return
+        return true
       }
     }
 
     log('info', `Tepki net değil (${verdict.reason}). Akış bozulmadan sıradaki adım kontrol edilecek.`)
-    if (await aheadIsReady(ahead)) return
+    if (await aheadIsReady(ahead)) return true
 
     log('info', 'Sıradaki öğe henüz yok. Karar vermeden önce beklenecek.')
     await pause(2500)
-    if (await aheadIsReady(ahead)) return
+    if (await aheadIsReady(ahead)) return true
 
     const plan = await askPlan(node, ahead, verdict.reason)
     if (plan) {
       log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
       if (plan.action === 'wait') await pause(plan.waitMs)
-      if (plan.action !== 'stop' && (await aheadIsReady(ahead))) return
-      if (plan.action === 'continue') {
-        log('info', 'Plan sıradaki adımı denemeyi seçti. Operasyon bozulmadan devam ediliyor.')
-        return
-      }
-      if (await aheadIsReady(ahead)) return
-      throw new Error(`“${node.title}” sonrası duruldu. ${plan.reason || verdict.reason}`)
+      if (await aheadIsReady(ahead)) return true
     }
-
-    if (await aheadIsReady(ahead)) return
-    throw new Error(`“${node.title}” tepki vermedi ve sıradaki öğe ekranda yok. Beklendi, yine de bulunamadı.`)
+    log('info', `“${node.title}” sonrası tepki doğrulanamadı; sıradaki adım kendi hedefini arayıp bekleyecek (bu adım hata sayılmadı).`)
+    return false
   }
 
   let inRecover = false
@@ -751,6 +761,33 @@ export function createAgent(ctx: AgentContext) {
   }
 
   const noted = new Set<string>()
+  let ocrLangs: { main: string; extra: string[]; available: string[] } | null | undefined
+
+  /**
+   * The screen shows Chinese/Japanese/Korean text (seen in UI Automation names) but Windows OCR cannot read it.
+   * Said once per run, with what to do about it.
+   */
+  function noteCjk(res: ScanResult, id: string) {
+    if ((res.uiaSkipped ?? 0) > 0) {
+      noteOnce('scan', 'uiaSkipped', `${res.uiaSkipped} pencerenin öğe ağacı çok büyük olduğu için süresinde okunamadı; o pencerelerde yalnızca OCR kullanıldı. Tarayıcıda çalışıyorsan “Tarayıcıyı Aç” ile sayfa modunu kullan.`)
+    }
+    if (process.platform !== 'win32' || noted.has('scan:cjk')) return
+    const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/
+    if (!res.items.some((i) => i.src === 'uia' && cjk.test(i.text))) return
+    void (async () => {
+      if (ocrLangs === undefined) ocrLangs = await bridge.ocrInfo()
+      const tags = [ocrLangs?.main ?? '', ...(ocrLangs?.extra ?? [])]
+      if (tags.some((t) => /^(zh|ja|ko)/i.test(t))) return
+      noteOnce(
+        'scan',
+        'cjk',
+        'Ekranda Çince/Japonca/Korece yazı var ama Windows OCR bu dili okuyamıyor (yüklü OCR dilleri: ' +
+          (tags.filter(Boolean).join(', ') || 'yok') +
+          '). Ayarlar > Zaman ve dil > Dil > “Dil ekle” ile Çince’yi ekle (OCR bileşeni gelir) ya da sitede “Tarayıcıyı Aç” ile sayfa modunu kullan.'
+      )
+    })()
+    void id
+  }
   function noteOnce(id: string, key: string, msg: string) {
     const k = `${id}:${key}`
     if (noted.has(k)) return
@@ -762,22 +799,83 @@ export function createAgent(ctx: AgentContext) {
 
   // ---------- typing ----------
 
-  /** Types into the focused field, reads it back, retypes once if it holds something else. */
+  function reportTyping(r: bridge.TypeResult | null) {
+    if (!r) return
+    if (r.skippedClear) {
+      log('warn', `Odaktaki öğe bir yazı alanı değil (${r.focusType || 'bilinmiyor'}); Ctrl+A / Delete gönderilmedi, sadece yazıldı. Alana tıklandığından emin ol.`)
+    }
+    if (r.pasted) log('info', 'Metinde klavyeyle yazılamayan karakterler vardı; pano üzerinden yapıştırıldı.')
+  }
+
+  /** How the field compares with what was typed. */
+  function fieldState(value: string, text: string): 'ok' | 'partial' | 'empty' | 'wrong' {
+    if (fieldHolds(value, text)) return 'ok'
+    const v = norm(value)
+    const t = norm(text)
+    if (!v) return 'empty'
+    const digits = (x: string) => x.replace(/[^\p{N}]/gu, '')
+    if (digits(v) && digits(v) === digits(t)) return 'partial'
+    if (t.includes(v) && v.length >= t.length * 0.5) return 'partial'
+    if (v.includes(t.slice(0, Math.max(3, Math.floor(t.length * 0.6))))) return 'partial'
+    return 'wrong'
+  }
+
+  /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
   async function typeVerified(text: string, enter: boolean, clear: boolean) {
-    await bridge.typeText(text, false, clear)
+    reportTyping(await bridge.typeText(text, false, clear))
     if (text) {
       let v = await bridge.focusedValue()
-      if (v !== null && !fieldHolds(v, text)) {
-        log('warn', `Alanda “${v.slice(0, 60)}” yazıyor, beklenen bu değil. Alan temizlenip bir kez daha yazılıyor.`)
-        await bridge.typeText(text, false, true)
+      let state = v === null ? 'ok' : fieldState(v, text)
+      if (state === 'empty' || state === 'wrong') {
+        log('warn', `Alanda “${(v ?? '').slice(0, 60)}” yazıyor, beklenen bu değil. Bir kez daha yazılıyor.`)
+        reportTyping(await bridge.typeText(text, false, true))
         v = await bridge.focusedValue()
-        if (v !== null && !fieldHolds(v, text)) throw new Error(`Yazı alana gitmedi: alanda “${v.slice(0, 60)}” var.`)
+        state = v === null ? 'ok' : fieldState(v, text)
+        if (state === 'empty' || state === 'wrong') throw new Error(`Yazı alana gitmedi: alanda “${(v ?? '').slice(0, 60)}” var.`)
       }
-      if (v !== null) log('success', 'Alan doğrulandı: yazı yerinde.')
+      if (state === 'partial') log('warn', `Alan yazıyı biçimlendirmiş görünüyor (“${(v ?? '').slice(0, 60)}”); devam ediliyor.`)
+      else if (v !== null) log('success', 'Alan doğrulandı: yazı yerinde.')
     }
     if (enter) {
       await sleep(240)
       await bridge.sendKeys('{ENTER}')
+    }
+  }
+
+  // ---------- safety around input ----------
+
+  async function waitUnlocked() {
+    if (!(await bridge.isLocked())) return
+    log('warn', 'Ekran kilitli ya da güvenlik ekranı açık; kilit açılana kadar bekleniyor (Ctrl+Shift+Q durdurur).')
+    while (await bridge.isLocked()) await pause(5000)
+    log('info', 'Kilit açıldı, devam ediliyor.')
+    await pause(1500)
+  }
+
+  /** Windows that grab focus on their own; keys meant for the app must not go to them. */
+  const FOCUS_THIEVES = /^(MusNotification(Ux)?|SecurityHealth(Host|Systray)|ShellExperienceHost|SearchHost|SearchApp|StartMenuExperienceHost|LockApp|Teams|ms-teams|Slack|Discord|OneDrive|XP Agent Studio|electron)$/i
+  let lastFg: { title: string; pid: number; proc?: string } | null = null
+
+  async function noteForeground() {
+    if (process.platform !== 'win32') return
+    lastFg = await bridge.foreground()
+  }
+
+  /** Before keys or typing without a click: the window that had focus after our last action should still have it. */
+  async function guardFocus(node: AgentNode) {
+    if (process.platform !== 'win32' || !lastFg) return
+    const fg = await bridge.foreground()
+    if (!fg || fg.pid === lastFg.pid) return
+    if (FOCUS_THIEVES.test(fg.proc ?? '') || fg.pid === process.pid) {
+      log('warn', `Odak “${fg.title || fg.proc}” penceresine kaymış; “${lastFg.title}” yeniden öne getiriliyor.`)
+      try {
+        await bridge.windowRect(lastFg.title)
+        await sleep(300)
+      } catch {
+        log('warn', `“${lastFg.title}” öne getirilemedi; tuşlar şu an öndeki pencereye gidecek.`)
+      }
+    } else {
+      noteOnce(node.id, `fg:${fg.pid}`, `Not: öndeki pencere değişti (“${fg.title || fg.proc}”). “${node.title}” tuşları bu pencereye gönderilecek.`)
     }
   }
 
@@ -902,7 +1000,8 @@ export function createAgent(ctx: AgentContext) {
       ocr: false,
       fresh: true,
       primary: true,
-      maxImageW: tars ? 1456 : 1400,
+      // Under 1 megapixel, so a provider that downsizes images does not shift UI-TARS pixel coordinates.
+      maxImageW: tars ? 1288 : 1400,
       snap: tars ? 28 : 0,
       sig: true,
     })
@@ -1002,6 +1101,7 @@ export function createAgent(ctx: AgentContext) {
     const done: PathStep[] = []
     for (const [i, st] of steps.entries()) {
       if (stopped()) throw new StoppedError()
+      await waitUnlocked()
       const shot = await agentShot(tars, `kayıtlı yol ${i + 1}`)
       const diff = sigDiff(st.sig, shot.sig)
       if (st.sig && diff > REPLAY_DIFF) {
@@ -1017,6 +1117,25 @@ export function createAgent(ctx: AgentContext) {
         keys: st.keys,
         text: renderTemplate(st.text, vars),
         direction: st.direction,
+      }
+      if (st.patch && a.x !== undefined && a.y !== undefined && process.platform === 'win32') {
+        const px = shot.area.x + a.x * shot.area.w
+        const py = shot.area.y + a.y * shot.area.h
+        const hit = await bridge
+          .findImage(st.patch, undefined, { x: px - PATCH_RADIUS, y: py - PATCH_RADIUS, w: PATCH_RADIUS * 2, h: PATCH_RADIUS * 2 })
+          .catch(() => null)
+        if (!hit || hit.score < PATCH_MIN) {
+          log('info', `Kayıtlı yol ${i + 1}. adımda ayrıldı: tıklanacak yerdeki görüntü kayıttakiyle aynı değil (%${Math.round((hit?.score ?? 0) * 100)}). Model buradan devam edecek.`)
+          return { ok: false, done }
+        }
+        const dx = (hit.x - px) / shot.area.w
+        const dy = (hit.y - py) / shot.area.h
+        a.x += dx
+        a.y += dy
+        if (a.x2 !== undefined && a.y2 !== undefined) {
+          a.x2 += dx
+          a.y2 += dy
+        }
       }
       log('info', `[kayıtlı yol ${i + 1}/${steps.length}] ${describeGui(a)}`)
       await doGui(a, shot.area)
@@ -1071,6 +1190,7 @@ export function createAgent(ctx: AgentContext) {
     let rejected = 0
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
+      await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)
       if (prev && lastKind !== 'wait' && sigDiff(prev.sig, shot.sig) < STILL_DIFF) still++
       else still = 0
@@ -1108,8 +1228,15 @@ export function createAgent(ctx: AgentContext) {
 
       const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img }
       try {
+        let patch: string | undefined
+        if (['click', 'double', 'right', 'drag'].includes(a.kind) && a.x !== undefined && a.y !== undefined) {
+          const px = shot.area.x + a.x * shot.area.w
+          const py = shot.area.y + a.y * shot.area.h
+          patch = (await bridge.patchAt(px, py, 64))?.data
+        }
         await doGui(a, shot.area)
         path.push({
+          patch,
           action: a.kind as PathStep['action'],
           rx: a.x,
           ry: a.y,
@@ -1163,12 +1290,21 @@ export function createAgent(ctx: AgentContext) {
       if (fresh.length) {
         const [name] = fresh[0]
         const full = path.join(folder, name)
-        const size1 = fs.statSync(full).size
-        await pause(1500)
-        const st = fs.existsSync(full) ? fs.statSync(full) : null
-        if (st && st.size > 0 && st.size === size1) {
-          known.set(name, st.mtimeMs)
-          log('success', `Dosya geldi: ${name} (${Math.round(st.size / 1024)} KB)`)
+        // Finished = size and time unchanged for about 4 seconds (three looks), and no partial download left.
+        let prev = fs.statSync(full)
+        let quiet = 0
+        while (quiet < 3) {
+          await pause(1300)
+          const st = fs.existsSync(full) ? fs.statSync(full) : null
+          if (!st) break
+          const stillPartial = [...listFiles(folder).keys()].some((n) => TEMP_FILE.test(n) && n.toLowerCase().startsWith(name.toLowerCase().slice(0, 12)))
+          if (st.size > 0 && st.size === prev.size && st.mtimeMs === prev.mtimeMs && !stillPartial) quiet++
+          else quiet = 0
+          prev = st
+        }
+        if (quiet >= 3) {
+          known.set(name, prev.mtimeMs)
+          log('success', `Dosya geldi: ${name} (${Math.round(prev.size / 1024)} KB)`)
           return full
         }
         continue
@@ -1215,17 +1351,23 @@ export function createAgent(ctx: AgentContext) {
     patchNode: (id, patch) => send('agent:patch', { id, patch }),
     shouldStop: stopped,
     click: async (node, stepNo, ahead) => {
+      await waitUnlocked()
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
-      await ensureActed(node, ahead, t.dom !== undefined, async () => {
+      const confirmed = await ensureActed(node, ahead, t.dom !== undefined, async () => {
         if (t.dom !== undefined) await browser.clickItem(t.dom, mode)
         else await bridge.clickAt(t.x, t.y, mode)
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
         log('success', `${verb}: ${t.label}${t.dom === undefined ? ` @${Math.round(t.x)},${Math.round(t.y)}` : ''}`)
       })
-      saveMemo(node, t.memo)
+      if (browser.hasPendingChooser() && ahead?.next?.kind !== 'type') {
+        log('warn', 'Sayfa bir dosya seçme penceresi açtı ama sıradaki adım Yazı Yaz değil. Dosya yolunu bir Yazı Yaz ile ver; 60 sn içinde verilmezse pencere iptal edilir.')
+      }
+      if (confirmed) saveMemo(node, t.memo)
+      await noteForeground()
     },
     type: async (node, stepNo, ahead) => {
+      await waitUnlocked()
       const text = node.text ?? ''
       const enter = !!node.pressEnter
       const clear = node.clearFirst !== false
@@ -1233,11 +1375,15 @@ export function createAgent(ctx: AgentContext) {
       let t: Resolved | null = null
       if (node.prompt?.trim() || node.locator) {
         t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+      } else {
+        await guardFocus(node)
       }
-      await ensureActed(node, ahead, t?.dom !== undefined, async () => {
+      const confirmed = await ensureActed(node, ahead, t?.dom !== undefined, async () => {
         if (t?.dom !== undefined) {
           const v = await browser.fillItem(t.dom, text, clear, enter)
-          if (v !== null && text && !fieldHolds(v, text)) throw new Error(`Yazı alana gitmedi: alanda “${v.slice(0, 60)}” var.`)
+          const state = v === null || !text ? 'ok' : fieldState(v, text)
+          if (state === 'empty' || state === 'wrong') throw new Error(`Yazı alana gitmedi: alanda “${(v ?? '').slice(0, 60)}” var.`)
+          if (state === 'partial') log('warn', `Alan yazıyı biçimlendirmiş görünüyor (“${(v ?? '').slice(0, 60)}”); devam ediliyor.`)
           log('success', `Yazıldı: ${t.label}`)
           return
         }
@@ -1248,16 +1394,20 @@ export function createAgent(ctx: AgentContext) {
         }
         await typeVerified(text, enter, clear)
       })
-      saveMemo(node, t?.memo)
+      if (confirmed) saveMemo(node, t?.memo)
+      await noteForeground()
     },
     key: async (node, ahead) => {
+      await waitUnlocked()
       const keys = node.keys
       if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
       let t: Resolved | null = null
       if (node.useVision && node.prompt?.trim()) {
         t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide), () => recoverTarget(node, ahead))
+      } else if (!getSettings().targetWindow) {
+        await guardFocus(node)
       }
-      await ensureActed(node, ahead, false, async () => {
+      const confirmed = await ensureActed(node, ahead, false, async () => {
         if (t) {
           await bridge.clickAt(t.x, t.y, 'left')
           await sleep(FOCUS_MS)
@@ -1268,9 +1418,11 @@ export function createAgent(ctx: AgentContext) {
         const onPage = await browserInFront()
         await bridge.sendKeys(keys, onPage ? undefined : getSettings().targetWindow || undefined)
       })
-      saveMemo(node, t?.memo)
+      if (confirmed) saveMemo(node, t?.memo)
+      await noteForeground()
     },
     exists: async (text, node) => {
+      await waitUnlocked()
       const found = (how: string) => {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
@@ -1280,13 +1432,15 @@ export function createAgent(ctx: AgentContext) {
         const how = await savedTargetVisible(node)
         if (how) return found(how)
       }
-      if (text && process.platform === 'win32') {
+      if (text) {
         const res = await bridge.scan({ image: 'none', fresh: true })
-        const hit = res.items.find((i) => containsText([i], text))
+        noteCjk(res, node.id)
+        const hit = containsTextStrict(res.items, text)
         if (hit) return found(`ekranda “${hit.text}” (${hit.src === 'ocr' ? 'okunan yazı' : hit.type})`)
-      } else if (text) {
-        const res = await bridge.scan({ image: 'none', fresh: true })
-        if (containsText(res.items, text)) return found(`ekranda “${text}”`)
+        if (!node.locator && !noted.has(`${node.id}:loose`)) {
+          const near = res.items.find((i) => containsText([i], text))
+          if (near) noteOnce(node.id, 'loose', `“${text}” tam kelime olarak yok ama “${near.text}” içinde geçiyor; Koşul bunu “var” saymıyor. Gerekirse yazıyı “${near.text}” yap.`)
+        }
       }
       if (node.useVision && (text || node.locator?.icon)) {
         const last = lastVisionAt.get(node.id) ?? 0
@@ -1295,6 +1449,15 @@ export function createAgent(ctx: AgentContext) {
         if (await visionExists(text, node)) return found('görsel model')
       }
       return false
+    },
+    captureFailure: async (label) => {
+      if (!failDir) return
+      const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, fresh: true, maxImageW: 1600 }).catch(() => null)
+      if (!res?.image?.data) return
+      const safe = label.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 60)
+      const file = path.join(failDir, `hata-${new Date().toISOString().replace(/[:.]/g, '-')}-${safe}.jpg`)
+      fs.writeFileSync(file, Buffer.from(res.image.data, 'base64'))
+      log('info', `Hata anının ekran görüntüsü kaydedildi: ${file}`)
     },
     initiative: (node, stepNo, ahead, vars) =>
       node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),

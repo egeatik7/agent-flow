@@ -233,10 +233,41 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
   return worker.call('windowRect', { windowTitle })
 }
 
-export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<void> {
-  if (!IS_WIN) return
-  if (!text && !pressEnter && !clearFirst) return
-  await worker.call('typeText', { text, pressEnter, clearFirst })
+export type TypeResult = { cleared: boolean; skippedClear: boolean; pasted: boolean; focusType: string }
+
+export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<TypeResult | null> {
+  if (!IS_WIN) return null
+  if (!text && !pressEnter && !clearFirst) return null
+  return worker.call<TypeResult>('typeText', { text, pressEnter, clearFirst })
+}
+
+/** Lock screen or secure desktop is up: nothing can be seen or clicked. */
+export async function isLocked(): Promise<boolean> {
+  if (!IS_WIN) return false
+  try {
+    return !!(await worker.call<boolean>('locked', {}, 10000))
+  } catch {
+    return false
+  }
+}
+
+export async function ocrInfo(): Promise<{ ok: boolean; main: string; extra: string[]; available: string[] } | null> {
+  if (!IS_WIN) return null
+  try {
+    return await worker.call('ocrInfo', {}, 30000)
+  } catch {
+    return null
+  }
+}
+
+/** Small picture around a screen point (for checking a replayed click lands on the same thing). */
+export async function patchAt(x: number, y: number, size = 64): Promise<{ data: string; w: number; h: number } | null> {
+  if (!IS_WIN) return null
+  try {
+    return await worker.call('patch', { x: Math.round(x), y: Math.round(y), size }, 15000)
+  } catch {
+    return null
+  }
 }
 
 export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
@@ -251,9 +282,13 @@ export async function pickAt(box: { x: number; y: number; w: number; h: number }
 }
 
 /** Where a saved icon picture is on screen now (score 0–1). */
-export async function findImage(icon: string, windowTitle?: string): Promise<{ x: number; y: number; score: number; window: string } | null> {
+export async function findImage(
+  icon: string,
+  windowTitle?: string,
+  region?: { x: number; y: number; w: number; h: number }
+): Promise<{ x: number; y: number; score: number; window: string } | null> {
   if (!IS_WIN) return null
-  return worker.call('findImage', { icon, windowTitle: windowTitle || '' }, 30000)
+  return worker.call('findImage', { icon, windowTitle: windowTitle || '', region: region ?? null }, 30000)
 }
 
 export async function drag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
@@ -272,7 +307,7 @@ export async function hotkey(keys: string[]): Promise<void> {
   await worker.call('hotkey', { keys })
 }
 
-export async function foreground(): Promise<{ title: string; pid: number } | null> {
+export async function foreground(): Promise<{ title: string; pid: number; proc?: string } | null> {
   if (!IS_WIN) return null
   try {
     return await worker.call('foreground', {}, 10000)

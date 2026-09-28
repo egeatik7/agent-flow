@@ -3,6 +3,8 @@
 
 $script:OcrTried = $false
 $script:OcrEngine = $null
+# Extra engines for Chinese/Japanese/Korean when those OCR language packs are installed but not first in the profile.
+$script:OcrExtra = New-Object System.Collections.ArrayList
 
 function Initialize-Ocr {
   if ($script:OcrTried) { return ($null -ne $script:OcrEngine) }
@@ -23,10 +25,33 @@ function Initialize-Ocr {
     if ($null -eq $script:OcrEngine) {
       $script:OcrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language 'en-US'))
     }
+    $mainTag = ''
+    if ($null -ne $script:OcrEngine) { $mainTag = [string]$script:OcrEngine.RecognizerLanguage.LanguageTag }
+    foreach ($lang in [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages) {
+      $tag = [string]$lang.LanguageTag
+      if ($tag -eq $mainTag -or $tag -notmatch '^(zh|ja|ko)') { continue }
+      if ($script:OcrExtra.Count -ge 2) { break }
+      $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($lang)
+      if ($null -ne $eng) { [void]$script:OcrExtra.Add($eng) }
+    }
   } catch {
     $script:OcrEngine = $null
   }
   return ($null -ne $script:OcrEngine)
+}
+
+function Get-OcrInfo {
+  $ok = Initialize-Ocr
+  $avail = @()
+  try { $avail = @([Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | ForEach-Object { [string]$_.LanguageTag }) } catch {}
+  $extra = @($script:OcrExtra | ForEach-Object { [string]$_.RecognizerLanguage.LanguageTag })
+  $main = ''
+  if ($ok) { $main = [string]$script:OcrEngine.RecognizerLanguage.LanguageTag }
+  return [pscustomobject]@{ ok = $ok; main = $main; extra = $extra; available = $avail }
+}
+
+function Test-Cjk([string]$s) {
+  return $s -match '[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]'
 }
 
 function Wait-WinRt($op, [type]$resultType) {
@@ -82,47 +107,84 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   if (-not [object]::ReferenceEquals($src, $bmp)) { $src.Dispose() }
 
   $stream = $null
+  $results = New-Object System.Collections.ArrayList
   try {
     $file = Wait-WinRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync($tmp)) ([Windows.Storage.StorageFile])
     $stream = Wait-WinRt ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder = Wait-WinRt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
     $soft = Wait-WinRt ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
-    $res = Wait-WinRt ($script:OcrEngine.RecognizeAsync($soft)) ([Windows.Media.Ocr.OcrResult])
+    [void]$results.Add([pscustomobject]@{ res = (Wait-WinRt ($script:OcrEngine.RecognizeAsync($soft)) ([Windows.Media.Ocr.OcrResult])); extra = $false })
+    foreach ($eng in $script:OcrExtra) {
+      try { [void]$results.Add([pscustomobject]@{ res = (Wait-WinRt ($eng.RecognizeAsync($soft)) ([Windows.Media.Ocr.OcrResult])); extra = $true }) } catch {}
+    }
   } finally {
     if ($null -ne $stream) { $stream.Dispose() }
   }
 
-  foreach ($line in $res.Lines) {
-    $cur = $null
-    foreach ($w in $line.Words) {
-      $r = $w.BoundingRect
-      $wx = $r.X / $scale
-      $wy = $r.Y / $scale
-      $ww = $r.Width / $scale
-      $wh = $r.Height / $scale
-      if ($null -ne $cur) {
-        $gap = $wx - ($cur.x + $cur.w)
-        if ($gap -gt [Math]::Max(14.0, $wh * 1.4)) {
-          [void]$out.Add($cur)
-          $cur = $null
+  foreach ($pass in $results) {
+    $before = $out.Count
+    foreach ($line in $pass.res.Lines) {
+      $cur = $null
+      foreach ($w in $line.Words) {
+        $r = $w.BoundingRect
+        $wx = $r.X / $scale
+        $wy = $r.Y / $scale
+        $ww = $r.Width / $scale
+        $wh = $r.Height / $scale
+        if ($null -ne $cur) {
+          $gap = $wx - ($cur.x + $cur.w)
+          if ($gap -gt [Math]::Max(14.0, $wh * 1.4)) {
+            [void]$out.Add($cur)
+            $cur = $null
+          }
         }
+        $wt = [string]$w.Text
+        if ($null -eq $cur) {
+          $cur = @{ text = $wt; x = $wx; y = $wy; w = $ww; h = $wh; words = (New-Object System.Collections.ArrayList) }
+        } else {
+          $right = [Math]::Max($cur.x + $cur.w, $wx + $ww)
+          $bottom = [Math]::Max($cur.y + $cur.h, $wy + $wh)
+          $sep = ' '
+          if ((Test-Cjk $wt) -and (Test-Cjk $cur.text.Substring($cur.text.Length - 1))) { $sep = '' }
+          $cur.text = $cur.text + $sep + $wt
+          $cur.y = [Math]::Min($cur.y, $wy)
+          $cur.w = $right - $cur.x
+          $cur.h = $bottom - $cur.y
+        }
+        [void]$cur.words.Add([pscustomobject]@{
+            t = $wt
+            x = [int]($originX + $wx); y = [int]($originY + $wy); w = [int][Math]::Ceiling($ww); h = [int][Math]::Ceiling($wh)
+          })
       }
-      if ($null -eq $cur) {
-        $cur = @{ text = [string]$w.Text; x = $wx; y = $wy; w = $ww; h = $wh; words = (New-Object System.Collections.ArrayList) }
-      } else {
-        $right = [Math]::Max($cur.x + $cur.w, $wx + $ww)
-        $bottom = [Math]::Max($cur.y + $cur.h, $wy + $wh)
-        $cur.text = $cur.text + ' ' + [string]$w.Text
-        $cur.y = [Math]::Min($cur.y, $wy)
-        $cur.w = $right - $cur.x
-        $cur.h = $bottom - $cur.y
-      }
-      [void]$cur.words.Add([pscustomobject]@{
-          t = [string]$w.Text
-          x = [int]($originX + $wx); y = [int]($originY + $wy); w = [int][Math]::Ceiling($ww); h = [int][Math]::Ceiling($wh)
-        })
+      if ($null -ne $cur) { [void]$out.Add($cur) }
     }
-    if ($null -ne $cur) { [void]$out.Add($cur) }
+    if ($pass.extra) {
+      # Keep only Asian-script phrases from the extra engines, and only where the main engine found nothing.
+      $keep = New-Object System.Collections.ArrayList
+      for ($i = 0; $i -lt $before; $i++) { [void]$keep.Add($out[$i]) }
+      for ($i = $before; $i -lt $out.Count; $i++) {
+        $p = $out[$i]
+        if (-not (Test-Cjk $p.text)) { continue }
+        $clash = $false
+        for ($j = 0; $j -lt $before; $j++) {
+          $q = $out[$j]
+          $ix = [Math]::Max(0, [Math]::Min($p.x + $p.w, $q.x + $q.w) - [Math]::Max($p.x, $q.x))
+          $iy = [Math]::Max(0, [Math]::Min($p.y + $p.h, $q.y + $q.h) - [Math]::Max($p.y, $q.y))
+          if ($ix * $iy -gt 0.5 * [Math]::Min($p.w * $p.h, $q.w * $q.h)) { $clash = $true; break }
+        }
+        if ($clash) {
+          # The main engine read this spot as Latin garbage; the Asian reading wins.
+          for ($j = $keep.Count - 1; $j -ge 0; $j--) {
+            $q = $keep[$j]
+            $ix = [Math]::Max(0, [Math]::Min($p.x + $p.w, $q.x + $q.w) - [Math]::Max($p.x, $q.x))
+            $iy = [Math]::Max(0, [Math]::Min($p.y + $p.h, $q.y + $q.h) - [Math]::Max($p.y, $q.y))
+            if ($ix * $iy -gt 0.5 * [Math]::Min($p.w * $p.h, $q.w * $q.h) -and -not (Test-Cjk $q.text)) { $keep.RemoveAt($j) }
+          }
+        }
+        [void]$keep.Add($p)
+      }
+      $out = $keep
+    }
   }
 
   $result = New-Object System.Collections.ArrayList
@@ -177,6 +239,9 @@ function Test-Covered([double]$cx, [double]$cy, $rects) {
   return $false
 }
 
+$script:UiaBudgetMs = 6000
+$script:UiaSkipped = 0
+
 function Get-UiaItems($roots, $area) {
   $items = New-Object System.Collections.ArrayList
   $cr = New-Object System.Windows.Automation.CacheRequest
@@ -191,9 +256,11 @@ function Get-UiaItems($roots, $area) {
   foreach ($root in $roots) {
     $rootRect = $null
     try { $rootRect = $root.Current.BoundingRectangle } catch {}
-    $all = @()
-    $act = $cr.Activate()
-    try { $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond) } catch {} finally { $act.Dispose() }
+    $all = [XpText]::FindAllBounded($root, $cond, $cr, $script:UiaBudgetMs)
+    if ($null -eq $all) {
+      $script:UiaSkipped++
+      $all = @()
+    }
     foreach ($e in $all) {
       if ($items.Count -ge 450) { break }
       try {
@@ -347,6 +414,7 @@ function Invoke-Scan($P) {
   if ($P.ownPid) { $own = [int]$P.ownPid }
 
   $uia = New-Object System.Collections.ArrayList
+  $script:UiaSkipped = 0
   if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
   $bmp = Get-ScreenBitmap $rect
@@ -381,6 +449,7 @@ function Invoke-Scan($P) {
     window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
     missingWindow = $missing
     sig    = $sig
+    uiaSkipped = $script:UiaSkipped
   }
 }
 
@@ -404,6 +473,10 @@ function Get-IconCrop($r) {
   return [pscustomobject]@{ data = $b64; w = $w; h = $h; dx = $cx - $x - [int]($w / 2); dy = $cy - $y - [int]($h / 2) }
 }
 
+function Get-PatchAt([int]$x, [int]$y, [int]$size) {
+  return (Get-IconCrop ([pscustomobject]@{ x = $x - [int]($size / 2) + 3; y = $y - [int]($size / 2) + 3; w = $size - 6; h = $size - 6 }))
+}
+
 function Invoke-FindImage($P) {
   $bytes = [Convert]::FromBase64String([string]$P.icon)
   $ms = New-Object System.IO.MemoryStream(, $bytes)
@@ -411,6 +484,12 @@ function Invoke-FindImage($P) {
   $win = $null
   if ($P.windowTitle) { $win = Find-WindowOrNull ([string]$P.windowTitle) }
   $rect = Get-CaptureRect $win
+  if ($P.region) {
+    $v = Get-VirtualScreen
+    $x1 = [Math]::Max($v.x, [int]$P.region.x); $y1 = [Math]::Max($v.y, [int]$P.region.y)
+    $x2 = [Math]::Min($v.x + $v.w, [int]($P.region.x + $P.region.w)); $y2 = [Math]::Min($v.y + $v.h, [int]($P.region.y + $P.region.h))
+    if ($x2 - $x1 -gt $tpl.Width -and $y2 - $y1 -gt $tpl.Height) { $rect = [pscustomobject]@{ x = $x1; y = $y1; w = $x2 - $x1; h = $y2 - $y1 } }
+  }
   $bmp = Get-ScreenBitmap $rect
   $tpl24 = New-Object System.Drawing.Bitmap $tpl.Width, $tpl.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
   $g = [System.Drawing.Graphics]::FromImage($tpl24)

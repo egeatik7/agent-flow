@@ -97,6 +97,27 @@ Güvenceler:
 - Son 10 ekran karesi `%APPDATA%/xp-agent-studio/shots` altında tutulur, eskisi silinir.
 - Model konuşmaları ajan günlüğüne düşer: giden `API →`, dönen `API ←`.
 
+## Uzun çalıştırmalarda güvenceler
+
+- **Durdurma her an çalışır.** Model istekleri 90 sn’de kesilir; Ctrl+Shift+Q bekleyen isteği de hemen iptal eder. Geçici hatalarda
+  (429, 5xx, bağlantı kopması) istek 3 sn sonra bir kez daha denenir.
+- **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı
+  döngüsü) sadece o öğeyi hatalı yapar.
+- **Kurtarma zinciri hata verirse** öğe hatalı işaretlenir ve sıradaki öğeden önce kurtarma bir kez daha denenir; üst üste 3 kez
+  başarısız olursa akış durur.
+- **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar, bekler, gerekirse kurtarılır. Hafızaya yalnızca
+  tepkisi doğrulanan hedefler yazılır.
+- **Yazı Yaz güvenlidir.** Ctrl+A / Delete yalnızca odak bir yazı alanındayken gönderilir. Klavyeyle yazılamayan karakterler
+  (Çince vb.) pano üzerinden yapıştırılır. Alan biçimlendirme yaptıysa (1.5 → 1,5) sadece uyarılır.
+- **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.
+- **Bilgisayar uyumaz**, ekran kilitlenirse ajan kilit açılana kadar bekler.
+- **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
+- **Tarayıcı modu** sayfa yeniden çizilse de öğeyi yazısı ve türüyle yeniden bulur. 60 sn içinde yol verilmeyen dosya penceresi iptal edilir.
+- **Çince/Japonca/Korece:** Windows’a o dilin OCR paketi yüklüyse ek olarak o dille de okunur; yüklü değilse günlükte nasıl ekleneceği yazar.
+- **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
+- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30), hatalı öğelerin o anki ekranı da
+  kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi açar.
+
 ## Node türleri
 
 | Node | Ne yapar | Çıkışlar |

@@ -25,6 +25,8 @@ export type ScanResult = {
   missingWindow?: string
   /** 32x18 grayscale thumbnail (base64) when requested. */
   sig?: string
+  /** Windows whose accessibility tree was too big to read in time. */
+  uiaSkipped?: number
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }
@@ -303,6 +305,13 @@ export function matchFuzzy(
   const best = pickBest(scored, opts.anchor, opts.prefer)
   if (!best || best.score < (opts.minScore ?? 50)) return null
   return toTarget(best.item, best.box)
+}
+
+/** Whole-word match only: “下载” is not found inside “下载App”, “İndir” not inside “İndirimler”. */
+export function containsTextStrict(items: ScreenItem[], text: string): ScreenItem | undefined {
+  const q = norm(text)
+  if (!q) return undefined
+  return items.find((i) => ` ${norm(i.text)} `.includes(` ${q} `))
 }
 
 export function containsText(items: ScreenItem[], text: string): boolean {
