@@ -44,7 +44,7 @@ Tekrar eden adımlar bir **kutunun** içine konur. Kutu tuvalde yarı saydam bir
   sıralama: `resim2` → `resim10`). Liste boşsa kutu N kez çalışır.
 - Değişkenler: `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
   Yükleme adımına `{{öğe}}` yaz. Her tur sıradaki dosyanın yoludur: ilk tur birinci satır, ikinci tur ikinci satır.
-- Her çalıştırmada liste baştan sona gider. Öğeler tamam veya hatalı diye işaretlenmez; kaldığın yer hatırlanmaz.
+- Her çalıştırmada liste baştan sona gider. Öğeler tamam veya hatalı diye işaretlenmez. Listedeki işaret, tur hangi dosyadaysa oraya kayar. **Ajanı Çalıştır** işarete bakmaz, birinci satırdan başlar. **Seçiliden Çalıştır**, kutu içindeki bir node seçiliyken listeyi işaretli satırdan sona kadar götürür.
 
 Bir adım hata verirse (hedef yok, bekleme zaman aşımına uğradı, İnisiyatif olmadı dedi) o tur orada kalır, günlük kırmızı
 satırı yazar ve sıradaki öğeye geçilir. Sonraki çalıştırma yine birinci öğeden başlar.

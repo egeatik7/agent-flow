@@ -828,6 +828,86 @@ body {
   overflow-x: auto;
 }
 
+.xp-tick-list {
+  background: #fff;
+  border: 1px solid #7f9db9;
+  max-height: 168px;
+  overflow: auto;
+  padding: 1px 0;
+}
+
+.xp-tick-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: max-content;
+  padding: 1px 3px;
+}
+
+.xp-tick-row.on {
+  background: #0a246a;
+  color: #fff;
+}
+
+.xp-tick {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.xp-tick input {
+  position: absolute;
+  opacity: 0;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.xp-tick-box {
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #003c74;
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xp-tick input:checked + .xp-tick-box::after {
+  content: '';
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 2px solid #000;
+  border-bottom: 2px solid #000;
+  transform: rotate(-50deg);
+}
+
+.xp-tick input:focus-visible + .xp-tick-box {
+  outline: 1px dotted #000;
+  outline-offset: 1px;
+}
+
+.xp-tick-path {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 2px;
+  min-width: 8em;
+  width: auto;
+  outline: none;
+}
+
+.xp-tick-row.on .xp-tick-path {
+  color: #fff;
+}
+
 .check.inline {
   margin: 0;
 }

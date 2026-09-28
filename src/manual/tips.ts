@@ -37,7 +37,7 @@ const KIND: Record<string, Tip> = {
   },
   loop: {
     title: 'Her Öğe İçin',
-    text: 'Bir kutu. İçindeki adımlar listedeki her dosya için bir kez çalışır. Her çalıştırma listenin başından başlar. Sıradaki dosyanın yolu {{öğe}}, uzantısız adı {{öğe.isim}} olur. İş bitince akış “bitti” çıkışından çıkar.',
+    text: 'Bir kutu. İçindeki adımlar listedeki her dosya için bir kez çalışır. Ajanı Çalıştır listenin başından başlar. Listedeki işaret, Seçiliden Çalıştır’ın hangi dosyadan devam edeceğini tutar. Sıradaki dosyanın yolu {{öğe}}, uzantısız adı {{öğe.isim}} olur. İş bitince akış “bitti” çıkışından çıkar.',
   },
   ai: {
     title: 'İnisiyatif',
@@ -152,7 +152,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Yeni Akış', { title: 'Yeni Akış', text: 'Tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Kayıtlı akış dosyası da bu boş haliyle değişir.' }],
     ['Düzenle', { title: 'Düzenle', text: 'Node’ları soldan sağa, okların sırasına göre dizer. Bağlantıları değiştirmez.' }],
     ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Akışı Başlangıç’tan itibaren çalıştırır. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
-    ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Ondan önceki adımlar atlanır. Bir kutu seçiliyse kutu o node’dan başlar.' }],
+    ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Ondan önceki adımlar atlanır. Node bir kutunun içindeyse liste, işaretli satırdan sona kadar gider; sonraki dosyalar kutunun ilk adımından başlar.' }],
     ['Durdur', { title: 'Durdur', text: 'Çalışan akışı durdurur. Ctrl+Shift+Q ile de durur. Bekleyen model isteği de kesilir.' }],
     ['Dışa Aktar', { title: 'Dışa Aktar', text: 'Akışı bir JSON dosyası olarak indirir. Başka bilgisayarda İçe Aktar ile açılır.' }],
     ['İçe Aktar', { title: 'İçe Aktar', text: 'Daha önce dışa aktarılmış bir akış dosyasını açar. Ekrandaki akışın yerini alır.' }],
@@ -313,7 +313,7 @@ function fieldTip(el: Element): Tip | null {
   const legend = el.closest('fieldset')?.querySelector('legend')
   const group = legend ? text(legend) : ''
   const tips: [string, Tip][] = [
-    ['Liste (her satır bir öğe)', { title: 'Liste', text: 'Her satır bir turdur. İlk tur birinci satır, ikinci tur ikinci satır. Yükleme adımına {{öğe}} yaz; o, satırdaki tam yoldur.' }],
+    ['Liste (her satır bir öğe)', { title: 'Liste', text: 'Her satır bir turdur. Soldaki işaret, Seçiliden Çalıştır’ın başlayacağı satırdır; tek satır işaretli olur. Ajanı Çalıştır her zaman birinci satırdan başlar. Çalışırken işaret turdaki dosyaya kayar. Yükleme adımına {{öğe}} yaz; o, satırdaki tam yoldur.' }],
     ['Tekrar sayısı', { title: 'Tekrar sayısı', text: 'Liste boşken kutu bu kadar kez döner. {{öğe}} o turda 1, 2, 3 diye gider.' }],
     ['Nasıl çalışsın?', { title: 'Nasıl çalışsın?', text: 'Ekrana bakarak: model görüntüden tıklar. Yazı listesiyle: ekrandaki yazılardan numara seçer.' }],
     ['Hedef (ne olmasını istiyorsun?)', { title: 'Hedef', text: 'İnisiyatif’in yapacağı iş. Birkaç adımı tek cümlede yaz. {{öğe}} yazarsan her tur o dosyaya göre değişir; kayıtlı yol o zaman oynatılmaz, model yeniden bakar.' }],
@@ -415,6 +415,12 @@ function regionTip(el: Element): Tip | null {
   }
   if (el.classList.contains('memo-box')) {
     return { title: 'Kayıt', text: 'Bu node’un hatırladığı hedef veya başarılı tur. Unut yalnızca bunu siler.' }
+  }
+  if (el.classList.contains('xp-tick') || el.classList.contains('xp-tick-row') || el.classList.contains('xp-tick-list')) {
+    return {
+      title: 'Liste işareti',
+      text: 'Tek satır işaretlenir. Seçiliden Çalıştır listeyi bu satırdan sona kadar götürür. Ajanı Çalıştır birinci satırdan başlar. Çalışırken işaret, o anki turun dosyasına kayar.',
+    }
   }
   if (el.classList.contains('var-chips')) {
     return {

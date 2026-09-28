@@ -85,6 +85,11 @@ export type AgentNode = {
   items?: string[]
   /** Loop: item on screen during a run. Cleared when the loop finishes. */
   loopIndex?: number
+  /**
+   * Loop: item “Seçiliden Çalıştır” continues from. A full run ignores it and starts at the first item.
+   * Follows the live lap, and stays where the run stopped.
+   */
+  startIndex?: number
   /** Loop: folder the list was filled from. Dosyayı Bekle: folder to watch. */
   folder?: string
   /** Loop: nodes that belong to this box and repeat once per item. */
@@ -396,6 +401,17 @@ export function summarize(n: AgentNode): string {
 
 export function listItems(n: AgentNode): string[] {
   return (n.items ?? []).map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * First item of a run. A full run starts at 0. A run that begins inside the box
+ * continues from `startIndex` through the end of the list.
+ */
+export function loopStartIndex(loop: AgentNode, total: number, resume: boolean): number {
+  if (!resume || total <= 1) return 0
+  const raw = loop.startIndex
+  const i = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 0
+  return Math.min(Math.max(0, i), total - 1)
 }
 
 /** One key per lap: the list rows, or #1…#N in count mode. */

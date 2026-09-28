@@ -5,6 +5,7 @@ import {
   itemVars,
   listItems,
   loopKeys,
+  loopStartIndex,
   portLabel,
   renderTemplate,
   type AgentGraph,
@@ -295,7 +296,10 @@ export async function runGraph(
     }
   }
 
-  /** Runs every item of a box, from the first, every time. Returns the port to leave by. */
+  /**
+   * Runs the box. A full run walks every item from the first.
+   * A run that starts inside the box (`startAt`) continues from the ticked item through the end.
+   */
   const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
     ex.step(loop.id, 'running')
     const keys = loopKeys(loop)
@@ -320,17 +324,25 @@ export async function runGraph(
         ex.log('warn', `“${loop.title}” içinde bağlı olmayan node var: ${orphans.join(', ')}. Tur “${first.title}”dan başlar, oklarla gidilmeyen node’lar çalışmaz.`)
       }
     }
-    ex.log('info', `“${loop.title}”: ${keys.length} ${isList ? 'öğe' : 'tur'} çalışacak.`)
+    const from = loopStartIndex(loop, keys.length, !!startAt)
+    const noun = isList ? 'öğe' : 'tur'
+    const fromWord = isList ? 'öğeden' : 'turdan'
+    if (from > 0) {
+      const name = isList ? baseName(keys[from]) : `${from + 1}. tur`
+      ex.log('info', `“${loop.title}”: ${from + 1}. ${fromWord} devam (${name}). ${keys.length - from} ${noun} kaldı.`)
+    } else {
+      ex.log('info', `“${loop.title}”: ${keys.length} ${noun} çalışacak.`)
+    }
 
     const outer = vars
     let entry: AgentNode | undefined = startAt
     if (loop.results) patch(loop.id, { results: undefined })
     try {
-      for (let idx = 0; idx < keys.length; idx++) {
+      for (let idx = from; idx < keys.length; idx++) {
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
-        patch(loop.id, { loopIndex: idx })
+        patch(loop.id, { loopIndex: idx, startIndex: idx })
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 })
@@ -346,7 +358,13 @@ export async function runGraph(
       vars = outer
     }
 
-    ex.log('success', `“${loop.title}” bitti: ${keys.length} ${isList ? 'öğe' : 'tur'} çalıştı.`)
+    const ran = keys.length - from
+    ex.log(
+      'success',
+      from > 0
+        ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
+        : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
+    )
     patch(loop.id, { results: undefined, loopIndex: undefined })
     ex.step(loop.id, 'done')
     return 'done'

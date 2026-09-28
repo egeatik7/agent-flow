@@ -385,7 +385,7 @@ export default function App() {
     try {
       const r = await pickFolder(extensions)
       if (!r) return
-      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0, results: undefined })
+      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0, startIndex: 0, results: undefined })
       pushLog(
         r.files.length ? 'success' : 'warn',
         r.files.length ? `Klasörden ${r.files.length} dosya listeye eklendi: ${r.folder}` : `Klasörde uygun dosya yok: ${r.folder}`

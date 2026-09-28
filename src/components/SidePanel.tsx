@@ -5,6 +5,7 @@ import {
   portLabel,
   VISION_KINDS,
   listItems,
+  loopStartIndex,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -152,6 +153,12 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   const [imagesOnly, setImagesOnly] = useState(true)
   const items = listItems(n)
   const members = (n.members ?? []).length
+  const mark = loopStartIndex(n, items.length, true)
+  const setItem = (index: number, value: string) => {
+    const next = items.slice()
+    next[index] = value
+    p.onUpdateNode({ items: next })
+  }
   return (
     <>
       <p className="hint">
@@ -162,12 +169,38 @@ function LoopEditor(p: Props & { n: AgentNode }) {
       {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
       <div className="field">
         <label>Liste (her satır bir öğe)</label>
-        <textarea
-          className="xp-textarea mono list-area"
-          value={(n.items ?? []).join('\n')}
-          placeholder={'C:\\Resimler\\kedi.png\nC:\\Resimler\\köpek.png\n…'}
-          onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n') })}
-        />
+        {items.length === 0 ? (
+          <textarea
+            className="xp-textarea mono list-area"
+            value={(n.items ?? []).join('\n')}
+            placeholder={'C:\\Resimler\\kedi.png\nC:\\Resimler\\köpek.png\n…'}
+            onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
+          />
+        ) : (
+          <div className="xp-tick-list">
+            {items.map((item, i) => (
+              <div className={'xp-tick-row' + (i === mark ? ' on' : '')} key={i}>
+                <label className="xp-tick">
+                  <input
+                    type="checkbox"
+                    checked={i === mark}
+                    onChange={() => p.onUpdateNode({ startIndex: i })}
+                  />
+                  <span className="xp-tick-box" />
+                </label>
+                <input
+                  className="xp-tick-path mono"
+                  value={item}
+                  size={Math.max(item.length, 16)}
+                  spellCheck={false}
+                  onChange={(e) => {
+                    if (e.target.value.trim()) setItem(i, e.target.value)
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
         <div className="field-row wrap">
           <button type="button" className="xp-btn primary" onClick={() => p.onFillFromFolder(imagesOnly ? IMAGE_EXTS : [])}>
             Klasörden doldur…
@@ -177,12 +210,18 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             sadece resimler
           </label>
           {items.length > 0 && (
-            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined })}>
+            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, startIndex: undefined })}>
               Listeyi temizle
             </button>
           )}
         </div>
         {n.folder && <p className="hint mono">{n.folder}</p>}
+        {items.length > 0 && (
+          <p className="hint">
+            İşaretli satır, Seçiliden Çalıştır’ın başlayacağı dosyadır; liste oradan sona gider. Ajanı Çalıştır her zaman birinci satırdan başlar.
+            Çalışırken işaret, turdaki dosyaya kayar.
+          </p>
+        )}
       </div>
 
       {items.length === 0 && (
