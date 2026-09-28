@@ -32,6 +32,7 @@ import {
   freePort,
   mapNodes,
   packageSelection,
+  unpackPackage,
   removeNode,
   setMembership,
   wrapInLoop,
@@ -280,6 +281,28 @@ export default function App() {
         ? 'Paket oluşturuldu. Seçim bir döngüye değdiği için kutu, bütün üyeleriyle birlikte içeri girdi.'
         : 'Paket oluşturuldu. İçine girince adımları düzenlersin.'
     )
+  }
+
+  const unpack = (id: string) => {
+    const next = unpackPackage(graphRef.current, id)
+    if (!next) return
+    setGraph(next)
+    setSelectedNodeId(null)
+    setSelectedIds([])
+    selectedIdsRef.current = []
+    setSelectedEdgeId(null)
+    pushLog('info', 'Paket açıldı. İçindeki adımlar tuvale geri kondu.')
+  }
+
+  const updatePackaged = (packageId: string, nodeId: string, patch: Partial<AgentNode>) => {
+    setGraph((g) => ({
+      ...g,
+      nodes: g.nodes.map((n) =>
+        n.id === packageId && n.inner
+          ? { ...n, inner: mapNodes(n.inner, (x) => (x.id === nodeId ? { ...x, ...patch } : x)) }
+          : n
+      ),
+    }))
   }
 
   const enterPackage = (id: string) => {
@@ -695,6 +718,8 @@ export default function App() {
               }}
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
+              onUnpackPackage={unpack}
+              onExpose={(id, on) => updateNode(id, { expose: on })}
             />
           </div>
           <SidePanel
@@ -761,6 +786,8 @@ export default function App() {
             onOpenScanner={() => openScanner(selectedNodeId)}
             onFillFromFolder={(exts) => selectedNodeId && fillLoopFromFolder(selectedNodeId, exts)}
             onEnterPackage={enterPackage}
+            onUnpackPackage={unpack}
+            onUpdatePackaged={updatePackaged}
             onPickDir={async () => {
               if (api) return api.pickDir()
               return window.prompt('Klasör yolu') || null

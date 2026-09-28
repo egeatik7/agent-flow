@@ -391,6 +391,60 @@ body {
   font-size: 11px;
 }
 
+.node-expose {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  z-index: 6;
+  margin: 0;
+}
+
+.frame-expose {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  z-index: 5;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.node-expose .xp-tick-box {
+  width: 13px;
+  height: 13px;
+}
+
+.pkg-folds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pkg-fold {
+  border: 1px solid #7f9db9;
+  background: #fff;
+}
+
+.pkg-fold-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  color: #fff;
+  font-weight: 700;
+  text-align: left;
+  padding: 4px 6px;
+  cursor: pointer;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.pkg-fold-body {
+  padding: 6px;
+  max-height: 420px;
+  overflow: auto;
+}
+
 .canvas-zoom {
   position: absolute;
   right: 8px;

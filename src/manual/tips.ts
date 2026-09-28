@@ -155,6 +155,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
   const exact: [string, Tip][] = [
     ['Paketle', { title: 'Paketle', text: 'Seçili node’ları tek bir Paket node’una alır. Bir döngünün içinden node seçtiysen kutu, bütün üyeleriyle birlikte pakete girer; kutu ortadan bölünmez.' }],
     ['İçine gir', { title: 'İçine gir', text: 'Paketin içindeki akışı tuvalde açar. Orada node ekleyip ok çekebilirsin. Sağ üstteki Paketten çık ile dışarı dönersin.' }],
+    ['Paketi çıkar', { title: 'Paketi çıkar', text: 'Paketi dağıtır. İçindeki node’lar tuvale geri döner, paket node’u kalkar. Dışarıdaki oklar eski yerlerine bağlanır.' }],
     ['Paketten çık', { title: 'Paketten çık', text: 'İçeride yaptığın değişiklikleri pakete yazar ve dışarıdaki akışa döner. Paket yine tek node olarak durur.' }],
     ['Hafızayı Sil', { title: 'Hafızayı Sil', text: 'Bütün node’ların öğrendiği hedefleri ve İnisiyatif’in kayıtlı yollarını unutturur. Akış, liste ve yazdığın adımlar durur.' }],
     ['Yeni Akış', { title: 'Yeni Akış', text: 'Tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Kayıtlı akış dosyası da bu boş haliyle değişir.' }],

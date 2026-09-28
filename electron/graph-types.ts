@@ -123,6 +123,10 @@ export type AgentNode = {
   locator?: Locator
   /** Paket: the flow hidden inside this node. Runs from its own Başlangıç through to the end, then the outer flow continues. */
   inner?: AgentGraph
+  /** Paket: the inner edge that used to leave the selection, restored when the package is unpacked. */
+  packageExit?: { from: string; fromPort: string }
+  /** When set, this node’s settings are listed on the package that contains it. */
+  expose?: boolean
 }
 
 export type AgentEdge = {

@@ -249,6 +249,7 @@ export function packageSelection(graph: AgentGraph, ids: string[]): { graph: Age
   for (const e of incoming) edges.push({ ...e, to: pkg.id })
   if (leaving.length) {
     const exit = leaving.find((e) => e.fromPort === 'next' || e.fromPort === 'done' || e.fromPort === 'true' || e.fromPort === 'found') ?? leaving[0]
+    pkg.packageExit = { from: exit.from, fromPort: exit.fromPort }
     edges.push({ id: newId(), from: pkg.id, fromPort: 'next', to: exit.to })
   }
 
@@ -265,6 +266,44 @@ export function packageSelection(graph: AgentGraph, ids: string[]): { graph: Age
   let next: AgentGraph = { nodes, edges }
   next = withMember(next, parent, pkg.id)
   return { graph: next, id: pkg.id, absorbed: sel.size > ids.filter((id) => sel.has(id)).length }
+}
+
+/** Puts the package’s contents back on the canvas and removes the package. */
+export function unpackPackage(graph: AgentGraph, id: string): AgentGraph | null {
+  const pkg = graph.nodes.find((n) => n.id === id && n.kind === 'package')
+  if (!pkg?.inner) return null
+  const inner = pkg.inner
+  const outerHasStart = graph.nodes.some((n) => n.kind === 'start')
+  const innerStart = inner.nodes.find((n) => n.kind === 'start')
+  const startEdge = innerStart ? inner.edges.find((e) => e.from === innerStart.id && e.fromPort === 'next') : undefined
+  const dropStart = !!(innerStart && outerHasStart && startEdge && inner.nodes.filter((n) => n.kind === 'start').length === 1)
+  const restored = inner.nodes.filter((n) => !dropStart || n.id !== innerStart?.id)
+  const restoredIds = new Set(restored.map((n) => n.id))
+  const entryId = dropStart ? startEdge?.to : innerStart?.id
+  const outgoing = graph.edges.find((e) => e.from === id && e.fromPort === 'next')
+
+  let edges = graph.edges.filter((e) => e.from !== id && e.to !== id).map((e) => ({ ...e }))
+  for (const e of graph.edges.filter((e) => e.to === id)) {
+    if (entryId && restoredIds.has(entryId)) edges.push({ ...e, to: entryId })
+  }
+  for (const e of inner.edges) {
+    if (dropStart && innerStart && (e.from === innerStart.id || e.to === innerStart.id)) continue
+    if (restoredIds.has(e.from) && restoredIds.has(e.to)) edges.push({ ...e })
+  }
+  if (pkg.packageExit && outgoing && restoredIds.has(pkg.packageExit.from)) {
+    edges = edges.filter((e) => !(e.from === pkg.packageExit!.from && e.fromPort === pkg.packageExit!.fromPort))
+    edges.push({ id: newId(), from: pkg.packageExit.from, fromPort: pkg.packageExit.fromPort, to: outgoing.to })
+  }
+
+  const tops = restored.filter((n) => !restored.some((l) => l.kind === 'loop' && (l.members ?? []).includes(n.id))).map((n) => n.id)
+  const nodes = graph.nodes
+    .filter((n) => n.id !== id)
+    .map((n) => {
+      if (n.kind !== 'loop' || !n.members?.includes(id)) return n
+      return { ...n, members: [...n.members.filter((m) => m !== id), ...tops] }
+    })
+    .concat(restored)
+  return { nodes, edges }
 }
 
 /** Applies `fn` to every node, including nodes hidden inside a package. */

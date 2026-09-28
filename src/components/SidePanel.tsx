@@ -40,6 +40,8 @@ type Props = {
   onOpenScanner: () => void
   onFillFromFolder: (extensions: string[]) => void
   onEnterPackage: (id: string) => void
+  onUnpackPackage: (id: string) => void
+  onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
   onPickDir: () => Promise<string | null>
   capturing: number
 }
@@ -519,55 +521,56 @@ function VisionToggle(p: Props & { n: AgentNode }) {
   )
 }
 
-function NodeInspector(p: Props) {
-  const n = p.selected
-  if (p.selectedEdge) {
-    const from = p.graph.nodes.find((x) => x.id === p.selectedEdge!.from)
-    const to = p.graph.nodes.find((x) => x.id === p.selectedEdge!.to)
-    const port = from ? portLabel(from.kind, p.selectedEdge!.fromPort) : ''
-    return (
-      <div>
-        <p className="hint">
-          <b>Bağlantı:</b> {from?.title} ({port}) → {to?.title}
-        </p>
-        <button type="button" className="xp-btn danger" onClick={p.onDeleteEdge}>
-          Bağlantıyı Sil (Del)
-        </button>
-      </div>
-    )
+function flowRank(graph: AgentGraph): Map<string, number> {
+  const order: string[] = []
+  const seen = new Set<string>()
+  const visit = (id?: string) => {
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    order.push(id)
+    const n = graph.nodes.find((x) => x.id === id)
+    if (!n) return
+    if (n.kind === 'loop') {
+      const ids = new Set(n.members ?? [])
+      const fed = new Set(graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => e.to))
+      const queue = (n.members ?? []).filter((m) => !fed.has(m))
+      const walk = queue.length ? [...queue] : [...(n.members ?? [])]
+      const done = new Set<string>()
+      while (walk.length) {
+        const m = walk.shift()!
+        if (done.has(m)) continue
+        done.add(m)
+        visit(m)
+        for (const e of graph.edges) if (e.from === m && ids.has(e.to)) walk.push(e.to)
+      }
+    }
+    for (const e of graph.edges) if (e.from === id) visit(e.to)
   }
-  if (!n) {
-    return (
-      <div className="hint-block">
-        <p className="hint"><b>Nasıl kullanılır?</b></p>
-        <ul className="hint-list">
-          <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
-          <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
-          <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
-          <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
-          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
-          <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
-          <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
-          <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
-        </ul>
-      </div>
-    )
-  }
-  const spec = NODE_SPECS[n.kind]
+  const start = graph.nodes.find((n) => n.kind === 'start')
+  if (start) visit(start.id)
+  for (const n of graph.nodes) if (!seen.has(n.id)) order.push(n.id)
+  return new Map(order.map((id, i) => [id, i]))
+}
+
+function exposedIn(pkg: AgentNode): AgentNode[] {
+  const inner = pkg.inner
+  if (!inner) return []
+  const rank = flowRank(inner)
+  return inner.nodes
+    .filter((n) => n.expose)
+    .sort((a, b) => {
+      const group = (n: AgentNode) => (n.kind === 'loop' ? 0 : 1)
+      const g = group(a) - group(b)
+      if (g) return g
+      return (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)
+    })
+}
+
+function NodeFields(p: Props & { n: AgentNode }) {
+  const { n } = p
   const upd = p.onUpdateNode
-
   return (
-    <div>
-      {(p.selectedCount ?? 1) > 1 && (
-        <p className="hint">
-          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Shift ile tıklayınca seçime eklenir ya da çıkar. Boş yerde sürüklemek kutu çizer; Shift basılıyken çizilen kutu seçime eklenir.
-        </p>
-      )}
-      <div className="inspector-kind" style={{ background: spec.color }}>
-        {spec.icon} {spec.label}
-      </div>
-      <p className="hint">{spec.description}</p>
-
+    <>
       <div className="field">
         <label>Başlık</label>
         <input className="xp-input" value={n.title} onChange={(e) => upd({ title: e.target.value })} />
@@ -583,10 +586,10 @@ function NodeInspector(p: Props) {
               className="xp-textarea"
               value={n.prompt ?? ''}
               placeholder={
-              n.useVision
-                ? 'Örn: sağ üstteki dişli simgesine tıkla\nveya: ilk videonun küçük resmine bas'
-                : 'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'
-            }
+                n.useVision
+                  ? 'Örn: sağ üstteki dişli simgesine tıkla\nveya: ilk videonun küçük resmine bas'
+                  : 'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'
+              }
               onChange={(e) => upd({ prompt: e.target.value })}
             />
             <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
@@ -738,21 +741,121 @@ function NodeInspector(p: Props) {
         </>
       )}
 
-      {n.kind === 'package' && (
-        <div className="field">
-          <p className="hint">
-            Bu node’un içinde ayrı bir akış durur. Çalışınca orası kendi Başlangıç’ından bitişine kadar gider, sonra bu node’un “sonra” çıkışı devam eder.
-          </p>
-          <button type="button" className="xp-btn primary" onClick={() => p.onEnterPackage(n.id)}>
-            İçine gir
-          </button>
-        </div>
-      )}
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
       {n.kind === 'ai' && <AiEditor {...p} n={n} />}
       {n.kind === 'browser' && <BrowserEditor {...p} n={n} />}
       {n.kind === 'waitFile' && <WaitFileEditor {...p} n={n} />}
       {n.kind === 'moveFile' && <MoveFileEditor {...p} n={n} />}
+    </>
+  )
+}
+
+function PackageExposed(p: Props & { pkg: AgentNode }) {
+  const items = exposedIn(p.pkg)
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  if (!items.length) {
+    return <p className="hint">İçeride bir node’un sol altındaki kutuyu işaretlersen, ayarları burada açılır.</p>
+  }
+  return (
+    <div className="pkg-folds">
+      {items.map((node) => {
+        const spec = NODE_SPECS[node.kind]
+        const shown = !!open[node.id]
+        return (
+          <div className="pkg-fold" key={node.id}>
+            <button
+              type="button"
+              className="pkg-fold-head"
+              style={{ background: spec.color }}
+              onClick={() => setOpen((s) => ({ ...s, [node.id]: !s[node.id] }))}
+            >
+              <span>{shown ? '▾' : '▸'}</span>
+              <span>
+                {spec.icon} {node.title}
+              </span>
+            </button>
+            {shown && (
+              <div className="pkg-fold-body">
+                <NodeFields
+                  {...p}
+                  n={node}
+                  onUpdateNode={(patch) => p.onUpdatePackaged(p.pkg.id, node.id, patch)}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function NodeInspector(p: Props) {
+  const n = p.selected
+  if (p.selectedEdge) {
+    const from = p.graph.nodes.find((x) => x.id === p.selectedEdge!.from)
+    const to = p.graph.nodes.find((x) => x.id === p.selectedEdge!.to)
+    const port = from ? portLabel(from.kind, p.selectedEdge!.fromPort) : ''
+    return (
+      <div>
+        <p className="hint">
+          <b>Bağlantı:</b> {from?.title} ({port}) → {to?.title}
+        </p>
+        <button type="button" className="xp-btn danger" onClick={p.onDeleteEdge}>
+          Bağlantıyı Sil (Del)
+        </button>
+      </div>
+    )
+  }
+  if (!n) {
+    return (
+      <div className="hint-block">
+        <p className="hint"><b>Nasıl kullanılır?</b></p>
+        <ul className="hint-list">
+          <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
+          <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
+          <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
+          <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
+          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
+          <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
+          <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
+          <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
+        </ul>
+      </div>
+    )
+  }
+  const spec = NODE_SPECS[n.kind]
+
+  return (
+    <div>
+      {(p.selectedCount ?? 1) > 1 && (
+        <p className="hint">
+          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Shift ile tıklayınca seçime eklenir ya da çıkar. Boş yerde sürüklemek kutu çizer; Shift basılıyken çizilen kutu seçime eklenir.
+        </p>
+      )}
+      <div className="inspector-kind" style={{ background: spec.color }}>
+        {spec.icon} {spec.label}
+      </div>
+      <p className="hint">{spec.description}</p>
+
+      <NodeFields {...p} n={n} />
+
+      {n.kind === 'package' && (
+        <div className="field">
+          <p className="hint">
+            Bu node’un içinde ayrı bir akış durur. Çalışınca orası kendi Başlangıç’ından bitişine kadar gider, sonra bu node’un “sonra” çıkışı devam eder.
+          </p>
+          <div className="field-row wrap">
+            <button type="button" className="xp-btn primary" onClick={() => p.onEnterPackage(n.id)}>
+              İçine gir
+            </button>
+            <button type="button" className="xp-btn" onClick={() => p.onUnpackPackage(n.id)}>
+              Paketi çıkar
+            </button>
+          </div>
+          <PackageExposed {...p} pkg={n} />
+        </div>
+      )}
 
       <button type="button" className="xp-btn danger block" onClick={p.onDeleteNode}>
         {n.kind === 'loop' ? 'Kutuyu Sil (içindekiler kalır)' : 'Node’u Sil (Del)'}
