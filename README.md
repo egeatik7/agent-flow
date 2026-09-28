@@ -42,17 +42,14 @@ Tekrar eden adımlar bir **kutunun** içine konur. Kutu tuvalde yarı saydam bir
 - Liste ya elle yazılır (her satır bir öğe) ya da **Klasörden doldur…** ile bir klasördeki dosyalardan gelir (doğal
   sıralama: `resim2` → `resim10`). Liste boşsa kutu N kez çalışır.
 - Değişkenler: `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
+  Yükleme adımına `{{öğe}}` yaz. Her tur sıradaki dosyanın yoludur: ilk tur birinci satır, ikinci tur ikinci satır.
+- Her çalıştırmada liste baştan sona gider. Öğeler tamam veya hatalı diye işaretlenmez; kaldığın yer hatırlanmaz.
 
-**Bir öğe takılırsa** (hedef yok, bekleme zaman aşımına uğradı, İnisiyatif olmadı dedi):
+Bir adım hata verirse (hedef yok, bekleme zaman aşımına uğradı, İnisiyatif olmadı dedi) o tur orada kalır, günlük kırmızı
+satırı yazar ve sıradaki öğeye geçilir. Sonraki çalıştırma yine birinci öğeden başlar.
 
-1. Çerçevenin **hata olursa** çıkışına bağladığın kurtarma adımları çalışır. Örnek: `Tuş F5 → Koşul “Resim yükle” (30 sn bekle)`.
-2. Öğe baştan bir kez daha denenir. Deneme sayısı kutudan ayarlanır.
-3. Yine olmazsa öğe **hatalı** işaretlenir ve sıradaki öğeye geçilir. İstersen “Akışı durdur” seçilebilir.
-
-Tamamlanan öğeler kaydedilir. Durdurup tekrar çalıştırınca ya da bir sonraki çalıştırmada yalnızca bekleyen ve hatalı
-öğeler çalışır. Hepsi temiz biterse durum kendiliğinden sıfırlanır. Sonunda günlüğe “48 tamam, 2 hatalı (…)” yazılır.
-
-Eski akışlardaki “Döngü kartı + geri dönen ok” yapısı açılırken otomatik olarak kutuya çevrilir.
+Eski akışlardaki “Döngü kartı + geri dönen ok” yapısı açılırken otomatik olarak kutuya çevrilir. Eski “hata olursa”
+bağlantısı açılırken düşer.
 
 ## Tarayıcı modu
 
@@ -93,7 +90,7 @@ Güvenceler:
   değilse akış hemen bozulmaz: sıradaki adımın hedefi ekranda mı diye bakılır, yoksa beklenir, gerekirse model plan kurar.
   Aynı komut yeniden basılmaz.
 - **Yazı Yaz** sonrası alanın içi okunur. Başka bir şey yazıyorsa alan temizlenip bir kez daha yazılır; yine tutmazsa
-  adım hata verir (kutunun içindeyse o öğe kurtarılır).
+  adım hata verir. Kutu içindeyse o tur orada kalır ve sıradaki öğeye geçilir.
 - Son 10 ekran karesi `%APPDATA%/xp-agent-studio/shots` altında tutulur, eskisi silinir.
 - Model konuşmaları ajan günlüğüne düşer: giden `API →`, dönen `API ←`.
 
@@ -102,10 +99,8 @@ Güvenceler:
 - **Durdurma her an çalışır.** Model istekleri 90 sn’de kesilir; Ctrl+Shift+Q bekleyen isteği de hemen iptal eder. Geçici hatalarda
   (429, 5xx, bağlantı kopması) istek 3 sn sonra bir kez daha denenir.
 - **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı
-  döngüsü) sadece o öğeyi hatalı yapar.
-- **Kurtarma zinciri hata verirse** öğe hatalı işaretlenir ve sıradaki öğeden önce kurtarma bir kez daha denenir; üst üste 3 kez
-  başarısız olursa akış durur.
-- **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar, bekler, gerekirse kurtarılır. Hafızaya yalnızca
+  döngüsü) orada kalır ve sıradaki öğeye geçilir.
+- **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar ve bekler. Hafızaya yalnızca
   tepkisi doğrulanan hedefler yazılır.
 - **Yazı Yaz güvenlidir.** Ctrl+A / Delete yalnızca odak bir yazı alanındayken gönderilir. Klavyeyle yazılamayan karakterler
   (Çince vb.) pano üzerinden yapıştırılır. Alan biçimlendirme yaptıysa (1.5 → 1,5) sadece uyarılır.
@@ -115,8 +110,8 @@ Güvenceler:
 - **Tarayıcı modu** sayfa yeniden çizilse de öğeyi yazısı ve türüyle yeniden bulur. 60 sn içinde yol verilmeyen dosya penceresi iptal edilir.
 - **Çince/Japonca/Korece:** Windows’a o dilin OCR paketi yüklüyse ek olarak o dille de okunur; yüklü değilse günlükte nasıl ekleneceği yazar.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
-- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30), hatalı öğelerin o anki ekranı da
-  kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi açar.
+- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30). Bir tur hata verirse o anki ekran
+  da kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi açar.
 
 ## Node türleri
 
@@ -128,14 +123,14 @@ Güvenceler:
 | Tuş Gönder | Kısayol/tuş (`{ENTER}`, `^a`, `%{F4}` …) | sonra |
 | Zamanlayıcı | N saniye bekler | sonra |
 | Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
-| Her Öğe İçin | Kutu: içindekileri listedeki her öğe için çalıştırır | bitti / hata olursa |
+| Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
 | Tarayıcıyı Aç | Edge/Chrome’u açar, adrese gider; sonraki adımlar sayfanın içini görür | sonra |
 | Dosyayı Bekle | Klasöre yeni dosya inip tamamlanana kadar bekler → `{{dosya}}` | geldi / zaman aşımı |
 | Dosyayı Taşı | Dosyayı yeni adıyla taşır (`D:\Modeller\{{öğe.isim}}.glb`) | sonra |
 | Bitir | Akışı sonlandırır | — |
 
-“Zaman aşımı” ve “olmadı” çıkışları, bir de bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata sayılır. Kutunun içindeyse o öğe kurtarılır ve atlanır.
+“Zaman aşımı” ve “olmadı” çıkışları, bir de bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir.
 
 ## Örnek: klasördeki her resimden 3D model
 
@@ -146,7 +141,6 @@ Başlangıç → Tarayıcıyı Aç https://site
                → Koşul “İndir” (10 dk bekle) → Tıkla “İndir”
                → Dosyayı Bekle *.glb → Dosyayı Taşı D:\Modeller\{{öğe.isim}}.glb
             bitti → Bitir
-            hata olursa → Tuş {F5} → Koşul “Resim yükle” (30 sn bekle)
 ```
 
 ## Kullanım

@@ -83,7 +83,7 @@ export type AgentNode = {
   useVision?: boolean
   /** Loop: one value per lap, exposed as {{öğe}} while the members run. */
   items?: string[]
-  /** Loop: item being processed right now (display only; resume comes from `results`). */
+  /** Loop: item on screen during a run. Cleared when the loop finishes. */
   loopIndex?: number
   /** Loop: folder the list was filled from. Dosyayı Bekle: folder to watch. */
   folder?: string
@@ -110,6 +110,8 @@ export type AgentNode = {
   pattern?: string
   /** Dosyayı Taşı: source path (default {{dosya}}). */
   source?: string
+  /** Set while running when a field of this node contains a {{…}} value, so its target differs per lap. */
+  templated?: boolean
   /** Last known screen position of the target; breaks ties when the same text appears several times. */
   anchor?: { x: number; y: number }
   locator?: Locator
@@ -230,10 +232,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     icon: '↻',
     color: '#8a4b16',
     hasInput: true,
-    outputs: [
-      { key: 'done', label: 'bitti' },
-      { key: 'error', label: 'hata olursa' },
-    ],
+    outputs: [{ key: 'done', label: 'bitti' }],
     description: 'Bir kutu. İçine koyduğun node’lar listedeki her öğe için (veya N kez) sırayla çalışır.',
   },
   ai: {
@@ -341,7 +340,7 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
     case 'condition':
       return { ...base, text: '', timeoutMs: 0 }
     case 'loop':
-      return { ...base, count: 3, members: [], onError: 'skip', attempts: 2 }
+      return { ...base, count: 3, members: [] }
     case 'ai':
       return { ...base, prompt: '', maxActions: 25, engine: 'screen' }
     case 'browser':
@@ -380,10 +379,7 @@ export function summarize(n: AgentNode): string {
     }
     case 'loop': {
       const keys = loopKeys(n)
-      const done = keys.filter((k) => n.results?.[k] === 'ok').length
-      const failed = keys.filter((k) => n.results?.[k] === 'fail').length
-      const what = listItems(n).length ? `${keys.length} öğe` : `${keys.length} kez`
-      return `${what}${done ? ` · ${done} tamam` : ''}${failed ? ` · ${failed} hatalı` : ''}`
+      return listItems(n).length ? `${keys.length} öğe, her çalıştırmada baştan` : `${keys.length} kez`
     }
     case 'ai':
       return n.prompt?.trim() || 'Hedefi yaz: örn. “Blender’da küp ekle ve kırmızı materyal ver”'
@@ -501,12 +497,10 @@ function migrateLegacyLoops(nodes: AgentNode[], edges: AgentEdge[]): AgentEdge[]
     const body = legacyLoopBody(out, loop.id)
     const inBody = new Set(body)
     loop.members = body
-    loop.onError = 'skip'
-    loop.attempts = 2
-    const items = listItems(loop)
-    if (items.length && (loop.loopIndex ?? 0) > 0) {
-      loop.results = Object.fromEntries(items.slice(0, loop.loopIndex).map((k) => [k, 'ok' as ItemStatus]))
-    }
+    delete loop.results
+    delete loop.onError
+    delete loop.attempts
+    delete loop.loopIndex
     out = out
       .filter((e) => !(e.from === loop.id && e.fromPort === 'loop'))
       .filter((e) => !(inBody.has(e.from) && (e.to === loop.id || e.to === head)))
@@ -575,7 +569,13 @@ export function normalizeGraph(raw: unknown): AgentGraph {
         title: n.title || fallback.title,
         locator: n.locator ?? recorded,
       } as AgentNode
-      if (kind === 'loop' && !Array.isArray(n.members)) delete node.members
+      if (kind === 'loop') {
+        if (!Array.isArray(n.members)) delete node.members
+        delete node.results
+        delete node.onError
+        delete node.attempts
+        delete node.loopIndex
+      }
       return node
     })
   const ids = new Set(nodes.map((n) => n.id))

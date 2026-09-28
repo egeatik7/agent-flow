@@ -9,7 +9,6 @@ import {
   renderTemplate,
   type AgentGraph,
   type AgentNode,
-  type ItemStatus,
   type LogLevel,
   type StepStatus,
 } from './graph-types'
@@ -33,9 +32,9 @@ export type Executor = {
   waitFile?: (node: AgentNode, stepNo: number) => Promise<string | null>
   /** Returns the final path. */
   moveFile?: (from: string, to: string, node: AgentNode) => Promise<string>
-  /** Persist a change to a node (loop progress, results, memory) in the editor. */
+  /** Persist a change to a node (which item is on screen, memory) in the editor. */
   patchNode?: (id: string, patch: Partial<AgentNode>) => void
-  /** An item of a box failed: keep a picture of the screen for later. */
+  /** A lap hit an error: keep a picture of the screen for later. */
   captureFailure?: (label: string) => Promise<void>
 }
 
@@ -50,9 +49,8 @@ export class StepFailedError extends Error {}
 
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
-/** A single lap went over the step budget: that item fails, the run goes on. */
+/** A single lap went over the step budget. The lap stops; the next item still runs. */
 class LapLimitError extends Error {}
-class RecoveryError extends Error {}
 
 type Budget = { used: number }
 
@@ -70,8 +68,10 @@ export function findEntry(graph: AgentGraph, startId?: string): AgentNode | unde
 }
 
 function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
+  const templated = [node.prompt, node.text, node.keys, node.url, node.pattern, node.source].some((f) => !!f && /\{\{[^{}]+\}\}/.test(f))
   return {
     ...node,
+    templated,
     prompt: renderTemplate(node.prompt, vars),
     text: renderTemplate(node.text, vars),
     keys: renderTemplate(node.keys, vars),
@@ -295,32 +295,11 @@ export async function runGraph(
     }
   }
 
-  const runRecovery = async (loop: AgentNode, scope: AgentNode | null) => {
-    const edge = graph.edges.find((e) => e.from === loop.id && e.fromPort === 'error')
-    if (!edge) return
-    const start = enterable(edge.to, scope)
-    if (!start || start.id === loop.id) return
-    ex.log('info', `Kurtarma zinciri çalışıyor (“${loop.title}” → hata olursa).`)
-    try {
-      await runChain(start, scope, new Set([loop.id]), { used: 0 })
-    } catch (e) {
-      if (isFatal(e)) throw e
-      throw new RecoveryError(`Kurtarma zinciri başarısız oldu: ${(e as Error).message}`)
-    }
-  }
-
-  /** Runs every pending item of a box. Returns the port to leave by. */
+  /** Runs every item of a box, from the first, every time. Returns the port to leave by. */
   const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
     ex.step(loop.id, 'running')
     const keys = loopKeys(loop)
     const isList = listItems(loop).length > 0
-    let results: Record<string, ItemStatus> = { ...(loop.results ?? {}) }
-    for (const k of Object.keys(results)) if (!keys.includes(k)) delete results[k]
-    let pending = keys.map((_, i) => i).filter((i) => results[keys[i]] !== 'ok')
-    if (!pending.length) {
-      results = {}
-      pending = keys.map((_, i) => i)
-    }
     const first = lapStart(loop)
     if (!first) {
       ex.log('warn', `“${loop.title}” kutusu boş. İçine node sürükle.`)
@@ -341,96 +320,35 @@ export async function runGraph(
         ex.log('warn', `“${loop.title}” içinde bağlı olmayan node var: ${orphans.join(', ')}. Tur “${first.title}”dan başlar, oklarla gidilmeyen node’lar çalışmaz.`)
       }
     }
-    const failedBefore = keys.filter((k) => results[k] === 'fail').length
-    if (pending.length < keys.length) {
-      ex.log(
-        'info',
-        `“${loop.title}”: ${keys.length - pending.length} öğe önceki çalıştırmada tamamlanmış${
-          failedBefore ? `, ${failedBefore} hatalı öğe tekrar denenecek` : ''
-        }. Kalan ${pending.length} öğe çalışacak.`
-      )
-    } else {
-      ex.log('info', `“${loop.title}”: ${keys.length} ${isList ? 'öğe' : 'tur'} çalışacak.`)
-    }
+    ex.log('info', `“${loop.title}”: ${keys.length} ${isList ? 'öğe' : 'tur'} çalışacak.`)
 
     const outer = vars
-    const attempts = Math.max(1, Math.floor(loop.attempts ?? 2))
     let entry: AgentNode | undefined = startAt
-    let recoveryFails = 0
-    let recoverFirst = false
-
-    /** Runs the recovery chain; a failing chain marks the item and is retried before the next item, three in a row stop the run. */
-    const recover = async (): Promise<boolean> => {
-      try {
-        await runRecovery(loop, scope)
-        recoveryFails = 0
-        recoverFirst = false
-        return true
-      } catch (e) {
-        if (isFatal(e) || !(e instanceof RecoveryError)) throw e
-        recoveryFails++
-        ex.log('error', `${e.message} (${recoveryFails}/3)`)
-        if (recoveryFails >= 3) throw new Error(`“${loop.title}”: kurtarma zinciri üst üste 3 kez başarısız oldu, akış durduruldu.`)
-        recoverFirst = true
-        return false
-      }
-    }
-
+    if (loop.results) patch(loop.id, { results: undefined })
     try {
-      for (const idx of pending) {
+      for (let idx = 0; idx < keys.length; idx++) {
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
         patch(loop.id, { loopIndex: idx })
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
-        if (recoverFirst) {
-          ex.log('info', 'Önceki kurtarma yarım kaldı; bu öğeden önce bir kez daha deneniyor.')
-          await recover()
+        try {
+          await runChain(entry ?? first, loop, undefined, { used: 0 })
+        } catch (e) {
+          if (isFatal(e)) throw e
+          ex.log('error', `${label}: ${(e as Error).message}`)
+          await ex.captureFailure?.(label).catch(() => {})
+          ex.log('info', `${label} bu turda yarım kaldı. Sıradaki öğeye geçiliyor.`)
         }
-        let ok = false
-        for (let t = 1; t <= attempts && !ok; t++) {
-          try {
-            await runChain(entry ?? first, loop, undefined, { used: 0 })
-            ok = true
-          } catch (e) {
-            if (isFatal(e)) throw e
-            ex.log('error', `${label}: ${(e as Error).message}`)
-            await ex.captureFailure?.(label).catch(() => {})
-            if (loop.onError === 'stop') {
-              results[key] = 'fail'
-              patch(loop.id, { results: { ...results } })
-              throw e
-            }
-            const recovered = await recover()
-            if (!recovered) break
-            if (t < attempts) ex.log('info', `${label} baştan bir kez daha denenecek (${t + 1}/${attempts}).`)
-          }
-          entry = undefined
-        }
-        results[key] = ok ? 'ok' : 'fail'
-        patch(loop.id, { results: { ...results } })
-        if (ok) ex.log('success', `✓ ${label} tamam (${idx + 1}/${keys.length}).`)
-        else ex.log('warn', `✗ ${label} atlandı; sıradakine geçiliyor.`)
+        entry = undefined
       }
     } finally {
       vars = outer
     }
 
-    const failed = keys.filter((k) => results[k] === 'fail')
-    const okCount = keys.filter((k) => results[k] === 'ok').length
-    if (failed.length) {
-      ex.log(
-        'warn',
-        `“${loop.title}” bitti: ${okCount} tamam, ${failed.length} hatalı (${failed.map((k) => (isList ? baseName(k) : k)).slice(0, 8).join(', ')}${
-          failed.length > 8 ? '…' : ''
-        }). Tekrar çalıştırınca yalnızca bunlar denenir.`
-      )
-      patch(loop.id, { results: { ...results }, loopIndex: 0 })
-    } else {
-      ex.log('success', `“${loop.title}” bitti: ${okCount} öğenin hepsi tamam.`)
-      patch(loop.id, { results: undefined, loopIndex: 0 })
-    }
-    ex.step(loop.id, failed.length ? 'error' : 'done')
+    ex.log('success', `“${loop.title}” bitti: ${keys.length} ${isList ? 'öğe' : 'tur'} çalıştı.`)
+    patch(loop.id, { results: undefined, loopIndex: undefined })
+    ex.step(loop.id, 'done')
     return 'done'
   }
 

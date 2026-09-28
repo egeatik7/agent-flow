@@ -4,9 +4,7 @@ import {
   TEMPLATE_VARS,
   portLabel,
   VISION_KINDS,
-  baseName,
   listItems,
-  loopKeys,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -153,16 +151,13 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   const { n } = p
   const [imagesOnly, setImagesOnly] = useState(true)
   const items = listItems(n)
-  const keys = loopKeys(n)
-  const results = n.results ?? {}
-  const ok = keys.filter((k) => results[k] === 'ok').length
-  const bad = keys.filter((k) => results[k] === 'fail').length
   const members = (n.members ?? []).length
   return (
     <>
       <p className="hint">
-        Kutunun içine koyduğun node’lar her öğe için baştan sona bir kez çalışır. İlk adım, kutunun içinde kimsenin bağlanmadığı node’dur.
-        Değişen yerlere <span className="mono">{'{{öğe}}'}</span> yaz; <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi).
+        Her çalıştırmada liste baştan sona gider. İlk turda <span className="mono">{'{{öğe}}'}</span> birinci dosyanın tam yoludur, ikinci turda
+        ikinci dosyanın. <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi). Yükleme adımının metni{' '}
+        <span className="mono">{'{{öğe}}'}</span> olmalı. İlk adım, kutunun içinde kimsenin bağlanmadığı node’dur.
       </p>
       {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
       <div className="field">
@@ -182,7 +177,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             sadece resimler
           </label>
           {items.length > 0 && (
-            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, loopIndex: 0, results: undefined })}>
+            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined })}>
               Listeyi temizle
             </button>
           )}
@@ -203,73 +198,6 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         </div>
       )}
 
-      <div className="field">
-        <label>Bir öğe takılırsa</label>
-        <div className="seg">
-          {(
-            [
-              ['skip', 'Kurtar, atla, devam et'],
-              ['stop', 'Akışı durdur'],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              type="button"
-              key={k}
-              className={`seg-btn${(n.onError ?? 'skip') === k ? ' active' : ''}`}
-              onClick={() => p.onUpdateNode({ onError: k })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {(n.onError ?? 'skip') === 'skip' && (
-          <>
-            <label className="sub-label">Her öğe için deneme sayısı</label>
-            <input
-              className="xp-input"
-              type="number"
-              min={1}
-              max={5}
-              value={n.attempts ?? 2}
-              onChange={(e) => p.onUpdateNode({ attempts: Math.min(5, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
-            />
-            <p className="hint">
-              Takılınca çerçevedeki <b>hata olursa</b> çıkışına bağladığın adımlar çalışır (örn. F5 → ana sayfayı bekle), sonra öğe baştan denenir.
-              Yine olmazsa işaretlenir ve sıradaki öğeye geçilir.
-            </p>
-          </>
-        )}
-      </div>
-
-      <div className="field loop-progress">
-        <label>
-          Durum: {ok} tamam · {bad} hatalı · {keys.length - ok - bad} bekliyor
-        </label>
-        <div className="progress">
-          <div className="progress-bar" style={{ width: `${keys.length ? (ok / keys.length) * 100 : 0}%` }} />
-        </div>
-        {(ok > 0 || bad > 0) && (
-          <div className="result-list">
-            {keys.map((k) => {
-              const r = results[k]
-              return (
-                <div key={k} className={r ?? 'pending'}>
-                  <span>{r === 'ok' ? '✓' : r === 'fail' ? '✗' : '·'}</span>
-                  <span className="mono">{items.length ? baseName(k) : k}</span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-        <p className="hint">
-          Tamamlananlar kaydedilir. Tekrar çalıştırınca yalnızca bekleyen ve hatalı öğeler çalışır. Hepsi bitince durum kendiliğinden sıfırlanır.
-        </p>
-        {(ok > 0 || bad > 0) && (
-          <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ results: undefined, loopIndex: 0 })}>
-            Baştan başla (durumu sil)
-          </button>
-        )}
-      </div>
     </>
   )
 }
@@ -577,7 +505,7 @@ function NodeInspector(p: Props) {
           <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
           <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
           <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
-          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Takılan öğe atlanır, gerisi devam eder.</li>
+          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
           <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
           <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
           <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
@@ -761,7 +689,7 @@ function NodeInspector(p: Props) {
             </div>
             <p className="hint">
               Yazı ya da seçilen öğe (uygulamanın kendi öğesi veya resmi) görünürse <b>var</b>, görünmezse <b>yok</b> çıkışından devam eder.
-              Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata sayılır (kutunun içindeyse o öğe kurtarılır).
+              Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir.
               Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul; ama süre vermek daha hızlı tepki verir (her saniye bakar).
               Pasif (soluk) düğmeler “var” sayılmaz. Yazı alanına ekranda gerçekten görünen yazıyı yaz; öğe adındaki “caret-down” gibi ekler ekranda görünmez.
               Günlükte “… gördü:” satırı neyin “var” dediğini gösterir.

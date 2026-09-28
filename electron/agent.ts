@@ -226,7 +226,8 @@ export function createAgent(ctx: AgentContext) {
     const explicit = extractTarget(prompt)
     const loc = node.locator
     const recordedText = loc?.text || loc?.name || ''
-    const mem = memoFor(node)
+    // A target that contains {{öğe}} changes every lap; last lap's spot would point at last lap's item.
+    const mem = node.templated ? undefined : memoFor(node)
     const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, area, win)) : undefined
     const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
     const useLlm = allowLlm && !!s.apiKey && !!prompt
@@ -1164,7 +1165,9 @@ export function createAgent(ctx: AgentContext) {
     if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
 
     const saved = runPath.get(node.id) ?? node.path
-    if (saved?.length) {
+    if (saved?.length && node.templated) {
+      log('info', 'Hedefte her tur değişen bir değer ({{öğe}} gibi) var; geçen turun kayıtlı yolu bu tura uymayabileceği için oynatılmıyor, model ekrana bakarak yapacak.')
+    } else if (saved?.length) {
       const r = await replayPath(saved, vars, tars)
       path = [...r.done]
       if (r.ok) {

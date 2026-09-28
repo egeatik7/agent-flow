@@ -27,17 +27,10 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
     const rect = override?.get(loop.id) ?? frameRect(graph, loop)
     const keys = loopKeys(loop)
     const isList = listItems(loop).length > 0
-    const ok = keys.filter((k) => loop.results?.[k] === 'ok').length
-    const bad = keys.filter((k) => loop.results?.[k] === 'fail').length
-    const cur = Math.min(Math.max(0, loop.loopIndex ?? 0), keys.length - 1)
+    const cur = loop.loopIndex
     const label = `${loop.title} · ${isList ? `${keys.length} öğe` : `${keys.length} kez`}`
-    const sub = [
-      ok ? `${ok} tamam` : '',
-      bad ? `${bad} hatalı` : '',
-      isList && (ok || bad) ? `sıradaki: ${baseName(keys[cur] ?? '')}` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    const sub =
+      typeof cur === 'number' && keys[cur] ? `şu an: ${isList ? baseName(keys[cur]) : `${cur + 1}. tur`}` : ''
     frames.push({ loop, rect, depth: ancestors(graph, loop.id).length, label, sub })
   }
   return frames.sort((a, b) => a.depth - b.depth)
@@ -557,11 +550,7 @@ export default function NodeCanvas(p: Props) {
                   <div
                     className="node-port out frame-port"
                     style={{ background: o.key === 'done' ? '#ffd24a' : portColor(o.key) }}
-                    title={
-                      o.key === 'done'
-                        ? 'Bütün öğeler bitince akış buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak.'
-                        : 'Bir öğe takılırsa buraya bağladığın kurtarma adımları çalışır (örn. F5, ana sayfayı bekle), sonra sıradaki öğeye geçilir.'
-                    }
+                    title="Bütün öğeler bitince akış buradan devam eder. Sürükle ve dışarıdaki bir node’a bırak."
                     onMouseDown={(e) => startLink(e, f.loop, o.key)}
                   />
                 </div>
