@@ -491,6 +491,20 @@ export default function App() {
     setStepStatus({})
   }
 
+  const forgetAll = () => {
+    const remembered = graph.nodes.filter((n) => n.memory?.length || n.path?.length || n.trace?.length)
+    if (!remembered.length) {
+      pushLog('info', 'Silinecek hafıza yok.')
+      return
+    }
+    const ids = new Set(remembered.map((n) => n.id))
+    setGraph((g) => ({
+      ...g,
+      nodes: g.nodes.map((n) => (ids.has(n.id) ? { ...n, memory: undefined, path: undefined, trace: undefined } : n)),
+    }))
+    pushLog('info', `${remembered.length} node’un hafızası ve kayıtlı yolu silindi.`)
+  }
+
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const counts = graph.nodes.filter((n) => n.kind !== 'start').length
 
@@ -537,6 +551,7 @@ export default function App() {
           onStop={stop}
           onLayout={() => setGraph((g) => autoLayout(g))}
           onClear={newFlow}
+          onForget={forgetAll}
         />
         <div className="workspace">
           <div className="canvas-wrap">

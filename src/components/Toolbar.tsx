@@ -14,6 +14,7 @@ type Props = {
   onStop: () => void
   onLayout: () => void
   onClear: () => void
+  onForget: () => void
 }
 
 export default function Toolbar(p: Props) {
@@ -95,6 +96,15 @@ export default function Toolbar(p: Props) {
       </button>
       <button type="button" className="xp-btn" onClick={p.onClear} disabled={p.running}>
         Yeni Akış
+      </button>
+      <button
+        type="button"
+        className="xp-btn"
+        onClick={p.onForget}
+        disabled={p.running}
+        title="Bütün node’ların hafızasını ve kayıtlı yollarını siler. Akışın kendisi durur."
+      >
+        Hafızayı Sil
       </button>
     </div>
   )
