@@ -110,6 +110,7 @@ export function duplicateNode(graph: AgentGraph, id: string): { graph: AgentGrap
     memory: undefined,
     trace: undefined,
     ...(n.kind === 'loop' ? { members: [], results: undefined, loopIndex: 0 } : {}),
+    ...(n.kind === 'package' && n.inner ? { inner: JSON.parse(JSON.stringify(n.inner)) as AgentGraph } : {}),
   }
   const next = withMember({ ...graph, nodes: [...graph.nodes, copy] }, ownerOf(graph, id)?.id, copy.id)
   return { graph: next, id: copy.id }
@@ -172,6 +173,110 @@ export function wrapInLoop(graph: AgentGraph, ids: string[]): { graph: AgentGrap
   }
   next = withMember(next, parent, loop.id)
   return { graph: next, id: loop.id }
+}
+
+/** A loop is never split: touching it, or any node inside it, takes the box and every member. */
+function closePackageSet(graph: AgentGraph, ids: string[]): Set<string> {
+  const sel = new Set(ids.filter((id) => graph.nodes.some((n) => n.id === id)))
+  let guard = 0
+  let changed = true
+  while (changed && guard++ < 24) {
+    changed = false
+    for (const n of graph.nodes) {
+      if (n.kind !== 'loop') continue
+      const members = allMembers(graph, n.id)
+      if (!sel.has(n.id) && !members.some((id) => sel.has(id))) continue
+      if (!sel.has(n.id)) {
+        sel.add(n.id)
+        changed = true
+      }
+      for (const m of members) {
+        if (!sel.has(m)) {
+          sel.add(m)
+          changed = true
+        }
+      }
+    }
+  }
+  return sel
+}
+
+function cloneGraph(g: AgentGraph): AgentGraph {
+  return JSON.parse(JSON.stringify(g)) as AgentGraph
+}
+
+/** Replaces the selection with one Paket node. The inside keeps its own Başlangıç and runs through to its end. */
+export function packageSelection(graph: AgentGraph, ids: string[]): { graph: AgentGraph; id: string; absorbed: boolean } | null {
+  const sel = closePackageSet(graph, ids)
+  if (!sel.size) return null
+  const chosen = graph.nodes.filter((n) => sel.has(n.id))
+  const innerNodes = chosen.map((n) => {
+    const copy: AgentNode = n.kind === 'loop' ? { ...n, members: (n.members ?? []).filter((m) => sel.has(m)) } : { ...n }
+    delete copy.loopIndex
+    return copy
+  })
+  const innerEdges = graph.edges.filter((e) => sel.has(e.from) && sel.has(e.to)).map((e) => ({ ...e }))
+  const incoming = graph.edges.filter((e) => !sel.has(e.from) && sel.has(e.to))
+  const leaving = graph.edges.filter((e) => sel.has(e.from) && !sel.has(e.to))
+
+  if (!innerNodes.some((n) => n.kind === 'start')) {
+    const fromOutside = [...new Set(incoming.map((e) => e.to))]
+    let entry = fromOutside.length === 1 ? fromOutside[0] : null
+    if (!entry) {
+      const targeted = new Set(innerEdges.map((e) => e.to))
+      const heads = innerNodes.filter((n) => !targeted.has(n.id) && n.kind !== 'loop')
+      const loopHeads = innerNodes.filter((n) => !targeted.has(n.id) && n.kind === 'loop')
+      entry = (heads[0] ?? loopHeads[0])?.id ?? null
+    }
+    const entryNode = entry ? innerNodes.find((n) => n.id === entry) : undefined
+    if (entry && entryNode) {
+      const start = createNode('start', Math.max(0, entryNode.x - NODE_W - 80), entryNode.y)
+      innerNodes.unshift(start)
+      innerEdges.unshift({ id: newId(), from: start.id, fromPort: 'next', to: entry })
+    }
+  }
+
+  const rects = chosen.map((n) => (n.kind === 'loop' ? frameRect(graph, n) : { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }))
+  const pkg = createNode(
+    'package',
+    Math.max(0, Math.min(...rects.map((r) => r.x))),
+    Math.max(0, Math.min(...rects.map((r) => r.y))),
+    nextIndex(graph, 'package')
+  )
+  pkg.inner = cloneGraph({ nodes: innerNodes, edges: innerEdges })
+
+  let edges = graph.edges.filter((e) => !sel.has(e.from) && !sel.has(e.to)).map((e) => ({ ...e }))
+  for (const e of incoming) edges.push({ ...e, to: pkg.id })
+  if (leaving.length) {
+    const exit = leaving.find((e) => e.fromPort === 'next' || e.fromPort === 'done' || e.fromPort === 'true' || e.fromPort === 'found') ?? leaving[0]
+    edges.push({ id: newId(), from: pkg.id, fromPort: 'next', to: exit.to })
+  }
+
+  const owners = new Set(chosen.map((n) => ownerOf(graph, n.id)?.id).filter((id): id is string => !!id && !sel.has(id)))
+  const parent = owners.size === 1 ? [...owners][0] : undefined
+  const nodes = graph.nodes
+    .filter((n) => !sel.has(n.id))
+    .map((n) => {
+      if (n.kind !== 'loop' || !n.members) return n
+      const members = n.members.filter((m) => !sel.has(m))
+      return members.length === n.members.length ? n : { ...n, members }
+    })
+  nodes.push(pkg)
+  let next: AgentGraph = { nodes, edges }
+  next = withMember(next, parent, pkg.id)
+  return { graph: next, id: pkg.id, absorbed: sel.size > ids.filter((id) => sel.has(id)).length }
+}
+
+/** Applies `fn` to every node, including nodes hidden inside a package. */
+export function mapNodes(graph: AgentGraph, fn: (n: AgentNode) => AgentNode): AgentGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n) => {
+      const next = fn(n)
+      if (next.kind === 'package' && next.inner) return { ...next, inner: mapNodes(next.inner, fn) }
+      return next
+    }),
+  }
 }
 
 /** Follows the main path from the start node and returns the last node that has a free output. */

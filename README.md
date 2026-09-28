@@ -150,6 +150,7 @@ Başlangıç → Tarayıcıyı Aç https://site
 - **Bağla:** renkli çıkış noktasını sürükleyip başka bir node’un (ya da kutu başlığının) üstüne bırak.
 - **Tuval:** tekerlek yakınlaştırır/uzaklaştırır, orta tuşla sürüklemek kaydırır. Köşedeki yüzde 100%’e döner.
 - **Seç:** boş yerde sürüklemek kutu çizerek seçer. `Shift` ile tıklamak seçime ekler ya da çıkarır; `Shift` basılıyken çizilen kutu da seçime eklenir. Seçililer birlikte sürüklenir. `Ctrl+G` kutuya alır, `Del` siler, `Ctrl+D` kopyalar.
+- **Paketle:** seçim varken Node Ekle’nin sağında durur. Seçilenler tek Paket node’una toplanır. Bir döngünün parçası seçilirse kutu, bütün üyeleriyle birlikte içeri girer. **İçine gir** o akışı açar; tuvalin sağ üstündeki **Paketten çık** dışarı döner. Paket çalışınca içi Başlangıç’tan bitişe kadar gider, sonra dışarıdaki sonraki node çalışır.
   Kutuyu silmek içindekileri silmez.
 - **Sağ tık:** boş yerde (ya da kutunun içinde) node ekleme menüsü; node üzerinde çalıştır, kutuya al, kutudan çıkar, kopyala, sil.
 - **Ekran Tarayıcı:** ekranın görüntüsü alınır, bulunan her yazı kutuyla işaretlenir; birine tıklayınca seçili node’a atanır.

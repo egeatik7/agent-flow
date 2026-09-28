@@ -59,6 +59,10 @@ const KIND: Record<string, Tip> = {
     title: 'Bitir',
     text: 'Akış burada durur. Bundan sonraki node’lar çalışmaz.',
   },
+  package: {
+    title: 'Paket',
+    text: 'Seçtiğin adımların tek node’a toplanmış hali. İçine girince o akışı düzenlersin. Çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır.',
+  },
 }
 
 const BY_LABEL: Record<string, string> = {
@@ -74,6 +78,7 @@ const BY_LABEL: Record<string, string> = {
   'Dosyayı Bekle': 'waitFile',
   'Dosyayı Taşı': 'moveFile',
   Bitir: 'end',
+  Paket: 'package',
 }
 
 const PORT: Record<string, Tip> = {
@@ -148,6 +153,9 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
   }
 
   const exact: [string, Tip][] = [
+    ['Paketle', { title: 'Paketle', text: 'Seçili node’ları tek bir Paket node’una alır. Bir döngünün içinden node seçtiysen kutu, bütün üyeleriyle birlikte pakete girer; kutu ortadan bölünmez.' }],
+    ['İçine gir', { title: 'İçine gir', text: 'Paketin içindeki akışı tuvalde açar. Orada node ekleyip ok çekebilirsin. Sağ üstteki Paketten çık ile dışarı dönersin.' }],
+    ['Paketten çık', { title: 'Paketten çık', text: 'İçeride yaptığın değişiklikleri pakete yazar ve dışarıdaki akışa döner. Paket yine tek node olarak durur.' }],
     ['Hafızayı Sil', { title: 'Hafızayı Sil', text: 'Bütün node’ların öğrendiği hedefleri ve İnisiyatif’in kayıtlı yollarını unutturur. Akış, liste ve yazdığın adımlar durur.' }],
     ['Yeni Akış', { title: 'Yeni Akış', text: 'Tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Kayıtlı akış dosyası da bu boş haliyle değişir.' }],
     ['Düzenle', { title: 'Düzenle', text: 'Node’ları soldan sağa, okların sırasına göre dizer. Bağlantıları değiştirmez.' }],

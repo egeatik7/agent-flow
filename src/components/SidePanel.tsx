@@ -39,6 +39,7 @@ type Props = {
   onCaptureForNode: () => void
   onOpenScanner: () => void
   onFillFromFolder: (extensions: string[]) => void
+  onEnterPackage: (id: string) => void
   onPickDir: () => Promise<string | null>
   capturing: number
 }
@@ -737,6 +738,16 @@ function NodeInspector(p: Props) {
         </>
       )}
 
+      {n.kind === 'package' && (
+        <div className="field">
+          <p className="hint">
+            Bu node’un içinde ayrı bir akış durur. Çalışınca orası kendi Başlangıç’ından bitişine kadar gider, sonra bu node’un “sonra” çıkışı devam eder.
+          </p>
+          <button type="button" className="xp-btn primary" onClick={() => p.onEnterPackage(n.id)}>
+            İçine gir
+          </button>
+        </div>
+      )}
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
       {n.kind === 'ai' && <AiEditor {...p} n={n} />}
       {n.kind === 'browser' && <BrowserEditor {...p} n={n} />}

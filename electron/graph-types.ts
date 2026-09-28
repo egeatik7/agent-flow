@@ -10,6 +10,7 @@ export type NodeKind =
   | 'browser'
   | 'waitFile'
   | 'moveFile'
+  | 'package'
   | 'end'
 
 export type Locator = {
@@ -120,6 +121,8 @@ export type AgentNode = {
   /** Last known screen position of the target; breaks ties when the same text appears several times. */
   anchor?: { x: number; y: number }
   locator?: Locator
+  /** Paket: the flow hidden inside this node. Runs from its own Başlangıç through to the end, then the outer flow continues. */
+  inner?: AgentGraph
 }
 
 export type AgentEdge = {
@@ -278,6 +281,14 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     outputs: NEXT,
     description: 'Bir dosyayı yeni adıyla başka yere taşır (örn. D:\\Modeller\\{{öğe.isim}}.glb).',
   },
+  package: {
+    label: 'Paket',
+    icon: '▣',
+    color: '#24406e',
+    hasInput: true,
+    outputs: NEXT,
+    description: 'Seçilen adımları tek node’da toplar. İçi Başlangıç’tan bitişe kadar çalışır, sonra dışarıdaki sonraki node’a geçer.',
+  },
   end: {
     label: 'Bitir',
     icon: '■',
@@ -354,6 +365,8 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
       return { ...base, folder: '', pattern: '', timeoutMs: 300000 }
     case 'moveFile':
       return { ...base, source: '{{dosya}}', text: '' }
+    case 'package':
+      return { ...base, inner: { nodes: [], edges: [] } }
     default:
       return base
   }
@@ -394,6 +407,10 @@ export function summarize(n: AgentNode): string {
       return `${n.folder?.trim() || 'İndirilenler'}${n.pattern?.trim() ? ` · ${n.pattern.trim()}` : ''} (en çok ${Math.round((n.timeoutMs ?? 0) / 1000)} sn)`
     case 'moveFile':
       return `${n.source?.trim() || '{{dosya}}'} → ${n.text?.trim() || 'hedef yolu yaz…'}`
+    case 'package': {
+      const steps = (n.inner?.nodes ?? []).filter((x) => x.kind !== 'start' && x.kind !== 'end').length
+      return steps ? `${steps} adım` : 'Boş paket'
+    }
     case 'end':
       return 'Akışı bitir.'
   }
@@ -592,6 +609,7 @@ export function normalizeGraph(raw: unknown): AgentGraph {
         delete node.attempts
         delete node.loopIndex
       }
+      if (kind === 'package') node.inner = normalizeGraph(n.inner ?? { nodes: [], edges: [] })
       return node
     })
   const ids = new Set(nodes.map((n) => n.id))

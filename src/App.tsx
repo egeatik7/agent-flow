@@ -30,6 +30,8 @@ import {
   connect,
   duplicateNode,
   freePort,
+  mapNodes,
+  packageSelection,
   removeNode,
   setMembership,
   wrapInLoop,
@@ -61,9 +63,23 @@ function initialGraph(): AgentGraph {
   return normalizeGraph({ nodes: [createNode('start', 40, 80)], edges: [] })
 }
 
+type Crumb = { parent: AgentGraph; id: string }
+
+/** The saved flow: the open package view written back into its parents. */
+function rooted(view: AgentGraph, stack: Crumb[]): AgentGraph {
+  return stack.reduceRight(
+    (inner, crumb) => ({
+      ...crumb.parent,
+      nodes: crumb.parent.nodes.map((n) => (n.id === crumb.id ? { ...n, inner } : n)),
+    }),
+    view
+  )
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [graph, setGraph] = useState<AgentGraph>(initialGraph)
+  const [stack, setStack] = useState<Crumb[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
@@ -79,6 +95,8 @@ export default function App() {
 
   const graphRef = useRef(graph)
   graphRef.current = graph
+  const stackRef = useRef(stack)
+  stackRef.current = stack
   const selectedRef = useRef(selectedNodeId)
   selectedRef.current = selectedNodeId
   const selectedIdsRef = useRef(selectedIds)
@@ -92,7 +110,7 @@ export default function App() {
   }, [])
 
   const patchNode = useCallback((id: string, patch: Partial<AgentNode>) => {
-    setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }))
+    setGraph((g) => mapNodes(g, (n) => (n.id === id ? { ...n, ...patch } : n)))
   }, [])
 
   const refreshWindows = useCallback(async () => {
@@ -132,11 +150,12 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return
     const t = setTimeout(() => {
-      if (api) void api.saveGraph(graph)
-      else localStorage.setItem(LOCAL_GRAPH, JSON.stringify(graph))
+      const root = rooted(graphRef.current, stackRef.current)
+      if (api) void api.saveGraph(root)
+      else localStorage.setItem(LOCAL_GRAPH, JSON.stringify(root))
     }, 400)
     return () => clearTimeout(t)
-  }, [graph, loaded])
+  }, [graph, stack, loaded])
 
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
@@ -247,6 +266,52 @@ export default function App() {
     setGraph(r.graph)
     selectNode(r.id)
     pushLog('success', 'Seçilenler “Her Öğe İçin” kutusuna alındı. Sağ panelden listeyi doldur.')
+  }
+
+  const packSelection = () => {
+    const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedRef.current ? [selectedRef.current] : []
+    const r = packageSelection(graphRef.current, ids)
+    if (!r) return
+    setGraph(r.graph)
+    selectNode(r.id)
+    pushLog(
+      'success',
+      r.absorbed
+        ? 'Paket oluşturuldu. Seçim bir döngüye değdiği için kutu, bütün üyeleriyle birlikte içeri girdi.'
+        : 'Paket oluşturuldu. İçine girince adımları düzenlersin.'
+    )
+  }
+
+  const enterPackage = (id: string) => {
+    const g = graphRef.current
+    const n = g.nodes.find((x) => x.id === id && x.kind === 'package')
+    if (!n) return
+    setStack((s) => [...s, { parent: g, id }])
+    setGraph(normalizeGraph(n.inner ?? { nodes: [], edges: [] }))
+    setSelectedNodeId(null)
+    setSelectedIds([])
+    selectedIdsRef.current = []
+    setSelectedEdgeId(null)
+    setStepStatus({})
+  }
+
+  const exitPackage = () => {
+    const s = stackRef.current
+    const crumb = s[s.length - 1]
+    if (!crumb) return
+    const parent: AgentGraph = {
+      ...crumb.parent,
+      nodes: crumb.parent.nodes.map((n) => (n.id === crumb.id ? { ...n, inner: graphRef.current } : n)),
+    }
+    const nextStack = s.slice(0, -1)
+    stackRef.current = nextStack
+    setStack(nextStack)
+    setGraph(parent)
+    setSelectedNodeId(crumb.id)
+    setSelectedIds([crumb.id])
+    selectedIdsRef.current = [crumb.id]
+    setSelectedEdgeId(null)
+    setStepStatus({})
   }
 
   const addNode = (kind: NodeKind) => {
@@ -473,7 +538,7 @@ export default function App() {
   }
 
   const exportGraph = () => {
-    const blob = new Blob([JSON.stringify(graph, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(rooted(graphRef.current, stackRef.current), null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = 'xp-agent-akis.json'
@@ -483,6 +548,8 @@ export default function App() {
 
   const importGraph = async (file: File) => {
     try {
+      setStack([])
+      stackRef.current = []
       setGraph(normalizeGraph(JSON.parse(await file.text())))
       setSelectedNodeId(null)
       setStepStatus({})
@@ -494,6 +561,8 @@ export default function App() {
 
   const newFlow = () => {
     if (graph.nodes.length > 1 && !window.confirm('Mevcut akış silinsin mi?')) return
+    setStack([])
+    stackRef.current = []
     setGraph(initialGraph())
     setSelectedNodeId(null)
     setSelectedIds([])
@@ -503,17 +572,18 @@ export default function App() {
   }
 
   const forgetAll = () => {
-    const remembered = graph.nodes.filter((n) => n.memory?.length || n.path?.length || n.trace?.length)
-    if (!remembered.length) {
+    let count = 0
+    const cleared = mapNodes(graph, (n) => {
+      if (!n.memory?.length && !n.path?.length && !n.trace?.length) return n
+      count++
+      return { ...n, memory: undefined, path: undefined, trace: undefined }
+    })
+    if (!count) {
       pushLog('info', 'Silinecek hafıza yok.')
       return
     }
-    const ids = new Set(remembered.map((n) => n.id))
-    setGraph((g) => ({
-      ...g,
-      nodes: g.nodes.map((n) => (ids.has(n.id) ? { ...n, memory: undefined, path: undefined, trace: undefined } : n)),
-    }))
-    pushLog('info', `${remembered.length} node’un hafızası ve kayıtlı yolu silindi.`)
+    setGraph(cleared)
+    pushLog('info', `${count} node’un hafızası ve kayıtlı yolu silindi.`)
   }
 
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
@@ -555,6 +625,8 @@ export default function App() {
           hasSelection={!!selectedNodeId}
           capturing={capturing}
           onAdd={addNode}
+          canPackage={selectedIds.length > 0}
+          onPackage={packSelection}
           onCapture={captureAsNewNode}
           onOpenScanner={() => openScanner(null)}
           onRun={() => run()}
@@ -566,6 +638,11 @@ export default function App() {
         />
         <div className="workspace">
           <div className="canvas-wrap">
+            {stack.length > 0 && (
+              <button type="button" className="xp-btn package-exit" onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
+                Paketten çık
+              </button>
+            )}
             <NodeCanvas
               graph={graph}
               selectedNodeId={selectedNodeId}
@@ -617,6 +694,7 @@ export default function App() {
                 }
               }}
               onRunFrom={(id) => run(id)}
+              onEnterPackage={enterPackage}
             />
           </div>
           <SidePanel
@@ -682,6 +760,7 @@ export default function App() {
             onCaptureForNode={captureForSelected}
             onOpenScanner={() => openScanner(selectedNodeId)}
             onFillFromFolder={(exts) => selectedNodeId && fillLoopFromFolder(selectedNodeId, exts)}
+            onEnterPackage={enterPackage}
             onPickDir={async () => {
               if (api) return api.pickDir()
               return window.prompt('Klasör yolu') || null

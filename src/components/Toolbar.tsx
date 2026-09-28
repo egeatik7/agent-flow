@@ -7,6 +7,8 @@ type Props = {
   hasSelection: boolean
   capturing: number
   onAdd: (kind: NodeKind) => void
+  canPackage: boolean
+  onPackage: () => void
   onCapture: () => void
   onOpenScanner: () => void
   onRun: () => void
@@ -30,7 +32,7 @@ export default function Toolbar(p: Props) {
     return () => window.removeEventListener('mousedown', close)
   }, [open])
 
-  const kinds = NODE_KINDS.filter((k) => k !== 'start' || !p.hasStart)
+  const kinds = NODE_KINDS.filter((k) => k !== 'package' && (k !== 'start' || !p.hasStart))
 
   return (
     <div className="toolbar">
@@ -62,6 +64,17 @@ export default function Toolbar(p: Props) {
           </div>
         )}
       </div>
+      {p.canPackage && (
+        <button
+          type="button"
+          className="xp-btn"
+          onClick={p.onPackage}
+          disabled={p.running}
+          title="Seçili node’ları tek pakete alır. Döngünün bir parçası seçilirse kutu, içindeki her node ile birlikte girer."
+        >
+          Paketle
+        </button>
+      )}
 
       <span className="tb-sep" />
 

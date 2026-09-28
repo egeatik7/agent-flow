@@ -92,7 +92,7 @@ function isFatal(e: unknown) {
 export async function runGraph(
   graph: AgentGraph,
   ex: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; startId?: string }
+  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean }
 ): Promise<void> {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = findEntry(graph, opts.startId)
@@ -226,6 +226,18 @@ export async function runGraph(
         return 'end'
       case 'loop':
         return 'done'
+      case 'package': {
+        const inner = node.inner
+        if (!inner?.nodes.length) {
+          ex.log('warn', `“${node.title}” boş.`)
+          return 'next'
+        }
+        ex.log('info', `“${node.title}” paketi çalışıyor.`)
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true })
+        ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
+        await settle()
+        return 'next'
+      }
     }
   }
 
@@ -392,5 +404,5 @@ export async function runGraph(
     if (e instanceof EndFlow) return
     throw e
   }
-  ex.log('success', `Akış tamamlandı (${steps} adım).`)
+  if (!opts.nested) ex.log('success', `Akış tamamlandı (${steps} adım).`)
 }

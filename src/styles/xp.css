@@ -377,6 +377,20 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
 }
 
+.package-exit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 9;
+}
+
+.enter-pkg {
+  margin-top: 4px;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .canvas-zoom {
   position: absolute;
   right: 8px;

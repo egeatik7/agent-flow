@@ -56,6 +56,7 @@ type Props = {
   onDeleteEdge: (id: string) => void
   onDuplicate: (id: string) => void
   onRunFrom: (id: string) => void
+  onEnterPackage: (id: string) => void
 }
 
 type Linking = { from: string; port: string; mx: number; my: number; sx: number; sy: number; moved: boolean }
@@ -134,7 +135,7 @@ export default function NodeCanvas(p: Props) {
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
   const hasStart = p.graph.nodes.some((n) => n.kind === 'start')
-  const addableKinds = NODE_KINDS.filter((k) => k !== 'start' || !hasStart)
+  const addableKinds = NODE_KINDS.filter((k) => k !== 'package' && (k !== 'start' || !hasStart))
 
   const frames = useMemo(() => computeFrames(p.graph, drag?.frozen), [p.graph, drag?.frozen])
   const frameById = useMemo(() => new Map(frames.map((f) => [f.loop.id, f])), [frames])
@@ -708,6 +709,19 @@ export default function NodeCanvas(p: Props) {
               </div>
               <div className="node-body">
                 <div className="node-summary">{summarize(n)}</div>
+                {n.kind === 'package' && (
+                  <button
+                    type="button"
+                    className="xp-btn enter-pkg"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      p.onEnterPackage(n.id)
+                    }}
+                  >
+                    İçine gir
+                  </button>
+                )}
                 {n.locator ? (
                   <div className="node-meta" title={`${n.locator.windowTitle ?? ''} › ${n.locator.path}`}>
                     {n.locator.icon ? <img className="icon-thumb" alt="" src={`data:image/png;base64,${n.locator.icon}`} /> : '● '}
