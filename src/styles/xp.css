@@ -391,28 +391,6 @@ body {
   font-size: 11px;
 }
 
-.node-expose {
-  position: absolute;
-  left: 4px;
-  bottom: 3px;
-  z-index: 6;
-  margin: 0;
-}
-
-.frame-expose {
-  position: absolute;
-  left: 8px;
-  bottom: 6px;
-  z-index: 5;
-  margin: 0;
-  pointer-events: auto;
-}
-
-.node-expose .xp-tick-box {
-  width: 13px;
-  height: 13px;
-}
-
 .pkg-folds {
   display: flex;
   flex-direction: column;

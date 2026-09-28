@@ -719,7 +719,6 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-              onExpose={(id, on) => updateNode(id, { expose: on })}
             />
           </div>
           <SidePanel

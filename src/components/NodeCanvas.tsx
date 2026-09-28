@@ -58,7 +58,6 @@ type Props = {
   onRunFrom: (id: string) => void
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
-  onExpose: (id: string, on: boolean) => void
 }
 
 type Linking = { from: string; port: string; mx: number; my: number; sx: number; sy: number; moved: boolean }
@@ -548,10 +547,6 @@ export default function NodeCanvas(p: Props) {
             .join(' ')
           return (
             <div key={f.loop.id} className={cls} style={{ left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth }}>
-              <label className="frame-expose xp-tick" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                <input type="checkbox" checked={!!f.loop.expose} onChange={(e) => p.onExpose(f.loop.id, e.target.checked)} />
-                <span className="xp-tick-box" />
-              </label>
               <div
                 className="loop-frame-head"
                 data-node-id={f.loop.id}
@@ -703,10 +698,6 @@ export default function NodeCanvas(p: Props) {
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
             >
-              <label className="node-expose xp-tick" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                <input type="checkbox" checked={!!n.expose} onChange={(e) => p.onExpose(n.id, e.target.checked)} />
-                <span className="xp-tick-box" />
-              </label>
               <div className="node-head" style={{ background: headerGradient(spec.color) }}>
                 <span className="node-icon">{spec.icon}</span>
                 <span className="node-title">{n.title}</span>
