@@ -229,9 +229,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     return { title: 'Sil', text: 'Seçili node’u kaldırır. Kutu silinirse içindeki node’lar tuvalde kalır.' }
   }
   if (el.classList.contains('seg-btn')) return segTip(t)
-  if (el.classList.contains('chip') && el.classList.contains('var')) {
-    return { title: t, text: 'Tıklayınca bu değişken, üstteki alanın sonuna eklenir. {{öğe}} o turdaki dosyanın tam yoludur, {{öğe.isim}} uzantısız adıdır, {{dosya}} az önce gelen dosyadır.' }
-  }
+  if (el.classList.contains('chip') && el.classList.contains('var')) return varTip(raw)
   if (el.classList.contains('chip')) {
     return { title: t, text: 'Hazır değer. Tıklayınca üstteki alana bunu yazar. Kaydet isteyen ayarlarda ayrıca Kaydet’e bas.' }
   }
@@ -251,6 +249,42 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     return { title: 'Büyüt', text: 'Pencereyi büyütür veya eski boyutuna döner. Başlık çubuğuna çift tıklamak da aynısını yapar.' }
   }
   return null
+}
+
+function varTip(raw: string): Tip {
+  const key = raw.replace(/\s+/g, '')
+  const tips: Record<string, Tip> = {
+    '{{öğe}}': {
+      title: '{{öğe}}',
+      text: 'Bu turdaki satırın tamamı. Liste dosya yoluysa tam yoldur: ilk tur C:\\Resimler\\kedi.png, ikinci tur C:\\Resimler\\köpek.png. Yazı Yaz’a yalnızca bunu yazarsan her tur sıradaki dosya gider. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+    '{{öğe.ad}}': {
+      title: '{{öğe.ad}}',
+      text: 'Bu turdaki dosyanın adı, uzantısıyla. kedi.png satırında “kedi.png” olur, yolun geri kalanı gelmez. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+    '{{öğe.isim}}': {
+      title: '{{öğe.isim}}',
+      text: 'Bu turdaki dosyanın uzantısız adı. kedi.png → kedi. İnen modeli D:\\Modeller\\{{öğe.isim}}.glb diye kaydedersen dosya kedi.glb olur. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+    '{{sıra}}': {
+      title: '{{sıra}}',
+      text: 'Kaçıncı tur olduğu. İlk öğe 1, ikinci öğe 2. Liste boşken kutu N kez dönüyorsa da 1’den başlayıp artar. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+    '{{toplam}}': {
+      title: '{{toplam}}',
+      text: 'Listede kaç öğe olduğu. İki dosya varsa her turda 2’dir. “{{sıra}} / {{toplam}}” yazarsan 1 / 2, sonra 2 / 2 olur. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+    '{{dosya}}': {
+      title: '{{dosya}}',
+      text: 'Dosyayı Bekle’nin az önce gördüğü inen dosyanın tam yolu. Listedeki {{öğe}} bu değildir; siteden gelen sonuçtur. Dosyayı Taşı’nın kaynağı boşsa bunu kullanır. Tıklayınca üstteki alanın sonuna eklenir.',
+    },
+  }
+  return (
+    tips[key] ?? {
+      title: raw,
+      text: 'Bu turda yerine gerçek değer yazılır. Tıklayınca üstteki alanın sonuna eklenir.',
+    }
+  )
 }
 
 function segTip(t: string): Tip | null {
@@ -383,7 +417,10 @@ function regionTip(el: Element): Tip | null {
     return { title: 'Kayıt', text: 'Bu node’un hatırladığı hedef veya başarılı tur. Unut yalnızca bunu siler.' }
   }
   if (el.classList.contains('var-chips')) {
-    return { title: 'Değişkenler', text: 'Tıklayınca alana eklenir. {{öğe}} o turdaki dosyanın tam yolu, {{öğe.isim}} uzantısız adı, {{dosya}} az önce inen dosyadır.' }
+    return {
+      title: 'Değişkenler',
+      text: 'Her düğme bu turda değişen bir değerdir. Üzerinde durunca ne olduğu yazılır. Tıklayınca üstteki alanın sonuna eklenir.',
+    }
   }
   if (el.classList.contains('vision-box')) {
     return { title: 'Ekran görüntüsü', text: 'Açıksa bu node hedefi ekran görüntüsünden arar. Model, Ayarlar’daki görsel modeldir.' }
