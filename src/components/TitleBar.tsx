@@ -1,9 +1,11 @@
+import appIcon from '../assets/app-icon-32.png'
+
 export default function TitleBar() {
   const api = typeof window !== 'undefined' ? window.xpAgent : undefined
   return (
     <div className="titlebar" onDoubleClick={() => void api?.maximize()}>
       <div className="titlebar-left">
-        <div className="titlebar-icon" aria-hidden />
+        <img className="titlebar-icon" src={appIcon} alt="" aria-hidden draggable={false} />
         <h1>XP Agent Studio — Node Promptlatıcı</h1>
       </div>
       <div className="titlebar-controls">
