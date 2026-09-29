@@ -214,6 +214,7 @@ app.whenReady().then(() => {
         maxSteps: Math.max(1, s.maxSteps),
         stepDelayMs: Math.max(0, s.stepDelayMs),
         startId,
+        resume: !!startId,
       })
       return { ok: true }
     } catch (e) {

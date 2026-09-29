@@ -96,7 +96,7 @@ function isFatal(e: unknown) {
 export async function runGraph(
   graph: AgentGraph,
   ex: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph }
+  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph; resume?: boolean }
 ): Promise<void> {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = findEntry(graph, opts.startId)
@@ -249,7 +249,7 @@ export async function runGraph(
           return 'next'
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root })
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume })
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'
@@ -371,7 +371,7 @@ export async function runGraph(
     }
     const keys = fromFolder ?? loopKeys(loop)
     const isList = fromFolder != null || listItems(loop).length > 0
-    const from = loopStartIndex(loop, keys.length, !!startAt)
+    const from = loopStartIndex(loop, keys.length, !!opts.resume)
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'
     if (from > 0) {

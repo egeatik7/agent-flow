@@ -179,6 +179,7 @@ export async function runDemo(
       maxSteps: settings.maxSteps,
       stepDelayMs: Math.min(settings.stepDelayMs, 300),
       startId,
+      resume: !!startId,
     })
   } catch (e) {
     if (e instanceof StoppedError) log('warn', 'Ajan durduruldu.')

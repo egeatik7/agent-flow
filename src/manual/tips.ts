@@ -166,7 +166,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Yeni Akış', { title: 'Yeni Akış', text: 'Tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Kayıtlı akış dosyası da bu boş haliyle değişir.' }],
     ['Düzenle', { title: 'Düzenle', text: 'Node’ları soldan sağa, okların sırasına göre dizer. Bağlantıları değiştirmez.' }],
     ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Akışı Başlangıç’tan itibaren çalıştırır. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
-    ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Ondan önceki adımlar atlanır. Node bir kutunun içindeyse liste, işaretli satırdan sona kadar gider; sonraki dosyalar kutunun ilk adımından başlar.' }],
+    ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Kutular, listedeki işaretli satırdan devam eder; paket içindeki kutular da. Ajanı Çalıştır hepsini 1. öğeden başlatır.' }],
     ['Durdur', { title: 'Durdur', text: 'Çalışan akışı durdurur. Ctrl+Shift+Q ile de durur. Bekleyen model isteği de kesilir.' }],
     ['Dışa Aktar', { title: 'Dışa Aktar', text: 'Akışı bir JSON dosyası olarak indirir. Başka bilgisayarda İçe Aktar ile açılır.' }],
     ['İçe Aktar', { title: 'İçe Aktar', text: 'Daha önce dışa aktarılmış bir akış dosyasını açar. Ekrandaki akışın yerini alır.' }],

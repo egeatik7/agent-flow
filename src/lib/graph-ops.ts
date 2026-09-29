@@ -177,6 +177,27 @@ export function reconcileLoopMembership(graph: AgentGraph): AgentGraph {
   return { ...current, nodes }
 }
 
+/** Ajanı Çalıştır puts every box back on its first item. */
+export function resetLoopTicks(graph: AgentGraph): AgentGraph {
+  let changed = false
+  const nodes = graph.nodes.map((n) => {
+    let next = n
+    if (n.kind === 'loop' && n.startIndex) {
+      next = { ...next, startIndex: 0, loopIndex: undefined }
+      changed = true
+    }
+    if (n.kind === 'package' && n.inner) {
+      const inner = resetLoopTicks(n.inner)
+      if (inner !== n.inner) {
+        next = next === n ? { ...n, inner } : { ...next, inner }
+        changed = true
+      }
+    }
+    return next
+  })
+  return changed ? { ...graph, nodes } : graph
+}
+
 /** Puts the selected nodes into a new box and routes the chain through the box. */
 export function wrapInLoop(graph: AgentGraph, ids: string[]): { graph: AgentGraph; id: string } | null {
   const sel = new Set(ids.filter((id) => graph.nodes.find((n) => n.id === id && n.kind !== 'start')))

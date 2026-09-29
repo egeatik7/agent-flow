@@ -443,7 +443,7 @@ export function listItems(n: AgentNode): string[] {
  * continues from `startIndex` through the end of the list.
  */
 export function loopStartIndex(loop: AgentNode, total: number, resume: boolean): number {
-  if (!resume || total <= 1) return 0
+  if (!resume || total < 1) return 0
   const raw = loop.startIndex
   const i = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 0
   return Math.min(Math.max(0, i), total - 1)

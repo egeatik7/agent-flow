@@ -38,6 +38,7 @@ import {
   unpackPackage,
   removeNode,
   reconcileLoopMembership,
+  resetLoopTicks,
   setMembership,
   wrapInLoop,
 } from './lib/graph-ops'
@@ -627,14 +628,20 @@ export default function App() {
   }
 
   const run = async (startId?: string) => {
-    if (graph.nodes.length === 0) return
+    if (graphRef.current.nodes.length === 0) return
+    let g = graphRef.current
+    if (!startId) {
+      g = resetLoopTicks(g)
+      graphRef.current = g
+      setGraph(g)
+    }
     setRunning(true)
     setStepStatus({})
     pushLog('info', startId ? 'Seçili node’dan çalıştırılıyor…' : 'Ajan çalışıyor…')
     try {
-      if (api) await api.runAgent(graph, startId)
+      if (api) await api.runAgent(g, startId)
       else
-        await runDemo(graph, settings, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode)
+        await runDemo(g, settingsRef.current, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode)
     } catch (e) {
       pushLog('error', errText(e))
     } finally {
