@@ -1,4 +1,5 @@
 import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import NubboMascot from './NubboMascot'
 import {
   NODE_SPECS,
   TEMPLATE_VARS,
@@ -814,17 +815,22 @@ function NodeInspector(p: Props) {
   if (!n) {
     return (
       <div className="hint-block">
-        <p className="hint"><b>Nasıl kullanılır?</b></p>
-        <ul className="hint-list">
-          <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
-          <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
-          <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
-          <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
-          <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
-          <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
-          <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
-          <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
-        </ul>
+        <div>
+          <p className="hint"><b>Nasıl kullanılır?</b></p>
+          <ul className="hint-list">
+            <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
+            <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
+            <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
+            <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
+            <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
+            <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
+            <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
+            <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
+          </ul>
+        </div>
+        <div className="nubbo-slot">
+          <NubboMascot />
+        </div>
       </div>
     )
   }
