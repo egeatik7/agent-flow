@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import NubboMascot from './NubboMascot'
+import ProbeMark from './ProbeMark'
 import {
   NODE_SPECS,
   TEMPLATE_VARS,
@@ -755,6 +756,12 @@ function NodeFields(p: Props & { n: AgentNode }) {
         </>
       )}
 
+      {n.kind === 'probe' && (
+        <div className="field">
+          <p className="hint">Akışa dokunmaz. Bir değişkene tıklayınca, bu node’un durduğu kutudaki işaretli satırın değeri görünür.</p>
+          <ProbeMark graph={p.graph} node={n} onPick={(token) => upd({ text: token })} />
+        </div>
+      )}
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
       {n.kind === 'ai' && <AiEditor {...p} n={n} />}
       {n.kind === 'browser' && <BrowserEditor {...p} n={n} />}
@@ -792,6 +799,7 @@ function PackageExposed(p: Props & { pkg: AgentNode }) {
               <div className="pkg-fold-body">
                 <NodeFields
                   {...p}
+                  graph={p.pkg.inner ?? p.graph}
                   n={node}
                   onUpdateNode={(patch) => p.onUpdatePackaged(p.pkg.id, node.id, patch)}
                 />

@@ -63,6 +63,10 @@ const KIND: Record<string, Tip> = {
     title: 'Paket',
     text: 'Seçtiğin adımların tek node’a toplanmış hali. İçine girince o akışı düzenlersin. Çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır.',
   },
+  probe: {
+    title: 'Kontrol',
+    text: 'Akışı bozmaz. İçindeki {{öğe}}, {{öğe.isim}}, {{öğe.ad}}, {{sıra}}, {{toplam}} veya {{dosya}} düğmesine basınca, node’un durduğu kutudaki işaretli satırın değeri görünür. Çalışırken aynı değer günlüğe de yazılır.',
+  },
 }
 
 const BY_LABEL: Record<string, string> = {
@@ -79,6 +83,7 @@ const BY_LABEL: Record<string, string> = {
   'Dosyayı Taşı': 'moveFile',
   Bitir: 'end',
   Paket: 'package',
+  Kontrol: 'probe',
 }
 
 const PORT: Record<string, Tip> = {

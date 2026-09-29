@@ -11,6 +11,7 @@ export type NodeKind =
   | 'waitFile'
   | 'moveFile'
   | 'package'
+  | 'probe'
   | 'end'
 
 export type Locator = {
@@ -293,6 +294,14 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     outputs: NEXT,
     description: 'Seçilen adımları tek node’da toplar. İçi Başlangıç’tan bitişe kadar çalışır, sonra dışarıdaki sonraki node’a geçer.',
   },
+  probe: {
+    label: 'Kontrol',
+    icon: '⌕',
+    color: '#3f6b4e',
+    hasInput: true,
+    outputs: NEXT,
+    description: 'Durduğu yerde {{öğe}}, {{öğe.isim}}, {{sıra}} gibi değişkenlerin ne olduğunu gösterir. Akışı bozmaz.',
+  },
   end: {
     label: 'Bitir',
     icon: '■',
@@ -312,7 +321,8 @@ export const NODE_BODY = 58
 export const NODE_PORT_ROW = 22
 
 export function nodeHeight(kind: NodeKind): number {
-  return NODE_BORDER * 2 + NODE_HEADER + NODE_BODY + Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW + 4
+  const body = kind === 'probe' ? 118 : NODE_BODY
+  return NODE_BORDER * 2 + NODE_HEADER + body + Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW + 4
 }
 
 export function inputPoint(n: AgentNode) {
@@ -371,6 +381,8 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
       return { ...base, source: '{{dosya}}', text: '' }
     case 'package':
       return { ...base, inner: { nodes: [], edges: [] } }
+    case 'probe':
+      return base
     default:
       return base
   }
@@ -415,6 +427,8 @@ export function summarize(n: AgentNode): string {
       const steps = (n.inner?.nodes ?? []).filter((x) => x.kind !== 'start' && x.kind !== 'end').length
       return steps ? `${steps} adım` : 'Boş paket'
     }
+    case 'probe':
+      return n.text?.trim() ? n.text.trim() : 'Bir değişkene tıkla'
     case 'end':
       return 'Akışı bitir.'
   }

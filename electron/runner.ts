@@ -6,6 +6,7 @@ import {
   hasTemplate,
   listItems,
   loopKeys,
+  TEMPLATE_VARS,
   loopStartIndex,
   portLabel,
   renderTemplate,
@@ -222,6 +223,17 @@ export async function runGraph(
         if (!to) throw new Error(`“${live.title}”: hedef yolu boş.`)
         const final = await ex.moveFile(from, to, live)
         vars = { ...vars, ...fileVars(final) }
+        return 'next'
+      }
+      case 'probe': {
+        const picked = (node.text ?? '').trim()
+        const names = picked ? [picked] : TEMPLATE_VARS
+        const lines = names.map((v) => {
+          const token = v.includes('{{') ? v : `{{${v}}}`
+          const shown = renderTemplate(token, vars) ?? token
+          return `${token} = ${shown === token ? 'boş' : shown}`
+        })
+        ex.log('info', `[${stepNo}] Kontrol: ${lines.join(' · ')}`)
         return 'next'
       }
       case 'end':

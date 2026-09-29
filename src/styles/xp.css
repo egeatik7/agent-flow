@@ -944,6 +944,46 @@ body {
   border-color: #d2a060;
 }
 
+.chip.var.on {
+  background: #ffe08a;
+  border-color: #a07820;
+  font-weight: 700;
+}
+
+.agent-node.kind-probe .node-body.probe-body {
+  height: 118px;
+  padding: 4px 6px;
+}
+
+.probe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.probe-value {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.probe-where {
+  margin-top: 2px;
+  color: #555;
+  font-size: 10px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .list-area {
   min-height: 96px;
   white-space: pre;

@@ -17,6 +17,7 @@ import {
   type StepStatus,
 } from '../types'
 import { allMembers, ancestors, frameInput, frameOutput, frameRect, ownerOf, type Rect } from '../../electron/groups'
+import ProbeMark from './ProbeMark'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
 
@@ -58,6 +59,7 @@ type Props = {
   onRunFrom: (id: string) => void
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
+  onPatchNode: (id: string, patch: Partial<AgentNode>) => void
 }
 
 type Linking = { from: string; port: string; mx: number; my: number; sx: number; sy: number; moved: boolean }
@@ -708,7 +710,11 @@ export default function NodeCanvas(p: Props) {
                 )}
                 {st !== 'idle' && <span className={`status-chip ${st}`}>{st === 'running' ? 'çalışıyor' : st === 'done' ? 'tamam' : 'hata'}</span>}
               </div>
-              <div className="node-body">
+              <div className={'node-body' + (n.kind === 'probe' ? ' probe-body' : '')}>
+                {n.kind === 'probe' ? (
+                  <ProbeMark graph={p.graph} node={n} onPick={(token) => p.onPatchNode(n.id, { text: token })} />
+                ) : (
+                <>
                 <div className="node-summary">{summarize(n)}</div>
                 {n.kind === 'package' && (
                   <div className="field-row wrap">
@@ -755,6 +761,8 @@ export default function NodeCanvas(p: Props) {
                     ◆ geçen tur {n.trace.length} eylemde oldu
                   </div>
                 ) : null}
+                </>
+                )}
               </div>
               <div className="node-outputs">
                 {spec.outputs.map((o) => (

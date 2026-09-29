@@ -771,6 +771,7 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
+              onPatchNode={updateNode}
             />
           </div>
           <SidePanel
