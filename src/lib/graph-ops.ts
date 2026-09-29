@@ -140,6 +140,43 @@ export function setMembership(graph: AgentGraph, ids: string[], loopId: string |
   }
 }
 
+/** A node whose center lies inside a box becomes a member of that box. The innermost box wins. */
+export function reconcileLoopMembership(graph: AgentGraph): AgentGraph {
+  let current = graph
+  let changed = false
+  let guard = 0
+  while (guard++ < 16) {
+    let step = false
+    for (const n of current.nodes) {
+      if (n.kind === 'start') continue
+      const exclude = new Set<string>()
+      if (n.kind === 'loop') {
+        exclude.add(n.id)
+        for (const a of ancestors(current, n.id)) exclude.add(a.id)
+      }
+      const rect = n.kind === 'loop' ? frameRect(current, n) : { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }
+      const hit = loopAt(current, rect.x + rect.w / 2, rect.y + rect.h / 2, exclude)
+      if (!hit || (ownerOf(current, n.id)?.id ?? null) === hit.id) continue
+      const next = setMembership(current, [n.id], hit.id)
+      if (next === current) continue
+      current = next
+      step = true
+      changed = true
+    }
+    if (!step) break
+  }
+  let innerChanged = false
+  const nodes = current.nodes.map((n) => {
+    if (n.kind !== 'package' || !n.inner) return n
+    const inner = reconcileLoopMembership(n.inner)
+    if (inner === n.inner) return n
+    innerChanged = true
+    return { ...n, inner }
+  })
+  if (!innerChanged) return changed ? current : graph
+  return { ...current, nodes }
+}
+
 /** Puts the selected nodes into a new box and routes the chain through the box. */
 export function wrapInLoop(graph: AgentGraph, ids: string[]): { graph: AgentGraph; id: string } | null {
   const sel = new Set(ids.filter((id) => graph.nodes.find((n) => n.id === id && n.kind !== 'start')))

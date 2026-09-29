@@ -345,7 +345,7 @@ export default function NodeCanvas(p: Props) {
       setDrag(null)
       if (!moved || !d) return
       const changed = ids.filter((id) => (ownerOf(graphRef.current, id)?.id ?? null) !== d.over)
-      if (changed.length) p.onSetMembership(changed, d.over)
+      p.onSetMembership(changed, d.over)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)

@@ -37,6 +37,7 @@ import {
   packageSelection,
   unpackPackage,
   removeNode,
+  reconcileLoopMembership,
   setMembership,
   wrapInLoop,
 } from './lib/graph-ops'
@@ -136,12 +137,12 @@ export default function App() {
     void (async () => {
       if (api) {
         setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
-        setGraph(normalizeGraph(await api.getGraph()))
+        setGraph(reconcileLoopMembership(normalizeGraph(await api.getGraph())))
         pushLog('info', 'Nubbo Agent Studio hazır.')
       } else {
         try {
           const g = localStorage.getItem(LOCAL_GRAPH)
-          if (g) setGraph(normalizeGraph(JSON.parse(g)))
+          if (g) setGraph(reconcileLoopMembership(normalizeGraph(JSON.parse(g))))
           const s = localStorage.getItem(LOCAL_SETTINGS)
           if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
         } catch {
@@ -660,7 +661,7 @@ export default function App() {
     try {
       setStack([])
       stackRef.current = []
-      setGraph(normalizeGraph(JSON.parse(await file.text())))
+      setGraph(reconcileLoopMembership(normalizeGraph(JSON.parse(await file.text()))))
       setSelectedNodeId(null)
       setStepStatus({})
       pushLog('success', `Akış yüklendi: ${file.name}`)
@@ -767,10 +768,12 @@ export default function App() {
                 setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)) }))
               }
               onSetMembership={(ids, loopId) => {
+                setGraph((g) => {
+                  const moved = ids.length ? setMembership(g, ids, loopId) : g
+                  return reconcileLoopMembership(moved)
+                })
+                if (!ids.length) return
                 const g = graphRef.current
-                const next = setMembership(g, ids, loopId)
-                if (next === g) return
-                setGraph(next)
                 const box = loopId ? g.nodes.find((n) => n.id === loopId) : null
                 pushLog('info', box ? `${ids.length} node “${box.title}” kutusuna girdi.` : `${ids.length} node kutudan çıktı.`)
               }}
