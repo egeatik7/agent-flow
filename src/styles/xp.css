@@ -653,8 +653,8 @@ body {
 }
 
 .nubbo-mascot {
-  width: 176px;
-  height: 176px;
+  width: 186px;
+  height: 186px;
   display: block;
   pointer-events: none;
   transform: scaleX(-1);
@@ -662,9 +662,9 @@ body {
 
 .nubbo-logo {
   display: block;
-  width: min(268px, 100%);
+  width: min(252px, 100%);
   height: auto;
-  margin-top: 2px;
+  margin-top: -6px;
   pointer-events: none;
 }
 

@@ -23,8 +23,8 @@ export default function NubboMascot() {
         className="nubbo-mascot"
         src={src}
         alt=""
-        width={176}
-        height={176}
+        width={186}
+        height={186}
         draggable={false}
         onError={() => setBroken(true)}
       />
