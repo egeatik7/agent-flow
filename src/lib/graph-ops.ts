@@ -24,7 +24,11 @@ export function connect(graph: AgentGraph, from: string, port: string, to: strin
   if (!target || !NODE_SPECS[target.kind].hasInput) return graph
   const edges = graph.edges.filter((e) => !(e.from === from && e.fromPort === port))
   edges.push({ id: newId(), from, fromPort: port, to })
-  return { ...graph, edges }
+  let next: AgentGraph = { ...graph, edges }
+  const box = ownerOf(graph, from)
+  const targetBox = ownerOf(graph, to)
+  if (box && !targetBox && target.kind !== 'start' && target.id !== box.id) next = withMember(next, box.id, to)
+  return next
 }
 
 function withMember(graph: AgentGraph, loopId: string | undefined, id: string): AgentGraph {

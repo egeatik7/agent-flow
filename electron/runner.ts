@@ -15,7 +15,7 @@ import {
   type LogLevel,
   type StepStatus,
 } from './graph-types'
-import { firstMember, ownerOf } from './groups'
+import { firstMember, loopChainGaps, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
 import { outsideFolder } from './enclosing'
 
@@ -330,6 +330,8 @@ export async function runGraph(
    */
   const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
     ex.step(loop.id, 'running')
+    const gaps = loopChainGaps(graph, loop)
+    if (gaps.length) patch(loop.id, { members: [...new Set([...(loop.members ?? []), ...gaps])] })
     const first = lapStart(loop)
     if (!first) {
       ex.log('warn', `“${loop.title}” kutusu boş. İçine node sürükle.`)
