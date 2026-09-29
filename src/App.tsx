@@ -12,6 +12,7 @@ import {
   createNode,
   newId,
   hasTemplate,
+  listItems,
   normalizeGraph,
   type AgentGraph,
   type AgentNode,
@@ -39,6 +40,7 @@ import {
   setMembership,
   wrapInLoop,
 } from './lib/graph-ops'
+import { outsideFolder, templateLoops } from '../electron/enclosing'
 import { DEMO_CAPTURE, demoScan, runDemo, stopDemo } from './lib/demo'
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
@@ -487,14 +489,21 @@ export default function App() {
 
   const loopFolderGen = useRef(0)
   const loopFolderTimer = useRef<number | null>(null)
+  const templateFillGen = useRef(0)
+  const templateSeen = useRef(new Map<string, string>())
 
   const syncLoopFolder = (nodeId: string, folder: string, immediate = false) => {
     const gen = ++loopFolderGen.current
     if (loopFolderTimer.current) window.clearTimeout(loopFolderTimer.current)
     const trimmed = folder.trim()
-    if (!trimmed || hasTemplate(folder)) {
+    if (!trimmed) {
+      templateSeen.current.delete(nodeId)
       patchAnywhere(nodeId, { folder, items: [], startIndex: 0, loopIndex: undefined, results: undefined })
-      if (immediate && hasTemplate(folder)) pushLog('info', 'Klasör adresi çalışırken, dışarıdaki öğeyle doldurulacak.')
+      return
+    }
+    if (hasTemplate(folder)) {
+      templateSeen.current.delete(nodeId)
+      patchAnywhere(nodeId, { folder })
       return
     }
     patchAnywhere(nodeId, { folder })
@@ -517,6 +526,32 @@ export default function App() {
     if (immediate) void run()
     else loopFolderTimer.current = window.setTimeout(() => void run(), 400)
   }
+
+  useEffect(() => {
+    if (!loaded || !api?.listDir) return
+    const gen = ++templateFillGen.current
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const root = rooted(graphRef.current, stackRef.current)
+        for (const loop of templateLoops(root)) {
+          if (gen !== templateFillGen.current) return
+          const resolved = outsideFolder(root, loop)
+          const sig = `${loop.id}\n${resolved}`
+          if (templateSeen.current.get(loop.id) === sig) continue
+          const files = resolved ? await api.listDir(resolved) : []
+          if (gen !== templateFillGen.current) return
+          templateSeen.current.set(loop.id, sig)
+          const next = files ?? []
+          const cur = listItems(loop)
+          if (cur.length === next.length && cur.every((v, i) => v === next[i])) continue
+          patchAnywhere(loop.id, { items: next })
+        }
+      })().catch((e) => {
+        if (gen === templateFillGen.current) pushLog('error', errText(e))
+      })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [graph, stack, loaded, pushLog])
 
   const fillLoopFromFolder = async (nodeId: string) => {
     try {

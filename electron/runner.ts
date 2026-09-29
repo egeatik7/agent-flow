@@ -17,6 +17,7 @@ import {
 } from './graph-types'
 import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
+import { outsideFolder } from './enclosing'
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -95,11 +96,12 @@ function isFatal(e: unknown) {
 export async function runGraph(
   graph: AgentGraph,
   ex: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean }
+  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph }
 ): Promise<void> {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = findEntry(graph, opts.startId)
   if (!entry) throw new Error('Başlangıç node’u bulunamadı.')
+  const root = opts.root ?? graph
 
   let vars: Record<string, string> = { sira: '1' }
   let steps = 0
@@ -247,7 +249,7 @@ export async function runGraph(
           return 'next'
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true })
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root })
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'
@@ -351,9 +353,9 @@ export async function runGraph(
     const folderRaw = loop.folder?.trim() ?? ''
     let fromFolder: string[] | null = null
     if (hasTemplate(folderRaw)) {
-      const resolved = (renderTemplate(folderRaw, vars) ?? '').trim()
-      if (!resolved || hasTemplate(resolved)) {
-        ex.log('warn', `“${loop.title}”: klasör yolu çözülemedi (${folderRaw}).`)
+      const resolved = outsideFolder(root, loop)
+      if (!resolved) {
+        ex.log('warn', `“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
         fromFolder = []
       } else {
         const found = listDirEntries(resolved)

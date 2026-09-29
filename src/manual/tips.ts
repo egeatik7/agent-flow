@@ -177,7 +177,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Node’u Sil (Del)', { title: 'Node’u Sil', text: 'Seçili node’u akıştan çıkarır. Del tuşu da aynısını yapar.' }],
     ['Kutuyu Sil (içindekiler kalır)', { title: 'Kutuyu Sil', text: 'Her Öğe İçin çerçevesini kaldırır. İçindeki node’lar tuvalde kalır, sadece kutu dağılır.' }],
     ['Listeyi temizle', { title: 'Listeyi temizle', text: 'Klasör kutusunu ve öğe listesini boşaltır. İçindeki node’lar durur. Liste boşken kutu, aşağıdaki tekrar sayısı kadar döner.' }],
-    ['Klasörden doldur…', { title: 'Klasörden doldur', text: 'Bir klasör seçersin; yolu üstteki kutuya yazılır. O klasörün içindeki her şey (dosya ve klasör) listeye birer satır olur. Alt klasörlerin içi açılmaz.' }],
+    ['Klasörden doldur…', { title: 'Klasörden doldur', text: 'Bir klasör seçersin; yolu üstteki kutuya yazılır. O klasörün içindeki her şey (dosya ve klasör) listeye birer satır olur. Alt klasörlerin içi açılmaz. Kutuya {{öğe}} yazarsan yol, bir dıştaki Her Öğe İçin’in öğesidir; paket bunu kesmez.' }],
     ['Model listesini getir', { title: 'Model listesini getir', text: 'OpenRouter’daki model adlarını indirir. Anahtar kayıtlı olmalı. Liste gelince model kutusunda seçebilirsin.' }],
     ['API Test', { title: 'API Test', text: 'Kayıtlı OpenRouter anahtarının çalışıp çalışmadığına bakar. Günlüğe sonucu yazar.' }],
     ['Görsel Test (ekranı anlat)', { title: 'Görsel Test', text: 'Ekranın bir karesini görsel modele gönderir. Model ne gördüğünü günlüğe yazar. Anahtar ve görsel model kayıtlı olmalı.' }],

@@ -194,18 +194,11 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         </div>
         {folderIsTemplate && (
           <p className="hint">
-            Bu adres çalışırken dolar. <span className="mono">{'{{öğe}}'}</span> dışarıdaki kutunun o turdaki öğesidir. Alt klasörlerin içi açılmaz.
+            <span className="mono">{'{{öğe}}'}</span> bir dıştaki Her Öğe İçin’in öğesidir. Liste, o kutunun işaretli satırındaki klasörden gelir. Paketin içinde olsa da dışarıdaki kutuya bakar.
           </p>
         )}
         <label>Liste (her satır bir öğe)</label>
-        {folderIsTemplate ? null : items.length === 0 ? (
-          <textarea
-            className="xp-textarea mono list-area"
-            value={(n.items ?? []).join('\n')}
-            placeholder={'C:\\Klasör\\kedi.png\nC:\\Klasör\\alt-klasör\n…'}
-            onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
-          />
-        ) : (
+        {items.length > 0 ? (
           <div className="xp-tick-list">
             {items.map((item, i) => (
               <div className={'xp-tick-row' + (i === mark ? ' on' : '')} key={i}>
@@ -229,6 +222,13 @@ function LoopEditor(p: Props & { n: AgentNode }) {
               </div>
             ))}
           </div>
+        ) : folderIsTemplate ? null : (
+          <textarea
+            className="xp-textarea mono list-area"
+            value={(n.items ?? []).join('\n')}
+            placeholder={'C:\\Klasör\\kedi.png\nC:\\Klasör\\alt-klasör\n…'}
+            onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
+          />
         )}
         {items.length > 0 && (
           <p className="hint">
