@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { version } from '../../package.json'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
+import logo from '../assets/nubbo-logo.png'
 
 /** Plays the transparent Nubbo loop. Hidden windows show the still frame so the animation stops. */
 export default function NubboMascot() {
@@ -27,8 +28,8 @@ export default function NubboMascot() {
         draggable={false}
         onError={() => setBroken(true)}
       />
-      <p className="nubbo-name">Nubbo Agent Studio</p>
-      <p className="nubbo-ver">{version}</p>
+      <img className="nubbo-logo" src={logo} alt="Nubbo Agent Studio" draggable={false} />
+      <p className="nubbo-ver">version: {version}</p>
     </div>
   )
 }
