@@ -42,49 +42,6 @@ export function allMembers(graph: AgentGraph, loopId: string): string[] {
   return out
 }
 
-/**
- * Nodes on an arrow between two members of this box. The arrow stayed, the membership did not.
- * A node that never comes back into the box is not included.
- */
-export function loopChainGaps(graph: AgentGraph, loop: AgentNode): string[] {
-  const members = new Set(loop.members ?? [])
-  const known = new Set<string>()
-  const leadsBack = (start: string): boolean => {
-    const seen = new Set<string>()
-    const stack = [start]
-    while (stack.length) {
-      const id = stack.pop()!
-      if (seen.has(id)) continue
-      seen.add(id)
-      if (id === loop.id) continue
-      if (!graph.nodes.some((n) => n.id === id)) continue
-      const owner = ownerOf(graph, id)
-      if (owner && owner.id !== loop.id) continue
-      if (members.has(id)) return true
-      for (const e of graph.edges) if (e.from === id) stack.push(e.to)
-    }
-    return false
-  }
-  const added: string[] = []
-  const q = [...members]
-  while (q.length) {
-    const id = q.shift()!
-    if (known.has(id)) continue
-    known.add(id)
-    for (const e of graph.edges) {
-      if (e.from !== id || known.has(e.to) || members.has(e.to)) {
-        if (e.from === id && members.has(e.to) && !known.has(e.to)) q.push(e.to)
-        continue
-      }
-      if (!leadsBack(e.to)) continue
-      members.add(e.to)
-      added.push(e.to)
-      q.push(e.to)
-    }
-  }
-  return added
-}
-
 /** Where each lap begins: the member no other member points at. Ties go to the leftmost, then the highest. */
 export function firstMember(graph: AgentGraph, loop: AgentNode): AgentNode | undefined {
   const ids = new Set(loop.members ?? [])
