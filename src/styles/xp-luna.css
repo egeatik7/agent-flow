@@ -1,111 +1,137 @@
 /*
-  Luna görünümü. Yalnızca boya: kenar, düğme, kaydırma çubuğu, köşe.
+  Luna (XP’nin varsayılan mavi teması). Yalnızca boya.
   Yazı motoruna, akışa ve tıklamaya dokunmaz.
   Geri almak için main.tsx içindeki bu dosyanın import satırını sil.
 */
 
-/* Raised / sunken edges, the way Luna drew them. */
+.titlebar {
+  background: linear-gradient(
+    180deg,
+    #0997ff 0%,
+    #0058ee 12%,
+    #0050ee 42%,
+    #1664ef 70%,
+    #0054e3 88%,
+    #1664ef 93%,
+    #003dd7 100%
+  );
+}
+
+.toolbar {
+  background: linear-gradient(180deg, #f7f6f1 0%, #ece9d8 55%, #e2dcc8 100%);
+}
+
 .xp-btn,
 .seg-btn,
 .chip,
 .title-btn,
 .tab,
 .canvas-zoom {
-  border-radius: 0;
+  border-radius: 3px;
 }
 
 .xp-btn {
-  background: #ece9d8;
   border: 1px solid #003c74;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #808080;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f3ec 42%, #e4e0d1 78%, #d4d0c4 100%);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(0, 0, 0, 0.08);
 }
 
 .xp-btn:hover:not(:disabled) {
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #808080, inset 0 0 0 1px #f8b636;
+  background: linear-gradient(180deg, #fff 0%, #fff6e2 40%, #ffe7a8 100%);
+  box-shadow: inset 0 0 0 1px #f8b636, inset 0 1px 0 #fff;
 }
 
 .xp-btn:active:not(:disabled) {
-  background: #d6d2c2;
-  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #fff;
+  background: linear-gradient(180deg, #d8d4c8 0%, #ece9d8 100%);
+  box-shadow: inset 1px 1px 0 #808080;
 }
 
 .xp-btn.primary {
-  background: #d6e4f7;
   font-weight: 700;
+  background: linear-gradient(180deg, #ffffff 0%, #d7e7fb 40%, #9ec2f0 78%, #7eafeb 100%);
+}
+
+.xp-btn.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff 0%, #ffe9b0 45%, #f8c24a 100%);
 }
 
 .xp-btn.danger {
-  background: #f3d2cb;
+  background: linear-gradient(180deg, #fff8f6 0%, #f8d4cc 55%, #e8a89a 100%);
 }
 
 .xp-btn.save {
-  background: #c8e6c8;
   font-weight: 700;
+  background: linear-gradient(180deg, #f4fff4 0%, #c6ebc6 50%, #7ec67e 100%);
 }
 
 .title-btn {
+  border-radius: 3px;
   border: 1px solid #fff;
-  background: #1658d6;
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.45), inset -1px -1px 0 #08327a;
+  background: linear-gradient(180deg, #6eacff 0%, #2b73e8 48%, #0d4ec4 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .title-btn.close {
-  background: #c4402a;
-  box-shadow: inset 1px 1px 0 #f0a090, inset -1px -1px 0 #7a1c10;
+  background: linear-gradient(180deg, #f2a090 0%, #e25a42 48%, #b42312 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .xp-input,
 .xp-select,
 .xp-textarea {
-  border-radius: 0;
+  border-radius: 2px;
   border: 1px solid #7f9db9;
-  box-shadow: inset 1px 1px #404040, inset -1px -1px #fff;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+  box-shadow: inset 1px 1px 0 #e4eaf3;
 }
 
 .xp-input:focus,
 .xp-select:focus,
 .xp-textarea:focus {
   border-color: #316ac5;
-  box-shadow: inset 1px 1px #404040, inset -1px -1px #fff, 0 0 0 1px #f8b636;
+  box-shadow: 0 0 0 1px #f8b636, inset 1px 1px 0 #e4eaf3;
 }
 
 .menubar button:hover,
 .dropdown-menu button:hover,
 .ctx-menu button:hover {
-  background: #0a246a;
+  background: linear-gradient(180deg, #4b93f5 0%, #1d63d4 55%, #1654c0 100%);
   color: #fff;
 }
 
 .dropdown-menu,
 .ctx-menu {
-  border: 1px solid #808080;
-  border-radius: 0;
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+  border: 1px solid #4b6ea8;
+  border-radius: 3px;
+  box-shadow: 2px 3px 6px rgba(10, 36, 106, 0.35);
+}
+
+.ctx-title {
+  background: linear-gradient(90deg, #0a246a 0%, #3a6ea5 70%, #6ea2e0 100%);
 }
 
 .tab {
-  border-radius: 0;
-  background: #ece9d8;
-  box-shadow: inset 1px 1px 0 #fff;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #fff 0%, #ece9d8 100%);
+  box-shadow: inset 0 1px 0 #fff;
 }
 
 .tab.active {
-  background: #fcfcfe;
+  background: linear-gradient(180deg, #fff 0%, #f7f8fc 100%);
   border-top: 2px solid #f8b636;
 }
 
 .agent-node {
-  border-radius: 0;
-  box-shadow: 1px 1px 0 #808080;
-  transition: none;
+  border-radius: 4px;
+  box-shadow: 1px 2px 0 rgba(10, 36, 106, 0.18);
 }
 
 .node-head {
-  border-radius: 0;
+  border-radius: 2px 2px 0 0;
 }
 
 .agent-node.selected {
-  box-shadow: 0 0 0 2px #ffd24a, 1px 1px 0 #404040;
+  box-shadow: 0 0 0 2px #f8b636, 1px 2px 0 rgba(10, 36, 106, 0.18);
 }
 
 .agent-node.drop-target {
@@ -121,39 +147,38 @@
 }
 
 .loop-frame {
-  border-radius: 0;
-  transition: none;
+  border-radius: 6px;
 }
 
 .loop-frame-head {
-  border-radius: 0;
+  border-radius: 5px 5px 0 0;
+  background: linear-gradient(180deg, rgba(210, 150, 60, 0.28), rgba(138, 75, 22, 0.16));
 }
 
 .xp-dialog {
-  border-radius: 0;
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.35);
+  border-radius: 6px 6px 0 0;
+  box-shadow: 4px 6px 14px rgba(10, 36, 106, 0.4);
   animation: none;
 }
 
 .seg-btn {
-  background: #ece9d8;
-  box-shadow: inset 1px 1px 0 #fff;
+  background: linear-gradient(180deg, #fff 0%, #ece9d8 100%);
 }
 
 .seg-btn.active {
-  background: #c5d8f2;
+  background: linear-gradient(180deg, #eaf3ff 0%, #9ec2f0 100%);
 }
 
 .chip {
-  background: #ece9d8;
-  border-radius: 0;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #808080;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #fff 0%, #ece9d8 100%);
+  box-shadow: inset 0 1px 0 #fff;
 }
 
 .canvas-zoom {
-  border-radius: 0;
-  background: #ece9d8;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #808080;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #fff 0%, #d7e4f7 100%);
+  box-shadow: inset 0 1px 0 #fff;
 }
 
 .check input[type='checkbox'] {
@@ -162,14 +187,16 @@
   height: 13px;
   margin: 1px 2px 0 0;
   flex: 0 0 13px;
-  background-color: #fff;
+  background: linear-gradient(180deg, #fff 0%, #f4f7fb 100%);
   border: 1px solid #003c74;
-  box-shadow: inset 1px 1px #808080;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 #fff;
   cursor: pointer;
 }
 
 .check input[type='checkbox']:checked {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13'><path d='M2 6.5 L5 10 L11 3' fill='none' stroke='%23000' stroke-width='2'/></svg>");
+  background-color: #fff;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13'><path d='M2 6.5 L5 10 L11 3' fill='none' stroke='%23003c74' stroke-width='2'/></svg>");
   background-repeat: no-repeat;
   background-position: center;
   background-size: 11px 11px;
@@ -181,13 +208,13 @@
 }
 
 *::-webkit-scrollbar-track {
-  background: #ece9d8;
+  background: linear-gradient(90deg, #efece0, #e4e0d2);
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #d6d2c2;
-  border: 1px solid #fff;
-  box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #fff;
+  background: linear-gradient(180deg, #f4f8ff 0%, #b9cfee 45%, #7ea4d8 100%);
+  border: 1px solid #6e8ebc;
+  border-radius: 2px;
 }
 
 *::-webkit-scrollbar-corner {
@@ -197,7 +224,6 @@
 *::-webkit-scrollbar-button {
   height: 16px;
   width: 16px;
-  background: #ece9d8;
-  border: 1px solid #fff;
-  box-shadow: inset -1px -1px 0 #808080;
+  background: linear-gradient(180deg, #fff, #d7e4f7);
+  border: 1px solid #7f9db9;
 }
