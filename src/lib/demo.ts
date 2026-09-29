@@ -30,12 +30,12 @@ function demoSvg(): string {
     const btn = i.type === 'Button' || i.type === 'TabItem' || i.type === 'MenuItem' || i.type === 'Edit'
     const fill = i.type === 'Edit' ? '#fff' : btn ? '#e8eefc' : 'none'
     const stroke = btn ? '#6b8fd6' : 'none'
-    return `<rect x="${i.x}" y="${i.y}" width="${i.w}" height="${i.h}" rx="4" fill="${fill}" stroke="${stroke}"/><text x="${i.x + 8}" y="${i.y + i.h / 2 + 6}" font-family="Segoe UI, Tahoma" font-size="16" fill="${i.type === 'Edit' ? '#888' : '#1b2a44'}">${esc(i.text)}</text>`
+    return `<rect x="${i.x}" y="${i.y}" width="${i.w}" height="${i.h}" rx="4" fill="${fill}" stroke="${stroke}"/><text x="${i.x + 8}" y="${i.y + i.h / 2 + 6}" font-family="Tahoma, Geneva, Verdana" font-size="16" fill="${i.type === 'Edit' ? '#888' : '#1b2a44'}">${esc(i.text)}</text>`
   }).join('')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <rect width="${W}" height="${H}" fill="#2b5797"/>
 <rect x="0" y="30" width="${W}" height="1000" fill="#f3f4f7"/>
-<rect x="0" y="0" width="${W}" height="30" fill="#1f1f1f"/><text x="12" y="21" font-family="Segoe UI" font-size="14" fill="#ddd">Model Hub — Demo Uygulama</text>
+<rect x="0" y="0" width="${W}" height="30" fill="#1f1f1f"/><text x="12" y="21" font-family="Tahoma, Geneva, Verdana" font-size="14" fill="#ddd">Model Hub — Demo Uygulama</text>
 <rect x="0" y="1030" width="${W}" height="50" fill="#202020"/>
 <rect x="140" y="170" width="620" height="260" rx="6" fill="#fff" stroke="#d0d4dc"/>
 ${boxes}</svg>`

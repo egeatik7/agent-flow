@@ -7,8 +7,8 @@
   --xp-border-dark: #404040;
   --xp-border-mid: #808080;
   --xp-green: #2f8a2f;
-  --font-ui: Tahoma, 'Segoe UI', Geneva, Verdana, sans-serif;
-  --font-mono: Consolas, 'Lucida Console', 'Courier New', monospace;
+  --font-ui: Tahoma, Geneva, Verdana, sans-serif;
+  --font-mono: 'Lucida Console', 'Courier New', monospace;
 }
 
 * {
