@@ -10,6 +10,9 @@ import { DEFAULT_SETTINGS, normalizeGraph, type AgentGraph, type AppSettings, ty
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 
+// Keep the existing profile folder. The visible name can change without moving saved flows or the API key.
+app.setPath('userData', path.join(app.getPath('appData'), 'xp-agent-studio'))
+
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
 const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph }>({
@@ -88,7 +91,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
-    title: 'XP Agent Studio',
+    title: 'Nubbo Agent Studio',
   })
 
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)

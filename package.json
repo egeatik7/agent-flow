@@ -1,9 +1,9 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.7.15",
-  "description": "Windows XP tarzı node-based accessibility agent promptlatıcı — OpenRouter ile",
+  "version": "1.7.16",
+  "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/main.js",
-  "author": "XP Agent Studio",
+  "author": "Nubbo Agent Studio",
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.xpagentsudio.app",
-    "productName": "XP Agent Studio",
+    "productName": "Nubbo Agent Studio",
     "directories": {
       "output": "release"
     },
@@ -45,11 +45,11 @@
         }
       ],
       "icon": "resources/icon.ico",
-      "artifactName": "XP-Agent-Studio.exe",
+      "artifactName": "Nubbo.exe",
       "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "XP-Agent-Studio.exe"
+      "artifactName": "Nubbo.exe"
     },
     "asar": true,
     "afterPack": "scripts/after-pack.cjs"

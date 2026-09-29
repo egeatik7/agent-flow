@@ -854,7 +854,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** Windows that grab focus on their own; keys meant for the app must not go to them. */
-  const FOCUS_THIEVES = /^(MusNotification(Ux)?|SecurityHealth(Host|Systray)|ShellExperienceHost|SearchHost|SearchApp|StartMenuExperienceHost|LockApp|Teams|ms-teams|Slack|Discord|OneDrive|XP Agent Studio|electron)$/i
+  const FOCUS_THIEVES = /^(MusNotification(Ux)?|SecurityHealth(Host|Systray)|ShellExperienceHost|SearchHost|SearchApp|StartMenuExperienceHost|LockApp|Teams|ms-teams|Slack|Discord|OneDrive|XP Agent Studio|XP-Agent-Studio|Nubbo|Nubbo Agent Studio|electron)$/i
   let lastFg: { title: string; pid: number; proc?: string } | null = null
 
   async function noteForeground() {

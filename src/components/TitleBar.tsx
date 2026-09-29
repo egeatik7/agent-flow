@@ -6,7 +6,7 @@ export default function TitleBar() {
     <div className="titlebar" onDoubleClick={() => void api?.maximize()}>
       <div className="titlebar-left">
         <img className="titlebar-icon" src={appIcon} alt="" aria-hidden draggable={false} />
-        <h1>XP Agent Studio — Node Promptlatıcı</h1>
+        <h1>Nubbo Agent Studio</h1>
       </div>
       <div className="titlebar-controls">
         <button

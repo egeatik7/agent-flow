@@ -50,8 +50,8 @@ async function stoppableWait(ms: number) {
 const HEADERS = (apiKey: string) => ({
   Authorization: `Bearer ${apiKey}`,
   'Content-Type': 'application/json',
-  'HTTP-Referer': 'https://xp-agent-studio.local',
-  'X-Title': 'XP Agent Studio',
+  'HTTP-Referer': 'https://nubbo.local',
+  'X-Title': 'Nubbo Agent Studio',
 })
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }

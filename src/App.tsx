@@ -131,7 +131,7 @@ export default function App() {
       if (api) {
         setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
         setGraph(normalizeGraph(await api.getGraph()))
-        pushLog('info', 'XP Agent Studio hazır.')
+        pushLog('info', 'Nubbo Agent Studio hazır.')
       } else {
         try {
           const g = localStorage.getItem(LOCAL_GRAPH)
@@ -564,7 +564,7 @@ export default function App() {
     const blob = new Blob([JSON.stringify(rooted(graphRef.current, stackRef.current), null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'xp-agent-akis.json'
+    a.download = 'nubbo-akis.json'
     a.click()
     URL.revokeObjectURL(a.href)
   }

@@ -1,4 +1,4 @@
-# XP Agent Studio
+# Nubbo Agent Studio
 
 Windows XP görünümünde, **node tabanlı** bir masaüstü ve web otomasyon ajanı. Her node bir aşamadır: “Resim yükle’ye
 bas”, “`{{öğe}}` yaz”, “İndir’i bekle” gibi. Ajan her adımda ekranı okur (Windows OCR + UI Automation). Tarayıcıda ise
@@ -176,7 +176,7 @@ görsel mod anahtar ister.
 
 ## Exe
 
-Repoda hazır portable paket: **`XP-Agent-Studio.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Tarayıcı modu için
+Repoda hazır portable paket: **`Nubbo.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Tarayıcı modu için
 Edge (Windows’ta hazır gelir) ya da Chrome yeterli; ayrıca tarayıcı indirilmez.
 
 ## Geliştirme
@@ -185,7 +185,7 @@ Edge (Windows’ta hazır gelir) ya da Chrome yeterli; ayrıca tarayıcı indiri
 npm install
 npm run dev          # Electron + Vite (hot reload)
 npm run dev:web      # Sadece arayüz, tarayıcıda http://127.0.0.1:4521 (tıklamalar simüle)
-npm run pack:win     # release/XP-Agent-Studio.exe üretir
+npm run pack:win     # release/Nubbo.exe üretir
 ```
 
 - `electron/runner.ts`: akışı yürütür (kutular, kurtarma, kaldığı yerden devam).
