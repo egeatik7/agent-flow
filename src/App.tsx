@@ -635,13 +635,15 @@ export default function App() {
       graphRef.current = g
       setGraph(g)
     }
+    const path = stackRef.current.map((c) => c.id)
+    const full = path.length ? rooted(g, stackRef.current) : g
     setRunning(true)
     setStepStatus({})
     pushLog('info', startId ? 'Seçili node’dan çalıştırılıyor…' : 'Ajan çalışıyor…')
     try {
-      if (api) await api.runAgent(g, startId)
+      if (api) await api.runAgent(full, startId, path)
       else
-        await runDemo(g, settingsRef.current, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode)
+        await runDemo(full, settingsRef.current, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode, path)
     } catch (e) {
       pushLog('error', errText(e))
     } finally {

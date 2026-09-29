@@ -100,7 +100,8 @@ export async function runDemo(
   log: (l: LogLevel, m: string) => void,
   step: (id: string, s: StepStatus) => void,
   startId?: string,
-  patchNode?: (id: string, patch: Partial<AgentNode>) => void
+  patchNode?: (id: string, patch: Partial<AgentNode>) => void,
+  packagePath?: string[]
 ) {
   demoStop = false
   const ex: Executor = {
@@ -180,6 +181,7 @@ export async function runDemo(
       stepDelayMs: Math.min(settings.stepDelayMs, 300),
       startId,
       resume: !!startId,
+      packagePath,
     })
   } catch (e) {
     if (e instanceof StoppedError) log('warn', 'Ajan durduruldu.')

@@ -52,12 +52,19 @@ export class StoppedError extends Error {
 /** A step ended on a failure port that leads nowhere (zaman aşımı, olmadı). */
 export class StepFailedError extends Error {}
 
+/** The loop stopped on this item. The tick stays here. */
+export class LoopHalted extends Error {}
+
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
 /** A single lap went over the step budget. The lap stops; the next item still runs. */
 class LapLimitError extends Error {}
 
 type Budget = { used: number }
+
+function isApiDown(message: string): boolean {
+  return /resourceexhausted|rate limit|quota|too many requests|429|402|401|bakiye|upstream error|openrouter \d{3}/i.test(message)
+}
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
   const end = Date.now() + ms
@@ -90,14 +97,31 @@ function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
 const FAIL_PORTS = new Set(['timeout', 'fail'])
 
 function isFatal(e: unknown) {
-  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError
+  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LoopHalted
 }
 
 export async function runGraph(
   graph: AgentGraph,
   ex: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph; resume?: boolean }
+  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph; resume?: boolean; packagePath?: string[] }
 ): Promise<void> {
+  if (opts.packagePath?.length) {
+    let inner = graph
+    for (const id of opts.packagePath) {
+      const pkg = inner.nodes.find((n) => n.id === id && n.kind === 'package')
+      if (!pkg?.inner) throw new Error('Açık paket bu akışta yok.')
+      inner = pkg.inner
+    }
+    await runGraph(inner, ex, {
+      maxSteps: opts.maxSteps,
+      stepDelayMs: opts.stepDelayMs,
+      startId: opts.startId,
+      nested: opts.nested,
+      root: opts.root ?? graph,
+      resume: opts.resume,
+    })
+    return
+  }
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = findEntry(graph, opts.startId)
   if (!entry) throw new Error('Başlangıç node’u bulunamadı.')
@@ -383,6 +407,7 @@ export async function runGraph(
 
     const outer = vars
     let entry: AgentNode | undefined = startAt
+    let lastFail = ''
     if (loop.results) patch(loop.id, { results: undefined })
     try {
       for (let idx = from; idx < keys.length; idx++) {
@@ -395,8 +420,15 @@ export async function runGraph(
           await runChain(entry ?? first, loop, undefined, { used: 0 })
         } catch (e) {
           if (isFatal(e)) throw e
-          ex.log('error', `${label}: ${(e as Error).message}`)
+          const msg = (e as Error).message || String(e)
+          ex.log('error', `${label}: ${msg}`)
           await ex.captureFailure?.(label).catch(() => {})
+          const again = msg === lastFail
+          lastFail = msg
+          if (isApiDown(msg) || again) {
+            ex.log('error', isApiDown(msg) ? 'API cevap vermiyor. Döngü durdu, işaret bu öğede kaldı.' : 'Aynı hata üst üste geldi. Döngü durdu, işaret bu öğede kaldı.')
+            throw new LoopHalted(msg)
+          }
           ex.log('info', `${label} bu turda yarım kaldı. Sıradaki öğeye geçiliyor.`)
         }
         entry = undefined

@@ -183,7 +183,7 @@ app.whenReady().then(() => {
     return bridge.captureAtCursor()
   })
 
-  ipcMain.handle('agent:run', async (_e, raw: AgentGraph, startId?: string) => {
+  ipcMain.handle('agent:run', async (_e, raw: AgentGraph, startId?: string, packagePath?: string[]) => {
     if (running) throw new Error('Ajan zaten çalışıyor.')
     running = true
     stopRequested = false
@@ -215,6 +215,7 @@ app.whenReady().then(() => {
         stepDelayMs: Math.max(0, s.stepDelayMs),
         startId,
         resume: !!startId,
+        packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
       })
       return { ok: true }
     } catch (e) {
