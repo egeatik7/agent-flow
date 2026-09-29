@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { version } from '../../package.json'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
 
@@ -15,15 +16,19 @@ export default function NubboMascot() {
 
   const src = broken || !playing ? still : nubbo
   return (
-    <img
-      key={src}
-      className="nubbo-mascot"
-      src={src}
-      alt=""
-      width={128}
-      height={128}
-      draggable={false}
-      onError={() => setBroken(true)}
-    />
+    <div className="nubbo-brand">
+      <img
+        key={src}
+        className="nubbo-mascot"
+        src={src}
+        alt=""
+        width={176}
+        height={176}
+        draggable={false}
+        onError={() => setBroken(true)}
+      />
+      <p className="nubbo-name">Nubbo Agent Studio</p>
+      <p className="nubbo-ver">{version}</p>
+    </div>
   )
 }

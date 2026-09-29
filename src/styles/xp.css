@@ -639,16 +639,37 @@ body {
 .nubbo-slot {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px 0 8px;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 16px 2px 2px;
+}
+
+.nubbo-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
 }
 
 .nubbo-mascot {
-  width: 128px;
-  height: 128px;
+  width: 176px;
+  height: 176px;
   display: block;
   pointer-events: none;
+  transform: scaleX(-1);
+}
+
+.nubbo-name {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #000;
+}
+
+.nubbo-ver {
+  margin: 0;
+  font-size: 11px;
+  color: #555;
 }
 
 .hint-list {
