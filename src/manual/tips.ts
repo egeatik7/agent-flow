@@ -365,6 +365,7 @@ function fieldTip(el: Element): Tip | null {
 function checkTip(el: Element): Tip | null {
   if (!el.classList.contains('check')) return null
   const t = text(el)
+  if (t.includes('Pakette ayarları göster')) return { title: 'Pakette ayarları göster', text: 'İşaretliyse bu node’un ayarları, içinde durduğu pakete tıklayınca sağda açılır. Her Öğe İçin kutuları o listede en üstte durur.' }
   if (t.includes('sadece resimler')) return { title: 'Sadece resimler', text: 'Klasörden doldururken png, jpg, webp, bmp ve gif alınır. Kapalıysa klasördeki her dosya listeye girer.' }
   if (t.includes('Önce alandaki yazıyı sil')) return { title: 'Önce sil', text: 'Yazmadan önce alanın içini temizler. Odak bir yazı alanı değilse Ctrl+A gönderilmez, sadece yazılır.' }
   if (t.includes('Enter')) return { title: 'Enter’a bas', text: 'Yazı gittikten sonra Enter yollar. Dosya penceresinde bu, seçilen dosyayı açar.' }

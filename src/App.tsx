@@ -5,6 +5,7 @@ import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
+import ConfirmDialog from './components/ConfirmDialog'
 import {
   DEFAULT_SETTINGS,
   NODE_SPECS,
@@ -93,6 +94,8 @@ export default function App() {
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [loaded, setLoaded] = useState(false)
+  const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
+  const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
 
   const graphRef = useRef(graph)
   graphRef.current = graph
@@ -283,7 +286,22 @@ export default function App() {
     )
   }
 
-  const unpack = (id: string) => {
+  const askSure = (question: string) =>
+    new Promise<boolean>((resolve) => {
+      confirmAnswer.current = resolve
+      setConfirmQuestion(question)
+    })
+
+  const answerSure = (yes: boolean) => {
+    const done = confirmAnswer.current
+    confirmAnswer.current = null
+    setConfirmQuestion(null)
+    done?.(yes)
+  }
+
+  const unpack = async (id: string) => {
+    const yes = await askSure('Paketi çıkarmak istediğinize emin misiniz?')
+    if (!yes) return
     const next = unpackPackage(graphRef.current, id)
     if (!next) return
     setGraph(next)
@@ -806,6 +824,9 @@ export default function App() {
           />
         </div>
       </div>
+      {confirmQuestion && (
+        <ConfirmDialog question={confirmQuestion} onYes={() => answerSure(true)} onNo={() => answerSure(false)} />
+      )}
       {scanner && (
         <ScreenScanner
           targetLabel={

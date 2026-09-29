@@ -577,7 +577,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
       </div>
       <label className="check">
         <input type="checkbox" checked={!!n.expose} onChange={(e) => upd({ expose: e.target.checked })} />
-        pakette ayarları göster
+        Pakette ayarları göster
       </label>
 
       {VISION_KINDS.includes(n.kind) && <VisionToggle {...p} n={n} />}
@@ -758,7 +758,7 @@ function PackageExposed(p: Props & { pkg: AgentNode }) {
   const items = exposedIn(p.pkg)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   if (!items.length) {
-    return <p className="hint">Bir node’u açıp başlığının altındaki “pakette ayarları göster” kutusunu işaretlersen, ayarları burada açılır.</p>
+    return <p className="hint">Bir node’u açıp başlığının altındaki “Pakette ayarları göster” kutusunu işaretlersen, ayarları burada açılır.</p>
   }
   return (
     <div className="pkg-folds">
