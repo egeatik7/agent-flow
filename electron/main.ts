@@ -160,6 +160,12 @@ app.whenReady().then(() => {
     return r.canceled ? null : r.filePaths[0] ?? null
   })
 
+  ipcMain.handle('chrome:match', async (_e, rect: { x: number; y: number; w: number; h: number }) => {
+    if (!rect || typeof rect.x !== 'number') return null
+    const { matchUserChrome } = await import('./browser')
+    return matchUserChrome(rect)
+  })
+
   ipcMain.handle('screen:scan', async (_e, windowTitle?: string) => {
     const hidden = await hideSelf()
     try {

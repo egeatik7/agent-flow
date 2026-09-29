@@ -592,9 +592,21 @@ export default function App() {
   }
 
   const pickScreenItem = async (item: ScreenItem) => {
-    const text = item.text.trim()
+    let text = item.text.trim()
+    let fromPage = false
+    if (api?.matchChrome) {
+      try {
+        const dom = await api.matchChrome({ x: item.x, y: item.y, w: item.w, h: item.h })
+        if (dom?.text) {
+          text = dom.text.trim()
+          fromPage = true
+        }
+      } catch {
+        /* port closed or the page moved; keep the scan text */
+      }
+    }
     const letters = (text.match(/\p{L}/gu) ?? []).length
-    const meaningful = item.src === 'uia' ? letters >= 2 : letters >= 3 && letters / Math.max(1, text.length) >= 0.5
+    const meaningful = fromPage ? letters >= 1 : item.src === 'uia' ? letters >= 2 : letters >= 3 && letters / Math.max(1, text.length) >= 0.5
     const anchor = { x: Math.round(item.x + item.w / 2), y: Math.round(item.y + item.h / 2) }
     const node = scanner?.nodeId ? graphRef.current.nodes.find((n) => n.id === scanner.nodeId) : undefined
     setScanner(null)
@@ -620,7 +632,7 @@ export default function App() {
     }
     pushLog(
       'success',
-      `Ekrandan seçildi: ${meaningful ? `“${text}”` : 'yazısız simge'}${loc?.icon ? ' (resmi de kaydedildi; yazı bulunamazsa ekranda resmi aranır)' : ''}${
+      `Ekrandan seçildi: ${meaningful ? `“${text}”` : 'yazısız simge'}${fromPage ? ' (Chrome sayfasındaki yazı)' : ''}${loc?.icon ? ' (resmi de kaydedildi; yazı bulunamazsa ekranda resmi aranır)' : ''}${
         node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'
       }`
     )

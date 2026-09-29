@@ -337,6 +337,14 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const win = s.targetWindow || loc?.windowTitle || ''
+    const userChrome = await browser.userChromeItems(win || undefined)
+    if (userChrome) {
+      log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
+      const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true)
+      if (pick) return { ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }
+      log('info', '[chrome] Sayfada bulunamadı; ekran okunuyor.')
+    }
+
     if (loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)) {
       try {
         const r = await bridge.locate(loc, win)
@@ -784,7 +792,7 @@ export function createAgent(ctx: AgentContext) {
         'cjk',
         'Ekranda Çince/Japonca/Korece yazı var ama Windows OCR bu dili okuyamıyor (yüklü OCR dilleri: ' +
           (tags.filter(Boolean).join(', ') || 'yok') +
-          '). Ayarlar > Zaman ve dil > Dil > “Dil ekle” ile Çince’yi ekle (OCR bileşeni gelir) ya da sitede “Tarayıcıyı Aç” ile sayfa modunu kullan.'
+          '). Chrome 9222 ile açıldıysa sayfanın kendi yazısı kullanılır.'
       )
     })()
     void id

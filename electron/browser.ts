@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { BrowserContext, Download, FileChooser, Page } from 'playwright-core'
+import type { Browser, BrowserContext, Download, FileChooser, Page } from 'playwright-core'
 import { norm, type ScreenItem } from './matcher'
 
 type Log = (level: 'info' | 'warn' | 'success', msg: string) => void
@@ -368,4 +368,124 @@ export async function hasText(text: string): Promise<boolean> {
 
 export async function pendingDownloads() {
   await Promise.allSettled([...saving])
+}
+
+const CDP_URL = 'http://127.0.0.1:9222'
+let cdp: Browser | null = null
+let cdpFailUntil = 0
+
+/** The Chrome the user opened with --remote-debugging-port=9222. Null when that port is closed. */
+export async function attachUserChrome(): Promise<Browser | null> {
+  if (cdp?.isConnected()) return cdp
+  if (Date.now() < cdpFailUntil) return null
+  try {
+    const { chromium } = await import('playwright-core')
+    cdp = await chromium.connectOverCDP(CDP_URL, { timeout: 700 })
+    cdp.on('disconnected', () => {
+      cdp = null
+    })
+    return cdp
+  } catch {
+    cdp = null
+    cdpFailUntil = Date.now() + 12000
+    return null
+  }
+}
+
+type DomBox = { text: string; type: string; x: number; y: number; w: number; h: number }
+
+async function pageOnScreen(p: Page): Promise<DomBox[]> {
+  const data = (await p.evaluate(COLLECT)) as { out: { text: string; type: string; x: number; y: number; w: number; h: number }[]; vw: number; vh: number }
+  const m = (await p.evaluate(`(() => ({
+    sx: window.screenX || 0,
+    sy: window.screenY || 0,
+    dpr: window.devicePixelRatio || 1,
+    top: Math.max(0, (window.outerHeight || 0) - (window.innerHeight || 0))
+  }))()`)) as { sx: number; sy: number; dpr: number; top: number }
+  const dpr = m.dpr || 1
+  const ox = m.sx * dpr
+  const oy = (m.sy + m.top) * dpr
+  return data.out.map((d) => ({
+    text: d.text,
+    type: d.type,
+    x: ox + d.x * dpr,
+    y: oy + d.y * dpr,
+    w: d.w * dpr,
+    h: d.h * dpr,
+  }))
+}
+
+function pageMatches(title: string, win: string): boolean {
+  const bare = win.replace(/\s+-\s+Google Chrome\s*$/i, '').replace(/\s+-\s+Chromium\s*$/i, '').trim()
+  if (!bare || !title) return false
+  return bare.includes(title) || title.includes(bare)
+}
+
+async function chromeBoxes(win?: string): Promise<DomBox[] | null> {
+  const browser = await attachUserChrome()
+  if (!browser) return null
+  const pages = browser.contexts().flatMap((c) => c.pages()).filter((p) => !p.isClosed())
+  if (!pages.length) return null
+  let chosen: Page[] = pages
+  if (win) {
+    const scored: Page[] = []
+    for (const p of pages) {
+      const title = await p.title().catch(() => '')
+      if (pageMatches(title, win)) scored.push(p)
+    }
+    if (scored.length) chosen = scored
+  }
+  const all: DomBox[] = []
+  for (const p of chosen) {
+    try {
+      all.push(...(await pageOnScreen(p)))
+    } catch {
+      /* tab gone */
+    }
+  }
+  return all.length ? all : null
+}
+
+function asItems(boxes: DomBox[]): ScreenItem[] {
+  return boxes.map((d, i) => ({ id: i + 1, text: d.text, type: d.type, src: 'dom' as const, x: d.x, y: d.y, w: d.w, h: d.h }))
+}
+
+/** Page elements of the user's Chrome, in screen pixels, for the normal click ladder. */
+export async function userChromeItems(win?: string): Promise<{ items: ScreenItem[]; area: { x: number; y: number; w: number; h: number }; host: string } | null> {
+  const boxes = await chromeBoxes(win)
+  if (!boxes) return null
+  const items = asItems(boxes)
+  const x1 = Math.min(...items.map((i) => i.x))
+  const y1 = Math.min(...items.map((i) => i.y))
+  const x2 = Math.max(...items.map((i) => i.x + i.w))
+  const y2 = Math.max(...items.map((i) => i.y + i.h))
+  return { items, area: { x: x1, y: y1, w: Math.max(1, x2 - x1), h: Math.max(1, y2 - y1) }, host: 'chrome' }
+}
+
+function overlap(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) {
+  const w = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+  const h = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+  return w * h
+}
+
+/** The page text sitting on the same spot as a box the user picked on the screen scan. */
+export async function matchUserChrome(rect: { x: number; y: number; w: number; h: number }, win?: string): Promise<{ text: string; type: string } | null> {
+  const boxes = await chromeBoxes(win)
+  if (!boxes) return null
+  const cx = rect.x + rect.w / 2
+  const cy = rect.y + rect.h / 2
+  const inside = boxes.filter((b) => cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h)
+  const pool = inside.length ? inside : boxes.filter((b) => overlap(rect, b) > 0)
+  let best: DomBox | null = null
+  let score = -1
+  for (const b of pool) {
+    const area = Math.max(1, b.w * b.h)
+    const s = inside.length ? 1 / area : overlap(rect, b) / area
+    if (!best || s > score) {
+      best = b
+      score = s
+    }
+  }
+  if (!best?.text) return null
+  return { text: best.text, type: best.type }
 }

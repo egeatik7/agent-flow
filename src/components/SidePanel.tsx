@@ -763,10 +763,10 @@ function NodeFields(p: Props & { n: AgentNode }) {
         </div>
       )}
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
+      {(n.kind === 'browser' || n.kind === 'waitFile' || n.kind === 'moveFile') && (
+        <p className="hint">Bu adım kaldırıldı. Node’u silip akışa devam edebilirsin.</p>
+      )}
       {n.kind === 'ai' && <AiEditor {...p} n={n} />}
-      {n.kind === 'browser' && <BrowserEditor {...p} n={n} />}
-      {n.kind === 'waitFile' && <WaitFileEditor {...p} n={n} />}
-      {n.kind === 'moveFile' && <MoveFileEditor {...p} n={n} />}
     </>
   )
 }
@@ -840,7 +840,6 @@ function NodeInspector(p: Props) {
             <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
             <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
             <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
-            <li>Web sitelerinde önce <b>Tarayıcıyı Aç</b>: sayfanın içi okunur, dosya pencereleri ve indirmeler kendiliğinden halledilir.</li>
             <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
             <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
           </ul>

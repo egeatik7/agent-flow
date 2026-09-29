@@ -32,7 +32,7 @@ export default function Toolbar(p: Props) {
     return () => window.removeEventListener('mousedown', close)
   }, [open])
 
-  const kinds = NODE_KINDS.filter((k) => k !== 'package' && (k !== 'start' || !p.hasStart))
+  const kinds = NODE_KINDS.filter((k) => k !== 'package' && k !== 'browser' && k !== 'waitFile' && k !== 'moveFile' && (k !== 'start' || !p.hasStart))
 
   return (
     <div className="toolbar">

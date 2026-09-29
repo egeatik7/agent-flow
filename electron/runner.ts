@@ -1,7 +1,6 @@
 import {
   NODE_SPECS,
   baseName,
-  fileVars,
   itemVars,
   hasTemplate,
   listItems,
@@ -229,28 +228,10 @@ export async function runGraph(
         return ok ? 'next' : 'fail'
       }
       case 'browser':
-        if (!ex.openBrowser) throw new Error('Tarayıcı modu bu ortamda çalışmıyor.')
-        ex.log('info', `[${stepNo}] Tarayıcı: ${live.url || '(boş sayfa)'}`)
-        await ex.openBrowser(live)
-        await settle()
-        return 'next'
-      case 'waitFile': {
-        if (!ex.waitFile) throw new Error('Dosyayı Bekle bu ortamda çalışmıyor.')
-        const file = await ex.waitFile(live, stepNo)
-        if (!file) return 'timeout'
-        vars = { ...vars, ...fileVars(file) }
-        return 'found'
-      }
-      case 'moveFile': {
-        if (!ex.moveFile) throw new Error('Dosyayı Taşı bu ortamda çalışmıyor.')
-        const from = (live.source?.trim() || renderTemplate('{{dosya}}', vars) || '').trim()
-        const to = (live.text ?? '').trim()
-        if (!from || from.includes('{{')) throw new Error(`“${live.title}”: taşınacak dosya yok. Önce Dosyayı Bekle çalışmalı.`)
-        if (!to) throw new Error(`“${live.title}”: hedef yolu boş.`)
-        const final = await ex.moveFile(from, to, live)
-        vars = { ...vars, ...fileVars(final) }
-        return 'next'
-      }
+      case 'waitFile':
+      case 'moveFile':
+        ex.log('info', `“${node.title}” kaldırıldı, geçiliyor.`)
+        return node.kind === 'waitFile' ? 'found' : 'next'
       case 'probe': {
         const picked = (node.text ?? '').trim()
         const names = picked ? [picked] : TEMPLATE_VARS
