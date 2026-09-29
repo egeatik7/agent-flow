@@ -171,8 +171,8 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Bağlantıyı Sil (Del)', { title: 'Bağlantıyı Sil', text: 'Seçili oku kaldırır. İki node durur, sadece aralarındaki bağ gider. Del tuşu da aynısını yapar.' }],
     ['Node’u Sil (Del)', { title: 'Node’u Sil', text: 'Seçili node’u akıştan çıkarır. Del tuşu da aynısını yapar.' }],
     ['Kutuyu Sil (içindekiler kalır)', { title: 'Kutuyu Sil', text: 'Her Öğe İçin çerçevesini kaldırır. İçindeki node’lar tuvalde kalır, sadece kutu dağılır.' }],
-    ['Listeyi temizle', { title: 'Listeyi temizle', text: 'Kutunun dosya listesini boşaltır. İçindeki node’lar durur. Liste boşken kutu, aşağıdaki tekrar sayısı kadar döner.' }],
-    ['Klasörden doldur…', { title: 'Klasörden doldur', text: 'Bir klasör seçersin; içindeki dosyalar listeye her satıra bir tane yazılır. “Sadece resimler” açıksa png, jpg ve benzerleri alınır.' }],
+    ['Listeyi temizle', { title: 'Listeyi temizle', text: 'Klasör kutusunu ve öğe listesini boşaltır. İçindeki node’lar durur. Liste boşken kutu, aşağıdaki tekrar sayısı kadar döner.' }],
+    ['Klasörden doldur…', { title: 'Klasörden doldur', text: 'Bir klasör seçersin; yolu üstteki kutuya yazılır. O klasörün içindeki her şey (dosya ve klasör) listeye birer satır olur. Alt klasörlerin içi açılmaz.' }],
     ['Model listesini getir', { title: 'Model listesini getir', text: 'OpenRouter’daki model adlarını indirir. Anahtar kayıtlı olmalı. Liste gelince model kutusunda seçebilirsin.' }],
     ['API Test', { title: 'API Test', text: 'Kayıtlı OpenRouter anahtarının çalışıp çalışmadığına bakar. Günlüğe sonucu yazar.' }],
     ['Görsel Test (ekranı anlat)', { title: 'Görsel Test', text: 'Ekranın bir karesini görsel modele gönderir. Model ne gördüğünü günlüğe yazar. Anahtar ve görsel model kayıtlı olmalı.' }],
@@ -366,7 +366,6 @@ function checkTip(el: Element): Tip | null {
   if (!el.classList.contains('check')) return null
   const t = text(el)
   if (t.includes('Pakette ayarları göster')) return { title: 'Pakette ayarları göster', text: 'İşaretliyse bu node’un ayarları, içinde durduğu pakete tıklayınca sağda açılır. Her Öğe İçin kutuları o listede en üstte durur.' }
-  if (t.includes('sadece resimler')) return { title: 'Sadece resimler', text: 'Klasörden doldururken png, jpg, webp, bmp ve gif alınır. Kapalıysa klasördeki her dosya listeye girer.' }
   if (t.includes('Önce alandaki yazıyı sil')) return { title: 'Önce sil', text: 'Yazmadan önce alanın içini temizler. Odak bir yazı alanı değilse Ctrl+A gönderilmez, sadece yazılır.' }
   if (t.includes('Enter')) return { title: 'Enter’a bas', text: 'Yazı gittikten sonra Enter yollar. Dosya penceresinde bu, seçilen dosyayı açar.' }
   if (t.includes('Ekran görüntüsüne bakarak yap')) return { title: 'Ekran görüntüsüne bakarak yap', text: 'Açıksa hedefi yazı listesinden değil, ekran görüntüsünden arar. İkon ve yazısız düğmeler için. Görsel model Ayarlar’dan seçilir.' }

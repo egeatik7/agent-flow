@@ -545,6 +545,17 @@ body {
   flex-wrap: wrap;
 }
 
+.loop-folder-actions {
+  flex-wrap: nowrap;
+  margin-top: 4px;
+}
+
+.loop-folder-actions .xp-btn {
+  flex: 1 1 0;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 .xp-input,
 .xp-select,
 .xp-textarea {

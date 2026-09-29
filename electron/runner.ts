@@ -3,6 +3,7 @@ import {
   baseName,
   fileVars,
   itemVars,
+  hasTemplate,
   listItems,
   loopKeys,
   loopStartIndex,
@@ -14,6 +15,7 @@ import {
   type StepStatus,
 } from './graph-types'
 import { firstMember, ownerOf } from './groups'
+import { listDirEntries } from './list-dir'
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -314,8 +316,6 @@ export async function runGraph(
    */
   const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
     ex.step(loop.id, 'running')
-    const keys = loopKeys(loop)
-    const isList = listItems(loop).length > 0
     const first = lapStart(loop)
     if (!first) {
       ex.log('warn', `“${loop.title}” kutusu boş. İçine node sürükle.`)
@@ -336,6 +336,27 @@ export async function runGraph(
         ex.log('warn', `“${loop.title}” içinde bağlı olmayan node var: ${orphans.join(', ')}. Tur “${first.title}”dan başlar, oklarla gidilmeyen node’lar çalışmaz.`)
       }
     }
+    const folderRaw = loop.folder?.trim() ?? ''
+    let fromFolder: string[] | null = null
+    if (hasTemplate(folderRaw)) {
+      const resolved = (renderTemplate(folderRaw, vars) ?? '').trim()
+      if (!resolved || hasTemplate(resolved)) {
+        ex.log('warn', `“${loop.title}”: klasör yolu çözülemedi (${folderRaw}).`)
+        fromFolder = []
+      } else {
+        const found = listDirEntries(resolved)
+        if (!found) {
+          ex.log('warn', `“${loop.title}”: klasör yok: ${resolved}`)
+          fromFolder = []
+        } else {
+          fromFolder = found
+          ex.log('info', `“${loop.title}”: ${resolved} içinde ${found.length} öğe.`)
+          patch(loop.id, { items: found })
+        }
+      }
+    }
+    const keys = fromFolder ?? loopKeys(loop)
+    const isList = fromFolder != null || listItems(loop).length > 0
     const from = loopStartIndex(loop, keys.length, !!startAt)
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'

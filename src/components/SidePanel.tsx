@@ -39,7 +39,8 @@ type Props = {
   onDeleteEdge: () => void
   onCaptureForNode: () => void
   onOpenScanner: () => void
-  onFillFromFolder: (extensions: string[]) => void
+  onFillFromFolder: (nodeId: string) => void
+  onLoopFolder: (nodeId: string, folder: string) => void
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
   onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
@@ -132,8 +133,6 @@ function TargetBox(p: Props & { n: AgentNode }) {
   )
 }
 
-const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'tif', 'tiff']
-
 function VarChips({ onInsert }: { onInsert: (v: string) => void }) {
   return (
     <div className="var-chips">
@@ -154,10 +153,11 @@ const append = (cur: string | undefined, v: string) => {
 
 function LoopEditor(p: Props & { n: AgentNode }) {
   const { n } = p
-  const [imagesOnly, setImagesOnly] = useState(true)
   const items = listItems(n)
   const members = (n.members ?? []).length
   const mark = loopStartIndex(n, items.length, true)
+  const folder = n.folder ?? ''
+  const folderIsTemplate = /\{\{/.test(folder)
   const setItem = (index: number, value: string) => {
     const next = items.slice()
     next[index] = value
@@ -166,18 +166,42 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   return (
     <>
       <p className="hint">
-        Her çalıştırmada liste baştan sona gider. İlk turda <span className="mono">{'{{öğe}}'}</span> birinci dosyanın tam yoludur, ikinci turda
-        ikinci dosyanın. <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi). Yükleme adımının metni{' '}
+        Her çalıştırmada liste baştan sona gider. İlk turda <span className="mono">{'{{öğe}}'}</span> birinci öğenin tam yoludur, ikinci turda
+        ikinci öğenin. <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi). Yükleme adımının metni{' '}
         <span className="mono">{'{{öğe}}'}</span> olmalı. İlk adım, kutunun içinde kimsenin bağlanmadığı node’dur.
       </p>
       {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
       <div className="field">
+        <label htmlFor="loop-folder">Klasör</label>
+        <input
+          id="loop-folder"
+          className="xp-input mono"
+          value={folder}
+          spellCheck={false}
+          placeholder={'C:\\Klasör   veya   D:\\İş\\{{öğe}}'}
+          onChange={(e) => p.onLoopFolder(n.id, e.target.value)}
+        />
+        <div className="field-row loop-folder-actions">
+          <button type="button" className="xp-btn primary" onClick={() => p.onFillFromFolder(n.id)}>
+            Klasörden doldur…
+          </button>
+          {(items.length > 0 || folder.trim()) && (
+            <button type="button" className="xp-btn" onClick={() => p.onLoopFolder(n.id, '')}>
+              Listeyi temizle
+            </button>
+          )}
+        </div>
+        {folderIsTemplate && (
+          <p className="hint">
+            Bu adres çalışırken dolar. <span className="mono">{'{{öğe}}'}</span> dışarıdaki kutunun o turdaki öğesidir. Alt klasörlerin içi açılmaz.
+          </p>
+        )}
         <label>Liste (her satır bir öğe)</label>
-        {items.length === 0 ? (
+        {folderIsTemplate ? null : items.length === 0 ? (
           <textarea
             className="xp-textarea mono list-area"
             value={(n.items ?? []).join('\n')}
-            placeholder={'C:\\Resimler\\kedi.png\nC:\\Resimler\\köpek.png\n…'}
+            placeholder={'C:\\Klasör\\kedi.png\nC:\\Klasör\\alt-klasör\n…'}
             onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
           />
         ) : (
@@ -205,30 +229,15 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             ))}
           </div>
         )}
-        <div className="field-row wrap">
-          <button type="button" className="xp-btn primary" onClick={() => p.onFillFromFolder(imagesOnly ? IMAGE_EXTS : [])}>
-            Klasörden doldur…
-          </button>
-          <label className="check inline">
-            <input type="checkbox" checked={imagesOnly} onChange={(e) => setImagesOnly(e.target.checked)} />
-            sadece resimler
-          </label>
-          {items.length > 0 && (
-            <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ items: [], folder: undefined, startIndex: undefined })}>
-              Listeyi temizle
-            </button>
-          )}
-        </div>
-        {n.folder && <p className="hint mono">{n.folder}</p>}
         {items.length > 0 && (
           <p className="hint">
-            İşaretli satır, Seçiliden Çalıştır’ın başlayacağı dosyadır; liste oradan sona gider. Ajanı Çalıştır her zaman birinci satırdan başlar.
-            Çalışırken işaret, turdaki dosyaya kayar.
+            İşaretli satır, Seçiliden Çalıştır’ın başlayacağı öğedir; liste oradan sona gider. Ajanı Çalıştır her zaman birinci satırdan başlar.
+            Çalışırken işaret, turdaki öğeye kayar.
           </p>
         )}
       </div>
 
-      {items.length === 0 && (
+      {items.length === 0 && !folderIsTemplate && (
         <div className="field">
           <label>Tekrar sayısı (liste boşken)</label>
           <input

@@ -11,6 +11,7 @@ import {
   NODE_SPECS,
   createNode,
   newId,
+  hasTemplate,
   normalizeGraph,
   type AgentGraph,
   type AgentNode,
@@ -264,6 +265,9 @@ export default function App() {
   const updateNode = (id: string, patch: Partial<AgentNode>) =>
     setGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }))
 
+  const patchAnywhere = (id: string, patch: Partial<AgentNode>) =>
+    setGraph((g) => mapNodes(g, (n) => (n.id === id ? { ...n, ...patch } : n)))
+
   const wrapSelection = (ids: string[]) => {
     const r = wrapInLoop(graphRef.current, ids)
     if (!r) return
@@ -481,32 +485,62 @@ export default function App() {
 
   const openScanner = (nodeId: string | null) => setScanner({ nodeId })
 
-  const pickFolder = async (extensions: string[]): Promise<{ folder: string; files: string[] } | null> => {
-    if (api) return api.pickFolder(extensions)
-    return new Promise((resolve) => {
-      const input = document.createElement('input')
-      input.type = 'file'
-      input.setAttribute('webkitdirectory', '')
-      input.onchange = () => {
-        const files = Array.from(input.files ?? [])
-          .filter((f) => !extensions.length || extensions.includes(f.name.split('.').pop()?.toLowerCase() ?? ''))
-          .map((f) => f.webkitRelativePath || f.name)
-          .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true, sensitivity: 'base' }))
-        resolve(files.length || input.files?.length ? { folder: files[0]?.split('/')[0] ?? '', files } : null)
+  const loopFolderGen = useRef(0)
+  const loopFolderTimer = useRef<number | null>(null)
+
+  const syncLoopFolder = (nodeId: string, folder: string, immediate = false) => {
+    const gen = ++loopFolderGen.current
+    if (loopFolderTimer.current) window.clearTimeout(loopFolderTimer.current)
+    const trimmed = folder.trim()
+    if (!trimmed || hasTemplate(folder)) {
+      patchAnywhere(nodeId, { folder, items: [], startIndex: 0, loopIndex: undefined, results: undefined })
+      if (immediate && hasTemplate(folder)) pushLog('info', 'Klasör adresi çalışırken, dışarıdaki öğeyle doldurulacak.')
+      return
+    }
+    patchAnywhere(nodeId, { folder })
+    const run = async () => {
+      if (!api?.listDir) return
+      try {
+        const files = await api.listDir(trimmed)
+        if (gen !== loopFolderGen.current) return
+        patchAnywhere(nodeId, { folder, items: files ?? [], startIndex: 0, loopIndex: undefined, results: undefined })
+        if (!immediate) return
+        pushLog(
+          files && files.length ? 'success' : 'warn',
+          files == null ? `Klasör yok: ${trimmed}` : `Klasörden ${files.length} öğe listeye eklendi: ${trimmed}`
+        )
+      } catch (e) {
+        if (gen !== loopFolderGen.current) return
+        pushLog('error', errText(e))
       }
-      input.click()
-    })
+    }
+    if (immediate) void run()
+    else loopFolderTimer.current = window.setTimeout(() => void run(), 400)
   }
 
-  const fillLoopFromFolder = async (nodeId: string, extensions: string[]) => {
+  const fillLoopFromFolder = async (nodeId: string) => {
     try {
-      const r = await pickFolder(extensions)
-      if (!r) return
-      updateNode(nodeId, { items: r.files, folder: r.folder, loopIndex: 0, startIndex: 0, results: undefined })
-      pushLog(
-        r.files.length ? 'success' : 'warn',
-        r.files.length ? `Klasörden ${r.files.length} dosya listeye eklendi: ${r.folder}` : `Klasörde uygun dosya yok: ${r.folder}`
-      )
+      if (!api) {
+        const r = await new Promise<{ folder: string; files: string[] } | null>((resolve) => {
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.setAttribute('webkitdirectory', '')
+          input.onchange = () => {
+            const files = Array.from(input.files ?? [])
+              .map((f) => f.webkitRelativePath || f.name)
+              .filter((p) => p.split('/').length <= 2)
+              .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true, sensitivity: 'base' }))
+            resolve(files.length ? { folder: files[0]?.split('/')[0] ?? '', files } : null)
+          }
+          input.click()
+        })
+        if (!r) return
+        patchAnywhere(nodeId, { items: r.files, folder: r.folder, loopIndex: undefined, startIndex: 0, results: undefined })
+        return
+      }
+      const dir = await api.pickDir()
+      if (!dir) return
+      syncLoopFolder(nodeId, dir, true)
     } catch (e) {
       pushLog('error', errText(e))
     }
@@ -801,7 +835,8 @@ export default function App() {
             onDeleteEdge={() => selectedEdge && deleteEdge(selectedEdge.id)}
             onCaptureForNode={captureForSelected}
             onOpenScanner={() => openScanner(selectedNodeId)}
-            onFillFromFolder={(exts) => selectedNodeId && fillLoopFromFolder(selectedNodeId, exts)}
+            onFillFromFolder={(id) => fillLoopFromFolder(id)}
+            onLoopFolder={(id, folder) => syncLoopFolder(id, folder)}
             onEnterPackage={enterPackage}
             onUnpackPackage={unpack}
             onUpdatePackaged={updatePackaged}

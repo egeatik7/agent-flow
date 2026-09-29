@@ -7,6 +7,7 @@ import { createAgent } from './agent'
 import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import { DEFAULT_SETTINGS, normalizeGraph, type AgentGraph, type AppSettings, type LogLevel } from './graph-types'
+import { listDirEntries } from './list-dir'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 
@@ -143,20 +144,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('windows:list', () => bridge.listWindows())
 
-  ipcMain.handle('dialog:pickFolder', async (_e, extensions: string[]) => {
+  ipcMain.handle('dialog:listDir', (_e, dir: string) => listDirEntries(typeof dir === 'string' ? dir : ''))
+
+  ipcMain.handle('dialog:pickFolder', async () => {
     if (!mainWindow) return null
     const r = await dialog.showOpenDialog(mainWindow, { title: 'Klasör seç', properties: ['openDirectory'] })
     const dir = r.filePaths[0]
     if (r.canceled || !dir) return null
-    const exts = extensions.map((e) => e.trim().replace(/^\./, '').toLowerCase()).filter(Boolean)
-    const files = fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((d) => d.isFile())
-      .map((d) => d.name)
-      .filter((n) => !exts.length || exts.includes(path.extname(n).slice(1).toLowerCase()))
-      .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true, sensitivity: 'base' }))
-      .map((n) => path.join(dir, n))
-    return { folder: dir, files }
+    return { folder: dir, files: listDirEntries(dir) ?? [] }
   })
 
   ipcMain.handle('dialog:pickDir', async () => {
