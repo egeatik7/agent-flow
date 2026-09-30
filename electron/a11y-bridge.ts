@@ -4,6 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
+import { mergeOnnxLines, onnxError, recognizeShot, warmOnnx } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
 
@@ -139,6 +140,7 @@ const worker = new Worker()
 export function warmUp() {
   if (!IS_WIN) return
   worker.call('ping').catch(() => {})
+  warmOnnx().catch(() => {})
 }
 
 export function shutdown() {
@@ -188,7 +190,7 @@ export async function scan(opts: {
       window: opts.windowTitle ?? '',
     }
   }
-  const r = await worker.call<ScanResult>(
+  const r = await worker.call<ScanResult & { shot?: string }>(
     'scan',
     {
       windowTitle: opts.windowTitle || '',
@@ -204,7 +206,26 @@ export async function scan(opts: {
     },
     90000
   )
-  return { ...r, items: Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : [] }
+  const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
+  let onnx = false
+  let onnxAdded = 0
+  const shot = r.shot
+  if (opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
+    try {
+      const lines = await recognizeShot(shot, r.area?.x ?? 0, r.area?.y ?? 0)
+      const merged = mergeOnnxLines(items, lines)
+      items.splice(0, items.length, ...merged.items)
+      onnxAdded = merged.added
+      onnx = !onnxError()
+    } catch {
+      onnx = false
+    } finally {
+      fs.unlink(shot, () => {})
+    }
+  }
+  const { shot: _shot, ...rest } = r
+  void _shot
+  return { ...rest, items, onnx, onnxAdded }
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{

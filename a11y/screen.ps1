@@ -389,6 +389,45 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
   return [pscustomobject]@{ data = $b64; w = $w; h = $h }
 }
 
+# A tightly packed BGRA frame for the second reader (PP-OCRv4). Windows OCR does not use this file.
+function Save-OnnxShot($bmp) {
+  $w = [int]$bmp.Width
+  $h = [int]$bmp.Height
+  if ($w -lt 2 -or $h -lt 2) { return '' }
+  $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-onnx-{0}.raw" -f ([guid]::NewGuid().ToString('N')))
+  $clone = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($clone)
+  $g.DrawImage($bmp, 0, 0, $w, $h)
+  $g.Dispose()
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+  $bd = $clone.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $clone.PixelFormat)
+  try {
+    $stride = [int]$bd.Stride
+    $row = $w * 4
+    $packed = New-Object byte[] ($row * $h)
+    for ($y = 0; $y -lt $h; $y++) {
+      $src = [System.IntPtr]::Add($bd.Scan0, ($y * $stride))
+      [System.Runtime.InteropServices.Marshal]::Copy($src, $packed, ($y * $row), $row)
+    }
+    $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+    $bw = New-Object System.IO.BinaryWriter($fs)
+    try {
+      $bw.Write([byte]88)
+      $bw.Write([byte]80)
+      $bw.Write([byte]65)
+      $bw.Write([byte]83)
+      $bw.Write([int32]$w)
+      $bw.Write([int32]$h)
+      $bw.Write($packed)
+      $bw.Flush()
+    } finally { $bw.Dispose() }
+  } finally {
+    $clone.UnlockBits($bd)
+    $clone.Dispose()
+  }
+  return $path
+}
+
 function Invoke-Scan($P) {
   $fresh = $false
   if ($P.fresh -eq $true) { $fresh = $true }
@@ -420,9 +459,11 @@ function Invoke-Scan($P) {
   $bmp = Get-ScreenBitmap $rect
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
+  $shot = ''
   if ($P.ocr -ne $false) {
     $ocrOk = Initialize-Ocr
     if ($ocrOk) { $ocr = Get-OcrPhrases $bmp $rect.x $rect.y }
+    try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
   $items = Merge-Items $uia $ocr
 
@@ -450,6 +491,7 @@ function Invoke-Scan($P) {
     missingWindow = $missing
     sig    = $sig
     uiaSkipped = $script:UiaSkipped
+    shot   = $shot
   }
 }
 

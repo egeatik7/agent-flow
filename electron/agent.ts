@@ -205,8 +205,9 @@ export function createAgent(ctx: AgentContext) {
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
-    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'})${res.window ? ` — ${res.window}` : ''}`)
+    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'}${res.onnxAdded ? ` +çince ${res.onnxAdded}` : ''})${res.window ? ` — ${res.window}` : ''}`)
     if (!res.ocr) log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
+    if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'Çince okuyucu açılamadı; Windows OCR ile devam ediliyor.')
     return res
   }
 
@@ -778,11 +779,12 @@ export function createAgent(ctx: AgentContext) {
    */
   function noteCjk(res: ScanResult, id: string) {
     if ((res.uiaSkipped ?? 0) > 0) {
-      noteOnce('scan', 'uiaSkipped', `${res.uiaSkipped} pencerenin öğe ağacı çok büyük olduğu için süresinde okunamadı; o pencerelerde yalnızca OCR kullanıldı. Tarayıcıda çalışıyorsan “Tarayıcıyı Aç” ile sayfa modunu kullan.`)
+      noteOnce('scan', 'uiaSkipped', `${res.uiaSkipped} pencerenin öğe ağacı çok büyük olduğu için süresinde okunamadı; o pencerelerde yalnızca OCR kullanıldı.`)
     }
     if (process.platform !== 'win32' || noted.has('scan:cjk')) return
     const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/
     if (!res.items.some((i) => i.src === 'uia' && cjk.test(i.text))) return
+    if (res.onnx && res.items.some((i) => i.src === 'ocr' && cjk.test(i.text))) return
     void (async () => {
       if (ocrLangs === undefined) ocrLangs = await bridge.ocrInfo()
       const tags = [ocrLangs?.main ?? '', ...(ocrLangs?.extra ?? [])]

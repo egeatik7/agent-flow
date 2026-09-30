@@ -27,6 +27,10 @@ export type ScanResult = {
   sig?: string
   /** Windows whose accessibility tree was too big to read in time. */
   uiaSkipped?: number
+  /** The bundled Chinese/English reader ran on this scan. */
+  onnx?: boolean
+  /** Lines it added or corrected. Windows OCR lines that already matched are not counted. */
+  onnxAdded?: number
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }

@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.7.32",
+  "version": "1.7.33",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/main.js",
   "author": "Nubbo Agent Studio",
@@ -27,14 +27,28 @@
       "dist/**/*",
       "dist-electron/**/*",
       "resources/icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/DirectML.dll",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxcompiler.dll",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxil.dll"
     ],
     "extraResources": [
       {
         "from": "a11y",
         "to": "a11y"
+      },
+      {
+        "from": "ocr",
+        "to": "ocr"
       }
     ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/bin/**"
+    ],
+    "npmRebuild": false,
     "win": {
       "target": [
         {
@@ -56,6 +70,7 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0",
+    "onnxruntime-node": "^1.30.0",
     "playwright-core": "^1.63.0"
   },
   "devDependencies": {
