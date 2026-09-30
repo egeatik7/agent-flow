@@ -91,7 +91,57 @@ function reportIn(text: string) {
 
 class ImageUnsupportedError extends Error {}
 
-async function chat(
+/** Key or balance. Another model name cannot fix these. */
+export class FatalApiError extends Error {}
+
+/** This model could not answer. The next name in the list should be tried. */
+export class ModelFailed extends Error {}
+
+const CYCLE_PAUSE_MS = 4000
+
+export function asModelChain(model: string | string[] | undefined): string[] {
+  const raw = Array.isArray(model) ? model : [model ?? '']
+  const out: string[] = []
+  for (const item of raw) {
+    const name = String(item ?? '').trim()
+    if (!name || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= 5) break
+  }
+  return out
+}
+
+function brief(err: unknown): string {
+  return ((err as Error).message || String(err)).replace(/\s+/g, ' ').slice(0, 160)
+}
+
+/**
+ * Tries each model once. After the last one fails, waits and starts again at the first.
+ * Stops only when the user stops, or the key / balance is rejected.
+ */
+export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS): Promise<T> {
+  const chain = asModelChain(models)
+  if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
+  for (;;) {
+    for (let i = 0; i < chain.length; i++) {
+      if (stopCheck()) throw new StoppedError()
+      const model = chain[i]
+      try {
+        return await run(model)
+      } catch (e) {
+        if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+        const last = i === chain.length - 1
+        const next = chain[(i + 1) % chain.length]
+        chatLogger?.(last ? `${model} olmadı (${brief(e)}). Sıra başa dönüyor.` : `${model} olmadı (${brief(e)}). ${next} deneniyor.`)
+      }
+    }
+    chatLogger?.(`Modellerin hepsi susuyor. ${Math.round(pauseMs / 1000)} sn sonra ${chain[0]} yeniden denenecek.`)
+    await stoppableWait(pauseMs)
+  }
+}
+
+/** One request to one model. No second try here; the chain does that. */
+async function chatOnce(
   apiKey: string,
   model: string,
   messages: Message[],
@@ -106,7 +156,6 @@ async function chat(
       body: JSON.stringify({
         model,
         temperature: 0,
-        // Reasoning models spend tokens before answering; too low a cap yields empty replies.
         max_tokens: opts.maxTokens ?? (hasImage ? 2500 : 800),
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
@@ -114,48 +163,60 @@ async function chat(
     })
     if (!res.ok) {
       reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
-      if (res.status === 429 || res.status >= 500) throw new TransientError(`OpenRouter ${res.status}: ${res.text.slice(0, 200)}`)
-      return { ok: false as const, status: res.status, text: res.text }
+      if (res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
+      if (res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
+      if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
+      throw new ModelFailed(`OpenRouter ${res.status}: ${res.text.slice(0, 200)}`)
     }
     let data: { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
     try {
       data = JSON.parse(res.text)
     } catch {
-      throw new TransientError('OpenRouter yanıtı okunamadı.')
+      throw new ModelFailed('OpenRouter yanıtı okunamadı.')
+    }
+    if (data.error?.message) {
+      const msg = data.error.message
+      reportIn(`hata: ${msg}`)
+      if (/invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
+      if (/insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
+      throw new ModelFailed(`OpenRouter: ${msg.slice(0, 200)}`)
     }
     const content = data.choices?.[0]?.message?.content ?? ''
-    reportIn(data.error?.message ? `hata: ${data.error.message}` : content)
-    return { ok: true as const, data, content }
+    reportIn(content)
+    return content
   }
-  const send = async (json: boolean) => {
-    try {
-      return await once(json)
-    } catch (e) {
-      if (!(e instanceof TransientError)) throw e
-      chatLogger?.(`API ⟳ ${e.message} 3 sn sonra bir kez daha deneniyor.`)
-      await stoppableWait(3000)
-      try {
-        return await once(json)
-      } catch (e2) {
-        if (e2 instanceof TransientError) throw new Error(e2.message)
-        throw e2
-      }
-    }
+  try {
+    return await once(opts.json !== false)
+  } catch (e) {
+    if (!(e instanceof ModelFailed) || opts.json === false) throw e
+    if (/400|404|422/.test(e.message)) return once(false)
+    throw e
   }
+}
 
-  let res = await send(opts.json !== false)
-  if (!res.ok && (res.status === 400 || res.status === 404 || res.status === 422)) {
-    if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
-    res = await send(false)
-  }
-  if (!res.ok) {
-    if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
-    if (res.status === 401) throw new Error('OpenRouter API anahtarı geçersiz (401).')
-    if (res.status === 402) throw new Error('OpenRouter bakiyesi yetersiz (402).')
-    throw new Error(`OpenRouter ${res.status}: ${res.text.slice(0, 300)}`)
-  }
-  if (res.data.error?.message) throw new Error(`OpenRouter: ${res.data.error.message}`)
-  return res.content
+async function chat(
+  apiKey: string,
+  model: string | string[],
+  messages: Message[],
+  hasImage: boolean,
+  opts: { json?: boolean; maxTokens?: number } = {},
+  /** Same request with the picture removed, used when this model cannot see images. */
+  withoutImage?: Message[]
+): Promise<string> {
+  return runModelChain(asModelChain(model), async (name) => {
+    try {
+      const text = await chatOnce(apiKey, name, messages, hasImage, opts)
+      if (!text.trim()) throw new ModelFailed('boş yanıt')
+      return text
+    } catch (e) {
+      if (!(e instanceof ImageUnsupportedError)) throw e
+      if (!withoutImage) throw new ModelFailed(`${name} ekran görüntüsü kabul etmiyor.`)
+      chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
+      const text = await chatOnce(apiKey, name, withoutImage, false, opts)
+      if (!text.trim()) throw new ModelFailed('boş yanıt')
+      return text
+    }
+  })
 }
 
 function parseJson(content: string): Record<string, unknown> {
@@ -173,7 +234,7 @@ export type ScreenChoice = { id: number | null; text?: string; reason: string; u
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   prompt: string
   kind: NodeKind
   scan: ScanResult
@@ -219,7 +280,7 @@ Talimat: ${opts.prompt}${opts.hint ? `\n\nHafıza: ${opts.hint}\nHafıza sadece 
   let content: string
   let usedImage = withImage
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, {}, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
@@ -244,7 +305,7 @@ function imagePart(img: Img) {
   return { type: 'image_url', image_url: { url: `data:${img.mime ?? 'image/jpeg'};base64,${img.data}` } }
 }
 
-async function visionChat(apiKey: string, model: string, system: string, text: string, images: Img[]): Promise<Record<string, unknown>> {
+async function visionChat(apiKey: string, model: string | string[], system: string, text: string, images: Img[]): Promise<Record<string, unknown>> {
   try {
     const content = await chat(
       apiKey,
@@ -299,7 +360,7 @@ const VISION_ACTION: Partial<Record<NodeKind, string>> = {
 
 export async function visionLocate(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   prompt: string
   kind: NodeKind
   scan: ScanResult
@@ -336,7 +397,7 @@ ${list || '(yok)'}`
 /** Second pass on a zoomed crop around the first guess, for pixel-accurate clicks. */
 export async function visionRefine(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   prompt: string
   image: Img
 }): Promise<{ x: number; y: number } | null> {
@@ -351,7 +412,7 @@ export type ReactionVerdict = 'ready' | 'missed' | 'loading' | 'blocked' | 'unkn
 /** Two pocket frames: did the action move the screen toward the next step? */
 export async function judgeReaction(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   step: string
   expected: string
   ahead: string
@@ -381,7 +442,7 @@ Sonra ekrana yeni gelen yazılar: ${opts.fresh.length ? opts.fresh.join(' | ') :
 
 export async function visionCheck(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   question: string
   image: Img
   /** Picture of the element that should be present. */
@@ -397,7 +458,7 @@ export async function visionCheck(opts: {
   return { answer, reason: String(p.reason ?? '') }
 }
 
-export async function visionDescribe(opts: { apiKey: string; model: string; image: Img }): Promise<string> {
+export async function visionDescribe(opts: { apiKey: string; model: string | string[]; image: Img }): Promise<string> {
   const p = await visionChat(
     opts.apiKey,
     opts.model,
@@ -421,7 +482,7 @@ export type AgentAction = {
 /** İnisiyatif: one action at a time toward a goal, from the numbered screen list (and screenshot). */
 export async function nextAction(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   goal: string
   stepTitle: string
   history: string[]
@@ -647,7 +708,7 @@ function parseJsonAction(content: string): GuiAction {
  */
 export async function guiStep(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   goal: string
   history: GuiTurn[]
   screen: Img
@@ -656,34 +717,38 @@ export async function guiStep(opts: {
   const keep = Math.max(1, opts.keepImages ?? 4)
   const recent = opts.history.slice(-keep + 1)
   const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
-  if (isTarsModel(opts.model)) {
-    const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal) }]
-    for (const t of older) {
-      messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
-      if (t.note) messages.push({ role: 'user', content: t.note })
+  return runModelChain(asModelChain(opts.model), async (model) => {
+    if (isTarsModel(model)) {
+      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal) }]
+      for (const t of older) {
+        messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
+        if (t.note) messages.push({ role: 'user', content: t.note })
+      }
+      for (const t of recent) {
+        if (t.image) messages.push({ role: 'user', content: [imagePart(t.image)] })
+        messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
+        if (t.note) messages.push({ role: 'user', content: t.note })
+      }
+      messages.push({ role: 'user', content: [imagePart(opts.screen)] })
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, maxTokens: 1000 })
+      if (!content.trim()) throw new ModelFailed('boş yanıt')
+      return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
-    for (const t of recent) {
-      if (t.image) messages.push({ role: 'user', content: [imagePart(t.image)] })
-      messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
-      if (t.note) messages.push({ role: 'user', content: t.note })
-    }
-    messages.push({ role: 'user', content: [imagePart(opts.screen)] })
-    const content = await chat(opts.apiKey, opts.model, messages, true, { json: false, maxTokens: 1000 })
-    return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(opts.model))
-  }
-  const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
-  const text = `Hedef: ${opts.goal}
+    const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
+    const text = `Hedef: ${opts.goal}
 
 Önceki adımlar:
 ${lines.length ? lines.join('\n') : '(henüz yok)'}
 
 Son ekran görüntüsü ektedir.`
-  const messages: Message[] = [
-    { role: 'system', content: JSON_PROMPT },
-    { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
-  ]
-  const content = await chat(opts.apiKey, opts.model, messages, true)
-  return parseJsonAction(content)
+    const messages: Message[] = [
+      { role: 'system', content: JSON_PROMPT },
+      { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
+    ]
+    const content = await chatOnce(opts.apiKey, model, messages, true)
+    if (!content.trim()) throw new ModelFailed('boş yanıt')
+    return parseJsonAction(content)
+  })
 }
 
 export type StallPlan = {
@@ -696,7 +761,7 @@ export type StallPlan = {
 /** When a step did not land cleanly: look, wait if needed, and decide before the run is broken. */
 export async function planStall(opts: {
   apiKey: string
-  model: string
+  model: string | string[]
   step: string
   problem: string
   ahead: string

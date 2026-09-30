@@ -137,6 +137,8 @@ export type AgentGraph = {
 export type AppSettings = {
   apiKey: string
   model: string
+  /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */
+  modelBackups: string[]
   targetWindow: string
   stepDelayMs: number
   maxSteps: number
@@ -144,10 +146,14 @@ export type AppSettings = {
   sendScreenshot: boolean
   /** Model used by nodes running in screenshot (vision) mode; same OpenRouter key. */
   visionModel: string
+  /** Tried, in order, when `visionModel` cannot be reached. */
+  visionBackups: string[]
   /** Minimize this app while the agent runs so it does not cover the target. */
   hideWhileRunning: boolean
   /** Model that drives İnisiyatif from screenshots (UI-TARS or any vision model). */
   agentModel: string
+  /** Tried, in order, when `agentModel` cannot be reached. */
+  agentBackups: string[]
   /** Which reader supplies on-screen text. UI Automation names are used either way. */
   ocrEngine: 'windows' | 'onnx'
 }
@@ -155,13 +161,16 @@ export type AppSettings = {
 export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   model: 'openai/gpt-4o-mini',
+  modelBackups: [],
   targetWindow: '',
   stepDelayMs: 800,
   maxSteps: 2000,
   sendScreenshot: true,
   visionModel: 'google/gemini-3.8-flash',
+  visionBackups: [],
   hideWhileRunning: true,
   agentModel: 'bytedance/ui-tars-1.5-7b',
+  agentBackups: [],
   ocrEngine: 'windows',
 }
 
@@ -480,6 +489,31 @@ export function itemVars(item: string, index: number, total: number): Record<str
 }
 
 export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}']
+
+/** Preferred model first, then backups. Empty and repeated names are dropped. At most five. */
+export function modelChain(primary: string | undefined, backups: string[] | undefined): string[] {
+  const out: string[] = []
+  for (const raw of [primary, ...(Array.isArray(backups) ? backups : [])]) {
+    const name = String(raw ?? '').trim()
+    if (!name || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= 5) break
+  }
+  return out
+}
+
+export function cleanBackups(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const name = item.trim()
+    if (!name || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= 4) break
+  }
+  return out
+}
 
 /** Replaces {{name}} placeholders; accepts ASCII spellings too ({{oge.isim}}, {{sira}}). Unknown names stay as-is. */
 export function renderTemplate(s: string | undefined, vars: Record<string, string>): string | undefined {

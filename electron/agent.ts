@@ -4,7 +4,7 @@ import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
   containsTextStrict,
@@ -99,6 +99,20 @@ function fieldHolds(value: string, text: string) {
   const v = norm(value)
   const t = norm(text)
   return !!t && v.includes(t)
+}
+
+function textModels(s: AppSettings): string[] {
+  return modelChain(s.model, s.modelBackups)
+}
+
+function visionModels(s: AppSettings): string[] {
+  const vision = modelChain(s.visionModel, s.visionBackups)
+  return vision.length ? vision : textModels(s)
+}
+
+function agentModels(s: AppSettings): string[] {
+  const agent = modelChain(s.agentModel, s.agentBackups)
+  return agent.length ? agent : visionModels(s)
 }
 
 export function createAgent(ctx: AgentContext) {
@@ -201,7 +215,7 @@ export function createAgent(ctx: AgentContext) {
     if (!hit && useLlm) {
       const choice = await chooseScreenTarget({
         apiKey: s.apiKey,
-        model: s.model,
+        model: textModels(s),
         prompt,
         kind: node.kind,
         scan,
@@ -238,7 +252,7 @@ export function createAgent(ctx: AgentContext) {
         try {
           const second = await chooseScreenTarget({
             apiKey: s.apiKey,
-            model: s.model,
+            model: textModels(s),
             prompt,
             kind: node.kind,
             scan,
@@ -352,10 +366,12 @@ export function createAgent(ctx: AgentContext) {
     )
   }
 
-  function visionModelOrThrow(): { apiKey: string; model: string } {
+  function visionModelOrThrow(): { apiKey: string; model: string[] } {
     const s = getSettings()
     if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')
-    return { apiKey: s.apiKey, model: (s.visionModel || s.model).trim() }
+    const model = visionModels(s)
+    if (!model.length) throw new Error('Görsel model yok. Ayarlar > Görsel LLM’den bir model yaz.')
+    return { apiKey: s.apiKey, model }
   }
 
   function visionPrompt(node: AgentNode): string {
@@ -381,7 +397,7 @@ export function createAgent(ctx: AgentContext) {
     warnMissingWindow(scanRes)
     const mem = memoFor(node)
     const hint = describeMemory(mem)
-    log('info', `[görsel] Ekran görüntüsü ${model} modeline gönderildi (${scanRes.items.length} işaretli öğe).`)
+    log('info', `[görsel] Ekran görüntüsü ${model.join(' → ')} modeline gönderildi (${scanRes.items.length} işaretli öğe).`)
     const pick = await visionLocate({
       apiKey,
       model,
@@ -471,7 +487,7 @@ export function createAgent(ctx: AgentContext) {
 
   async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
     const s = getSettings()
-    const model = (s.visionModel || s.model).trim()
+    const model = visionModels(s)
     if (!s.apiKey || !model || !before.image || !after.image) return v
     if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
     try {
@@ -524,7 +540,7 @@ export function createAgent(ctx: AgentContext) {
 
   async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
     const s = getSettings()
-    const model = (s.visionModel || s.model).trim()
+    const model = visionModels(s)
     if (!s.apiKey || !model) return null
     let image: { data: string; w: number; h: number } | null = null
     try {
@@ -823,7 +839,7 @@ export function createAgent(ctx: AgentContext) {
   async function initiative(node: AgentNode, _stepNo: number, ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
     const s = getSettings()
     if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
-    const model = (s.visionModel || s.model).trim()
+    const model = visionModels(s)
     const goal = node.prompt!.trim()
     const max = Math.min(40, Math.max(1, Math.floor(node.maxActions ?? 12)))
     const lastLap = (runTrace.get(node.id) ?? node.trace ?? []).map((l) => renderTemplate(l, vars) ?? l)
@@ -1003,8 +1019,8 @@ export function createAgent(ctx: AgentContext) {
   /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
   async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string }> {
     const s = getSettings()
-    const model = (s.visionModel || '').trim()
-    if (!s.apiKey || !model) return { ok: true, reason: 'kontrol modeli yok' }
+    const model = modelChain(s.visionModel, s.visionBackups)
+    if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok' }
     try {
       await pause(800)
       const shot = await agentShot(tars, 'inisiyatif kontrol')
@@ -1080,13 +1096,13 @@ export function createAgent(ctx: AgentContext) {
   async function initiativeScreen(node: AgentNode, _stepNo: number, _ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
     const s = getSettings()
     if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
-    const model = (s.agentModel || s.visionModel || s.model).trim()
-    const tars = isTarsModel(model)
+    const model = agentModels(s)
+    const tars = model.some((name) => isTarsModel(name))
     const goal = node.prompt!.trim()
     const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
     const history: GuiTurn[] = []
     let path: PathStep[] = []
-    log('info', `İnisiyatif (${model}${tars ? ', UI-TARS biçimi' : ''}): ${goal}`)
+    log('info', `İnisiyatif (${model.join(' → ')}${tars ? ', UI-TARS sırada' : ''}): ${goal}`)
     if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
 
     const saved = runPath.get(node.id) ?? node.path

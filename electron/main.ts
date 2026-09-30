@@ -6,7 +6,7 @@ import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
-import { DEFAULT_SETTINGS, normalizeGraph, type AgentGraph, type AppSettings, type LogLevel } from './graph-types'
+import { cleanBackups, DEFAULT_SETTINGS, modelChain, normalizeGraph, type AgentGraph, type AppSettings, type LogLevel } from './graph-types'
 import { listDirEntries } from './list-dir'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
@@ -29,6 +29,9 @@ function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
   if (s.ocrEngine !== 'onnx') s.ocrEngine = 'windows'
+  s.modelBackups = cleanBackups(s.modelBackups)
+  s.visionBackups = cleanBackups(s.visionBackups)
+  s.agentBackups = cleanBackups(s.agentBackups)
   bridge.setOcrEngine(s.ocrEngine)
   return s
 }
@@ -136,6 +139,9 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
     const next = { ...getSettings(), ...partial }
     if (next.ocrEngine !== 'onnx') next.ocrEngine = 'windows'
+    next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
+    next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
+    next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
     store.set('settings', next)
     bridge.setOcrEngine(next.ocrEngine)
     return next
@@ -260,7 +266,8 @@ app.whenReady().then(() => {
   ipcMain.handle('openrouter:testVision', async () => {
     const s = getSettings()
     if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')
-    const model = (s.visionModel || s.model).trim()
+    const chain = modelChain(s.visionModel, s.visionBackups)
+    const models = chain.length ? chain : modelChain(s.model, s.modelBackups)
     const hidden = await hideSelf()
     let shot: Awaited<ReturnType<typeof bridge.scan>>
     try {
@@ -269,7 +276,7 @@ app.whenReady().then(() => {
       if (hidden) showSelf()
     }
     if (!shot.image) throw new Error('Ekran görüntüsü alınamadı.')
-    return { model, text: await visionDescribe({ apiKey: s.apiKey, model, image: shot.image }) }
+    return { model: models[0] ?? '', text: await visionDescribe({ apiKey: s.apiKey, model: models, image: shot.image }) }
   })
 })
 

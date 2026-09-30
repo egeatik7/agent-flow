@@ -80,6 +80,41 @@ const CLICK_MODES: { key: ClickMode; label: string }[] = [
   { key: 'right', label: 'Sağ tık' },
 ]
 
+function BackupModels(props: { backups: string[] | undefined; listId: string; onChange: (next: string[]) => void }) {
+  const rows = props.backups ?? []
+  return (
+    <div className="backup-box">
+      {rows.map((name, i) => (
+        <div className="backup-row" key={i}>
+          <span className="backup-n">{i + 2}</span>
+          <input
+            className="xp-input"
+            list={props.listId}
+            value={name}
+            placeholder="yedek model adı"
+            onChange={(e) => {
+              const next = rows.slice()
+              next[i] = e.target.value
+              props.onChange(next)
+            }}
+          />
+          <button
+            type="button"
+            className="xp-btn backup-x"
+            title="Bu yedeği sil"
+            onClick={() => props.onChange(rows.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button type="button" className="xp-btn backup-add" disabled={rows.length >= 4} onClick={() => props.onChange([...rows, ''])}>
+        + Yedek
+      </button>
+    </div>
+  )
+}
+
 function SaveRow(props: { children: ReactNode; onSave: () => void }) {
   return (
     <div className="field-row">
@@ -802,9 +837,11 @@ function Settings(p: Props) {
 
       <div className="field">
         <label htmlFor="model">Model adı</label>
-        <SaveRow onSave={() => p.onSaveSettings({ model: s.model.trim() })}>
+        <SaveRow onSave={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
           <input id="model" className="xp-input" list="model-list" value={s.model} placeholder="openai/gpt-4o-mini" onChange={(e) => set({ model: e.target.value })} />
         </SaveRow>
+        <BackupModels listId="model-list" backups={s.modelBackups} onChange={(modelBackups) => set({ modelBackups })} />
+        <p className="hint">Üstteki 1. modeldir. Olmazsa 2, 3, 4, 5 denenir. Hepsi susarsa sıra başa döner. Durdurmak için Ctrl+Shift+Q.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
@@ -842,7 +879,7 @@ function Settings(p: Props) {
         </p>
         <div className="field">
           <label htmlFor="visionModel">Görsel model adı</label>
-          <SaveRow onSave={() => p.onSaveSettings({ visionModel: s.visionModel.trim() })}>
+          <SaveRow onSave={() => p.onSaveSettings({ visionModel: s.visionModel.trim(), visionBackups: s.visionBackups ?? [] })}>
             <input
               id="visionModel"
               className="xp-input"
@@ -863,6 +900,7 @@ function Settings(p: Props) {
             <p className="hint warn">Bu model ekran görüntüsü göremiyor; görsel destekli bir model seç.</p>
           )}
           {visionInfo?.vision && <p className="hint ok">Görsel destekli model.</p>}
+          <BackupModels listId="vision-model-list" backups={s.visionBackups} onChange={(visionBackups) => set({ visionBackups })} />
           <div className="chips">
             {VISION_PRESETS.map((m) => (
               <button type="button" key={m} className="chip" onClick={() => set({ visionModel: m })}>
@@ -885,7 +923,7 @@ function Settings(p: Props) {
         </p>
         <div className="field">
           <label htmlFor="agentModel">Model adı</label>
-          <SaveRow onSave={() => p.onSaveSettings({ agentModel: s.agentModel.trim() })}>
+          <SaveRow onSave={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>
             <input
               id="agentModel"
               className="xp-input"
@@ -902,6 +940,7 @@ function Settings(p: Props) {
               </button>
             ))}
           </div>
+          <BackupModels listId="vision-model-list" backups={s.agentBackups} onChange={(agentBackups) => set({ agentBackups })} />
         </div>
       </fieldset>
 
