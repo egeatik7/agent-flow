@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { NODE_KINDS, NODE_SPECS, type NodeKind } from '../types'
 
+type OcrEngine = 'windows' | 'onnx'
+
 type Props = {
   running: boolean
   hasStart: boolean
@@ -17,6 +19,8 @@ type Props = {
   onLayout: () => void
   onClear: () => void
   onForget: () => void
+  ocrEngine: OcrEngine
+  onOcrEngine: (engine: OcrEngine) => void
 }
 
 export default function Toolbar(p: Props) {
@@ -119,6 +123,21 @@ export default function Toolbar(p: Props) {
       >
         Hafızayı Sil
       </button>
+
+      <div className="ocr-pick" title="ONNX seçilince ekran yazısı yalnızca ondan gelir. Windows’un Çinceye uydurduğu satır kullanılmaz.">
+        <span className="ocr-pick-label">OCR</span>
+        {(['windows', 'onnx'] as const).map((engine) => (
+          <label key={engine} className={`ocr-opt${p.ocrEngine === engine ? ' on' : ''}`}>
+            <input
+              type="radio"
+              name="ocr-engine"
+              checked={p.ocrEngine === engine}
+              onChange={() => p.onOcrEngine(engine)}
+            />
+            {engine === 'windows' ? 'Windows' : 'ONNX'}
+          </label>
+        ))}
+      </div>
     </div>
   )
 }

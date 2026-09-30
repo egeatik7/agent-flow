@@ -31,6 +31,8 @@ export type ScanResult = {
   onnx?: boolean
   /** Lines it added or corrected. Windows OCR lines that already matched are not counted. */
   onnxAdded?: number
+  /** Which reader supplied the OCR lines on this scan. */
+  ocrEngine?: 'windows' | 'onnx'
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }

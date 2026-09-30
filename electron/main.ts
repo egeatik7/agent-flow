@@ -28,6 +28,8 @@ let stopRequested = false
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
+  if (s.ocrEngine !== 'onnx') s.ocrEngine = 'windows'
+  bridge.setOcrEngine(s.ocrEngine)
   return s
 }
 
@@ -119,6 +121,7 @@ function showSelf() {
 
 app.whenReady().then(() => {
   createWindow()
+  getSettings()
   bridge.warmUp()
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
@@ -132,7 +135,9 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
     const next = { ...getSettings(), ...partial }
+    if (next.ocrEngine !== 'onnx') next.ocrEngine = 'windows'
     store.set('settings', next)
+    bridge.setOcrEngine(next.ocrEngine)
     return next
   })
 

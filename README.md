@@ -109,7 +109,7 @@ Güvenceler:
 - **Bilgisayar uyumaz**, ekran kilitlenirse ajan kilit açılana kadar bekler.
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
 - **Tarayıcı modu** sayfa yeniden çizilse de öğeyi yazısı ve türüyle yeniden bulur. 60 sn içinde yol verilmeyen dosya penceresi iptal edilir.
-- **Çince:** Windows OCR durur. Yanına paketlenen hafif okuyucu aynı kareye bakar; Çinceyi ve Windows’un kaçırdığı İngilizceyi ekler. Aynı yazıyı ikisi de gördüyse Windows satırı kalır. Ekranı Tara ve tıklama sırası değişmez. Japonca/Korece için Windows’ta o dilin OCR paketi gerekir.
+- **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
 - **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30). Bir tur hata verirse o anki ekran
   da kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi açar.

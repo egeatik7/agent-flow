@@ -156,6 +156,8 @@ export type AppSettings = {
   hideWhileRunning: boolean
   /** Model that drives İnisiyatif from screenshots (UI-TARS or any vision model). */
   agentModel: string
+  /** Which reader supplies on-screen text. UI Automation names are used either way. */
+  ocrEngine: 'windows' | 'onnx'
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -168,6 +170,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   visionModel: 'google/gemini-3.8-flash',
   hideWhileRunning: true,
   agentModel: 'bytedance/ui-tars-1.5-7b',
+  ocrEngine: 'windows',
 }
 
 export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'condition']

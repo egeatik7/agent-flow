@@ -205,8 +205,10 @@ export function createAgent(ctx: AgentContext) {
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
-    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${res.ocr ? res.ocrCount : 'kapalı'}${res.onnxAdded ? ` +çince ${res.onnxAdded}` : ''})${res.window ? ` — ${res.window}` : ''}`)
-    if (!res.ocr) log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
+    const ocrVia =
+      res.ocrEngine === 'onnx' ? `ONNX ${res.onnxAdded ?? 0}` : res.ocr ? `${res.ocrCount}${res.onnxAdded ? ` +çince ${res.onnxAdded}` : ''}` : 'kapalı'
+    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${ocrVia})${res.window ? ` — ${res.window}` : ''}`)
+    if (ocrVia === 'kapalı') log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
     if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'Çince okuyucu açılamadı; Windows OCR ile devam ediliyor.')
     return res
   }

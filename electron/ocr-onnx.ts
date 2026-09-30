@@ -511,19 +511,57 @@ function overlapRatio(a: { x: number; y: number; w: number; h: number }, b: { x:
   return small > 0 ? inter / small : 0
 }
 
+export type OcrEngine = 'windows' | 'onnx'
+
+function acceptedText(line: OnnxLine): string | null {
+  const text = line.text.replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  const cjk = CJK.test(text)
+  const latin = /[A-Za-z]/.test(text)
+  if (!cjk && !latin) return null
+  if (!cjk && (line.conf < 0.85 || text.length < 2)) return null
+  if (cjk && line.conf < 0.5) return null
+  return text
+}
+
+function lineItem(id: number, text: string, line: OnnxLine): ScreenItem {
+  const x = Math.round(line.x)
+  const y = Math.round(line.y)
+  const w = Math.max(1, Math.round(line.w))
+  const h = Math.max(1, Math.round(line.h))
+  return { id, text, type: 'Text', src: 'ocr', x, y, w, h, words: [{ t: text, x, y, w, h }] }
+}
+
+/**
+ * ONNX is the only OCR. Windows lines are dropped, including the ones it invented
+ * for Chinese. Application names (UIA) stay. If ONNX read nothing, Windows lines stay.
+ */
+function preferOnnx(items: ScreenItem[], lines: OnnxLine[]): { items: ScreenItem[]; added: number; usedOnnx: boolean } {
+  const accepted = lines.flatMap((line) => {
+    const text = acceptedText(line)
+    return text ? [{ text, line }] : []
+  })
+  if (accepted.length === 0) return { items, added: 0, usedOnnx: false }
+  const kept = items.filter((i) => i.src !== 'ocr')
+  let nextId = kept.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1
+  const ocr = accepted.map(({ text, line }) => lineItem(nextId++, text, line))
+  return { items: [...kept, ...ocr], added: ocr.length, usedOnnx: true }
+}
+
 /** Keep Windows lines. Add a new line, or replace Latin garbage when this spot is actually Chinese. */
-export function mergeOnnxLines(items: ScreenItem[], lines: OnnxLine[]): { items: ScreenItem[]; added: number } {
-  const out = items.map((i) => ({ ...i, words: i.words?.map((w) => ({ ...w })) }))
+export function mergeOnnxLines(
+  items: ScreenItem[],
+  lines: OnnxLine[],
+  engine: OcrEngine = 'windows'
+): { items: ScreenItem[]; added: number; usedOnnx: boolean } {
+  if (engine === 'onnx') return preferOnnx(items, lines)
+  const out: ScreenItem[] = items.map((i) => ({ ...i, words: i.words?.map((w) => ({ ...w })) }))
   let added = 0
   let nextId = out.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1
   for (const line of lines) {
-    const text = line.text.replace(/\s+/g, ' ').trim()
+    const text = acceptedText(line)
     if (!text) continue
     const cjk = CJK.test(text)
-    const latin = /[A-Za-z]/.test(text)
-    if (!cjk && !latin) continue
-    if (!cjk && (line.conf < 0.85 || text.length < 2)) continue
-    if (cjk && line.conf < 0.5) continue
     const box = { x: line.x, y: line.y, w: line.w, h: line.h }
     let skip = false
     for (const it of out) {
@@ -553,22 +591,8 @@ export function mergeOnnxLines(items: ScreenItem[], lines: OnnxLine[]): { items:
       }
     }
     if (skip) continue
-    const x = Math.round(box.x)
-    const y = Math.round(box.y)
-    const w = Math.max(1, Math.round(box.w))
-    const h = Math.max(1, Math.round(box.h))
-    out.push({
-      id: nextId++,
-      text,
-      type: 'Text',
-      src: 'ocr',
-      x,
-      y,
-      w,
-      h,
-      words: [{ t: text, x, y, w, h }],
-    })
+    out.push(lineItem(nextId++, text, line))
     added++
   }
-  return { items: out, added }
+  return { items: out, added, usedOnnx: added > 0 }
 }

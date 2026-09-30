@@ -4,7 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
-import { mergeOnnxLines, onnxError, recognizeShot, warmOnnx } from './ocr-onnx'
+import { mergeOnnxLines, onnxError, recognizeShot, warmOnnx, type OcrEngine } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
 
@@ -137,6 +137,12 @@ class Worker {
 
 const worker = new Worker()
 
+let ocrEngine: OcrEngine = 'windows'
+
+export function setOcrEngine(v: OcrEngine | undefined) {
+  ocrEngine = v === 'onnx' ? 'onnx' : 'windows'
+}
+
 export function warmUp() {
   if (!IS_WIN) return
   worker.call('ping').catch(() => {})
@@ -178,6 +184,8 @@ export async function scan(opts: {
   snap?: number
   /** Also return a tiny grayscale signature to tell whether the screen changed. */
   sig?: boolean
+  /** Which reader wins. Defaults to the saved choice. */
+  ocrEngine?: OcrEngine
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
@@ -209,14 +217,17 @@ export async function scan(opts: {
   const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
   let onnx = false
   let onnxAdded = 0
+  let engine: OcrEngine = 'windows'
   const shot = r.shot
+  const prefer = opts.ocrEngine ?? ocrEngine
   if (opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
     try {
       const lines = await recognizeShot(shot, r.area?.x ?? 0, r.area?.y ?? 0)
-      const merged = mergeOnnxLines(items, lines)
+      const merged = mergeOnnxLines(items, lines, prefer)
       items.splice(0, items.length, ...merged.items)
       onnxAdded = merged.added
-      onnx = !onnxError()
+      onnx = merged.usedOnnx && !onnxError()
+      if (prefer === 'onnx' && merged.usedOnnx) engine = 'onnx'
     } catch {
       onnx = false
     } finally {
@@ -225,7 +236,7 @@ export async function scan(opts: {
   }
   const { shot: _shot, ...rest } = r
   void _shot
-  return { ...rest, items, onnx, onnxAdded }
+  return { ...rest, items, onnx, onnxAdded, ocrEngine: engine }
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{
