@@ -329,7 +329,7 @@ function AiEditor(p: Props & { n: AgentNode }) {
               </button>
             </>
           ) : (
-            <>Ekrandaki (tarayıcıdaysa sayfadaki) yazıların numaralı listesinden seçer. Yazı ağırlıklı formlarda ve web sayfalarında hızlıdır.</>
+            <>Ekrandaki yazıların numaralı listesinden seçer. Yazı ağırlıklı formlarda ve web sayfalarında hızlıdır.</>
           )}
         </p>
       </div>
@@ -391,111 +391,6 @@ function AiEditor(p: Props & { n: AgentNode }) {
           </button>
         </div>
       ) : null}
-    </>
-  )
-}
-
-function BrowserEditor(p: Props & { n: AgentNode }) {
-  const { n } = p
-  const upd = p.onUpdateNode
-  return (
-    <>
-      <div className="field">
-        <label>Adres</label>
-        <input className="xp-input mono" value={n.url ?? ''} placeholder="https://..." onChange={(e) => upd({ url: e.target.value })} />
-        <VarChips onInsert={(v) => upd({ url: append(n.url, v) })} />
-      </div>
-      <div className="field">
-        <label>Tarayıcı</label>
-        <div className="seg">
-          {(
-            [
-              ['auto', 'Otomatik'],
-              ['msedge', 'Edge'],
-              ['chrome', 'Chrome'],
-            ] as const
-          ).map(([k, label]) => (
-            <button type="button" key={k} className={`seg-btn${(n.browser ?? 'auto') === k ? ' active' : ''}`} onClick={() => upd({ browser: k })}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="hint">
-        Tarayıcı programın kendi profiliyle açılır; siteye bir kez elle giriş yaparsan sonra hep açık kalır. Bu tarayıcı öndeyken Tıkla ve
-        Yazı Yaz hedefi sayfanın içinden bulur; bulamazsa ekrana bakar. Dosya seçme penceresine yol doğrudan verilir. İndirmeler
-        İndirilenler klasörüne düşer; <b>Dosyayı Bekle</b> ve <b>Dosyayı Taşı</b> ile ad verebilirsin. Açıkken aynı node tekrar gelirse sadece adrese gider.
-      </p>
-    </>
-  )
-}
-
-function WaitFileEditor(p: Props & { n: AgentNode }) {
-  const { n } = p
-  const upd = p.onUpdateNode
-  return (
-    <>
-      <div className="field">
-        <label>Klasör (boşsa İndirilenler)</label>
-        <div className="field-row">
-          <input className="xp-input mono" value={n.folder ?? ''} placeholder="İndirilenler" onChange={(e) => upd({ folder: e.target.value })} />
-          <button
-            type="button"
-            className="xp-btn"
-            onClick={async () => {
-              const d = await p.onPickDir()
-              if (d) upd({ folder: d })
-            }}
-          >
-            Seç…
-          </button>
-        </div>
-      </div>
-      <div className="field">
-        <label>Dosya türü (boşsa her dosya)</label>
-        <input className="xp-input mono" value={n.pattern ?? ''} placeholder="*.glb; *.zip" onChange={(e) => upd({ pattern: e.target.value })} />
-      </div>
-      <div className="field">
-        <label>En fazla bekleme (saniye)</label>
-        <input
-          className="xp-input"
-          type="number"
-          min={1}
-          value={Math.round((n.timeoutMs ?? 300000) / 1000)}
-          onChange={(e) => upd({ timeoutMs: Math.max(1, Number(e.target.value) || 1) * 1000 })}
-        />
-      </div>
-      <p className="hint">
-        Akış başladığında klasörde olan dosyalar sayılmaz. Yeni gelen dosya yarım (.crdownload, .part) değilse ve boyutu durduysa hazır sayılır;
-        sonraki adımlarda <span className="mono">{'{{dosya}}'}</span> olarak kullanılır.
-      </p>
-    </>
-  )
-}
-
-function MoveFileEditor(p: Props & { n: AgentNode }) {
-  const { n } = p
-  const upd = p.onUpdateNode
-  return (
-    <>
-      <div className="field">
-        <label>Hangi dosya?</label>
-        <input className="xp-input mono" value={n.source ?? ''} placeholder="{{dosya}}" onChange={(e) => upd({ source: e.target.value })} />
-      </div>
-      <div className="field">
-        <label>Nereye, hangi adla?</label>
-        <input
-          className="xp-input mono"
-          value={n.text ?? ''}
-          placeholder="D:\\Modeller\\{{öğe.isim}}.glb"
-          onChange={(e) => upd({ text: e.target.value })}
-        />
-        <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
-      </div>
-      <p className="hint">
-        Klasör yoksa oluşturulur. Uzantı yazmazsan dosyanın kendi uzantısı kalır. Aynı adda dosya varsa sonuna (2) eklenir. Sonuna \ koyarsan
-        dosya o klasöre kendi adıyla gider.
-      </p>
     </>
   )
 }
@@ -657,7 +552,6 @@ function NodeFields(p: Props & { n: AgentNode }) {
           </label>
           <p className="hint">
             Tıklama, silme ve yazma arasında kısa beklemeler var. Yazdıktan sonra alanın içi okunur; başka bir şey yazıyorsa bir kez daha yazılır.
-            Tarayıcıda dosya penceresi açıksa ve metin bir dosya yoluysa, yol pencereye doğrudan verilir.
           </p>
           <label className="check">
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />

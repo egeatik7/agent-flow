@@ -31,11 +31,6 @@ export type Executor = {
   exists: (text: string, node: AgentNode) => Promise<boolean>
   /** İnisiyatif: reach the goal in a few actions. */
   initiative?: (node: AgentNode, stepNo: number, ahead?: StepAhead, vars?: Record<string, string>) => Promise<boolean>
-  openBrowser?: (node: AgentNode) => Promise<void>
-  /** Returns the finished file, or null on timeout. */
-  waitFile?: (node: AgentNode, stepNo: number) => Promise<string | null>
-  /** Returns the final path. */
-  moveFile?: (from: string, to: string, node: AgentNode) => Promise<string>
   /** Persist a change to a node (which item is on screen, memory) in the editor. */
   patchNode?: (id: string, patch: Partial<AgentNode>) => void
   /** A lap hit an error: keep a picture of the screen for later. */
@@ -389,7 +384,6 @@ export async function runGraph(
     const outer = vars
     let entry: AgentNode | undefined = startAt
     let lastFail = ''
-    if (loop.results) patch(loop.id, { results: undefined })
     try {
       for (let idx = from; idx < keys.length; idx++) {
         const key = keys[idx]
@@ -425,7 +419,7 @@ export async function runGraph(
         ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
         : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
     )
-    patch(loop.id, { results: undefined, loopIndex: undefined })
+    patch(loop.id, { loopIndex: undefined })
     ex.step(loop.id, 'done')
     return 'done'
   }

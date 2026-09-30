@@ -15,12 +15,6 @@ export function revealAt(graph: AgentGraph, nodeId: string, token: string): VarR
   const raw = token.trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '')
   const boxes = ancestors(graph, nodeId)
   const inner = boxes[0]
-  if (raw.toLowerCase().startsWith('dosya')) {
-    return {
-      value: 'henüz yok',
-      where: 'Dosyayı Bekle çalışınca inen dosyanın yolu. Tuvalde duran bir değer yok.',
-    }
-  }
   if (!inner) {
     return { value: 'boş', where: 'Bu node bir Her Öğe İçin kutusunun içinde değil.' }
   }

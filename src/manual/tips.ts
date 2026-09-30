@@ -17,11 +17,11 @@ const KIND: Record<string, Tip> = {
   },
   click: {
     title: 'Tıkla',
-    text: 'Ekranda (tarayıcı açıksa sayfada) yazdığın yeri arar ve tıklar. Tırnak içindeki yazı birebir aranır. Sağındaki sarı nokta bir sonraki adıma gider.',
+    text: 'Ekranda yazdığın yeri arar ve tıklar. Chrome 9222 ile açıksa önce sayfanın kendi yazısına bakar. Tırnak içindeki yazı birebir aranır. Sağındaki sarı nokta bir sonraki adıma gider.',
   },
   type: {
     title: 'Yazı Yaz',
-    text: 'Bir alana yazar. Alan boş bırakılırsa o an seçili yere yazar. Metin bir dosya yoluysa ve sayfa dosya istiyorsa yol pencereye doğrudan verilir. Döngüde sıradaki dosya için metne {{öğe}} yaz.',
+    text: 'Bir alana yazar. Alan boş bırakılırsa o an seçili yere yazar. Döngüde sıradaki dosya için metne {{öğe}} yaz.',
   },
   key: {
     title: 'Tuş Gönder',
@@ -45,15 +45,15 @@ const KIND: Record<string, Tip> = {
   },
   browser: {
     title: 'Tarayıcıyı Aç',
-    text: 'Edge’i, yoksa Chrome’u programın kendi profiliyle açar ve adrese gider. Sonraki tıklamalar sayfanın içini görür. Dosya seçme penceresi çıkmaz; sıradaki Yazı Yaz adımı yolu doğrudan verir. Elle açtığın Opera veya Chrome’a bağlanmaz.',
+    text: 'Bu adım kaldırıldı. Node’u silip akışa devam edebilirsin. Chrome’u kendin 9222 portuyla açarsan Tıkla ve Yazı Yaz sayfanın yazısını okur.',
   },
   waitFile: {
     title: 'Dosyayı Bekle',
-    text: 'Klasöre yeni bir dosya inip bitene kadar bekler. Yarım indirmeyi (.crdownload, .part) saymaz. Gelen dosyanın yolu sonraki adımlarda {{dosya}} olur.',
+    text: 'Bu adım kaldırıldı. Node’u silip akışa devam edebilirsin.',
   },
   moveFile: {
     title: 'Dosyayı Taşı',
-    text: 'Bir dosyayı yeni adıyla başka yere taşır. Kaynak boşsa {{dosya}} kullanılır, yani az önce Dosyayı Bekle’nin gördüğü dosya. Hedefe {{öğe.isim}} yazarsan her tur o dosyanın adını alır.',
+    text: 'Bu adım kaldırıldı. Node’u silip akışa devam edebilirsin.',
   },
   end: {
     title: 'Bitir',
@@ -65,7 +65,7 @@ const KIND: Record<string, Tip> = {
   },
   probe: {
     title: 'Kontrol',
-    text: 'Akışı bozmaz. İçindeki {{öğe}}, {{öğe.isim}}, {{öğe.ad}}, {{sıra}}, {{toplam}} veya {{dosya}} düğmesine basınca, node’un durduğu kutudaki işaretli satırın değeri görünür. Çalışırken aynı değer günlüğe de yazılır.',
+    text: 'Akışı bozmaz. İçindeki {{öğe}}, {{öğe.isim}}, {{öğe.ad}}, {{sıra}} veya {{toplam}} düğmesine basınca, node’un durduğu kutudaki işaretli satırın değeri görünür. Çalışırken aynı değer günlüğe de yazılır.',
   },
 }
 
@@ -109,11 +109,11 @@ const PORT: Record<string, Tip> = {
   },
   geldi: {
     title: 'Geldi',
-    text: 'Dosya inip tamamlanınca akış buradan gider. Dosyanın yolu {{dosya}} olur.',
+    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O adım artık atlanır ve akış buradan devam eder.',
   },
   'zaman aşımı': {
     title: 'Zaman aşımı',
-    text: 'Süre doldu ve dosya gelmedi. Akış bu çıkıştan gider. Çıkış boşsa adım hata verir.',
+    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O adım artık atlanır; bu çıkış kullanılmaz.',
   },
   tamam: {
     title: 'Tamam',
@@ -183,7 +183,6 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Görsel Test (ekranı anlat)', { title: 'Görsel Test', text: 'Ekranın bir karesini görsel modele gönderir. Model ne gördüğünü günlüğe yazar. Anahtar ve görsel model kayıtlı olmalı.' }],
     ['Tümünü Kaydet', { title: 'Tümünü Kaydet', text: 'Ayarlar sekmesindeki bütün alanları birden kaydeder. Tek bir alanın yanındaki Kaydet yalnızca o alanı yazar.' }],
     ['Unut', { title: 'Unut', text: 'Yalnızca bu node’un hafızasını veya kayıtlı yolunu siler. Diğer node’lar hatırlar. Hepsi için araç çubuğundaki Hafızayı Sil.' }],
-    ['Seç…', { title: 'Klasör seç', text: 'Dosyayı Bekle’nin bakacağı klasörü seçersin. Boş bırakırsan İndirilenler klasörüne bakar.' }],
   ]
   for (const [name, tip] of exact) {
     if (t === name || t.startsWith(name)) return tip
@@ -288,10 +287,6 @@ function varTip(raw: string): Tip {
       title: '{{toplam}}',
       text: 'Listede kaç öğe olduğu. İki dosya varsa her turda 2’dir. “{{sıra}} / {{toplam}}” yazarsan 1 / 2, sonra 2 / 2 olur. Tıklayınca üstteki alanın sonuna eklenir.',
     },
-    '{{dosya}}': {
-      title: '{{dosya}}',
-      text: 'Dosyayı Bekle’nin az önce gördüğü inen dosyanın tam yolu. Listedeki {{öğe}} bu değildir; siteden gelen sonuçtur. Dosyayı Taşı’nın kaynağı boşsa bunu kullanır. Tıklayınca üstteki alanın sonuna eklenir.',
-    },
   }
   return (
     tips[key] ?? {
@@ -314,9 +309,6 @@ function segTip(t: string): Tip | null {
       title: 'Yazı listesiyle',
       text: 'Ekrandaki yazılar numaralanır, model numarayı seçer. Formlar ve web sayfalarında hızlıdır. İkonu göremez.',
     },
-    Otomatik: { title: 'Otomatik', text: 'Windows’ta önce Edge, yoksa Chrome açılır.' },
-    Edge: { title: 'Edge', text: 'Tarayıcıyı Aç, Microsoft Edge’i kullanır.' },
-    Chrome: { title: 'Chrome', text: 'Tarayıcıyı Aç, Google Chrome’u kullanır.' },
   }
   return map[t] ?? null
 }
@@ -332,14 +324,7 @@ function fieldTip(el: Element): Tip | null {
     ['Nasıl çalışsın?', { title: 'Nasıl çalışsın?', text: 'Ekrana bakarak: model görüntüden tıklar. Yazı listesiyle: ekrandaki yazılardan numara seçer.' }],
     ['Hedef (ne olmasını istiyorsun?)', { title: 'Hedef', text: 'İnisiyatif’in yapacağı iş. Birkaç adımı tek cümlede yaz. {{öğe}} yazarsan her tur o dosyaya göre değişir; kayıtlı yol o zaman oynatılmaz, model yeniden bakar.' }],
     ['En fazla eylem', { title: 'En fazla eylem', text: 'İnisiyatif bu kadar tıklama, yazma ve tuştan sonra durur. Hedefe varmadan sınır dolarsa “olmadı” sayılır.' }],
-    ['Adres', { title: 'Adres', text: 'Tarayıcıyı Aç’ın gideceği sayfa. https:// ile yaz.' }],
-    ['Tarayıcı', { title: 'Tarayıcı', text: 'Sayfayı hangi tarayıcı açsın. Otomatik, önce Edge’e bakar.' }],
-    ['Klasör (boşsa İndirilenler)', { title: 'Klasör', text: 'Dosyayı Bekle bu klasöre bakar. Boşsa İndirilenler. Çalışma başladığında klasörde olan dosyalar sayılmaz; yalnızca yeniler.' }],
-    ['Dosya türü', { title: 'Dosya türü', text: 'Yalnızca bu ada uyan dosyayı bekle. Örnek: *.glb. Boşsa gelen her dosya kabul edilir.' }],
-    ['En fazla bekleme', { title: 'En fazla bekleme', text: 'Dosya bu sürede gelmezse “zaman aşımı” çıkışına bakılır. Çıkış boşsa adım hata verir.' }],
-    ['Hangi dosya?', { title: 'Hangi dosya?', text: 'Taşınacak dosyanın yolu. {{dosya}} az önce Dosyayı Bekle’nin gördüğü dosyadır.' }],
-    ['Nereye, hangi adla?', { title: 'Nereye', text: 'Dosyanın gideceği yer ve yeni adı. {{öğe.isim}} o turdaki dosyanın uzantısız adıdır. Örnek: D:\\Modeller\\{{öğe.isim}}.glb' }],
-    ['Neye tıklanacak?', { title: 'Neye tıklanacak?', text: 'Ekranda gördüğün yazıyı yaz. Tırnak içine alırsan birebir aranır. {{öğe.ad}} o turdaki dosya adıdır; dosya penceresinde o adı aramak için kullanılabilir.' }],
+    ['Neye tıklanacak?', { title: 'Neye tıklanacak?', text: 'Ekranda gördüğün yazıyı yaz. Tırnak içine alırsan birebir aranır. {{öğe.ad}} o turdaki dosya adıdır.' }],
     ['Tıklama türü', { title: 'Tıklama türü', text: 'Tek tık, çift tık veya sağ tık. Simgeler çoğunlukla çift tık ister.' }],
     ['Yazılacak metin', { title: 'Yazılacak metin', text: 'Alana yazılacak şey. Sıradaki dosya için yalnızca {{öğe}} yaz. Sabit bir dosya adı yazarsan her tur aynı dosya gider.' }],
     ['Hangi alana?', { title: 'Hangi alana?', text: 'Yazının gideceği yer. Boşsa o an odaklanan alana yazar. Doluysa önce o yazıyı ekranda bulup oraya tıklar.' }],

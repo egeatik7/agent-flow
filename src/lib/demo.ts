@@ -151,21 +151,6 @@ export async function runDemo(
       patchNode?.(n.id, { trace: ['tıkla “Model Seç”'] })
       return true
     },
-    openBrowser: async (n) => {
-      await pause(400)
-      log('success', `(demo) [tarayıcı] Edge açıldı: ${n.url || 'boş sayfa'} (gerçek otomasyon Windows exe’de)`)
-    },
-    waitFile: async (n) => {
-      await pause(700)
-      const name = `model-${Date.now().toString(36).slice(-4)}${(n.pattern ?? '').replace(/^\*/, '').split(/[;,]/)[0]?.trim() || '.glb'}`
-      log('success', `(demo) Dosya geldi: ${name}`)
-      return `C:\\Users\\demo\\Downloads\\${name}`
-    },
-    moveFile: async (from, to) => {
-      await pause(200)
-      log('success', `(demo) Taşındı: ${from} → ${to}`)
-      return to
-    },
     exists: async (text, n) => {
       await pause(250)
       if (n.useVision) {

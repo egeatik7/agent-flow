@@ -64,8 +64,6 @@ export type TargetMemo = {
   at: number
 }
 
-export type ItemStatus = 'ok' | 'fail'
-
 export type AgentNode = {
   id: string
   kind: NodeKind
@@ -96,12 +94,6 @@ export type AgentNode = {
   folder?: string
   /** Loop: nodes that belong to this box and repeat once per item. */
   members?: string[]
-  /** Loop: outcome per item key. Failed and missing items run again; a clean finish clears it. */
-  results?: Record<string, ItemStatus>
-  /** Loop: what to do when an item fails after its tries. */
-  onError?: 'skip' | 'stop'
-  /** Loop: tries per item (recovery chain runs between tries). */
-  attempts?: number
   /** Last successful targets of this node. */
   memory?: TargetMemo[]
   /** İnisiyatif (liste): the actions of the last lap that reached the goal. */
@@ -487,20 +479,7 @@ export function itemVars(item: string, index: number, total: number): Record<str
   return Object.fromEntries(Object.entries(vars).map(([k, v]) => [keyNorm(k), v]))
 }
 
-/** {{dosya}}, {{dosya.ad}}, {{dosya.isim}}, {{dosya.uzantı}} for the last file Dosyayı Bekle saw. */
-export function fileVars(file: string): Record<string, string> {
-  const ad = baseName(file)
-  const ext = ad.includes('.') ? ad.slice(ad.lastIndexOf('.')) : ''
-  const vars: Record<string, string> = {
-    dosya: file,
-    'dosya.ad': ad,
-    'dosya.isim': ext ? ad.slice(0, -ext.length) : ad,
-    'dosya.uzantı': ext,
-  }
-  return Object.fromEntries(Object.entries(vars).map(([k, v]) => [keyNorm(k), v]))
-}
-
-export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}', '{{dosya}}']
+export const TEMPLATE_VARS = ['{{öğe}}', '{{öğe.isim}}', '{{öğe.ad}}', '{{sıra}}', '{{toplam}}']
 
 /** Replaces {{name}} placeholders; accepts ASCII spellings too ({{oge.isim}}, {{sira}}). Unknown names stay as-is. */
 export function renderTemplate(s: string | undefined, vars: Record<string, string>): string | undefined {
@@ -551,9 +530,9 @@ function migrateLegacyLoops(nodes: AgentNode[], edges: AgentEdge[]): AgentEdge[]
     const body = legacyLoopBody(out, loop.id)
     const inBody = new Set(body)
     loop.members = body
-    delete loop.results
-    delete loop.onError
-    delete loop.attempts
+    delete (loop as { results?: unknown }).results
+    delete (loop as { onError?: unknown }).onError
+    delete (loop as { attempts?: unknown }).attempts
     delete loop.loopIndex
     out = out
       .filter((e) => !(e.from === loop.id && e.fromPort === 'loop'))
@@ -625,9 +604,9 @@ export function normalizeGraph(raw: unknown): AgentGraph {
       } as AgentNode
       if (kind === 'loop') {
         if (!Array.isArray(n.members)) delete node.members
-        delete node.results
-        delete node.onError
-        delete node.attempts
+        delete (node as { results?: unknown }).results
+        delete (node as { onError?: unknown }).onError
+        delete (node as { attempts?: unknown }).attempts
         delete node.loopIndex
       }
       if (kind === 'package') node.inner = normalizeGraph(n.inner ?? { nodes: [], edges: [] })

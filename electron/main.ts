@@ -206,10 +206,7 @@ app.whenReady().then(() => {
     } catch {
       runLog = ''
     }
-    agent.beginRun(
-      graph.nodes.filter((n) => n.kind === 'waitFile').map((n) => n.folder?.trim() ?? ''),
-      runLog ? logsDir() : ''
-    )
+    agent.beginRun(runLog ? logsDir() : '')
     globalShortcut.register(STOP_HOTKEY, () => {
       stopRequested = true
     })
@@ -278,7 +275,6 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
-  void agent.closeBrowser()
 })
 
 app.on('window-all-closed', () => {

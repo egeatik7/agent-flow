@@ -52,17 +52,13 @@ satırı yazar ve sıradaki öğeye geçilir. Sonraki çalıştırma yine birinc
 Eski akışlardaki “Döngü kartı + geri dönen ok” yapısı açılırken otomatik olarak kutuya çevrilir. Eski “hata olursa”
 bağlantısı açılırken düşer.
 
-## Tarayıcı modu
+## Chrome
 
-**Tarayıcıyı Aç** node’u Edge’i (yoksa Chrome’u) programın kendi profiliyle açar ve adrese gider. Siteye bir kez elle
-giriş yaparsan sonra hep açık kalır.
+Kendi açtığın Chrome, kısayolu şöyleyse sayfanın yazısını verir:
 
-- Bu tarayıcı öndeyken Tıkla, Yazı Yaz ve Koşul önce sayfanın içine bakar. Bulamazsa (örn. sistem
-  penceresi açıldıysa) ekrana döner.
-- Sayfa bir dosya seçme penceresi açarsa pencere görünmez; sıradaki **Yazı Yaz** adımındaki yol (`{{öğe}}`) doğrudan verilir.
-- İndirmeler **İndirilenler** klasörüne düşer, “Farklı kaydet” penceresi çıkmaz. Ad vermek için **Dosyayı Bekle** +
-  **Dosyayı Taşı** kullan.
-- Kendi açtığın normal Chrome’a bağlanılamaz; o durumda ajan ekran modunda çalışır.
+`"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222`
+
+Chrome’u bu kısayoldan tamamen kapatıp yeniden aç. Tıkla ve Yazı Yaz, öndeki sayfanın kendi düğme ve yazı listesine bakar. Port kapalıysa, yazı sayfada yoksa ya da önünde bir dosya penceresi varsa ekran okumasına düşer. Ekranı Tara’da seçtiğin kutunun üstüne denk gelen sayfa yazısı kayda geçer.
 
 ## İnisiyatif
 
@@ -73,7 +69,7 @@ Birkaç aşamalı bir işi tek cümleyle tarif etmek için: “Blender’da küp
   sürükle, tuş kombinasyonu (Shift+A, Ctrl+S, Win), yaz, kaydır, bekle, bitti ya da yardım iste. Tıklama noktası
   doğrudan ekran görüntüsünden gelir; yazısız ikonlar, 3D görünüm ve menüler dahil. Modele son birkaç ekran görüntüsü ve
   önceki adımları birlikte gider. Başka bir görsel model de yazabilirsin (Gemini, Claude); o zaman aynı eylemler JSON olarak istenir.
-- **Yazı listesiyle:** ekrandaki (tarayıcıdaysa sayfadaki) yazıların numaralı listesinden seçer. Formlarda ve web sayfalarında hızlıdır.
+- **Yazı listesiyle:** ekrandaki yazıların numaralı listesinden seçer. Formlarda ve web sayfalarında hızlıdır.
 
 Güvenceler:
 
@@ -85,8 +81,7 @@ Güvenceler:
 
 ## Emin olma
 
-- Sıradaki node **Koşul** ya da **Dosyayı Bekle** ise eylem bir kez yapılır ve kontrol edilmeden geçilir; o node ekrana kendisi bakar.
-- Tarayıcıda: sayfanın yüklenmesi beklenir, sıradaki adımın yazısı sayfada mı diye bakılır.
+- Sıradaki node **Koşul** ise eylem bir kez yapılır ve kontrol edilmeden geçilir; o node ekrana kendisi bakar.
 - Ekranda: eylemden önce ve sonra bir kare alınır. Sayfa değiştiyse ve sıradaki yazı geldiyse devam edilir. Tepki net
   değilse akış hemen bozulmaz: sıradaki adımın hedefi ekranda mı diye bakılır, yoksa beklenir, gerekirse model plan kurar.
   Aynı komut yeniden basılmaz.
@@ -108,7 +103,6 @@ Güvenceler:
 - **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.
 - **Bilgisayar uyumaz**, ekran kilitlenirse ajan kilit açılana kadar bekler.
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
-- **Tarayıcı modu** sayfa yeniden çizilse de öğeyi yazısı ve türüyle yeniden bulur. 60 sn içinde yol verilmeyen dosya penceresi iptal edilir.
 - **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
 - **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30). Bir tur hata verirse o anki ekran
@@ -126,21 +120,16 @@ Güvenceler:
 | Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
-| Tarayıcıyı Aç | Edge/Chrome’u açar, adrese gider; sonraki adımlar sayfanın içini görür | sonra |
-| Dosyayı Bekle | Klasöre yeni dosya inip tamamlanana kadar bekler → `{{dosya}}` | geldi / zaman aşımı |
-| Dosyayı Taşı | Dosyayı yeni adıyla taşır (`D:\Modeller\{{öğe.isim}}.glb`) | sonra |
 | Bitir | Akışı sonlandırır | — |
 
-“Zaman aşımı” ve “olmadı” çıkışları, bir de bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir.
+“olmadı” çıkışı ve bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı duruyorsa o adım atlanır.
 
 ## Örnek: klasördeki her resimden 3D model
 
 ```
-Başlangıç → Tarayıcıyı Aç https://site
-          → [Her Öğe İçin: C:\Resimler klasörü]
+Başlangıç → [Her Öğe İçin: C:\Resimler klasörü]
                Tıkla “Resim yükle” → Yazı Yaz {{öğe}} → Tıkla “Oluştur”
                → Koşul “İndir” (10 dk bekle) → Tıkla “İndir”
-               → Dosyayı Bekle *.glb → Dosyayı Taşı D:\Modeller\{{öğe.isim}}.glb
             bitti → Bitir
 ```
 
@@ -171,13 +160,12 @@ Başlangıç → Tarayıcıyı Aç https://site
 5. Hedef pencere → **Kaydet** (boş bırakılırsa tüm ekran okunur)
 6. Node’ları diz, **▶ Ajanı Çalıştır**
 
-API anahtarı olmadan da çalışır: yazı eşleştirmesi, tarayıcı modu, kutular ve dosya node’ları modelsiz çalışır. İnisiyatif ve
+API anahtarı olmadan da çalışır: yazı eşleştirmesi ve kutular modelsiz çalışır. İnisiyatif ve
 görsel mod anahtar ister.
 
 ## Exe
 
-Repoda hazır portable paket: **`Nubbo.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Tarayıcı modu için
-Edge (Windows’ta hazır gelir) ya da Chrome yeterli; ayrıca tarayıcı indirilmez.
+Repoda hazır portable paket: **`Nubbo.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Chrome sayfasının yazısını okumak için Chrome’u `--remote-debugging-port=9222` ile aç.
 
 ## Geliştirme
 
@@ -189,11 +177,10 @@ npm run pack:win     # release/Nubbo.exe üretir
 ```
 
 - `electron/runner.ts`: akışı yürütür (kutular, kurtarma, kaldığı yerden devam).
-- `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, doğrulama, İnisiyatif, dosyalar).
-- `electron/browser.ts`: tarayıcı modu (`playwright-core`, sistemdeki Edge/Chrome ile).
+- `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, doğrulama, İnisiyatif).
+- `electron/browser.ts`: kullanıcının 9222 portuyla açtığı Chrome’un sayfa yazısı (`playwright-core`).
 - `electron/memory.ts`: hedef hafızası ve çelişki kontrolü.
 - `a11y/`: ekran okuma ve tıklama için PowerShell (`worker.ps1` sürekli açık kalan tek süreç; `screen.ps1` ekran
   görüntüsü + `Windows.Media.Ocr` + UI Automation). Gerçek ekran otomasyonu yalnızca Windows 10/11’de çalışır.
 
-API anahtarı `electron-store` ile kullanıcı profiline (`%APPDATA%/xp-agent-studio`) yazılır. Tarayıcı profili aynı
-klasörde `browser-profile` altındadır.
+API anahtarı `electron-store` ile kullanıcı profiline (`%APPDATA%/xp-agent-studio`) yazılır.

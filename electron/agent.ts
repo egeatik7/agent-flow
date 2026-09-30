@@ -1,4 +1,4 @@
-import { app, screen as electronScreen } from 'electron'
+import { screen as electronScreen } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import * as bridge from './a11y-bridge'
@@ -45,7 +45,7 @@ export type AgentContext = {
   shouldStop: () => boolean
 }
 
-type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; dom?: number }
+type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
 
 class NotFoundError extends Error {}
 
@@ -79,48 +79,9 @@ const PATCH_RADIUS = 90
 const ICON_MIN = 0.82
 /** Koşul decides a branch on the picture alone, so it asks for a closer match. */
 const ICON_CHECK_MIN = 0.88
-const TEMP_FILE = /\.(crdownload|part|partial|tmp|download|opdownload|xpas-part)$/i
 
 function center(t: { x: number; y: number; w: number; h: number }) {
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
-}
-
-function globToRe(glob: string | undefined): RegExp | null {
-  const g = (glob ?? '').trim()
-  if (!g) return null
-  const parts = g.split(/[;,]\s*/).filter(Boolean)
-  const body = parts
-    .map((p) => p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'))
-    .join('|')
-  return new RegExp(`^(?:${body})$`, 'i')
-}
-
-function uniquePath(p: string): string {
-  if (!fs.existsSync(p)) return p
-  const ext = path.extname(p)
-  const stem = p.slice(0, p.length - ext.length)
-  for (let i = 2; i < 1000; i++) {
-    const c = `${stem} (${i})${ext}`
-    if (!fs.existsSync(c)) return c
-  }
-  return `${stem} (${Date.now()})${ext}`
-}
-
-function listFiles(folder: string): Map<string, number> {
-  const out = new Map<string, number>()
-  try {
-    for (const d of fs.readdirSync(folder, { withFileTypes: true })) {
-      if (!d.isFile()) continue
-      try {
-        out.set(d.name, fs.statSync(path.join(folder, d.name)).mtimeMs)
-      } catch {
-        /* vanished while listing */
-      }
-    }
-  } catch {
-    /* folder missing */
-  }
-  return out
 }
 
 /** Replace this lap's values with their placeholders so the trace fits the next lap too. */
@@ -155,7 +116,6 @@ export function createAgent(ctx: AgentContext) {
     const f = d.scaleFactor || 1
     return { x: Math.round(d.bounds.x * f), y: Math.round(d.bounds.y * f), w: Math.max(1, Math.round(d.bounds.width * f)), h: Math.max(1, Math.round(d.bounds.height * f)) }
   }
-  const baselines = new Map<string, Map<string, number>>()
   const warnedMissing = new Set<string>()
 
   const memoFor = (node: AgentNode) => runMemo.get(node.id) ?? node.memory
@@ -166,12 +126,10 @@ export function createAgent(ctx: AgentContext) {
     send('agent:patch', { id: node.id, patch: { memory: list } })
   }
 
-  const downloadsDir = () => app.getPath('downloads')
-
   let failDir = ''
 
-  /** Called when a run starts: forget this run's memory copies, note which files already exist. */
-  function beginRun(folders: string[], logDir = '') {
+  /** Called when a run starts: forget this run's memory copies. */
+  function beginRun(logDir = '') {
     failDir = logDir
     runMemo.clear()
     runTrace.clear()
@@ -180,14 +138,6 @@ export function createAgent(ctx: AgentContext) {
     lastVisionAt.clear()
     lastFg = null
     warnedMissing.clear()
-    baselines.clear()
-    for (const f of new Set([downloadsDir(), ...folders.filter((x) => x && !x.includes('{{'))])) baselines.set(f, listFiles(f))
-  }
-
-  async function browserInFront(): Promise<boolean> {
-    if (!browser.isOpen()) return false
-    const fg = await bridge.foreground()
-    return browser.looksForeground(fg ? fg.title : null)
   }
 
   function warnMissingWindow(res: ScanResult) {
@@ -330,15 +280,6 @@ export function createAgent(ctx: AgentContext) {
     const prompt = node.prompt?.trim() ?? ''
 
     const loc = node.locator
-    const pickedInBrowser = !loc || /edge|chrome|firefox|opera/i.test(loc.windowTitle ?? '')
-    if (pickedInBrowser && (await browserInFront())) {
-      const d = await browser.items()
-      log('info', `[sayfa] ${d.items.length} öğe okundu${d.host ? ` (${d.host})` : ''}.`)
-      const pick = await pickFrom(node, pseudoScan(d.items, d.area, d.host), `web:${d.host}`, true)
-      if (pick) return { x: 0, y: 0, dom: pick.item.id, memo: pick.memo, label: `[sayfa] “${pick.target.text}” (${pick.how})` }
-      log('info', '[sayfa] Sayfada bulunamadı; ekran okunuyor (açılır pencere ya da sistem penceresi olabilir).')
-    }
-
     const win = s.targetWindow || loc?.windowTitle || ''
     const userChrome = await browser.userChromeItems(win || undefined)
     if (userChrome) {
@@ -570,10 +511,6 @@ export function createAgent(ctx: AgentContext) {
       if (!quiet) log('info', 'Sırada kontrol edilecek bir öğe yok. Devam ediliyor.')
       return true
     }
-    if (browser.isOpen() && (await browser.hasText(goal.text))) {
-      log('success', `${goal.label} sayfada. Devam ediliyor.`)
-      return true
-    }
     if (process.platform === 'win32') {
       const res = await bridge.scan({ image: 'none', fresh: true })
       if (containsText(res.items, goal.text) || matchPrompt(res.items, goal.text)) {
@@ -627,22 +564,11 @@ export function createAgent(ctx: AgentContext) {
    * if the reaction cannot be confirmed, the next step looks for its own target, waits, and recovers.
    * Returns whether the reaction was confirmed (only confirmed targets go into memory).
    */
-  async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, onPage: boolean, act: () => Promise<void>): Promise<boolean> {
-    if (ahead?.next?.kind === 'condition' || ahead?.next?.kind === 'waitFile') {
+  async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, act: () => Promise<void>): Promise<boolean> {
+    if (ahead?.next?.kind === 'condition') {
       await act()
-      if (onPage) await browser.settle(1500)
       log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım (${ahead.next.title}) ekrana kendisi baktığı için kontrol edilmeden geçiliyor.`)
       return true
-    }
-    if (onPage) {
-      await act()
-      await browser.settle()
-      if (await aheadIsReady(ahead, true)) return true
-      await pause(2000)
-      await browser.settle()
-      if (await aheadIsReady(ahead, true)) return true
-      log('info', 'Sayfada sıradaki öğe henüz yok; sıradaki adım kendisi arayıp bekleyecek.')
-      return false
     }
     if (process.platform !== 'win32') {
       await act()
@@ -909,16 +835,9 @@ export function createAgent(ctx: AgentContext) {
 
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
-      const onPage = await browserInFront()
-      let items: ScreenItem[]
-      let image: ScanResult['image'] = null
-      if (onPage) {
-        items = (await browser.items()).items
-      } else {
-        const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400 })
-        items = res.items
-        image = res.image
-      }
+      const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400 })
+      const items = res.items
+      const image = res.image
       const a = await nextAction({
         apiKey: s.apiKey,
         model,
@@ -926,7 +845,7 @@ export function createAgent(ctx: AgentContext) {
         stepTitle: node.title,
         history,
         lastLap,
-        listText: `${onPage ? '(web sayfası)\n' : ''}${describeItems(items, 300)}`,
+        listText: describeItems(items, 300),
         image,
         next,
       })
@@ -967,13 +886,10 @@ export function createAgent(ctx: AgentContext) {
           trace.push(`tuş ${a.keys}`)
         } else if (a.action === 'type') {
           if (item) {
-            if (onPage) await browser.fillItem(item.id, a.text, true, a.enter)
-            else {
-              await bridge.clickAt(center(item).x, center(item).y, 'left')
-              await sleep(FOCUS_MS)
-              await typeVerified(a.text, a.enter, true)
-            }
-          } else if (!(browser.isOpen() && (await browser.feedChooser(a.text)))) {
+            await bridge.clickAt(center(item).x, center(item).y, 'left')
+            await sleep(FOCUS_MS)
+            await typeVerified(a.text, a.enter, true)
+          } else {
             await typeVerified(a.text, a.enter, false)
           }
           const line = `yaz “${a.text}”${item ? ` → “${item.text}”` : ''}${a.enter ? ' + Enter' : ''}`
@@ -985,8 +901,7 @@ export function createAgent(ctx: AgentContext) {
             continue
           }
           const mode = a.action === 'double' ? 'double' : a.action === 'right' ? 'right' : 'left'
-          if (onPage) await browser.clickItem(item.id, mode)
-          else await bridge.clickAt(center(item).x, center(item).y, mode)
+          await bridge.clickAt(center(item).x, center(item).y, mode)
           const line = `${mode === 'double' ? 'çift tıkla' : mode === 'right' ? 'sağ tıkla' : 'tıkla'} “${item.text}”`
           history.push(line)
           trace.push(line)
@@ -996,7 +911,6 @@ export function createAgent(ctx: AgentContext) {
         history.push(`hata: ${(e as Error).message.split('\n')[0]}`)
       }
       await pause(700)
-      if (onPage) await browser.settle(1500)
     }
     log('warn', `İnisiyatif ${max} eylemde hedefe ulaşamadı.`)
     return false
@@ -1072,7 +986,6 @@ export function createAgent(ctx: AgentContext) {
         const raw = a.text ?? ''
         const enter = /\n$/.test(raw)
         const body = raw.replace(/\n+$/, '')
-        if (browser.isOpen() && (await browser.feedChooser(body))) return
         await bridge.typeText(body, enter, false)
         return
       }
@@ -1277,87 +1190,6 @@ export function createAgent(ctx: AgentContext) {
     return false
   }
 
-  // ---------- files ----------
-
-  async function waitFile(node: AgentNode, stepNo: number): Promise<string | null> {
-    const folder = node.folder?.trim() || downloadsDir()
-    const re = globToRe(node.pattern)
-    const timeout = Math.max(1000, node.timeoutMs ?? 300000)
-    if (!baselines.has(folder)) baselines.set(folder, listFiles(folder))
-    const known = baselines.get(folder)!
-    log('info', `[${stepNo}] ${folder} klasörüne ${node.pattern?.trim() ? `“${node.pattern.trim()}” ` : ''}yeni dosya bekleniyor…`)
-    const until = Date.now() + timeout
-    let lastNote = Date.now()
-    while (Date.now() < until) {
-      if (stopped()) throw new StoppedError()
-      const now = listFiles(folder)
-      let partial = false
-      const fresh = [...now.entries()]
-        .filter(([name, mtime]) => {
-          if (name.startsWith('.') || TEMP_FILE.test(name)) {
-            partial = true
-            return false
-          }
-          if (re && !re.test(name)) return false
-          return known.get(name) !== mtime
-        })
-        .sort((a, b) => b[1] - a[1])
-      if (fresh.length) {
-        const [name] = fresh[0]
-        const full = path.join(folder, name)
-        // Finished = size and time unchanged for about 4 seconds (three looks), and no partial download left.
-        let prev = fs.statSync(full)
-        let quiet = 0
-        while (quiet < 3) {
-          await pause(1300)
-          const st = fs.existsSync(full) ? fs.statSync(full) : null
-          if (!st) break
-          const stillPartial = [...listFiles(folder).keys()].some((n) => TEMP_FILE.test(n) && n.toLowerCase().startsWith(name.toLowerCase().slice(0, 12)))
-          if (st.size > 0 && st.size === prev.size && st.mtimeMs === prev.mtimeMs && !stillPartial) quiet++
-          else quiet = 0
-          prev = st
-        }
-        if (quiet >= 3) {
-          known.set(name, prev.mtimeMs)
-          log('success', `Dosya geldi: ${name} (${Math.round(prev.size / 1024)} KB)`)
-          return full
-        }
-        continue
-      }
-      if (Date.now() - lastNote > 20000) {
-        lastNote = Date.now()
-        log('info', partial ? 'İndirme sürüyor…' : `Hâlâ bekleniyor (${Math.round((until - Date.now()) / 1000)} sn kaldı).`)
-      }
-      await pause(1000)
-    }
-    log('warn', `${Math.round(timeout / 1000)} sn içinde yeni dosya gelmedi.`)
-    return null
-  }
-
-  async function moveFile(from: string, to: string): Promise<string> {
-    if (!fs.existsSync(from)) throw new Error(`Taşınacak dosya yok: ${from}`)
-    let dst = path.isAbsolute(to) ? to : path.join(path.dirname(from), to)
-    const dirTarget = /[\\/]$/.test(to) || (fs.existsSync(dst) && fs.statSync(dst).isDirectory())
-    if (dirTarget) dst = path.join(dst, path.basename(from))
-    else if (!path.extname(dst) && path.extname(from)) dst += path.extname(from)
-    fs.mkdirSync(path.dirname(dst), { recursive: true })
-    if (path.resolve(dst) !== path.resolve(from) && fs.existsSync(dst)) {
-      const alt = uniquePath(dst)
-      log('warn', `${path.basename(dst)} zaten var; ${path.basename(alt)} olarak kaydediliyor.`)
-      dst = alt
-    }
-    try {
-      fs.renameSync(from, dst)
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e
-      fs.copyFileSync(from, dst)
-      fs.unlinkSync(from)
-    }
-    for (const known of baselines.values()) known.delete(path.basename(from))
-    log('success', `Taşındı: ${path.basename(from)} → ${dst}`)
-    return dst
-  }
-
   // ---------- executor ----------
 
   const executor: Executor = {
@@ -1369,15 +1201,11 @@ export function createAgent(ctx: AgentContext) {
       await waitUnlocked()
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
-      const confirmed = await ensureActed(node, ahead, t.dom !== undefined, async () => {
-        if (t.dom !== undefined) await browser.clickItem(t.dom, mode)
-        else await bridge.clickAt(t.x, t.y, mode)
+      const confirmed = await ensureActed(node, ahead, async () => {
+        await bridge.clickAt(t.x, t.y, mode)
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
-        log('success', `${verb}: ${t.label}${t.dom === undefined ? ` @${Math.round(t.x)},${Math.round(t.y)}` : ''}`)
+        log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       })
-      if (browser.hasPendingChooser() && ahead?.next?.kind !== 'type') {
-        log('warn', 'Sayfa bir dosya seçme penceresi açtı ama sıradaki adım Yazı Yaz değil. Dosya yolunu bir Yazı Yaz ile ver; 60 sn içinde verilmezse pencere iptal edilir.')
-      }
       if (confirmed) saveMemo(node, t.memo)
       await noteForeground()
     },
@@ -1386,22 +1214,13 @@ export function createAgent(ctx: AgentContext) {
       const text = node.text ?? ''
       const enter = !!node.pressEnter
       const clear = node.clearFirst !== false
-      if (browser.isOpen() && (await browser.feedChooser(text))) return
       let t: Resolved | null = null
       if (node.prompt?.trim() || node.locator) {
         t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       } else {
         await guardFocus(node)
       }
-      const confirmed = await ensureActed(node, ahead, t?.dom !== undefined, async () => {
-        if (t?.dom !== undefined) {
-          const v = await browser.fillItem(t.dom, text, clear, enter)
-          const state = v === null || !text ? 'ok' : fieldState(v, text)
-          if (state === 'empty' || state === 'wrong') throw new Error(`Yazı alana gitmedi: alanda “${(v ?? '').slice(0, 60)}” var.`)
-          if (state === 'partial') log('warn', `Alan yazıyı biçimlendirmiş görünüyor (“${(v ?? '').slice(0, 60)}”); devam ediliyor.`)
-          log('success', `Yazıldı: ${t.label}`)
-          return
-        }
+      const confirmed = await ensureActed(node, ahead, async () => {
         if (t) {
           await bridge.clickAt(t.x, t.y, 'left')
           await sleep(FOCUS_MS)
@@ -1422,7 +1241,7 @@ export function createAgent(ctx: AgentContext) {
       } else if (!getSettings().targetWindow) {
         await guardFocus(node)
       }
-      const confirmed = await ensureActed(node, ahead, false, async () => {
+      const confirmed = await ensureActed(node, ahead, async () => {
         if (t) {
           await bridge.clickAt(t.x, t.y, 'left')
           await sleep(FOCUS_MS)
@@ -1430,8 +1249,7 @@ export function createAgent(ctx: AgentContext) {
           await bridge.sendKeys(keys)
           return
         }
-        const onPage = await browserInFront()
-        await bridge.sendKeys(keys, onPage ? undefined : getSettings().targetWindow || undefined)
+        await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       })
       if (confirmed) saveMemo(node, t?.memo)
       await noteForeground()
@@ -1442,7 +1260,6 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      if (text && browser.isOpen() && (await browser.hasText(text))) return found(`sayfada “${text}” yazısı`)
       if (node.locator) {
         const how = await savedTargetVisible(node)
         if (how) return found(how)
@@ -1476,18 +1293,7 @@ export function createAgent(ctx: AgentContext) {
     },
     initiative: (node, stepNo, ahead, vars) =>
       node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),
-    openBrowser: async (node) => {
-      await browser.open({
-        url: node.url ?? '',
-        browser: node.browser ?? 'auto',
-        profileDir: path.join(app.getPath('userData'), 'browser-profile'),
-        downloadsDir: downloadsDir(),
-        log: (l, m) => log(l, m),
-      })
-    },
-    waitFile,
-    moveFile: (from, to) => moveFile(from, to),
   }
 
-  return { executor, beginRun, closeBrowser: () => browser.close() }
+  return { executor, beginRun }
 }
