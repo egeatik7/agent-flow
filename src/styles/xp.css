@@ -1651,6 +1651,102 @@ body {
   height: min(900px, 92vh);
 }
 
+.xp-dialog.scanner > .toolbar {
+  position: relative;
+  z-index: 4;
+}
+
+.ramp-drop .xp-btn.open {
+  border-color: #003c74;
+}
+
+.ramp-menu {
+  width: 292px;
+  padding: 8px 10px 10px;
+  cursor: default;
+}
+
+.ramp-title {
+  font-weight: bold;
+  color: #003c74;
+}
+
+.ramp-hint {
+  margin: 2px 0 8px;
+  color: #333;
+  line-height: 1.35;
+}
+
+.ramp-track {
+  position: relative;
+  height: 36px;
+  margin: 0 4px 6px;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.ramp-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 16px;
+  border: 1px solid #404040;
+  box-shadow: inset 1px 1px 0 #fff;
+}
+
+.ramp-stop {
+  position: absolute;
+  top: 2px;
+  width: 8px;
+  height: 24px;
+  margin-left: -5px;
+  background: #fff;
+  border: 2px solid #003c74;
+  box-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+
+.ramp-stop.hi {
+  background: #003c74;
+  border-color: #fff;
+}
+
+.ramp-fields {
+  display: flex;
+  gap: 8px;
+}
+
+.ramp-fields label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #003c74;
+}
+
+.ramp-fields input {
+  width: 100%;
+}
+
+.ramp-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.shot-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  box-shadow: 0 0 0 1px #000;
+}
+
+.shot-wrap img.shot-hidden,
+.shot-canvas.shot-hidden {
+  display: none;
+}
+
 .xp-confirm-backdrop {
   z-index: 220;
 }

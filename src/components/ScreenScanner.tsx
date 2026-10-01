@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { rampIsFlat, remapPixel } from '../lib/value-ramp'
 import type { ScanResult, ScreenItem } from '../types'
 
 type Props = {
   targetLabel: string
   windows: { title: string; handle: string }[]
   defaultWindow: string
-  onScan: (windowTitle: string) => Promise<ScanResult>
+  valueLo: number
+  valueHi: number
+  onRamp: (lo: number, hi: number) => void
+  onScan: (windowTitle: string, ramp: { lo: number; hi: number }) => Promise<ScanResult>
   onPick: (item: ScreenItem) => void
   onClose: () => void
 }
@@ -14,9 +18,9 @@ function norm(s: string) {
   return s.replace(/[İIı]/g, 'i').toLowerCase()
 }
 
-function bytesOf(data: string): Uint8Array {
+function bytesOf(data: string): Uint8Array<ArrayBuffer> {
   const bin = atob(data)
-  const bytes = new Uint8Array(bin.length)
+  const bytes = new Uint8Array(new ArrayBuffer(bin.length))
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   return bytes
 }
@@ -29,12 +33,42 @@ export default function ScreenScanner(p: Props) {
   const [filter, setFilter] = useState('')
   const [hover, setHover] = useState<number | null>(null)
   const [source, setSource] = useState<'all' | 'uia' | 'ocr'>('all')
+  const [lo, setLo] = useState(p.valueLo)
+  const [hi, setHi] = useState(p.valueHi)
+  const [rampOpen, setRampOpen] = useState(false)
+  const rampRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
+  const dragStop = useRef<'lo' | 'hi' | null>(null)
+  const rampNow = useRef({ lo: p.valueLo, hi: p.valueHi })
+  const rampTimer = useRef<number | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const baseRef = useRef<ImageData | null>(null)
+  const [painted, setPainted] = useState(false)
+
+  useEffect(() => {
+    setLo(p.valueLo)
+    setHi(p.valueHi)
+  }, [p.valueLo, p.valueHi])
+
+  const setRamp = (nextLo: number, nextHi: number, flush = false) => {
+    const a = Math.min(1, Math.max(0, nextLo))
+    const b = Math.min(1, Math.max(0, nextHi))
+    const lo2 = Math.min(a, b)
+    const hi2 = Math.max(a, b)
+    rampNow.current = { lo: lo2, hi: hi2 }
+    setLo(lo2)
+    setHi(hi2)
+    if (rampTimer.current) window.clearTimeout(rampTimer.current)
+    if (flush) p.onRamp(lo2, hi2)
+    else rampTimer.current = window.setTimeout(() => p.onRamp(lo2, hi2), 80)
+  }
 
   const scan = async () => {
     setLoading(true)
     setError(null)
+    p.onRamp(lo, hi)
     try {
-      setResult(await p.onScan(scope))
+      setResult(await p.onScan(scope, { lo, hi }))
     } catch (e) {
       setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
     } finally {
@@ -48,10 +82,39 @@ export default function ScreenScanner(p: Props) {
   }, [])
 
   useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && p.onClose()
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (rampOpen) {
+        setRampOpen(false)
+        return
+      }
+      p.onClose()
+    }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [p])
+  }, [p, rampOpen])
+
+  useEffect(() => {
+    if (!rampOpen) return
+    const close = (e: PointerEvent) => {
+      if (rampRef.current?.contains(e.target as Node)) return
+      setRampOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [rampOpen])
+
+  const placeStop = (which: 'lo' | 'hi', x: number) => {
+    const now = rampNow.current
+    if (which === 'lo') setRamp(Math.min(x, now.hi), now.hi)
+    else setRamp(now.lo, Math.max(x, now.lo))
+  }
+
+  const atTrack = (clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect || rect.width < 1) return 0
+    return Math.round(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * 100) / 100
+  }
 
   const items = useMemo(() => {
     const all = result?.items ?? []
@@ -69,8 +132,65 @@ export default function ScreenScanner(p: Props) {
     }
     const url = URL.createObjectURL(new Blob([bytesOf(img.data)], { type: img.mime || 'image/png' }))
     setSrc(url)
+    setPainted(false)
+    baseRef.current = null
     return () => URL.revokeObjectURL(url)
   }, [img?.data, img?.mime])
+
+  useEffect(() => {
+    if (!src) return
+    let cancel = false
+    const image = new Image()
+    image.onload = () => {
+      if (cancel || !image.naturalWidth) return
+      const c = document.createElement('canvas')
+      c.width = image.naturalWidth
+      c.height = image.naturalHeight
+      const g = c.getContext('2d', { willReadFrequently: true })
+      if (!g) return
+      g.drawImage(image, 0, 0)
+      baseRef.current = g.getImageData(0, 0, c.width, c.height)
+      paintRamp()
+    }
+    image.src = src
+    return () => {
+      cancel = true
+    }
+    // paintRamp closes over the latest stops; the effect below repaints when they move.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src])
+
+  const paintRamp = () => {
+    const base = baseRef.current
+    const canvas = canvasRef.current
+    if (!base || !canvas) return
+    if (canvas.width !== base.width || canvas.height !== base.height) {
+      canvas.width = base.width
+      canvas.height = base.height
+    }
+    const g = canvas.getContext('2d')
+    if (!g) return
+    if (rampIsFlat(lo, hi)) {
+      g.putImageData(base, 0, 0)
+      setPainted(true)
+      return
+    }
+    const out = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height)
+    const d = out.data
+    for (let i = 0; i < d.length; i += 4) {
+      const [r, gc, b] = remapPixel(d[i], d[i + 1], d[i + 2], lo, hi)
+      d[i] = r
+      d[i + 1] = gc
+      d[i + 2] = b
+    }
+    g.putImageData(out, 0, 0)
+    setPainted(true)
+  }
+
+  useEffect(() => {
+    paintRamp()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lo, hi, src])
 
   return (
     <div className="modal-backdrop" onMouseDown={p.onClose}>
@@ -110,6 +230,85 @@ export default function ScreenScanner(p: Props) {
             <option value="uia">Uygulama öğeleri</option>
             <option value="ocr">OCR yazıları</option>
           </select>
+          <div className="dropdown ramp-drop" ref={rampRef}>
+            <button
+              type="button"
+              className={`xp-btn${rampOpen ? ' open' : ''}`}
+              title="Value ramp. Görüntü hemen değişir. Sonraki tarama bu duraklarla okunur."
+              onClick={() => setRampOpen((v) => !v)}
+            >
+              Değer {lo.toFixed(2)}–{hi.toFixed(2)} ▾
+            </button>
+            {rampOpen && (
+              <div className="dropdown-menu ramp-menu" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="ramp-title">Value ramp</div>
+                <p className="ramp-hint">Soldaki durak giriş 0’ın çıkışı, sağdaki durak giriş 1’in çıkışı. Görüntü hemen değişir. Ekranı Tara bu ayarla okur.</p>
+                <div
+                  className="ramp-track"
+                  ref={trackRef}
+                  onPointerDown={(e) => {
+                    const x = atTrack(e.clientX)
+                    const which = Math.abs(x - lo) <= Math.abs(x - hi) ? 'lo' : 'hi'
+                    dragStop.current = which
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    placeStop(which, x)
+                  }}
+                  onPointerMove={(e) => {
+                    if (!dragStop.current) return
+                    placeStop(dragStop.current, atTrack(e.clientX))
+                  }}
+                  onPointerUp={() => {
+                    dragStop.current = null
+                    const now = rampNow.current
+                    setRamp(now.lo, now.hi, true)
+                  }}
+                >
+                  <div
+                    className="ramp-bar"
+                    style={{
+                      background: `linear-gradient(90deg, rgb(${Math.round(lo * 255)},${Math.round(lo * 255)},${Math.round(lo * 255)}), rgb(${Math.round(hi * 255)},${Math.round(hi * 255)},${Math.round(hi * 255)}))`,
+                    }}
+                  />
+                  <span className="ramp-stop" style={{ left: `${lo * 100}%` }} />
+                  <span className="ramp-stop hi" style={{ left: `${hi * 100}%` }} />
+                </div>
+                <div className="ramp-fields">
+                  <label>
+                    Siyah
+                    <input
+                      className="xp-input"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={lo}
+                      onChange={(e) => setRamp(Number(e.target.value), hi)}
+                    />
+                  </label>
+                  <label>
+                    Beyaz
+                    <input
+                      className="xp-input"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={hi}
+                      onChange={(e) => setRamp(lo, Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <div className="ramp-presets">
+                  <button type="button" className="xp-btn" onClick={() => setRamp(0, 1)}>
+                    Düz 0–1
+                  </button>
+                  <button type="button" className="xp-btn" onClick={() => setRamp(0.15, 0.8)}>
+                    0.15–0.80
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <span className="scanner-count">
             {result ? `${items.length} / ${result.items.length} yazı` : ''}
             {result && !result.ocr ? ' · OCR kapalı' : ''}
@@ -123,7 +322,8 @@ export default function ScreenScanner(p: Props) {
             {error && <div className="scanner-empty error">{error}</div>}
             {src && area && (
               <div className="shot-wrap">
-                <img src={src} alt="Ekran görüntüsü" draggable={false} />
+                <img src={src} alt="Ekran görüntüsü" draggable={false} className={painted ? 'shot-hidden' : ''} />
+                <canvas ref={canvasRef} className={painted ? 'shot-canvas' : 'shot-canvas shot-hidden'} />
                 {items.map((i) => (
                   <button
                     type="button"

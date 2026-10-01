@@ -785,12 +785,12 @@ export default function App() {
     }
   }
 
-  const scanScreen = async (windowTitle: string) => {
+  const scanScreen = async (windowTitle: string, ramp?: { lo: number; hi: number }) => {
     if (!api) {
       await new Promise((r) => setTimeout(r, 400))
       return demoScan()
     }
-    return api.scanScreen(windowTitle || undefined)
+    return api.scanScreen(windowTitle || undefined, ramp)
   }
 
   const pickScreenItem = async (item: ScreenItem) => {
@@ -1185,6 +1185,13 @@ export default function App() {
           }
           windows={windows}
           defaultWindow={settings.targetWindow}
+          valueLo={settings.valueLo}
+          valueHi={settings.valueHi}
+          onRamp={(lo, hi) => {
+            setSettings((s) => ({ ...s, valueLo: lo, valueHi: hi }))
+            if (api) void api.saveSettings({ valueLo: lo, valueHi: hi })
+            else localStorage.setItem(LOCAL_SETTINGS, JSON.stringify({ ...settingsRef.current, valueLo: lo, valueHi: hi }))
+          }}
           onScan={scanScreen}
           onPick={pickScreenItem}
           onClose={() => setScanner(null)}

@@ -200,8 +200,12 @@ public static class XpTurn {
     return dst;
   }
 
-  // Value only: 0 goes to 0.15, 1 goes to 0.80. Hue stays. In place, no draw.
-  public static void CompressValue(Bitmap bmp) {
+  // Value only. lo is the output of input 0, hi is the output of input 1. Hue stays.
+  public static void CompressValue(Bitmap bmp, double lo, double hi) {
+    if (lo < 0) lo = 0;
+    if (hi > 1) hi = 1;
+    if (hi < lo) { double swap = lo; lo = hi; hi = swap; }
+    if (lo <= 0.0001 && hi >= 0.9999) return;
     int w = bmp.Width, h = bmp.Height;
     if (w < 1 || h < 1) return;
     var rect = new Rectangle(0, 0, w, h);
@@ -210,6 +214,7 @@ public static class XpTurn {
       int stride = bd.Stride;
       var bytes = new byte[stride * h];
       Marshal.Copy(bd.Scan0, bytes, 0, bytes.Length);
+      byte black = Chan(lo * 255.0);
       for (int y = 0; y < h; y++) {
         int row = y * stride;
         for (int x = 0; x < w; x++) {
@@ -220,11 +225,11 @@ public static class XpTurn {
           int max = r > g ? r : g;
           if (b > max) max = b;
           if (max == 0) {
-            bytes[i] = bytes[i + 1] = bytes[i + 2] = 38;
+            bytes[i] = bytes[i + 1] = bytes[i + 2] = black;
             continue;
           }
           double v = max / 255.0;
-          double v2 = 0.15 + v * 0.65;
+          double v2 = lo + v * (hi - lo);
           double scale = (v2 * 255.0) / max;
           bytes[i] = Chan(b * scale);
           bytes[i + 1] = Chan(g * scale);
@@ -746,6 +751,8 @@ function Invoke-Scan($P) {
   $ocrOk = $false
   $shot = ''
   $sideCount = 0
+  $script:ValueLo = 0.15
+  $script:ValueHi = 0.80
   # The window keeps this copy. Value squeeze below touches only the reader bitmap.
   $shotBmp = $null
   $mode = [string]$P.image
@@ -754,8 +761,10 @@ function Invoke-Scan($P) {
   if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
   if ($P.ocr -ne $false) {
     $ocrOk = Initialize-Ocr
+    if ($null -ne $P.valueLo) { $script:ValueLo = [double]$P.valueLo }
+    if ($null -ne $P.valueHi) { $script:ValueHi = [double]$P.valueHi }
     if ($ocrOk) {
-      try { [XpTurn]::CompressValue($bmp) } catch {}
+      try { [XpTurn]::CompressValue($bmp, $script:ValueLo, $script:ValueHi) } catch {}
       $ocr = Get-OcrPhrases $bmp $rect.x $rect.y
     }
     try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
@@ -803,7 +812,7 @@ function Invoke-Scan($P) {
       'yontem: Graphics.CopyFromScreen (BitBlt, SRCCOPY)',
       'printWindow: yok',
       'windowsGraphicsCapture: yok',
-      'onizleme: orijinal opak kare. Okuyucu value 0.15-0.80 gorur.',
+      ('onizleme: orijinal opak kare. Okuyucu value {0:0.00}-{1:0.00}.' -f $script:ValueLo, $script:ValueHi),
       ('pencere: {0}' -f $wname),
       ('sinif: {0}' -f $wclass),
       ('hwnd: {0}' -f $hwnd),

@@ -7,6 +7,7 @@ import { createAgent } from './agent'
 import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
+  clampRamp,
   cleanBackups,
   DEFAULT_SETTINGS,
   modelChain,
@@ -39,6 +40,10 @@ function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
   if (s.ocrEngine !== 'onnx') s.ocrEngine = 'windows'
+  const ramp = clampRamp(s.valueLo, s.valueHi)
+  s.valueLo = ramp.lo
+  s.valueHi = ramp.hi
+  bridge.setValueRamp(ramp.lo, ramp.hi)
   s.modelBackups = cleanBackups(s.modelBackups)
   s.visionBackups = cleanBackups(s.visionBackups)
   s.agentBackups = cleanBackups(s.agentBackups)
@@ -166,6 +171,10 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
     const next = { ...getSettings(), ...partial }
     if (next.ocrEngine !== 'onnx') next.ocrEngine = 'windows'
+    const ramp = clampRamp(next.valueLo, next.valueHi)
+    next.valueLo = ramp.lo
+    next.valueHi = ramp.hi
+    bridge.setValueRamp(ramp.lo, ramp.hi)
     next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
     next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
@@ -216,9 +225,13 @@ app.whenReady().then(() => {
     return matchUserChrome(rect)
   })
 
-  ipcMain.handle('screen:scan', async (_e, windowTitle?: string) => {
+  ipcMain.handle('screen:scan', async (_e, windowTitle?: string, ramp?: { lo?: number; hi?: number }) => {
     const hidden = await hideSelf()
     try {
+      const s = getSettings()
+      const next = clampRamp(ramp?.lo ?? s.valueLo, ramp?.hi ?? s.valueHi)
+      bridge.setValueRamp(next.lo, next.hi)
+      if (s.valueLo !== next.lo || s.valueHi !== next.hi) store.set('settings', { ...s, valueLo: next.lo, valueHi: next.hi })
       return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true, debugDir: logsDir() })
     } finally {
       if (hidden) showSelf()

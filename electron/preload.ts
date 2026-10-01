@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
-  scanScreen: (windowTitle?: string) => ipcRenderer.invoke('screen:scan', windowTitle),
+  scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => ipcRenderer.invoke('screen:scan', windowTitle, ramp),
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => ipcRenderer.invoke('chrome:match', rect),
   pickScreenBox: (box: unknown) => ipcRenderer.invoke('screen:pick', box),
 

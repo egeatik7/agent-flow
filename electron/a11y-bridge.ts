@@ -138,9 +138,16 @@ class Worker {
 const worker = new Worker()
 
 let ocrEngine: OcrEngine = 'windows'
+let valueLo = 0.15
+let valueHi = 0.8
 
 export function setOcrEngine(v: OcrEngine | undefined) {
   ocrEngine = v === 'onnx' ? 'onnx' : 'windows'
+}
+
+export function setValueRamp(lo: number, hi: number) {
+  valueLo = lo
+  valueHi = hi
 }
 
 export function warmUp() {
@@ -222,6 +229,8 @@ export async function scan(opts: {
       snap: opts.snap ?? 0,
       sig: opts.sig === true,
       tilt: opts.tilt === true,
+      valueLo,
+      valueHi,
       debugDir: opts.debugDir || '',
     },
     180000

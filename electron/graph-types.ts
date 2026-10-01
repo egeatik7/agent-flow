@@ -168,6 +168,26 @@ export type AppSettings = {
   agentBackups: string[]
   /** Which reader supplies on-screen text. UI Automation names are used either way. */
   ocrEngine: 'windows' | 'onnx'
+  /** Output value for an input of 0. The preview and the readers share this. */
+  valueLo: number
+  /** Output value for an input of 1. */
+  valueHi: number
+}
+
+export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } {
+  const unit = (n: unknown, fallback: number) => {
+    const v = typeof n === 'number' ? n : Number(n)
+    if (!Number.isFinite(v)) return fallback
+    return Math.min(1, Math.max(0, v))
+  }
+  let a = unit(lo, 0.15)
+  let b = unit(hi, 0.8)
+  if (b < a) {
+    const t = a
+    a = b
+    b = t
+  }
+  return { lo: a, hi: b }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -184,6 +204,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentModel: 'bytedance/ui-tars-1.5-7b',
   agentBackups: [],
   ocrEngine: 'windows',
+  valueLo: 0.15,
+  valueHi: 0.8,
 }
 
 export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'condition']
