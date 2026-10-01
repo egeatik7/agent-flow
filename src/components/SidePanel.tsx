@@ -1,4 +1,5 @@
 import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import ProbeMark from './ProbeMark'
 import {
@@ -17,7 +18,7 @@ import {
   type ModelInfo,
 } from '../types'
 
-export type SideTab = 'node' | 'settings'
+export type SideTab = 'node' | 'llm' | 'settings'
 
 type Props = {
   tab: SideTab
@@ -1011,6 +1012,7 @@ export default function SidePanel(p: Props) {
         {(
           [
             ['node', p.selectedEdge ? 'Bağlantı' : 'Node'],
+            ['llm', 'LLM'],
             ['settings', 'Ayarlar'],
           ] as [SideTab, string][]
         ).map(([k, label]) => (
@@ -1021,6 +1023,7 @@ export default function SidePanel(p: Props) {
       </div>
       <div className="panel-body">
         {p.tab === 'node' && <NodeInspector {...p} />}
+        {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
         {p.tab === 'settings' && <Settings {...p} />}
       </div>
     </aside>

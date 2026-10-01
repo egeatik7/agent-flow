@@ -837,6 +837,79 @@ body {
   padding-bottom: 4px;
 }
 
+.llm-panel .hint {
+  margin: 0 0 8px;
+}
+
+.llm-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.llm-stage {
+  border: 1px solid #919b9c;
+  background: #fff;
+  padding: 6px;
+}
+
+.llm-stage.off {
+  background: #f3f3f0;
+  color: #666;
+}
+
+.llm-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.llm-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.llm-move {
+  display: flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.llm-move .xp-btn {
+  min-width: 22px;
+  padding: 0 4px;
+}
+
+.llm-note {
+  margin: 4px 0;
+  color: #444;
+  line-height: 1.35;
+}
+
+.llm-prompt {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.llm-extra-title {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  color: #003c74;
+}
+
+.llm-panel .save.block {
+  margin-top: 10px;
+}
+
 .hint {
   color: #404040;
   font-size: 11px;

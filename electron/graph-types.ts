@@ -172,6 +172,12 @@ export type AppSettings = {
   valueLo: number
   /** Output value for an input of 1. */
   valueHi: number
+  /** Click search order. Missing ids are appended. */
+  findOrder: import('./llm-flow').FindStageId[]
+  /** Stages skipped in that order. */
+  findOff: import('./llm-flow').FindStageId[]
+  /** Custom system prompts. Empty means the built-in text. */
+  llmPrompts: import('./llm-flow').LlmPrompts
 }
 
 export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } {
@@ -206,6 +212,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ocrEngine: 'windows',
   valueLo: 0.15,
   valueHi: 0.8,
+  findOrder: ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'],
+  findOff: ['list'],
+  llmPrompts: {},
 }
 
 export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'condition']

@@ -1,4 +1,5 @@
 import type { NodeKind } from './graph-types'
+import { fillGoal, LIST_PROMPT, SCREEN_PROMPT, TARS_TEMPLATE } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -243,6 +244,8 @@ export async function chooseScreenTarget(opts: {
   onImageFallback?: (msg: string) => void
   /** What worked on earlier laps, or why this lap looks different. */
   hint?: string
+  /** Replaces the built-in system prompt when set in the LLM panel. */
+  system?: string
 }): Promise<ScreenChoice> {
   const { scan } = opts
   const action =
@@ -250,11 +253,12 @@ export async function chooseScreenTarget(opts: {
       ? 'Kullanıcı bu adımda bir metin kutusuna yazı yazacak: yazılacak ALANI seç (arama kutusu, Edit, giriş alanı).'
       : 'Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.'
 
-  const system = `Sen bir Windows masaüstü otomasyon ajanısın. Ekranda görünen yazıların ve öğelerin numaralı listesi verilir (UIA = uygulamanın bildirdiği öğe, Yazı = ekran görüntüsünden OCR ile okunan yazı).
-${action}
-Kullanıcının talimatındaki isim ekrandaki yazıyla birebir aynı olmayabilir (Türkçe ekler, büyük/küçük harf, OCR hataları): anlamca en uygun öğeyi seç. Konum ifadelerini (tepedeki, sağdaki, alttaki) koordinatlara göre değerlendir.
-Yanıtı SADECE JSON olarak ver: {"id": <numara veya null>, "text": "<tıklanacak yazının kendisi>", "reason": "<kısa gerekçe>"}
-Uygun öğe yoksa id=null ver.`
+  const system =
+    opts.system?.trim() ||
+    LIST_PROMPT.replace(
+      'Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.',
+      action
+    )
 
   const listText = `Ekran alanı: ${scan.area.w}x${scan.area.h} (sol üst ${scan.area.x},${scan.area.y})${scan.window ? `, pencere: ${scan.window}` : ''}
 Öğeler (#numara tür "yazı" @x,y genişlikxyükseklik):
@@ -367,13 +371,14 @@ export async function visionLocate(opts: {
   stepTitle: string
   /** Picture of the element to find (from Ekran Tarayıcı / İmleçle Yakala). */
   reference?: Img
+  system?: string
 }): Promise<VisionPick> {
   if (!opts.scan.image) throw new Error('Ekran görüntüsü alınamadı.')
   const list = opts.scan.items
     .slice(0, 250)
     .map((i) => `#${i.id} "${i.text.replace(/"/g, "'")}"`)
     .join('\n')
-  const system = `Sen Windows ekran görüntüsüne bakarak işlem yapan bir ajansın. Görevin: talimata göre ${VISION_ACTION[opts.kind] ?? 'hedefi'} bulmak.
+  const system = opts.system?.trim() || `Sen Windows ekran görüntüsüne bakarak işlem yapan bir ajansın. Görevin: talimata göre ${VISION_ACTION[opts.kind] ?? 'hedefi'} bulmak.
 Görüntüde bazı yazı/öğeler numaralı ince kutularla işaretli (mavi: uygulama öğesi, turuncu: okunan yazı). Hedef işaretsiz de olabilir (ikon, resim, boş alan).
 - Hedef numaralı bir kutuysa: {"id": <numara>, "reason": "..."}
 - Değilse hedefin ORTASINI görüntü üzerinde 0-1000 arası normalize koordinatla ver (x: soldan sağa, y: yukarıdan aşağıya): {"x": <0-1000>, "y": <0-1000>, "reason": "..."}
@@ -419,8 +424,9 @@ export async function judgeReaction(opts: {
   fresh: string[]
   before: Img
   after: Img
+  system?: string
 }): Promise<{ verdict: ReactionVerdict; reason: string }> {
-  const system = `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
+  const system = opts.system?.trim() || `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
 Tek bir verdict seç:
 - ready: sıradaki adımın hedefi görünüyor ya da ekran o adıma hazır
 - missed: ekran pratikte aynı, tıklama veya tuş tepki vermemiş
@@ -490,8 +496,9 @@ export async function nextAction(opts: {
   listText: string
   image?: Img | null
   next?: string
+  system?: string
 }): Promise<AgentAction> {
-  const system = `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
+  const system = opts.system?.trim() || `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
 Ekrandaki öğeler numaralı listede verilir. Tıklama ve yazma hedefi listeden bir numara olmalı.
 Eylemler:
 - click / double / right: {"id": <numara>}
@@ -566,48 +573,7 @@ function tarsAbsolute(model: string) {
   return /ui-?tars-?1\.5|ui-?tars-1_5/i.test(model) && !/doubao/i.test(model)
 }
 
-const TARS_PROMPT = (goal: string) => `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
-
-## Output Format
-\`\`\`
-Thought: ...
-Action: ...
-\`\`\`
-
-## Action Space
-
-click(start_box='<|box_start|>(x1,y1)<|box_end|>')
-left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
-right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
-drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
-hotkey(key='ctrl c') # Split keys with a space and use lowercase. Also, do not use more than 3 keys in one hotkey action.
-type(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format. If you want to submit your input, use \\n at the end of content.
-scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
-wait() #Sleep for 5s and take a screenshot to check for any changes.
-finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
-call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.
-
-## Note
-- Use Turkish in \`Thought\` part.
-- Write a small plan and finally summarize your next action (with its target element) in one sentence in \`Thought\` part.
-- The computer runs Windows. Prefer keyboard shortcuts when they are reliable (for example Blender: shift a to add objects).
-
-## User Instruction
-${goal}`
-
-const JSON_PROMPT = `Sen Windows'ta çalışan bir bilgisayar kullanım ajanısın. Her turda sana hedef, önceki adımların ve SON ekran görüntüsü verilir. Hedefe giden SIRADAKİ TEK eylemi seç.
-Koordinatlar ekran görüntüsü üzerinde 0-1000 arası normalize: x soldan sağa, y yukarıdan aşağıya. Hedefin tam ortasını ver.
-Eylemler:
-- click / double / right: {"x":..,"y":..}
-- drag: {"x":..,"y":..,"x2":..,"y2":..}
-- hotkey: {"keys":["ctrl","s"]} (küçük harf, en fazla 3 tuş; win, enter, esc, tab, f1..f12, delete, up/down/left/right kullanılabilir)
-- type: {"text":"..."} (o an odaktaki alana yazar; gönderilecekse sonuna \\n koy)
-- scroll: {"x":..,"y":..,"direction":"down|up|left|right"}
-- wait: sayfa/uygulama yükleniyorsa
-- finished: hedef ekranda gerçekleştiyse {"text":"kısa özet"}
-- call_user: hedef yapılamıyorsa ya da kullanıcı gerekiyorsa
-Kurallar: önce kısa bir plan düşün; aynı eylemi sonuç vermeden tekrarlama; güvenilir kısayollar varsa kullan (örn. Blender'da nesne eklemek için shift a).
-Sadece JSON: {"thought":"<Türkçe kısa plan ve sıradaki eylem>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
+const TARS_PROMPT = (goal: string, custom?: string) => fillGoal(custom?.trim() || TARS_TEMPLATE, goal)
 
 function unescape(s: string) {
   return s.replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\')
@@ -713,13 +679,15 @@ export async function guiStep(opts: {
   history: GuiTurn[]
   screen: Img
   keepImages?: number
+  tarsPrompt?: string
+  jsonPrompt?: string
 }): Promise<GuiAction> {
   const keep = Math.max(1, opts.keepImages ?? 4)
   const recent = opts.history.slice(-keep + 1)
   const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
   return runModelChain(asModelChain(opts.model), async (model) => {
     if (isTarsModel(model)) {
-      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal) }]
+      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt) }]
       for (const t of older) {
         messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
         if (t.note) messages.push({ role: 'user', content: t.note })
@@ -742,7 +710,7 @@ ${lines.length ? lines.join('\n') : '(henüz yok)'}
 
 Son ekran görüntüsü ektedir.`
     const messages: Message[] = [
-      { role: 'system', content: JSON_PROMPT },
+      { role: 'system', content: opts.jsonPrompt?.trim() || SCREEN_PROMPT },
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
     ]
     const content = await chatOnce(opts.apiKey, model, messages, true)
@@ -767,8 +735,9 @@ export async function planStall(opts: {
   ahead: string
   expected: string
   image?: Img | null
+  system?: string
 }): Promise<StallPlan> {
-  const system = `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
+  const system = opts.system?.trim() || `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
 Karar:
 - continue: sıradaki adımın istediği şey bu ekranda var ya da adım denenebilir; akış sürsün
 - wait: sayfa henüz oturmadı, kısa bekle (waitSec 1 ile 8 arası)

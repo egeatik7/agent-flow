@@ -1,4 +1,13 @@
 export * from '../electron/graph-types'
+export {
+  FIND_STAGES,
+  EXTRA_PROMPTS,
+  DEFAULT_PROMPTS,
+  activeFindOrder,
+  type FindStageId,
+  type PromptId,
+  type LlmPrompts,
+} from '../electron/llm-flow'
 export type { ScanResult, ScreenItem } from '../electron/matcher'
 import type { AgentGraph, AppSettings, CanvasBook, Locator, LogLevel } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'

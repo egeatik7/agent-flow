@@ -19,6 +19,7 @@ import {
   type LogLevel,
 } from './graph-types'
 import { listDirEntries } from './list-dir'
+import { normalizeFind, normalizePrompts } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 
@@ -44,6 +45,10 @@ function getSettings(): AppSettings {
   s.valueLo = ramp.lo
   s.valueHi = ramp.hi
   bridge.setValueRamp(ramp.lo, ramp.hi)
+  const find = normalizeFind(s.findOrder, s.findOff === undefined ? ['list'] : s.findOff)
+  s.findOrder = find.order
+  s.findOff = find.off
+  s.llmPrompts = normalizePrompts(s.llmPrompts)
   s.modelBackups = cleanBackups(s.modelBackups)
   s.visionBackups = cleanBackups(s.visionBackups)
   s.agentBackups = cleanBackups(s.agentBackups)
@@ -175,6 +180,10 @@ app.whenReady().then(() => {
     next.valueLo = ramp.lo
     next.valueHi = ramp.hi
     bridge.setValueRamp(ramp.lo, ramp.hi)
+    const find = normalizeFind(next.findOrder, next.findOff)
+    next.findOrder = find.order
+    next.findOff = find.off
+    next.llmPrompts = normalizePrompts(next.llmPrompts)
     next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
     next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())

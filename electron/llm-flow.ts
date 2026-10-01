@@ -1,0 +1,141 @@
+/** Find order and the prompts the models actually receive. Empty saved text means the built-in prompt. */
+
+export const FIND_STAGE_IDS = ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'] as const
+export type FindStageId = (typeof FIND_STAGE_IDS)[number]
+
+export type PromptId = 'list' | 'tars' | 'screen' | 'initiative' | 'reaction' | 'stall'
+
+export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt?: PromptId }[] = [
+  { id: 'chrome', title: 'Chrome sayfası', note: '9222 portundaki sayfanın yazıları. Tam eşleşmezse kelime listesi yazı modeline gider.' },
+  { id: 'uia', title: 'Kayıtlı öğe', note: 'Yakalanan düğmenin kendi adı. LLM yok.' },
+  { id: 'icon', title: 'Kayıtlı resim', note: 'Simge resmi yerelde aranır. LLM yok.' },
+  { id: 'windows', title: 'Windows OCR', note: 'Rampalı kare ve 90° tur. Liste yerelde eşleşir, modele gitmez.' },
+  { id: 'onnx', title: 'ONNX OCR', note: 'Aynı rampalı kare, Windows kaçırdıysa. Modele gitmez.' },
+  { id: 'list', title: 'Kelime listesi → yazı modeli', note: 'OCR’dan çıkan numaralı liste bu prompt ile yazı modeline gider.', prompt: 'list' },
+  { id: 'tars', title: 'UI-TARS', note: 'Düz, rampasız ekran görüntüsü. {{hedef}} talimatın yerine yazılır.', prompt: 'tars' },
+  { id: 'offset', title: 'Kayıtlı konum', note: 'Eski pencere içi nokta. LLM yok.' },
+]
+
+export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
+  { id: 'screen', title: 'Ekran görüntüsü JSON', note: 'UI-TARS olmayan model ekran görüntüsüne bu prompt ile bakar.' },
+  { id: 'initiative', title: 'İnisiyatif', note: 'Hedefe giderken her turda numaralı liste ve görüntü bu prompt ile gider.' },
+  { id: 'reaction', title: 'Tepki', note: 'Tıklamadan sonraki iki kare bu prompt ile yorumlanır.' },
+  { id: 'stall', title: 'Takılma', note: 'Hedef bulunamazsa akış bu prompt ile bekler, sürer ya da durur.' },
+]
+
+export const DEFAULT_FIND_OFF: FindStageId[] = ['list']
+
+export const LIST_PROMPT = `Sen bir Windows masaüstü otomasyon ajanısın. Ekranda görünen yazıların ve öğelerin numaralı listesi verilir (UIA = uygulamanın bildirdiği öğe, Yazı = ekran görüntüsünden OCR ile okunan yazı).
+Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.
+Kullanıcının talimatındaki isim ekrandaki yazıyla birebir aynı olmayabilir (Türkçe ekler, büyük/küçük harf, OCR hataları): anlamca en uygun öğeyi seç. Konum ifadelerini (tepedeki, sağdaki, alttaki) koordinatlara göre değerlendir.
+Yanıtı SADECE JSON olarak ver: {"id": <numara veya null>, "text": "<tıklanacak yazının kendisi>", "reason": "<kısa gerekçe>"}
+Uygun öğe yoksa id=null ver.`
+
+export const TARS_TEMPLATE = `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
+
+## Output Format
+\`\`\`
+Thought: ...
+Action: ...
+\`\`\`
+
+## Action Space
+
+click(start_box='<|box_start|>(x1,y1)<|box_end|>')
+left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
+right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
+drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
+hotkey(key='ctrl c')
+type(content='xxx')
+scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
+wait()
+finished(content='xxx')
+call_user()
+
+## Note
+- Use Turkish in Thought part.
+- Write a small plan and finally summarize your next action in one sentence in Thought part.
+- The computer runs Windows.
+
+## User Instruction
+{{hedef}}`
+
+export const SCREEN_PROMPT = `Sen Windows'ta çalışan bir bilgisayar kullanım ajanısın. Her turda sana hedef, önceki adımların ve SON ekran görüntüsü verilir. Hedefe giden SIRADAKİ TEK eylemi seç.
+Koordinatlar ekran görüntüsü üzerinde 0-1000 arası normalize: x soldan sağa, y yukarıdan aşağıya. Hedefin tam ortasını ver.
+Eylemler: click, double, right, drag, hotkey, type, scroll, wait, finished, call_user.
+Sadece JSON: {"thought":"<Türkçe kısa plan>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
+
+export const INITIATIVE_PROMPT = `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
+Ekrandaki öğeler numaralı listede verilir. Tıklama ve yazma hedefi listeden bir numara olmalı.
+Eylemler: click, double, right, type, key, wait, done, fail.
+Sadece JSON: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<kısa gerekçe>"}`
+
+export const REACTION_PROMPT = `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
+Tek bir verdict seç: ready, missed, loading, blocked, unknown.
+Sadece JSON: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<kısa gerekçe>"}`
+
+export const STALL_PROMPT = `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
+Karar: continue, wait (waitSec 1 ile 8), stop.
+lookFor: ekranda aranacak kısa yazı. Yoksa boş string.
+Sadece JSON: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<kısa plan>"}`
+
+export const DEFAULT_PROMPTS: Record<PromptId, string> = {
+  list: LIST_PROMPT,
+  tars: TARS_TEMPLATE,
+  screen: SCREEN_PROMPT,
+  initiative: INITIATIVE_PROMPT,
+  reaction: REACTION_PROMPT,
+  stall: STALL_PROMPT,
+}
+
+export type LlmPrompts = Partial<Record<PromptId, string>>
+
+const STAGE_SET = new Set<string>(FIND_STAGE_IDS)
+const PROMPT_SET = new Set<string>(Object.keys(DEFAULT_PROMPTS))
+
+export function normalizeFind(order: unknown, off: unknown): { order: FindStageId[]; off: FindStageId[] } {
+  const seen = new Set<FindStageId>()
+  const next: FindStageId[] = []
+  if (Array.isArray(order)) {
+    for (const id of order) {
+      if (typeof id !== 'string' || !STAGE_SET.has(id) || seen.has(id as FindStageId)) continue
+      seen.add(id as FindStageId)
+      next.push(id as FindStageId)
+    }
+  }
+  for (const id of FIND_STAGE_IDS) if (!seen.has(id)) next.push(id)
+  const disabled: FindStageId[] = []
+  if (Array.isArray(off)) {
+    for (const id of off) {
+      if (typeof id === 'string' && STAGE_SET.has(id)) disabled.push(id as FindStageId)
+    }
+  }
+  return { order: next, off: disabled }
+}
+
+export function normalizePrompts(raw: unknown): LlmPrompts {
+  const out: LlmPrompts = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!PROMPT_SET.has(k) || typeof v !== 'string') continue
+    const text = v.trim()
+    if (!text || text === DEFAULT_PROMPTS[k as PromptId].trim()) continue
+    out[k as PromptId] = v
+  }
+  return out
+}
+
+export function activeFindOrder(order: FindStageId[], off: FindStageId[]): FindStageId[] {
+  const disabled = new Set(off)
+  return order.filter((id) => !disabled.has(id))
+}
+
+export function promptOf(prompts: LlmPrompts | undefined, id: PromptId): string | undefined {
+  const v = prompts?.[id]
+  return typeof v === 'string' && v.trim() ? v : undefined
+}
+
+export function fillGoal(template: string, goal: string): string {
+  if (template.includes('{{hedef}}')) return template.split('{{hedef}}').join(goal)
+  return `${template}\n\n## User Instruction\n${goal}`
+}
