@@ -419,7 +419,9 @@ export async function runGraph(
         ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
         : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
     )
-    patch(loop.id, { loopIndex: undefined })
+    const held = loop.startIndex
+    patch(loop.id, { loopIndex: undefined, startIndex: 0 })
+    if (typeof held === 'number' && held > 0) ex.log('info', `“${loop.title}”: işaret 1. öğeye döndü.`)
     ex.step(loop.id, 'done')
     return 'done'
   }

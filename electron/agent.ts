@@ -1300,6 +1300,7 @@ export function createAgent(ctx: AgentContext) {
     },
     captureFailure: async (label) => {
       if (!failDir) return
+      fs.mkdirSync(failDir, { recursive: true })
       const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, fresh: true, maxImageW: 1600 }).catch(() => null)
       if (!res?.image?.data) return
       const safe = label.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 60)

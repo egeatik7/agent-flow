@@ -50,7 +50,7 @@ Tekrar eden adımlar bir **kutunun** içine konur. Kutu tuvalde yarı saydam bir
   sıralama: `resim2` → `resim10`). Liste boşsa kutu N kez çalışır.
 - Değişkenler: `{{öğe}}` (tam yol), `{{öğe.ad}}` (kedi.png), `{{öğe.isim}}` (kedi), `{{sıra}}`, `{{toplam}}`.
   Yükleme adımına `{{öğe}}` yaz. Her tur sıradaki dosyanın yoludur: ilk tur birinci satır, ikinci tur ikinci satır.
-- Her çalıştırmada liste baştan sona gider. Öğeler tamam veya hatalı diye işaretlenmez. Listedeki işaret, tur hangi dosyadaysa oraya kayar. **Ajanı Çalıştır** işarete bakmaz, birinci satırdan başlar. **Seçiliden Çalıştır**, kutu içindeki bir node seçiliyken listeyi işaretli satırdan sona kadar götürür.
+- Her çalıştırmada liste baştan sona gider. Öğeler tamam veya hatalı diye işaretlenmez. Listedeki işaret, tur hangi dosyadaysa oraya kayar. Kutu **bitti** deyince işaret 1. öğeye döner; dış kutu sıradaki klasöre geçince iç liste baştan işlenir. Durdurulursa veya kutu hata diye kesilirse işaret o dosyada kalır. **Ajanı Çalıştır** işarete bakmaz, birinci satırdan başlar. **Seçiliden Çalıştır**, kutu içindeki bir node seçiliyken listeyi işaretli satırdan sona kadar götürür.
 
 Bir adım hata verirse (hedef yok, bekleme zaman aşımına uğradı, İnisiyatif olmadı dedi) o tur orada kalır, günlük kırmızı
 satırı yazar ve sıradaki öğeye geçilir. Sonraki çalıştırma yine birinci öğeden başlar.
@@ -111,8 +111,7 @@ Güvenceler:
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
 - **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
-- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs/<sürüm>/` altına yazılır (o sürümden son 30). Bir tur hata verirse o anki ekran
-  da kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
+- **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30). 1.7.38 ilk kez açılınca `logs/1.7.38` yoksa oluşur. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
 ## Node türleri
 

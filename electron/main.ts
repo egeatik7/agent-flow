@@ -62,10 +62,16 @@ function logsDir() {
   return path.join(logsRoot(), version)
 }
 
-/** One text file per run under %APPDATA%/xp-agent-studio/logs/<version>; only the last 30 runs of that version are kept. */
-function openRunLog() {
+/** This version's log folder. Created as soon as the version runs, before a run or an error shot. */
+function ensureLogsDir(): string {
   const dir = logsDir()
   fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** One text file per run under %APPDATA%/xp-agent-studio/logs/<version>; only the last 30 runs of that version are kept. */
+function openRunLog() {
+  const dir = ensureLogsDir()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   runLog = path.join(dir, `calistirma-${stamp}.txt`)
   const runs = fs
@@ -141,6 +147,11 @@ function showSelf() {
 app.whenReady().then(() => {
   createWindow()
   getSettings()
+  try {
+    ensureLogsDir()
+  } catch {
+    /* the run path creates it again before writing a log or an error shot */
+  }
   bridge.warmUp()
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
@@ -235,12 +246,14 @@ app.whenReady().then(() => {
     const graph = normalizeGraph(raw)
     store.set('graph', graph)
     const s = getSettings()
+    let shotDir = ''
     try {
+      shotDir = ensureLogsDir()
       openRunLog()
     } catch {
       runLog = ''
     }
-    agent.beginRun(runLog ? logsDir() : '')
+    agent.beginRun(shotDir)
     globalShortcut.register(STOP_HOTKEY, () => {
       stopRequested = true
     })
@@ -276,9 +289,9 @@ app.whenReady().then(() => {
     }
   })
   ipcMain.handle('logs:open', async () => {
-    fs.mkdirSync(logsDir(), { recursive: true })
-    await shell.openPath(logsDir())
-    return logsDir()
+    const dir = ensureLogsDir()
+    await shell.openPath(dir)
+    return dir
   })
   ipcMain.handle('agent:stop', () => {
     stopRequested = true
