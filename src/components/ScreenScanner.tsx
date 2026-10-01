@@ -238,7 +238,7 @@ export default function ScreenScanner(p: Props) {
             <button
               type="button"
               className={`xp-btn${rampOpen ? ' open' : ''}`}
-              title="Value ramp. Görüntü hemen değişir. Sonraki tarama bu duraklarla okunur."
+              title="Value ramp. Siyah durağı ve altı 0 olur. Beyaz durağı ve üstü 1 olur."
               onClick={() => setRampOpen((v) => !v)}
             >
               Değer {lo.toFixed(2)}–{hi.toFixed(2)} ▾
@@ -246,7 +246,7 @@ export default function ScreenScanner(p: Props) {
             {rampOpen && (
               <div className="dropdown-menu ramp-menu" onMouseDown={(e) => e.stopPropagation()}>
                 <div className="ramp-title">Value ramp</div>
-                <p className="ramp-hint">Soldaki durak giriş 0’ın çıkışı, sağdaki durak giriş 1’in çıkışı. Görüntü hemen değişir. Kaydet’e basınca bir sonraki açılışta da durur.</p>
+                <p className="ramp-hint">Siyah durak ve altındaki her değer 0 olur. Beyaz durak ve üstündeki her değer 1 olur. Arası 0’dan 1’e yayılır. Kaydet’e basınca kalır.</p>
                 <div
                   className="ramp-track"
                   ref={trackRef}
@@ -268,7 +268,7 @@ export default function ScreenScanner(p: Props) {
                   <div
                     className="ramp-bar"
                     style={{
-                      background: `linear-gradient(90deg, rgb(${Math.round(lo * 255)},${Math.round(lo * 255)},${Math.round(lo * 255)}), rgb(${Math.round(hi * 255)},${Math.round(hi * 255)},${Math.round(hi * 255)}))`,
+                      background: `linear-gradient(90deg, #000 0%, #000 ${lo * 100}%, #fff ${hi * 100}%, #fff 100%)`,
                     }}
                   />
                   <span className="ramp-stop" style={{ left: `${lo * 100}%` }} />

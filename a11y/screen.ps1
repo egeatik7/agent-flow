@@ -200,7 +200,7 @@ public static class XpTurn {
     return dst;
   }
 
-  // Value only. lo is the output of input 0, hi is the output of input 1. Hue stays.
+  // Levels. lo and below become 0. hi and above become 1. The middle stretches. Hue stays.
   public static void CompressValue(Bitmap bmp, double lo, double hi) {
     if (lo < 0) lo = 0;
     if (hi > 1) hi = 1;
@@ -214,7 +214,7 @@ public static class XpTurn {
       int stride = bd.Stride;
       var bytes = new byte[stride * h];
       Marshal.Copy(bd.Scan0, bytes, 0, bytes.Length);
-      byte black = Chan(lo * 255.0);
+      double span = hi - lo;
       for (int y = 0; y < h; y++) {
         int row = y * stride;
         for (int x = 0; x < w; x++) {
@@ -224,12 +224,13 @@ public static class XpTurn {
           int r = bytes[i + 2];
           int max = r > g ? r : g;
           if (b > max) max = b;
-          if (max == 0) {
-            bytes[i] = bytes[i + 1] = bytes[i + 2] = black;
+          if (max == 0) continue;
+          double v = max / 255.0;
+          double v2 = v <= lo ? 0 : (v >= hi ? 1 : (span <= 0 ? 1 : (v - lo) / span));
+          if (v2 <= 0) {
+            bytes[i] = bytes[i + 1] = bytes[i + 2] = 0;
             continue;
           }
-          double v = max / 255.0;
-          double v2 = lo + v * (hi - lo);
           double scale = (v2 * 255.0) / max;
           bytes[i] = Chan(b * scale);
           bytes[i + 1] = Chan(g * scale);
@@ -812,7 +813,7 @@ function Invoke-Scan($P) {
       'yontem: Graphics.CopyFromScreen (BitBlt, SRCCOPY)',
       'printWindow: yok',
       'windowsGraphicsCapture: yok',
-      ('onizleme: orijinal opak kare. Okuyucu value {0:0.00}-{1:0.00}.' -f $script:ValueLo, $script:ValueHi),
+      ('onizleme: orijinal. Okuyucu: {0:0.00} ve alti 0, {1:0.00} ve ustu 1.' -f $script:ValueLo, $script:ValueHi),
       ('pencere: {0}' -f $wname),
       ('sinif: {0}' -f $wclass),
       ('hwnd: {0}' -f $hwnd),

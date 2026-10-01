@@ -1,4 +1,4 @@
-/** Same value squeeze as XpTurn.CompressValue. Input 0 lands on lo, input 1 lands on hi. */
+/** Same levels clip as XpTurn.CompressValue. Values at or below lo become 0. Values at or above hi become 1. */
 
 export function rampIsFlat(lo: number, hi: number): boolean {
   return lo <= 0.0001 && hi >= 0.9999
@@ -13,12 +13,13 @@ function chan(v: number): number {
 export function remapPixel(r: number, g: number, b: number, lo: number, hi: number): [number, number, number] {
   const max = r > g ? r : g
   const m = b > max ? b : max
-  if (m === 0) {
-    const lifted = chan(lo * 255)
-    return [lifted, lifted, lifted]
-  }
+  if (m === 0) return [0, 0, 0]
   const v = m / 255
-  const v2 = lo + v * (hi - lo)
+  let v2: number
+  if (v <= lo) v2 = 0
+  else if (v >= hi) v2 = 1
+  else v2 = (v - lo) / (hi - lo)
+  if (v2 <= 0) return [0, 0, 0]
   const scale = (v2 * 255) / m
   return [chan(r * scale), chan(g * scale), chan(b * scale)]
 }
