@@ -219,7 +219,7 @@ app.whenReady().then(() => {
   ipcMain.handle('screen:scan', async (_e, windowTitle?: string) => {
     const hidden = await hideSelf()
     try {
-      return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600 })
+      return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true })
     } finally {
       if (hidden) showSelf()
     }

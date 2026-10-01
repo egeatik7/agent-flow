@@ -4,7 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
-import { mergeOnnxLines, onnxError, recognizeShot, warmOnnx, type OcrEngine } from './ocr-onnx'
+import { mergeOnnxLines, onnxError, readRawShot, recognizeBgra, recognizeSideways, warmOnnx, type OcrEngine } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
 
@@ -186,6 +186,8 @@ export async function scan(opts: {
   sig?: boolean
   /** Which reader wins. Defaults to the saved choice. */
   ocrEngine?: OcrEngine
+  /** Also read the shot turned 90° counter-clockwise, and keep only lines the upright pass missed. */
+  tilt?: boolean
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
@@ -211,32 +213,47 @@ export async function scan(opts: {
       primary: opts.primary === true,
       snap: opts.snap ?? 0,
       sig: opts.sig === true,
+      tilt: opts.tilt === true,
     },
     90000
   )
   const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
   let onnx = false
   let onnxAdded = 0
+  let sideCount = Number(r.sideCount) || 0
   let engine: OcrEngine = 'windows'
   const shot = r.shot
   const prefer = opts.ocrEngine ?? ocrEngine
   if (opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
     try {
-      const lines = await recognizeShot(shot, r.area?.x ?? 0, r.area?.y ?? 0)
+      const raw = readRawShot(fs.readFileSync(shot))
+      const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0)
       const merged = mergeOnnxLines(items, lines, prefer)
       items.splice(0, items.length, ...merged.items)
       onnxAdded = merged.added
       onnx = merged.usedOnnx && !onnxError()
-      if (prefer === 'onnx' && merged.usedOnnx) engine = 'onnx'
+      if (prefer === 'onnx' && merged.usedOnnx) {
+        engine = 'onnx'
+        sideCount = 0
+      }
+      if (opts.tilt) {
+        const side = await recognizeSideways(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0, items)
+        if (side.length) {
+          items.push(...side)
+          sideCount += side.length
+          if (!onnxError()) onnx = true
+        }
+      }
     } catch {
       onnx = false
     } finally {
       fs.unlink(shot, () => {})
     }
   }
-  const { shot: _shot, ...rest } = r
+  const { shot: _shot, sideCount: _side, ...rest } = r
   void _shot
-  return { ...rest, items, onnx, onnxAdded, ocrEngine: engine }
+  void _side
+  return { ...rest, items, onnx, onnxAdded, sideCount, ocrEngine: engine }
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{

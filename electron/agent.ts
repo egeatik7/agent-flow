@@ -166,12 +166,14 @@ export function createAgent(ctx: AgentContext) {
       windowTitle: wide ? undefined : s.targetWindow || undefined,
       image: withImage ? 'marked' : 'none',
       fresh: wide,
+      tilt: true,
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
     const ocrVia =
       res.ocrEngine === 'onnx' ? `ONNX ${res.onnxAdded ?? 0}` : res.ocr ? `${res.ocrCount}${res.onnxAdded ? ` +çince ${res.onnxAdded}` : ''}` : 'kapalı'
-    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${ocrVia})${res.window ? ` — ${res.window}` : ''}`)
+    const side = res.sideCount ? ` +yan ${res.sideCount}` : ''
+    log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${ocrVia}${side})${res.window ? ` — ${res.window}` : ''}`)
     if (ocrVia === 'kapalı') log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
     if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'Çince okuyucu açılamadı; Windows OCR ile devam ediliyor.')
     return res
@@ -393,6 +395,7 @@ export function createAgent(ctx: AgentContext) {
       image: 'marked',
       maxImageW: 1600,
       fresh: wide,
+      tilt: true,
     })
     warnMissingWindow(scanRes)
     const mem = memoFor(node)
@@ -528,7 +531,7 @@ export function createAgent(ctx: AgentContext) {
       return true
     }
     if (process.platform === 'win32') {
-      const res = await bridge.scan({ image: 'none', fresh: true })
+      const res = await bridge.scan({ image: 'none', fresh: true, tilt: true })
       if (containsText(res.items, goal.text) || matchPrompt(res.items, goal.text)) {
         log('success', `${goal.label} ekranda. Operasyon bozulmadan devam ediliyor.`)
         return true
@@ -851,7 +854,7 @@ export function createAgent(ctx: AgentContext) {
 
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
-      const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400 })
+      const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400, tilt: true })
       const items = res.items
       const image = res.image
       const a = await nextAction({
@@ -1281,7 +1284,7 @@ export function createAgent(ctx: AgentContext) {
         if (how) return found(how)
       }
       if (text) {
-        const res = await bridge.scan({ image: 'none', fresh: true })
+        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true })
         noteCjk(res, node.id)
         const hit = containsTextStrict(res.items, text)
         if (hit) return found(`ekranda “${hit.text}” (${hit.src === 'ocr' ? 'okunan yazı' : hit.type})`)

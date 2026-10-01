@@ -198,6 +198,63 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   return , $result
 }
 
+function Convert-TiltRect($x, $y, $w, $h, [int]$bmpW, [int]$originX, [int]$originY) {
+  # The phrase was read on a bitmap turned 90° counter-clockwise. Put the box back.
+  $nx = $bmpW - $y - $h
+  $ny = $x
+  $nw = $h
+  $nh = $w
+  if ($nx -lt 0) { $nw += $nx; $nx = 0 }
+  if ($ny -lt 0) { $nh += $ny; $ny = 0 }
+  if ($nw -lt 1 -or $nh -lt 1) { return $null }
+  return [pscustomobject]@{
+    x = [int]($originX + $nx)
+    y = [int]($originY + $ny)
+    w = [int][Math]::Ceiling($nw)
+    h = [int][Math]::Ceiling($nh)
+  }
+}
+
+# Second OCR pass for text that stands on its side. A line that overlaps any first-pass box is dropped.
+function Get-TiltedPhrases($bmp, [int]$originX, [int]$originY, $horizontal) {
+  $kept = New-Object System.Collections.ArrayList
+  $rot = New-Object System.Drawing.Bitmap ([int]$bmp.Width), ([int]$bmp.Height), ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($rot)
+  $g.DrawImage($bmp, 0, 0, $bmp.Width, $bmp.Height)
+  $g.Dispose()
+  $rot.RotateFlip([System.Drawing.RotateFlipType]::Rotate270FlipNone)
+  try {
+    $phrases = Get-OcrPhrases $rot 0 0
+    $bmpW = [int]$bmp.Width
+    foreach ($p in $phrases) {
+      if ([string]::IsNullOrWhiteSpace([string]$p.text)) { continue }
+      $box = Convert-TiltRect $p.x $p.y $p.w $p.h $bmpW $originX $originY
+      if ($null -eq $box) { continue }
+      $hit = $false
+      foreach ($q in @($horizontal) + @($kept)) {
+        if ($null -eq $q) { continue }
+        if ((Test-Overlap $box $q) -gt 0) { $hit = $true; break }
+      }
+      if ($hit) { continue }
+      $words = New-Object System.Collections.ArrayList
+      foreach ($wd in @($p.words)) {
+        if ($null -eq $wd) { continue }
+        $wb = Convert-TiltRect $wd.x $wd.y $wd.w $wd.h $bmpW $originX $originY
+        if ($null -eq $wb) { continue }
+        [void]$words.Add([pscustomobject]@{ t = [string]$wd.t; x = $wb.x; y = $wb.y; w = $wb.w; h = $wb.h })
+      }
+      [void]$kept.Add([pscustomobject]@{
+          text = [string]$p.text; type = 'Text'; src = 'ocr'
+          x = $box.x; y = $box.y; w = $box.w; h = $box.h
+          words = $words
+        })
+    }
+  } finally {
+    $rot.Dispose()
+  }
+  return , $kept
+}
+
 function Get-ScanRoots($win, [int]$ownPid, [bool]$fresh) {
   $roots = New-Object System.Collections.ArrayList
   if ($null -ne $win) {
@@ -460,9 +517,15 @@ function Invoke-Scan($P) {
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
+  $sideCount = 0
   if ($P.ocr -ne $false) {
     $ocrOk = Initialize-Ocr
     if ($ocrOk) { $ocr = Get-OcrPhrases $bmp $rect.x $rect.y }
+    if ($P.tilt -eq $true -and $ocrOk) {
+      $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
+      $sideCount = @($tilted).Count
+      foreach ($p in @($tilted)) { [void]$ocr.Add($p) }
+    }
     try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
   $items = Merge-Items $uia $ocr
@@ -492,6 +555,7 @@ function Invoke-Scan($P) {
     sig    = $sig
     uiaSkipped = $script:UiaSkipped
     shot   = $shot
+    sideCount = $sideCount
   }
 }
 
