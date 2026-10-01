@@ -188,6 +188,8 @@ export async function scan(opts: {
   ocrEngine?: OcrEngine
   /** Also read the shot turned 90° counter-clockwise, and keep only lines the upright pass missed. */
   tilt?: boolean
+  /** Folder for raw / OCR / rotated / monitor PNGs. Scanner only. */
+  debugDir?: string
 }): Promise<ScanResult> {
   if (!IS_WIN) {
     return {
@@ -214,6 +216,7 @@ export async function scan(opts: {
       snap: opts.snap ?? 0,
       sig: opts.sig === true,
       tilt: opts.tilt === true,
+      debugDir: opts.debugDir || '',
     },
     90000
   )

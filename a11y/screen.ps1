@@ -87,6 +87,14 @@ function Get-ScreenBitmap($rect) {
   return $bmp
 }
 
+function Capture-Raw($rect) {
+  $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
+  $g.Dispose()
+  return $bmp
+}
+
 function Set-BitmapOpaque($bmp) {
   $fmt = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
   if ($bmp.PixelFormat -ne $fmt) { return }
@@ -136,9 +144,26 @@ function Copy-Bitmap32($bmp) {
   return $copy
 }
 
+function Save-DebugPng($bmp, [string]$name) {
+  if ([string]::IsNullOrWhiteSpace($script:CaptureDebugDir) -or $null -eq $bmp) { return }
+  $copy = $null
+  try {
+    New-Item -ItemType Directory -Force -Path $script:CaptureDebugDir | Out-Null
+    $copy = Copy-Bitmap32 $bmp
+    $path = Join-Path $script:CaptureDebugDir ("{0}-{1}-{2}.png" -f $script:CaptureDebugStamp, $script:CaptureDebugSlug, $name)
+    $copy.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } catch {
+  } finally {
+    if ($null -ne $copy) { $copy.Dispose() }
+  }
+}
+
 function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   $out = New-Object System.Collections.ArrayList
   if (-not (Initialize-Ocr)) { return , $out }
+  $script:OcrPass = [int]$script:OcrPass + 1
+  if ($script:OcrPass -eq 1) { Save-DebugPng $bmp 'ocr' }
+  elseif ($script:OcrPass -eq 2) { Save-DebugPng $bmp 'donuk' }
 
   $maxDim = [double][Windows.Media.Ocr.OcrEngine]::MaxImageDimension
   $pixelCap = [Math]::Sqrt(12000000.0 / ([double]$bmp.Width * [double]$bmp.Height))
@@ -566,11 +591,30 @@ function Invoke-Scan($P) {
   $own = 0
   if ($P.ownPid) { $own = [int]$P.ownPid }
 
+  $script:CaptureDebugDir = ''
+  if ($P.debugDir) { $script:CaptureDebugDir = [string]$P.debugDir }
+  $script:CaptureDebugStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $slug = 'ekran'
+  if ($P.windowTitle) { $slug = ([string]$P.windowTitle) -replace '[^\p{L}\p{N}]+', '-' }
+  $slug = $slug.Trim('-')
+  if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40) }
+  if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'ekran' }
+  $script:CaptureDebugSlug = $slug
+  $script:OcrPass = 0
+
   $uia = New-Object System.Collections.ArrayList
   $script:UiaSkipped = 0
   if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
-  $bmp = Get-ScreenBitmap $rect
+  $bmp = Capture-Raw $rect
+  Save-DebugPng $bmp 'ham'
+  Set-BitmapOpaque $bmp
+  Save-DebugPng $bmp 'opak'
+  if ($script:CaptureDebugDir) {
+    $mon = Capture-Raw (Get-VirtualScreen)
+    Save-DebugPng $mon 'monitor'
+    $mon.Dispose()
+  }
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
@@ -590,6 +634,7 @@ function Invoke-Scan($P) {
     try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
   $items = Merge-Items $uia $ocr
+  Save-DebugPng $bmp 'onizleme'
 
   $img = $null
   $mode = [string]$P.image
@@ -604,6 +649,38 @@ function Invoke-Scan($P) {
   if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
   $bmp.Dispose()
 
+  $debugNote = ''
+  if ($script:CaptureDebugDir) {
+    $hwnd = 'yok'
+    $wname = 'Tüm ekran'
+    $wclass = ''
+    $wrect = ''
+    if ($null -ne $win) {
+      try { $hwnd = [string]$win.Current.NativeWindowHandle } catch {}
+      try { $wname = [string]$win.Current.Name } catch {}
+      try { $wclass = [string]$win.Current.ClassName } catch {}
+      try {
+        $br = $win.Current.BoundingRectangle
+        $wrect = '{0},{1} {2}x{3}' -f [int]$br.X, [int]$br.Y, [int]$br.Width, [int]$br.Height
+      } catch {}
+    }
+    $debugNote = Join-Path $script:CaptureDebugDir ("{0}-{1}.txt" -f $script:CaptureDebugStamp, $script:CaptureDebugSlug)
+    $lines = @(
+      'yontem: Graphics.CopyFromScreen (BitBlt, SRCCOPY)',
+      'printWindow: yok',
+      'windowsGraphicsCapture: yok',
+      'donus kodu yakalama cagrisini degistirmiyor. Donuk kare ayri kopya.',
+      'onizleme: opak kare. JPEG bu bitmapten ciziliyor. Donuk kare onizlemede yok.',
+      ('pencere: {0}' -f $wname),
+      ('sinif: {0}' -f $wclass),
+      ('hwnd: {0}' -f $hwnd),
+      ('pencere olcusu: {0}' -f $wrect),
+      ('yakalanan rect: {0},{1} {2}x{3}' -f $rect.x, $rect.y, $rect.w, $rect.h),
+      'dosyalar: ham, opak, ocr, donuk, monitor, onizleme'
+    )
+    try { Set-Content -LiteralPath $debugNote -Value ($lines -join "`r`n") -Encoding UTF8 } catch { $debugNote = '' }
+  }
+
   return [pscustomobject]@{
     area   = $rect
     items  = $items
@@ -617,6 +694,7 @@ function Invoke-Scan($P) {
     uiaSkipped = $script:UiaSkipped
     shot   = $shot
     sideCount = $sideCount
+    captureDebug = $debugNote
   }
 }
 
