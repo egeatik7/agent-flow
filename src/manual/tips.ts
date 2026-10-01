@@ -145,6 +145,18 @@ function fieldLabel(el: Element): string {
 }
 
 function buttonTip(el: HTMLButtonElement): Tip | null {
+  if (el.classList.contains('canvas-tab-add')) {
+    return {
+      title: 'Yeni tuval',
+      text: 'Boş bir tuval açar. Her tuval ayrı bir akıştır. Ajan, o an açık olan tuvali çalıştırır. Çalışırken sekme değişmez.',
+    }
+  }
+  if (el.classList.contains('canvas-tab-x')) {
+    return {
+      title: 'Tuvali kapat',
+      text: 'Bu tuvali kapatır. İçinde adım varsa onay ister. Son tuval kapanmaz. Çalışırken kapanmaz.',
+    }
+  }
   const raw = text(el)
   const t = raw.replace(/^[^\p{L}\p{N}+]+/u, '').trim()
   const inMenu = !!el.closest('.dropdown-menu, .ctx-menu')
@@ -163,16 +175,16 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Paketi çıkar', { title: 'Paketi çıkar', text: 'Paketi dağıtır. İçindeki node’lar tuvale geri döner, paket node’u kalkar. Dışarıdaki oklar eski yerlerine bağlanır.' }],
     ['Paketten çık', { title: 'Paketten çık', text: 'İçeride yaptığın değişiklikleri pakete yazar ve dışarıdaki akışa döner. Paket yine tek node olarak durur.' }],
     ['Hafızayı Sil', { title: 'Hafızayı Sil', text: 'Bütün node’ların öğrendiği hedefleri ve İnisiyatif’in kayıtlı yollarını unutturur. Akış, liste ve yazdığın adımlar durur.' }],
-    ['Yeni Akış', { title: 'Yeni Akış', text: 'Tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Kayıtlı akış dosyası da bu boş haliyle değişir.' }],
+    ['Yeni Akış', { title: 'Yeni Akış', text: 'Açık tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Diğer tuvaller durur.' }],
     ['Düzenle', { title: 'Düzenle', text: 'Node’ları soldan sağa, okların sırasına göre dizer. Bağlantıları değiştirmez.' }],
-    ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Akışı Başlangıç’tan itibaren çalıştırır. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
+    ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Açık tuvali Başlangıç’tan itibaren çalıştırır. Diğer tuvaller durur. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
     ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Kutular, listedeki işaretli satırdan devam eder; paket içindeki kutular da. Ajanı Çalıştır hepsini 1. öğeden başlatır.' }],
     ['Durdur', { title: 'Durdur', text: 'Çalışan akışı durdurur. Ctrl+Shift+Q ile de durur. Bekleyen model isteği de kesilir.' }],
-    ['Dışa Aktar', { title: 'Dışa Aktar', text: 'Akışı bir JSON dosyası olarak indirir. Başka bilgisayarda İçe Aktar ile açılır.' }],
-    ['İçe Aktar', { title: 'İçe Aktar', text: 'Daha önce dışa aktarılmış bir akış dosyasını açar. Ekrandaki akışın yerini alır.' }],
+    ['Dışa Aktar', { title: 'Dışa Aktar', text: 'Açık tuvalin akışını bir JSON dosyası olarak indirir. Dosya adı tuvalin adıdır. Diğer tuvaller bu dosyaya yazılmaz. Paketin içindeyken de paketin tamamı, yani tuvalin kendisi iner.' }],
+    ['İçe Aktar', { title: 'İçe Aktar', text: 'Bir JSON akışını açık tuvale yükler. Bu tuvalin eski akışının yerini alır. Diğer tuvaller durur.' }],
     ['Ekrandan Seç', { title: 'Ekrandan Seç', text: 'Ekranın görüntüsünü açar. Bir yazının veya öğenin üzerine tıklayınca o hedef bu node’a bağlanır.' }],
     ['Ekranı Tara', { title: 'Ekranı Tara', text: 'Ekranı yeniden okur. Penceredeki yazılar ve uygulama öğeleri kutularla işaretlenir.' }],
-    ['Günlük klasörü', { title: 'Günlük klasörü', text: 'Her çalıştırmanın yazıldığı klasörü açar. Hata anının ekran görüntüleri de oradadır.' }],
+    ['Günlük klasörü', { title: 'Günlük klasörü', text: 'Bu sürümün günlük klasörünü açar. Her program sürümü logs altında kendi klasörüne yazar. Hata anının ekran görüntüleri de oradadır.' }],
     ['Bağlantıyı Sil (Del)', { title: 'Bağlantıyı Sil', text: 'Seçili oku kaldırır. İki node durur, sadece aralarındaki bağ gider. Del tuşu da aynısını yapar.' }],
     ['Node’u Sil (Del)', { title: 'Node’u Sil', text: 'Seçili node’u akıştan çıkarır. Del tuşu da aynısını yapar.' }],
     ['Kutuyu Sil (içindekiler kalır)', { title: 'Kutuyu Sil', text: 'Her Öğe İçin çerçevesini kaldırır. İçindeki node’lar tuvalde kalır, sadece kutu dağılır.' }],
@@ -366,6 +378,12 @@ function checkTip(el: Element): Tip | null {
 }
 
 function regionTip(el: Element): Tip | null {
+  if (el.classList.contains('canvas-tab') || el.classList.contains('canvas-tabs') || el.classList.contains('canvas-tab-rename')) {
+    return {
+      title: 'Tuval sekmesi',
+      text: 'Her sekme ayrı bir akıştır. Ajan açık olanı çalıştırır. Çift tıklayınca adını değiştirirsin. Ctrl+A tuvaldeki her node’u seçer. Ctrl+C kopyalar, Ctrl+X keser, Ctrl+V yapıştırır. İki seçili node’un arasındaki ok durur; seçimin dışına çıkan ok kopar. Kopya başka bir tuvale ya da bir paketin içine de yapışır.',
+    }
+  }
   if (el.classList.contains('ocr-pick') || el.classList.contains('ocr-opt')) {
     return {
       title: 'OCR',
@@ -411,7 +429,7 @@ function regionTip(el: Element): Tip | null {
     return { title: 'Boş tuval', text: 'Sağ tıkla veya Node Ekle ile ilk adımı koy. Node’ları oklarla bağla. Her Öğe İçin kutusuna sürüklenen node, listedeki her dosya için tekrar eder.' }
   }
   if (el.classList.contains('canvas-scroll') || el.classList.contains('canvas-inner')) {
-    return { title: 'Tuval', text: 'Akışın durduğu yer. Boş yere sağ tıkla, node ekle. Tekerlek yakınlaştırır, orta tuş kaydırır. Boş yerde sürüklemek kutu çizerek seçer. Shift ile tıklamak, ya da Shift basılıyken yeni bir kutu çizmek, seçime ekler. Node’u bir çerçevenin içine bırakınca o kutuya girer, dışına bırakınca çıkar.' }
+    return { title: 'Tuval', text: 'Akışın durduğu yer. Boş yere sağ tıkla, node ekle. Ctrl+A hepsini seçer. Ctrl+C kopyalar, Ctrl+X keser, Ctrl+V yapıştırır; ok, yalnızca iki ucu da seçiliyse durur. Tekerlek yakınlaştırır, orta tuş kaydırır. Boş yerde sürüklemek kutu çizerek seçer. Shift ile tıklamak, ya da Shift basılıyken yeni bir kutu çizmek, seçime ekler. Node’u bir çerçevenin içine bırakınca o kutuya girer, dışına bırakınca çıkar.' }
   }
   if (el.classList.contains('hint-block') || el.classList.contains('hint-list')) {
     return { title: 'Nasıl kullanılır', text: 'Henüz bir node seçilmedi. Tuvalde bir node’a tıklayınca onun ayarları burada açılır. Soldaki liste de aynı işi anlatır.' }

@@ -1,6 +1,6 @@
 export * from '../electron/graph-types'
 export type { ScanResult, ScreenItem } from '../electron/matcher'
-import type { AgentGraph, AppSettings, Locator, LogLevel } from '../electron/graph-types'
+import type { AgentGraph, AppSettings, CanvasBook, Locator, LogLevel } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'
 
 export type LogEntry = {
@@ -20,6 +20,8 @@ export type XpAgentApi = {
   saveSettings: (partial: Partial<AppSettings>) => Promise<AppSettings>
   getGraph: () => Promise<AgentGraph>
   saveGraph: (graph: AgentGraph) => Promise<boolean>
+  getCanvases: () => Promise<CanvasBook>
+  saveCanvases: (book: CanvasBook) => Promise<boolean>
   listWindows: () => Promise<{ title: string; handle: string }[]>
   scanScreen: (windowTitle?: string) => Promise<ScanResult>
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => Promise<{ text: string; type: string } | null>

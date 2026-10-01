@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('xpAgent', {
   saveSettings: (partial: unknown) => ipcRenderer.invoke('settings:save', partial),
   getGraph: () => ipcRenderer.invoke('graph:get'),
   saveGraph: (graph: unknown) => ipcRenderer.invoke('graph:save', graph),
+  getCanvases: () => ipcRenderer.invoke('canvases:get'),
+  saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string) => ipcRenderer.invoke('screen:scan', windowTitle),

@@ -134,6 +134,18 @@ export type AgentGraph = {
   edges: AgentEdge[]
 }
 
+/** One canvas. The open tab is the project the agent runs and the file export writes. */
+export type CanvasTab = {
+  id: string
+  name: string
+  graph: AgentGraph
+}
+
+export type CanvasBook = {
+  activeId: string
+  tabs: CanvasTab[]
+}
+
 export type AppSettings = {
   apiKey: string
   model: string
@@ -682,4 +694,23 @@ export function normalizeGraph(raw: unknown): AgentGraph {
     }
   }
   return { nodes, edges }
+}
+
+export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
+  const rec = raw as { activeId?: unknown; tabs?: unknown } | null
+  if (rec && Array.isArray(rec.tabs) && rec.tabs.length) {
+    const tabs: CanvasTab[] = rec.tabs.map((item, i) => {
+      const t = item as { id?: unknown; name?: unknown; graph?: unknown }
+      const name = typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`
+      return {
+        id: typeof t?.id === 'string' && t.id ? t.id : rid(),
+        name,
+        graph: normalizeGraph(t?.graph),
+      }
+    })
+    const activeId = tabs.some((t) => t.id === rec.activeId) ? String(rec.activeId) : tabs[0].id
+    return { activeId, tabs }
+  }
+  const id = rid()
+  return { activeId: id, tabs: [{ id, name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }] }
 }

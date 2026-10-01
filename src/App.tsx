@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
+import CanvasTabs from './components/CanvasTabs'
 import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
@@ -13,10 +14,12 @@ import {
   newId,
   hasTemplate,
   listItems,
+  normalizeCanvasBook,
   normalizeGraph,
   type AgentGraph,
   type AgentNode,
   type AppSettings,
+  type CanvasBook,
   type Locator,
   type LogEntry,
   type LogLevel,
@@ -31,7 +34,10 @@ import {
   autoLayout,
   chainTail,
   connect,
+  copyNodes,
   duplicateNode,
+  pasteNodes,
+  type NodeClip,
   freePort,
   mapNodes,
   packageSelection,
@@ -48,6 +54,7 @@ import { DEMO_CAPTURE, demoScan, runDemo, stopDemo } from './lib/demo'
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
 
 const LOCAL_GRAPH = 'xp-agent-graph'
+const LOCAL_BOOK = 'xp-agent-canvases'
 const LOCAL_SETTINGS = 'xp-agent-settings'
 
 function errText(e: unknown): string {
@@ -70,6 +77,35 @@ function initialGraph(): AgentGraph {
   return normalizeGraph({ nodes: [createNode('start', 40, 80)], edges: [] })
 }
 
+function emptyBook(): CanvasBook {
+  const id = newId()
+  return { activeId: id, tabs: [{ id, name: 'Tuval 1', graph: initialGraph() }] }
+}
+
+function nextCanvasName(tabs: { name: string }[]): string {
+  const used = new Set(tabs.map((t) => t.name))
+  let n = 1
+  while (used.has(`Tuval ${n}`)) n += 1
+  return `Tuval ${n}`
+}
+
+function fileNameFor(name: string): string {
+  const clean = name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 48)
+  return `${clean || 'tuval'}.json`
+}
+
+function previewBook(): CanvasBook {
+  try {
+    const raw = localStorage.getItem(LOCAL_BOOK)
+    if (raw) return normalizeCanvasBook(JSON.parse(raw))
+    const g = localStorage.getItem(LOCAL_GRAPH)
+    if (g) return normalizeCanvasBook(undefined, JSON.parse(g))
+  } catch {
+    /* corrupt preview data */
+  }
+  return emptyBook()
+}
+
 type Crumb = { parent: AgentGraph; id: string }
 
 /** The saved flow: the open package view written back into its parents. */
@@ -84,8 +120,11 @@ function rooted(view: AgentGraph, stack: Crumb[]): AgentGraph {
 }
 
 export default function App() {
+  const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [graph, setGraph] = useState<AgentGraph>(initialGraph)
+  const [graph, setGraph] = useState<AgentGraph>(book0.tabs[0].graph)
+  const [activeId, setActiveId] = useState(book0.activeId)
+  const [tabList, setTabList] = useState(book0.tabs.map((t) => ({ id: t.id, name: t.name })))
   const [stack, setStack] = useState<Crumb[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -104,6 +143,12 @@ export default function App() {
 
   const graphRef = useRef(graph)
   graphRef.current = graph
+  const bookRef = useRef(book0)
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
+  const clipRef = useRef<NodeClip | null>(null)
+  const runningRef = useRef(false)
+  runningRef.current = running
   const stackRef = useRef(stack)
   stackRef.current = stack
   const selectedRef = useRef(selectedNodeId)
@@ -134,16 +179,62 @@ export default function App() {
     }
   }, [pushLog])
 
+  const rememberBook = useCallback((book: CanvasBook) => {
+    bookRef.current = book
+    activeIdRef.current = book.activeId
+    setActiveId(book.activeId)
+    setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
+    if (api) void api.saveCanvases(book).catch((e) => pushLog('error', errText(e)))
+    else localStorage.setItem(LOCAL_BOOK, JSON.stringify(book))
+  }, [pushLog])
+
+  const commitActive = useCallback((): CanvasBook => {
+    const root = rooted(graphRef.current, stackRef.current)
+    const id = activeIdRef.current
+    const cur = bookRef.current
+    return {
+      activeId: id,
+      tabs: cur.tabs.map((t) => (t.id === id ? { ...t, graph: root } : t)),
+    }
+  }, [])
+
+  const showCanvas = useCallback((book: CanvasBook, id: string) => {
+    const tab = book.tabs.find((t) => t.id === id) ?? book.tabs[0]
+    const next = { ...book, activeId: tab.id }
+    rememberBook(next)
+    const view = reconcileLoopMembership(tab.graph)
+    graphRef.current = view
+    stackRef.current = []
+    setStack([])
+    setGraph(view)
+    setSelectedNodeId(null)
+    setSelectedIds([])
+    selectedIdsRef.current = []
+    setSelectedEdgeId(null)
+    setStepStatus({})
+  }, [rememberBook])
+
   useEffect(() => {
     void (async () => {
       if (api) {
         setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
-        setGraph(reconcileLoopMembership(normalizeGraph(await api.getGraph())))
+        const book = normalizeCanvasBook(await api.getCanvases())
+        const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
+        bookRef.current = book
+        activeIdRef.current = tab.id
+        setActiveId(tab.id)
+        setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
+        setGraph(reconcileLoopMembership(tab.graph))
         pushLog('info', 'Nubbo Agent Studio hazır.')
       } else {
         try {
-          const g = localStorage.getItem(LOCAL_GRAPH)
-          if (g) setGraph(reconcileLoopMembership(normalizeGraph(JSON.parse(g))))
+          const book = previewBook()
+          const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
+          bookRef.current = book
+          activeIdRef.current = tab.id
+          setActiveId(tab.id)
+          setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
+          setGraph(reconcileLoopMembership(tab.graph))
           const s = localStorage.getItem(LOCAL_SETTINGS)
           if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
         } catch {
@@ -158,13 +249,9 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded) return
-    const t = setTimeout(() => {
-      const root = rooted(graphRef.current, stackRef.current)
-      if (api) void api.saveGraph(root)
-      else localStorage.setItem(LOCAL_GRAPH, JSON.stringify(root))
-    }, 400)
+    const t = setTimeout(() => rememberBook(commitActive()), 400)
     return () => clearTimeout(t)
-  }, [graph, stack, loaded])
+  }, [graph, stack, loaded, rememberBook, commitActive])
 
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
@@ -307,6 +394,53 @@ export default function App() {
     done?.(yes)
   }
 
+  const canvasName = () => bookRef.current.tabs.find((t) => t.id === activeIdRef.current)?.name ?? 'Tuval'
+
+  const switchTab = (id: string) => {
+    if (runningRef.current || id === activeIdRef.current) return
+    showCanvas(commitActive(), id)
+  }
+
+  const addTab = () => {
+    if (runningRef.current) return
+    const committed = commitActive()
+    const id = newId()
+    const name = nextCanvasName(committed.tabs)
+    const fresh = initialGraph()
+    showCanvas({ activeId: id, tabs: [...committed.tabs, { id, name, graph: fresh }] }, id)
+    pushLog('info', `${name} açıldı.`)
+  }
+
+  const closeTab = async (id: string) => {
+    if (runningRef.current) return
+    const looking = id === activeIdRef.current ? commitActive() : bookRef.current
+    if (looking.tabs.length < 2) return
+    const tab = looking.tabs.find((t) => t.id === id)
+    if (!tab) return
+    if (tab.graph.nodes.some((n) => n.kind !== 'start')) {
+      const yes = await askSure(`“${tab.name}” kapatılsın mı? Bu tuvaldeki akış silinir.`)
+      if (!yes || runningRef.current) return
+    }
+    const again = id === activeIdRef.current ? commitActive() : bookRef.current
+    if (again.tabs.length < 2 || !again.tabs.some((t) => t.id === id)) return
+    const idx = again.tabs.findIndex((t) => t.id === id)
+    const tabs = again.tabs.filter((t) => t.id !== id)
+    const wasOpen = id === activeIdRef.current
+    const nextId = wasOpen ? tabs[Math.max(0, idx - 1)].id : again.activeId
+    const book: CanvasBook = { activeId: nextId, tabs }
+    if (wasOpen) showCanvas(book, nextId)
+    else rememberBook(book)
+    pushLog('info', `${tab.name} kapatıldı.`)
+  }
+
+  const renameTab = (id: string, name: string) => {
+    const clean = name.trim().slice(0, 48)
+    if (!clean) return
+    const base = id === activeIdRef.current ? commitActive() : bookRef.current
+    if (!base.tabs.some((t) => t.id === id)) return
+    rememberBook({ ...base, tabs: base.tabs.map((t) => (t.id === id ? { ...t, name: clean } : t)) })
+  }
+
   const unpack = async (id: string) => {
     const yes = await askSure('Paketi çıkarmak istediğinize emin misiniz?')
     if (!yes) return
@@ -405,14 +539,64 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (confirmQuestion) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (scanner && mod) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
         else if (selectedIdsRef.current.length || selectedNodeId) deleteSelection()
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+      } else if (mod && key === 'a') {
+        e.preventDefault()
+        selectMany(graphRef.current.nodes.map((n) => n.id), 'replace')
+      } else if (mod && key === 'c') {
+        const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedNodeId ? [selectedNodeId] : []
+        const clip = copyNodes(graphRef.current, ids)
+        if (!clip) return
+        e.preventDefault()
+        clipRef.current = clip
+        pushLog('info', `${clip.nodes.length} node kopyalandı.`)
+      } else if (mod && key === 'x') {
+        const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedNodeId ? [selectedNodeId] : []
+        const clip = copyNodes(graphRef.current, ids)
+        if (!clip) return
+        e.preventDefault()
+        clipRef.current = clip
+        const cut = clip.nodes.filter((n) => n.kind !== 'start').map((n) => n.id)
+        if (cut.length) {
+          setGraph((g) => {
+            const next = cut.reduce((acc, id) => removeNode(acc, id), g)
+            graphRef.current = next
+            return next
+          })
+        }
+        const stay = ids.filter((id) => graphRef.current.nodes.find((n) => n.id === id)?.kind === 'start')
+        selectedIdsRef.current = stay
+        setSelectedIds(stay)
+        setSelectedNodeId(stay[0] ?? null)
+        setSelectedEdgeId(null)
+        pushLog('info', cut.length ? `${cut.length} node kesildi.` : 'Başlangıç kesilmez.')
+      } else if (mod && key === 'v') {
+        const clip = clipRef.current
+        if (!clip) return
+        e.preventDefault()
+        const pasted = pasteNodes(graphRef.current, clip)
+        if (!pasted) {
+          pushLog('warn', 'Yapıştırılacak node kalmadı. Bu tuvalde zaten bir Başlangıç var.')
+          return
+        }
+        graphRef.current = pasted.graph
+        setGraph(pasted.graph)
+        selectedIdsRef.current = pasted.ids
+        setSelectedIds(pasted.ids)
+        setSelectedNodeId(pasted.ids[pasted.ids.length - 1] ?? null)
+        setSelectedEdgeId(null)
+        pushLog('success', `${pasted.ids.length} node yapıştırıldı.`)
+      } else if (mod && key === 'g') {
         e.preventDefault()
         const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedNodeId ? [selectedNodeId] : []
         if (ids.length) wrapSelection(ids)
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedNodeId) {
+      } else if (mod && key === 'd' && selectedNodeId) {
         e.preventDefault()
         const r = duplicateNode(graphRef.current, selectedNodeId)
         if (r) {
@@ -649,9 +833,10 @@ export default function App() {
     }
     const path = stackRef.current.map((c) => c.id)
     const full = path.length ? rooted(g, stackRef.current) : g
+    const name = canvasName()
     setRunning(true)
     setStepStatus({})
-    pushLog('info', startId ? 'Seçili node’dan çalıştırılıyor…' : 'Ajan çalışıyor…')
+    pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (api) await api.runAgent(full, startId, path)
       else
@@ -670,32 +855,43 @@ export default function App() {
   }
 
   const exportGraph = () => {
+    const name = canvasName()
     const blob = new Blob([JSON.stringify(rooted(graphRef.current, stackRef.current), null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'nubbo-akis.json'
+    a.download = fileNameFor(name)
     a.click()
     URL.revokeObjectURL(a.href)
+    pushLog('info', `“${name}” dışa aktarıldı.`)
   }
 
   const importGraph = async (file: File) => {
     try {
-      setStack([])
+      const g = reconcileLoopMembership(normalizeGraph(JSON.parse(await file.text())))
+      graphRef.current = g
       stackRef.current = []
-      setGraph(reconcileLoopMembership(normalizeGraph(JSON.parse(await file.text()))))
+      setStack([])
+      setGraph(g)
       setSelectedNodeId(null)
+      setSelectedIds([])
+      selectedIdsRef.current = []
+      setSelectedEdgeId(null)
       setStepStatus({})
-      pushLog('success', `Akış yüklendi: ${file.name}`)
+      rememberBook(commitActive())
+      pushLog('success', `“${canvasName()}” tuvaline yüklendi: ${file.name}`)
     } catch {
       pushLog('error', 'Dosya okunamadı (geçerli bir akış JSON’u değil).')
     }
   }
 
   const newFlow = () => {
-    if (graph.nodes.length > 1 && !window.confirm('Mevcut akış silinsin mi?')) return
-    setStack([])
+    const whole = rooted(graphRef.current, stackRef.current)
+    if (whole.nodes.some((n) => n.kind !== 'start') && !window.confirm('Bu tuvaldeki akış silinsin mi?')) return
+    const fresh = initialGraph()
+    graphRef.current = fresh
     stackRef.current = []
-    setGraph(initialGraph())
+    setStack([])
+    setGraph(fresh)
     setSelectedNodeId(null)
     setSelectedIds([])
     selectedIdsRef.current = []
@@ -742,7 +938,7 @@ export default function App() {
             }}
           />
           <span className="menubar-status">
-            {counts} aşama · {graph.edges.length} bağlantı
+            {tabList.find((t) => t.id === activeId)?.name ?? 'Tuval'} · {counts} aşama · {graph.edges.length} bağlantı
             {settings.targetWindow
               ? ` · hedef: ${settings.targetWindow}${
                   windows.length && !windows.some((w) => w.title === settings.targetWindow) ? ' (açık değil)' : ''
@@ -788,6 +984,15 @@ export default function App() {
                 pushLog('error', errText(e))
               })
           }}
+        />
+        <CanvasTabs
+          tabs={tabList}
+          activeId={activeId}
+          disabled={running}
+          onSelect={switchTab}
+          onAdd={addTab}
+          onClose={(id) => void closeTab(id)}
+          onRename={renameTab}
         />
         <div className="workspace">
           <div className="canvas-wrap">

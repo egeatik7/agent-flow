@@ -386,6 +386,102 @@ body {
 
 /* ---------- Layout ---------- */
 
+.canvas-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 5px 8px 0;
+  background: linear-gradient(180deg, #f3f1e7 0%, #e4e1d4 100%);
+  border-bottom: 1px solid #7f9db9;
+  overflow-x: auto;
+  min-height: 28px;
+}
+
+.canvas-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  max-width: 180px;
+  padding: 0 4px 0 10px;
+  margin-bottom: -1px;
+  border: 1px solid #8aa0b8;
+  border-bottom: 1px solid #7f9db9;
+  border-radius: 5px 5px 0 0;
+  background: linear-gradient(180deg, #f7f6f1 0%, #d7d3c4 100%);
+  color: #333;
+  cursor: pointer;
+  font-size: 11px;
+  box-shadow: inset 1px 1px 0 #fff;
+}
+
+.canvas-tab.active {
+  height: 25px;
+  background: #dfe8f5;
+  border-color: #003c74;
+  border-bottom-color: #dfe8f5;
+  color: #000;
+  font-weight: 700;
+  z-index: 1;
+}
+
+.canvas-tab-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.canvas-tab-rename {
+  width: 96px;
+  height: 16px;
+  margin: 0;
+  padding: 0 3px;
+  border: 1px solid #7f9db9;
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.canvas-tab-x,
+.canvas-tab-add {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  line-height: 14px;
+  text-align: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+}
+
+.canvas-tab-x:hover:not(:disabled),
+.canvas-tab-add:hover:not(:disabled) {
+  background: #c6d9f5;
+  border-color: #003c74;
+}
+
+.canvas-tab-x:disabled,
+.canvas-tab-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.canvas-tab-add {
+  width: 22px;
+  height: 20px;
+  margin: 0 0 2px 2px;
+  border: 1px solid #7f9db9;
+  background: linear-gradient(180deg, #fff 0%, #d6e4f7 100%);
+  box-shadow: inset 1px 1px 0 #fff;
+  font-weight: 700;
+  color: #003c74;
+}
+
 .workspace {
   flex: 1;
   min-height: 0;

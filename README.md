@@ -16,6 +16,12 @@ sayfanın içine bakar. Emin olamadığı yerde OpenRouter’daki modele sorar.
 - Tırnak içinde yazdığın yazı (`“Oluştur”`) her zaman birebir aranır.
 - Araç çubuğunda **Yeni Akış**’ın sağındaki **Hafızayı Sil**, bütün node’ların hafızasını ve İnisiyatif’in kayıtlı yolunu birden temizler. Akışın kendisi durur.
 
+## Tuvaller
+
+Araç çubuğunun altında her tuval bir sekmedir ve ayrı bir akıştır. Ajan yalnızca açık olanı çalıştırır. **+** yeni tuval açar, **×** kapatır; son sekme kapanmaz. Sekmenin adına çift tıklayınca adı değişir. **Dışa Aktar** yalnız açık tuvali, tuvalin adıyla indirir. **İçe Aktar** yalnız o tuvalin yerini alır.
+
+Tuvalde **Ctrl+A** bütün node’ları seçer. **Ctrl+C** kopyalar, **Ctrl+X** keser (Başlangıç yerinde kalır), **Ctrl+V** yapıştırır. Ok, iki ucu da kopyadaysa durur; seçimin dışına çıkan ok kopar. Aynı kopya başka bir tuvale veya açık bir paketin içine de yapışır.
+
 ## Hedef nasıl bulunur?
 
 Sırayla, ilk bulunan yerde durur:
@@ -105,8 +111,8 @@ Güvenceler:
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
 - **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
-- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs` altına yazılır (son 30). Bir tur hata verirse o anki ekran
-  da kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi açar.
+- **Günlük dosyası:** her çalıştırma `%APPDATA%/xp-agent-studio/logs/<sürüm>/` altına yazılır (o sürümden son 30). Bir tur hata verirse o anki ekran
+  da kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
 ## Node türleri
 

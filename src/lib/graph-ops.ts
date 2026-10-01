@@ -5,6 +5,7 @@ import {
   createNode,
   newId,
   nodeHeight,
+  type AgentEdge,
   type AgentGraph,
   type AgentNode,
   type NodeKind,
@@ -436,4 +437,81 @@ export function autoLayout(graph: AgentGraph): AgentGraph {
     return { ...n, x: 40 + d * (NODE_W + GAP_X), y: 60 + row * 200 }
   })
   return { ...graph, nodes }
+}
+
+export type NodeClip = {
+  nodes: AgentNode[]
+  edges: Pick<AgentEdge, 'from' | 'fromPort' | 'to'>[]
+}
+
+function cloneData<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** Nodes in the selection, plus edges whose both ends are selected. Edges that leave the selection are dropped. */
+export function copyNodes(graph: AgentGraph, ids: string[]): NodeClip | null {
+  const set = new Set(ids)
+  const nodes = graph.nodes
+    .filter((n) => set.has(n.id))
+    .map((n) => {
+      const copy = cloneData(n)
+      if (copy.kind === 'loop') copy.members = (copy.members ?? []).filter((id) => set.has(id))
+      copy.loopIndex = undefined
+      return copy
+    })
+  if (!nodes.length) return null
+  const edges = graph.edges
+    .filter((e) => set.has(e.from) && set.has(e.to))
+    .map((e) => ({ from: e.from, fromPort: e.fromPort, to: e.to }))
+  return { nodes, edges }
+}
+
+function assignFreshIds(nodes: AgentNode[], map: Map<string, string>) {
+  for (const n of nodes) {
+    if (!map.has(n.id)) map.set(n.id, newId())
+    if (n.inner) assignFreshIds(n.inner.nodes, map)
+  }
+}
+
+function rewriteNode(n: AgentNode, map: Map<string, string>, dx: number, dy: number, shift: boolean): AgentNode {
+  const next: AgentNode = {
+    ...n,
+    id: map.get(n.id) ?? n.id,
+    x: shift ? Math.round(n.x + dx) : n.x,
+    y: shift ? Math.round(n.y + dy) : n.y,
+    members: n.members?.map((id) => map.get(id)).filter((id): id is string => !!id),
+    loopIndex: undefined,
+  }
+  if (n.inner) {
+    next.inner = {
+      nodes: n.inner.nodes.map((child) => rewriteNode(child, map, 0, 0, false)),
+      edges: n.inner.edges
+        .filter((e) => map.has(e.from) && map.has(e.to))
+        .map((e) => ({ id: newId(), from: map.get(e.from)!, fromPort: e.fromPort, to: map.get(e.to)! })),
+    }
+  }
+  return next
+}
+
+let pasteSerial = 0
+
+/** Pastes a clip into this canvas. A Başlangıç that the canvas already has is left out. */
+export function pasteNodes(graph: AgentGraph, clip: NodeClip): { graph: AgentGraph; ids: string[] } | null {
+  const hasStart = graph.nodes.some((n) => n.kind === 'start')
+  const nodes = clip.nodes.filter((n) => !(hasStart && n.kind === 'start'))
+  if (!nodes.length) return null
+  const map = new Map<string, string>()
+  assignFreshIds(nodes, map)
+  const minX = Math.min(...nodes.map((n) => n.x))
+  const minY = Math.min(...nodes.map((n) => n.y))
+  const bump = (pasteSerial % 8) * 28
+  pasteSerial += 1
+  const dx = 72 + bump - minX
+  const dy = 72 + bump - minY
+  const created = nodes.map((n) => rewriteNode(n, map, dx, dy, true))
+  const edges = clip.edges
+    .filter((e) => map.has(e.from) && map.has(e.to))
+    .map((e) => ({ id: newId(), from: map.get(e.from)!, fromPort: e.fromPort, to: map.get(e.to)! }))
+  const next = reconcileLoopMembership({ nodes: [...graph.nodes, ...created], edges: [...graph.edges, ...edges] })
+  return { graph: next, ids: created.map((n) => n.id) }
 }

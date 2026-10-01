@@ -6,7 +6,17 @@ import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
-import { cleanBackups, DEFAULT_SETTINGS, modelChain, normalizeGraph, type AgentGraph, type AppSettings, type LogLevel } from './graph-types'
+import {
+  cleanBackups,
+  DEFAULT_SETTINGS,
+  modelChain,
+  normalizeCanvasBook,
+  normalizeGraph,
+  type AgentGraph,
+  type AppSettings,
+  type CanvasBook,
+  type LogLevel,
+} from './graph-types'
 import { listDirEntries } from './list-dir'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
@@ -16,7 +26,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'xp-agent-studio'))
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph }>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
 })
@@ -42,11 +52,17 @@ function send(channel: string, payload: unknown) {
 
 let runLog = ''
 
-function logsDir() {
+function logsRoot() {
   return path.join(app.getPath('userData'), 'logs')
 }
 
-/** One text file per run under %APPDATA%/xp-agent-studio/logs; only the last 30 runs are kept. */
+function logsDir() {
+  const raw = (app.getVersion() || '0').trim() || '0'
+  const version = raw.replace(/[<>:"/\\|?*]/g, '_')
+  return path.join(logsRoot(), version)
+}
+
+/** One text file per run under %APPDATA%/xp-agent-studio/logs/<version>; only the last 30 runs of that version are kept. */
 function openRunLog() {
   const dir = logsDir()
   fs.mkdirSync(dir, { recursive: true })
@@ -150,6 +166,18 @@ app.whenReady().then(() => {
   ipcMain.handle('graph:get', () => normalizeGraph(store.get('graph')))
   ipcMain.handle('graph:save', (_e, graph: AgentGraph) => {
     store.set('graph', graph)
+    return true
+  })
+  ipcMain.handle('canvases:get', () => {
+    const saved = store.get('canvases') as CanvasBook | undefined
+    if (saved?.tabs?.length) return normalizeCanvasBook(saved)
+    return normalizeCanvasBook(undefined, normalizeGraph(store.get('graph')))
+  })
+  ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
+    const next = normalizeCanvasBook(book)
+    store.set('canvases', next)
+    const active = next.tabs.find((t) => t.id === next.activeId) ?? next.tabs[0]
+    if (active) store.set('graph', active.graph)
     return true
   })
 
