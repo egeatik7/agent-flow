@@ -487,6 +487,38 @@ function Merge-Items($uia, $ocr) {
   return , $final
 }
 
+function New-Bitmap24($bmp) {
+  $w = [int]$bmp.Width
+  $h = [int]$bmp.Height
+  $dst = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+  $srcBd = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $dstBd = $dst.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  try {
+    $ss = [int]$srcBd.Stride
+    $ds = [int]$dstBd.Stride
+    $sbytes = New-Object byte[] ($ss * $h)
+    $dbytes = New-Object byte[] ($ds * $h)
+    [System.Runtime.InteropServices.Marshal]::Copy($srcBd.Scan0, $sbytes, 0, $sbytes.Length)
+    for ($y = 0; $y -lt $h; $y++) {
+      $srow = $y * $ss
+      $drow = $y * $ds
+      for ($x = 0; $x -lt $w; $x++) {
+        $si = $srow + ($x * 4)
+        $di = $drow + ($x * 3)
+        $dbytes[$di] = $sbytes[$si]
+        $dbytes[$di + 1] = $sbytes[$si + 1]
+        $dbytes[$di + 2] = $sbytes[$si + 2]
+      }
+    }
+    [System.Runtime.InteropServices.Marshal]::Copy($dbytes, 0, $dstBd.Scan0, $dbytes.Length)
+  } finally {
+    $bmp.UnlockBits($srcBd)
+    $dst.UnlockBits($dstBd)
+  }
+  return $dst
+}
+
 function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0) {
   $scale = [Math]::Min(1.0, $maxW / [double]$bmp.Width)
   $w = [int]($bmp.Width * $scale)
@@ -495,11 +527,14 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
     $w = [Math]::Max($snap, [int]([Math]::Round($w / [double]$snap)) * $snap)
     $h = [Math]::Max($snap, [int]([Math]::Round($h / [double]$snap)) * $snap)
   }
-  $out = New-Object System.Drawing.Bitmap $w, $h
+  # 24-bit copy has no alpha, so scaling cannot turn the shot gray.
+  $solid = New-Bitmap24 $bmp
+  $out = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
   $g = [System.Drawing.Graphics]::FromImage($out)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
   $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-  $g.DrawImage($bmp, 0, 0, $w, $h)
+  $g.DrawImage($solid, 0, 0, $w, $h)
+  $solid.Dispose()
   $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
   if ($marks) {
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
@@ -525,12 +560,10 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
   $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
   $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
   $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), ([long]72)
-  $ms = New-Object System.IO.MemoryStream
-  $out.Save($ms, $codec, $ep)
+  $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-preview-{0}.jpg" -f ([guid]::NewGuid().ToString('N')))
+  $out.Save($path, $codec, $ep)
   $out.Dispose()
-  $b64 = [Convert]::ToBase64String($ms.ToArray())
-  $ms.Dispose()
-  return [pscustomobject]@{ data = $b64; w = $w; h = $h }
+  return [pscustomobject]@{ path = $path; data = ''; w = $w; h = $h; mime = 'image/jpeg' }
 }
 
 # A tightly packed BGRA frame for the second reader (PP-OCRv4). Windows OCR does not use this file.

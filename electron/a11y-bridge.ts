@@ -169,6 +169,12 @@ export async function listWindows(): Promise<{ title: string; handle: string }[]
 const PLACEHOLDER_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
+function readPreview(file: string, w: number, h: number): ScanResult['image'] {
+  const data = fs.readFileSync(file).toString('base64')
+  fs.unlink(file, () => {})
+  return { data, w, h, mime: 'image/jpeg' }
+}
+
 export async function scan(opts: {
   windowTitle?: string
   image?: 'none' | 'plain' | 'marked'
@@ -256,7 +262,12 @@ export async function scan(opts: {
   const { shot: _shot, sideCount: _side, ...rest } = r
   void _shot
   void _side
-  return { ...rest, items, onnx, onnxAdded, sideCount, ocrEngine: engine }
+  const carried = rest as ScanResult & { image?: { path?: string; data?: string; w?: number; h?: number; mime?: string } | null }
+  let image = carried.image ?? null
+  if (image?.path && fs.existsSync(image.path)) {
+    image = readPreview(image.path, image.w ?? 0, image.h ?? 0)
+  }
+  return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine }
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{
@@ -264,7 +275,9 @@ export async function crop(rect: { x: number; y: number; w: number; h: number },
   image: { data: string; w: number; h: number; mime?: string }
 }> {
   if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
-  return worker.call('crop', { ...rect, maxW })
+  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', { ...rect, maxW })
+  if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h) ?? got.image
+  return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
 
 export async function clickAt(x: number, y: number, button: ClickMode = 'left'): Promise<void> {
