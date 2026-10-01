@@ -82,16 +82,57 @@ function Get-ScreenBitmap($rect) {
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
   $g.Dispose()
+  # BitBlt leaves alpha at 0. A later draw then treats the whole shot as transparent and it comes out gray.
+  Set-BitmapOpaque $bmp
   return $bmp
 }
 
-# A 24-bit copy. OCR saves and rotates its own bitmaps; this one stays the picture the scanner shows.
-function Copy-Bitmap24($bmp) {
-  $copy = New-Object System.Drawing.Bitmap ([int]$bmp.Width), ([int]$bmp.Height), ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-  $g = [System.Drawing.Graphics]::FromImage($copy)
-  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-  $g.DrawImage($bmp, 0, 0, $bmp.Width, $bmp.Height)
-  $g.Dispose()
+function Set-BitmapOpaque($bmp) {
+  $fmt = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+  if ($bmp.PixelFormat -ne $fmt) { return }
+  $w = [int]$bmp.Width
+  $h = [int]$bmp.Height
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+  $bd = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $fmt)
+  try {
+    $stride = [int]$bd.Stride
+    $n = $stride * $h
+    $bytes = New-Object byte[] $n
+    [System.Runtime.InteropServices.Marshal]::Copy($bd.Scan0, $bytes, 0, $n)
+    for ($y = 0; $y -lt $h; $y++) {
+      $row = $y * $stride
+      for ($x = 0; $x -lt $w; $x++) { $bytes[$row + ($x * 4) + 3] = 255 }
+    }
+    [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $bd.Scan0, $n)
+  } finally {
+    $bmp.UnlockBits($bd)
+  }
+}
+
+# Pixel copy. DrawImage drops the picture when alpha is 0, which is what made Blender look gray.
+function Copy-Bitmap32($bmp) {
+  $w = [int]$bmp.Width
+  $h = [int]$bmp.Height
+  $fmt = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+  $copy = New-Object System.Drawing.Bitmap $w, $h, $fmt
+  $src = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $fmt)
+  $dst = $copy.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, $fmt)
+  try {
+    $ss = [int]$src.Stride
+    $ds = [int]$dst.Stride
+    $row = [Math]::Min($ss, $ds)
+    $sbytes = New-Object byte[] ($ss * $h)
+    $dbytes = New-Object byte[] ($ds * $h)
+    [System.Runtime.InteropServices.Marshal]::Copy($src.Scan0, $sbytes, 0, $sbytes.Length)
+    for ($y = 0; $y -lt $h; $y++) {
+      [System.Buffer]::BlockCopy($sbytes, ($y * $ss), $dbytes, ($y * $ds), $row)
+    }
+    [System.Runtime.InteropServices.Marshal]::Copy($dbytes, 0, $dst.Scan0, $dbytes.Length)
+  } finally {
+    $bmp.UnlockBits($src)
+    $copy.UnlockBits($dst)
+  }
   return $copy
 }
 
@@ -117,7 +158,7 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   $toSave = $src
   $owned = $false
   if ([object]::ReferenceEquals($src, $bmp)) {
-    $toSave = Copy-Bitmap24 $bmp
+    $toSave = Copy-Bitmap32 $bmp
     $owned = $true
   }
   $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-ocr-{0}.png" -f ([guid]::NewGuid().ToString('N')))
@@ -240,7 +281,7 @@ function Convert-TiltRect($x, $y, $w, $h, [int]$bmpW, [int]$originX, [int]$origi
 # Second OCR pass for text that stands on its side. A line that overlaps any first-pass box is dropped.
 function Get-TiltedPhrases($bmp, [int]$originX, [int]$originY, $horizontal) {
   $kept = New-Object System.Collections.ArrayList
-  $rot = Copy-Bitmap24 $bmp
+  $rot = Copy-Bitmap32 $bmp
   $rot.RotateFlip([System.Drawing.RotateFlipType]::Rotate270FlipNone)
   try {
     $phrases = Get-OcrPhrases $rot 0 0
@@ -473,13 +514,8 @@ function Save-OnnxShot($bmp) {
   $h = [int]$bmp.Height
   if ($w -lt 2 -or $h -lt 2) { return '' }
   $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-onnx-{0}.raw" -f ([guid]::NewGuid().ToString('N')))
-  $clone = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $g = [System.Drawing.Graphics]::FromImage($clone)
-  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-  $g.DrawImage($bmp, 0, 0, $w, $h)
-  $g.Dispose()
   $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
-  $bd = $clone.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $clone.PixelFormat)
+  $bd = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   try {
     $stride = [int]$bd.Stride
     $row = $w * 4
@@ -501,8 +537,7 @@ function Save-OnnxShot($bmp) {
       $bw.Flush()
     } finally { $bw.Dispose() }
   } finally {
-    $clone.UnlockBits($bd)
-    $clone.Dispose()
+    $bmp.UnlockBits($bd)
   }
   return $path
 }
@@ -536,7 +571,6 @@ function Invoke-Scan($P) {
   if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
   $bmp = Get-ScreenBitmap $rect
-  $picture = Copy-Bitmap24 $bmp
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
@@ -553,10 +587,8 @@ function Invoke-Scan($P) {
         $sideCount = 0
       }
     }
-    try { $shot = Save-OnnxShot $picture } catch { $shot = '' }
+    try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
-  $bmp.Dispose()
-  $bmp = $picture
   $items = Merge-Items $uia $ocr
 
   $img = $null
