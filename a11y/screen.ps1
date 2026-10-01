@@ -85,6 +85,16 @@ function Get-ScreenBitmap($rect) {
   return $bmp
 }
 
+# A 24-bit copy. OCR saves and rotates its own bitmaps; this one stays the picture the scanner shows.
+function Copy-Bitmap24($bmp) {
+  $copy = New-Object System.Drawing.Bitmap ([int]$bmp.Width), ([int]$bmp.Height), ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $g = [System.Drawing.Graphics]::FromImage($copy)
+  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+  $g.DrawImage($bmp, 0, 0, $bmp.Width, $bmp.Height)
+  $g.Dispose()
+  return $copy
+}
+
 function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   $out = New-Object System.Collections.ArrayList
   if (-not (Initialize-Ocr)) { return , $out }
@@ -99,12 +109,23 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
     $src = New-Object System.Drawing.Bitmap ([int]($bmp.Width * $scale)), ([int]($bmp.Height * $scale))
     $g = [System.Drawing.Graphics]::FromImage($src)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
     $g.DrawImage($bmp, 0, 0, $src.Width, $src.Height)
     $g.Dispose()
   }
-  $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-ocr-{0}.png" -f $PID)
-  $src.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
-  if (-not [object]::ReferenceEquals($src, $bmp)) { $src.Dispose() }
+  # Never save the caller's bitmap: a second pass used to overwrite the same file and blank the shot.
+  $toSave = $src
+  $owned = $false
+  if ([object]::ReferenceEquals($src, $bmp)) {
+    $toSave = Copy-Bitmap24 $bmp
+    $owned = $true
+  }
+  $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-ocr-{0}.png" -f ([guid]::NewGuid().ToString('N')))
+  try {
+    $toSave.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    if ($owned -or -not [object]::ReferenceEquals($src, $bmp)) { $toSave.Dispose() }
+  }
 
   $stream = $null
   $results = New-Object System.Collections.ArrayList
@@ -119,6 +140,7 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
     }
   } finally {
     if ($null -ne $stream) { $stream.Dispose() }
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   }
 
   foreach ($pass in $results) {
@@ -218,10 +240,7 @@ function Convert-TiltRect($x, $y, $w, $h, [int]$bmpW, [int]$originX, [int]$origi
 # Second OCR pass for text that stands on its side. A line that overlaps any first-pass box is dropped.
 function Get-TiltedPhrases($bmp, [int]$originX, [int]$originY, $horizontal) {
   $kept = New-Object System.Collections.ArrayList
-  $rot = New-Object System.Drawing.Bitmap ([int]$bmp.Width), ([int]$bmp.Height), ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $g = [System.Drawing.Graphics]::FromImage($rot)
-  $g.DrawImage($bmp, 0, 0, $bmp.Width, $bmp.Height)
-  $g.Dispose()
+  $rot = Copy-Bitmap24 $bmp
   $rot.RotateFlip([System.Drawing.RotateFlipType]::Rotate270FlipNone)
   try {
     $phrases = Get-OcrPhrases $rot 0 0
@@ -413,7 +432,9 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
   $out = New-Object System.Drawing.Bitmap $w, $h
   $g = [System.Drawing.Graphics]::FromImage($out)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
   $g.DrawImage($bmp, 0, 0, $w, $h)
+  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
   if ($marks) {
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
     $font = New-Object System.Drawing.Font('Tahoma', 9, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
@@ -454,6 +475,7 @@ function Save-OnnxShot($bmp) {
   $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-onnx-{0}.raw" -f ([guid]::NewGuid().ToString('N')))
   $clone = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($clone)
+  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
   $g.DrawImage($bmp, 0, 0, $w, $h)
   $g.Dispose()
   $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
@@ -514,6 +536,7 @@ function Invoke-Scan($P) {
   if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
   $bmp = Get-ScreenBitmap $rect
+  $picture = Copy-Bitmap24 $bmp
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
@@ -522,12 +545,18 @@ function Invoke-Scan($P) {
     $ocrOk = Initialize-Ocr
     if ($ocrOk) { $ocr = Get-OcrPhrases $bmp $rect.x $rect.y }
     if ($P.tilt -eq $true -and $ocrOk) {
-      $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
-      $sideCount = @($tilted).Count
-      foreach ($p in @($tilted)) { [void]$ocr.Add($p) }
+      try {
+        $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
+        $sideCount = @($tilted).Count
+        foreach ($p in @($tilted)) { if ($null -ne $p) { [void]$ocr.Add($p) } }
+      } catch {
+        $sideCount = 0
+      }
     }
-    try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
+    try { $shot = Save-OnnxShot $picture } catch { $shot = '' }
   }
+  $bmp.Dispose()
+  $bmp = $picture
   $items = Merge-Items $uia $ocr
 
   $img = $null
