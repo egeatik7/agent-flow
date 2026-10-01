@@ -161,9 +161,7 @@ function Save-DebugPng($bmp, [string]$name) {
 function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
   $out = New-Object System.Collections.ArrayList
   if (-not (Initialize-Ocr)) { return , $out }
-  $script:OcrPass = [int]$script:OcrPass + 1
-  if ($script:OcrPass -eq 1) { Save-DebugPng $bmp 'ocr' }
-  elseif ($script:OcrPass -eq 2) { Save-DebugPng $bmp 'donuk' }
+  Save-DebugPng $bmp 'ocr'
 
   $maxDim = [double][Windows.Media.Ocr.OcrEngine]::MaxImageDimension
   $pixelCap = [Math]::Sqrt(12000000.0 / ([double]$bmp.Width * [double]$bmp.Height))
@@ -284,60 +282,6 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
       })
   }
   return , $result
-}
-
-function Convert-TiltRect($x, $y, $w, $h, [int]$bmpW, [int]$originX, [int]$originY) {
-  # The phrase was read on a bitmap turned 90° counter-clockwise. Put the box back.
-  $nx = $bmpW - $y - $h
-  $ny = $x
-  $nw = $h
-  $nh = $w
-  if ($nx -lt 0) { $nw += $nx; $nx = 0 }
-  if ($ny -lt 0) { $nh += $ny; $ny = 0 }
-  if ($nw -lt 1 -or $nh -lt 1) { return $null }
-  return [pscustomobject]@{
-    x = [int]($originX + $nx)
-    y = [int]($originY + $ny)
-    w = [int][Math]::Ceiling($nw)
-    h = [int][Math]::Ceiling($nh)
-  }
-}
-
-# Second OCR pass for text that stands on its side. A line that overlaps any first-pass box is dropped.
-function Get-TiltedPhrases($bmp, [int]$originX, [int]$originY, $horizontal) {
-  $kept = New-Object System.Collections.ArrayList
-  $rot = Copy-Bitmap32 $bmp
-  $rot.RotateFlip([System.Drawing.RotateFlipType]::Rotate270FlipNone)
-  try {
-    $phrases = Get-OcrPhrases $rot 0 0
-    $bmpW = [int]$bmp.Width
-    foreach ($p in $phrases) {
-      if ([string]::IsNullOrWhiteSpace([string]$p.text)) { continue }
-      $box = Convert-TiltRect $p.x $p.y $p.w $p.h $bmpW $originX $originY
-      if ($null -eq $box) { continue }
-      $hit = $false
-      foreach ($q in @($horizontal) + @($kept)) {
-        if ($null -eq $q) { continue }
-        if ((Test-Overlap $box $q) -gt 0) { $hit = $true; break }
-      }
-      if ($hit) { continue }
-      $words = New-Object System.Collections.ArrayList
-      foreach ($wd in @($p.words)) {
-        if ($null -eq $wd) { continue }
-        $wb = Convert-TiltRect $wd.x $wd.y $wd.w $wd.h $bmpW $originX $originY
-        if ($null -eq $wb) { continue }
-        [void]$words.Add([pscustomobject]@{ t = [string]$wd.t; x = $wb.x; y = $wb.y; w = $wb.w; h = $wb.h })
-      }
-      [void]$kept.Add([pscustomobject]@{
-          text = [string]$p.text; type = 'Text'; src = 'ocr'
-          x = $box.x; y = $box.y; w = $box.w; h = $box.h
-          words = $words
-        })
-    }
-  } finally {
-    $rot.Dispose()
-  }
-  return , $kept
 }
 
 function Get-ScanRoots($win, [int]$ownPid, [bool]$fresh) {
@@ -641,7 +585,6 @@ function Invoke-Scan($P) {
   if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40) }
   if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'ekran' }
   $script:CaptureDebugSlug = $slug
-  $script:OcrPass = 0
 
   $uia = New-Object System.Collections.ArrayList
   $script:UiaSkipped = 0
@@ -659,19 +602,9 @@ function Invoke-Scan($P) {
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
-  $sideCount = 0
   if ($P.ocr -ne $false) {
     $ocrOk = Initialize-Ocr
     if ($ocrOk) { $ocr = Get-OcrPhrases $bmp $rect.x $rect.y }
-    if ($P.tilt -eq $true -and $ocrOk) {
-      try {
-        $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
-        $sideCount = @($tilted).Count
-        foreach ($p in @($tilted)) { if ($null -ne $p) { [void]$ocr.Add($p) } }
-      } catch {
-        $sideCount = 0
-      }
-    }
     try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
   $items = Merge-Items $uia $ocr
@@ -710,14 +643,13 @@ function Invoke-Scan($P) {
       'yontem: Graphics.CopyFromScreen (BitBlt, SRCCOPY)',
       'printWindow: yok',
       'windowsGraphicsCapture: yok',
-      'donus kodu yakalama cagrisini degistirmiyor. Donuk kare ayri kopya.',
-      'onizleme: opak kare. JPEG bu bitmapten ciziliyor. Donuk kare onizlemede yok.',
+      'onizleme: opak kare, PNG dosyasi.',
       ('pencere: {0}' -f $wname),
       ('sinif: {0}' -f $wclass),
       ('hwnd: {0}' -f $hwnd),
       ('pencere olcusu: {0}' -f $wrect),
       ('yakalanan rect: {0},{1} {2}x{3}' -f $rect.x, $rect.y, $rect.w, $rect.h),
-      'dosyalar: ham, opak, ocr, donuk, monitor, onizleme'
+      'dosyalar: ham, opak, ocr, monitor, onizleme'
     )
     try { Set-Content -LiteralPath $debugNote -Value ($lines -join "`r`n") -Encoding UTF8 } catch { $debugNote = '' }
   }
@@ -734,7 +666,6 @@ function Invoke-Scan($P) {
     sig    = $sig
     uiaSkipped = $script:UiaSkipped
     shot   = $shot
-    sideCount = $sideCount
     captureDebug = $debugNote
   }
 }

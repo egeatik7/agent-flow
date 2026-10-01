@@ -389,7 +389,7 @@ function regionTip(el: Element): Tip | null {
   if (el.classList.contains('ocr-pick') || el.classList.contains('ocr-opt')) {
     return {
       title: 'OCR',
-      text: 'Ekrandaki yazıyı hangi okuyucu versin. Windows: sistemin okuyucusu, ONNX yalnızca Çince ve kaçan İngilizceyi ekler. ONNX: ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulamanın kendi bildirdiği isimler iki seçenekte de durur. Aynı kare bir de yan çevrilip okunur; ilk turda kutusu boş kalan yazı listeye eklenir.',
+      text: 'Ekrandaki yazıyı hangi okuyucu versin. Windows: sistemin okuyucusu, ONNX yalnızca Çince ve kaçan İngilizceyi ekler. ONNX: ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulamanın kendi bildirdiği isimler iki seçenekte de durur.',
     }
   }
   const kind = kindOfNode(el)

@@ -31,8 +31,6 @@ export type ScanResult = {
   onnx?: boolean
   /** Lines it added or corrected. Windows OCR lines that already matched are not counted. */
   onnxAdded?: number
-  /** Lines found only on the shot turned 90° counter-clockwise. */
-  sideCount?: number
   /** Text file describing this scan's capture, when the scanner saved diagnostic PNGs. */
   captureDebug?: string
   /** Which reader supplied the OCR lines on this scan. */

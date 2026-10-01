@@ -109,7 +109,7 @@ Güvenceler:
 - **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.
 - **Bilgisayar uyumaz**, ekran kilitlenirse ajan kilit açılana kadar bekler.
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
-- **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur. Hedef aranırken aynı kare 90° saat yönünün tersine çevrilip bir kez daha okunur. İlk turdaki bir kutuya değen satır alınmaz; yalnızca orada bulunmayan yazı eklenir.
+- **OCR seçimi:** Araç çubuğunun sağında Windows veya ONNX. Windows seçiliyken sistem okuyucusu durur, ONNX Çinceyi ve kaçan İngilizceyi ekler. ONNX seçilince ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulama öğelerinin kendi isimleri iki seçenekte de durur. Ekran düz okunur; kare çevrilmez.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
 - **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30). 1.7.38 ilk kez açılınca `logs/1.7.38` yoksa oluşur. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
