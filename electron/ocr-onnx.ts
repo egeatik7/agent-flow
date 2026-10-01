@@ -486,6 +486,91 @@ export async function recognizeShot(file: string, originX: number, originY: numb
   return recognizeBgra(shot.bgra, shot.w, shot.h, originX, originY)
 }
 
+/** Turn a packed BGRA frame 90° counter-clockwise. New size is h × w. */
+export function rotateBgraCcw(bgra: Uint8Array, w: number, h: number): { bgra: Uint8Array; w: number; h: number } {
+  const nw = h
+  const nh = w
+  const out = new Uint8Array(nw * nh * 4)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const rx = y
+      const ry = w - 1 - x
+      const si = (y * w + x) * 4
+      const di = (ry * nw + rx) * 4
+      out[di] = bgra[si]
+      out[di + 1] = bgra[si + 1]
+      out[di + 2] = bgra[si + 2]
+      out[di + 3] = bgra[si + 3]
+    }
+  }
+  return { bgra: out, w: nw, h: nh }
+}
+
+function unrotateCcw(
+  line: { x: number; y: number; w: number; h: number },
+  srcW: number,
+  srcH: number,
+  originX: number,
+  originY: number
+): { x: number; y: number; w: number; h: number } | null {
+  let x = srcW - line.y - line.h
+  let y = line.x
+  let w = line.h
+  let h = line.w
+  if (x < 0) {
+    w += x
+    x = 0
+  }
+  if (y < 0) {
+    h += y
+    y = 0
+  }
+  if (x + w > srcW) w = srcW - x
+  if (y + h > srcH) h = srcH - y
+  if (w < 1 || h < 1) return null
+  return { x: originX + x, y: originY + y, w, h }
+}
+
+/**
+ * Lines read on the counter-clockwise frame, mapped back to the screen.
+ * A line that overlaps any OCR box already found, including one added here, is dropped.
+ */
+export function placeSideways(
+  lines: OnnxLine[],
+  existing: ScreenItem[],
+  srcW: number,
+  srcH: number,
+  originX: number,
+  originY: number
+): ScreenItem[] {
+  const ocr = existing.filter((i) => i.src === 'ocr')
+  const fresh: ScreenItem[] = []
+  let nextId = existing.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1
+  for (const line of lines) {
+    const text = acceptedText(line)
+    if (!text) continue
+    const box = unrotateCcw(line, srcW, srcH, originX, originY)
+    if (!box) continue
+    if ([...ocr, ...fresh].some((it) => overlapRatio(box, it) > 0)) continue
+    const item = lineItem(nextId++, text, { ...line, text, x: box.x, y: box.y, w: box.w, h: box.h })
+    fresh.push(item)
+  }
+  return fresh
+}
+
+export async function recognizeSideways(
+  bgra: Uint8Array,
+  w: number,
+  h: number,
+  originX: number,
+  originY: number,
+  existing: ScreenItem[]
+): Promise<ScreenItem[]> {
+  const turned = rotateBgraCcw(bgra, w, h)
+  const lines = await recognizeBgra(turned.bgra, turned.w, turned.h, 0, 0)
+  return placeSideways(lines, existing, w, h, originX, originY)
+}
+
 function keyOf(s: string): string {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 }

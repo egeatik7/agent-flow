@@ -4,7 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
-import { mergeOnnxLines, onnxError, readRawShot, recognizeBgra, warmOnnx, type OcrEngine } from './ocr-onnx'
+import { mergeOnnxLines, onnxError, readRawShot, recognizeBgra, recognizeSideways, warmOnnx, type OcrEngine } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
 
@@ -192,6 +192,8 @@ export async function scan(opts: {
   sig?: boolean
   /** Which reader wins. Defaults to the saved choice. */
   ocrEngine?: OcrEngine
+  /** Also read a turned copy, and keep only lines the upright pass missed. The preview is already a separate copy. */
+  tilt?: boolean
   /** Folder for raw / OCR / monitor PNGs. Scanner only. */
   debugDir?: string
 }): Promise<ScanResult> {
@@ -219,6 +221,7 @@ export async function scan(opts: {
       primary: opts.primary === true,
       snap: opts.snap ?? 0,
       sig: opts.sig === true,
+      tilt: opts.tilt === true,
       debugDir: opts.debugDir || '',
     },
     180000
@@ -226,6 +229,7 @@ export async function scan(opts: {
   const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
   let onnx = false
   let onnxAdded = 0
+  let sideCount = Number(r.sideCount) || 0
   let engine: OcrEngine = 'windows'
   const shot = r.shot
   const prefer = opts.ocrEngine ?? ocrEngine
@@ -237,21 +241,33 @@ export async function scan(opts: {
       items.splice(0, items.length, ...merged.items)
       onnxAdded = merged.added
       onnx = merged.usedOnnx && !onnxError()
-      if (prefer === 'onnx' && merged.usedOnnx) engine = 'onnx'
+      if (prefer === 'onnx' && merged.usedOnnx) {
+        engine = 'onnx'
+        sideCount = 0
+      }
+      if (opts.tilt) {
+        const side = await recognizeSideways(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0, items)
+        if (side.length) {
+          items.push(...side)
+          sideCount += side.length
+          if (!onnxError()) onnx = true
+        }
+      }
     } catch {
       onnx = false
     } finally {
       fs.unlink(shot, () => {})
     }
   }
-  const { shot: _shot, ...rest } = r
+  const { shot: _shot, sideCount: _side, ...rest } = r
   void _shot
+  void _side
   const carried = rest as ScanResult & { image?: { path?: string; data?: string; w?: number; h?: number; mime?: string } | null }
   let image = carried.image ?? null
   if (image?.path && fs.existsSync(image.path)) {
     image = readPreview(image.path, image.w ?? 0, image.h ?? 0, image.mime)
   }
-  return { ...rest, items, image, onnx, onnxAdded, ocrEngine: engine }
+  return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine }
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{

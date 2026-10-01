@@ -113,6 +113,7 @@ export default function ScreenScanner(p: Props) {
           <span className="scanner-count">
             {result ? `${items.length} / ${result.items.length} yazı` : ''}
             {result && !result.ocr ? ' · OCR kapalı' : ''}
+            {result?.sideCount ? ` · yan ${result.sideCount}` : ''}
             {result?.captureDebug ? ` · tanı: ${result.captureDebug}` : ''}
           </span>
         </div>

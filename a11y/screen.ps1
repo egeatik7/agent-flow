@@ -158,16 +158,63 @@ function Save-DebugPng($bmp, [string]$name) {
   }
 }
 
-function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
+if (-not ('XpTurn' -as [type])) {
+  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+public static class XpTurn {
+  // Quarter-turn counter-clockwise. Pixels are copied; RotateFlip and DrawImage are not used.
+  public static Bitmap Ccw(Bitmap src) {
+    int w = src.Width, h = src.Height;
+    if (w < 1 || h < 1) return new Bitmap(1, 1, PixelFormat.Format32bppArgb);
+    var srect = new Rectangle(0, 0, w, h);
+    var sbd = src.LockBits(srect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+    var dst = new Bitmap(h, w, PixelFormat.Format32bppArgb);
+    var drect = new Rectangle(0, 0, h, w);
+    var dbd = dst.LockBits(drect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+    try {
+      int ss = sbd.Stride, ds = dbd.Stride;
+      var sbytes = new byte[ss * h];
+      var dbytes = new byte[ds * w];
+      Marshal.Copy(sbd.Scan0, sbytes, 0, sbytes.Length);
+      for (int y = 0; y < h; y++) {
+        int srow = y * ss;
+        for (int x = 0; x < w; x++) {
+          int rx = y;
+          int ry = w - 1 - x;
+          int si = srow + (x * 4);
+          int di = ry * ds + (rx * 4);
+          dbytes[di] = sbytes[si];
+          dbytes[di + 1] = sbytes[si + 1];
+          dbytes[di + 2] = sbytes[si + 2];
+          dbytes[di + 3] = 255;
+        }
+      }
+      Marshal.Copy(dbytes, 0, dbd.Scan0, dbytes.Length);
+    } finally {
+      src.UnlockBits(sbd);
+      dst.UnlockBits(dbd);
+    }
+    return dst;
+  }
+}
+"@
+}
+
+function Get-OcrPhrases($bmp, [int]$originX, [int]$originY, [string]$debugName = 'ocr', [bool]$exact = $false) {
   $out = New-Object System.Collections.ArrayList
   if (-not (Initialize-Ocr)) { return , $out }
-  Save-DebugPng $bmp 'ocr'
+  if ($debugName) { Save-DebugPng $bmp $debugName }
 
   $maxDim = [double][Windows.Media.Ocr.OcrEngine]::MaxImageDimension
   $pixelCap = [Math]::Sqrt(12000000.0 / ([double]$bmp.Width * [double]$bmp.Height))
   $scale = [Math]::Min(2.0, [Math]::Min($pixelCap, [Math]::Min(($maxDim - 1) / $bmp.Width, ($maxDim - 1) / $bmp.Height)))
   if ($scale -lt 1.0 -and $bmp.Width -le $maxDim -and $bmp.Height -le $maxDim) { $scale = 1.0 }
   if ($scale -lt 0.5) { $scale = 0.5 }
+  # The turned copy is already opaque pixels. Drawing it would turn that copy blank.
+  if ($exact -and $bmp.Width -le $maxDim -and $bmp.Height -le $maxDim) { $scale = 1.0 }
   $src = $bmp
   if ([Math]::Abs($scale - 1.0) -gt 0.01) {
     $src = New-Object System.Drawing.Bitmap ([int]($bmp.Width * $scale)), ([int]($bmp.Height * $scale))
@@ -282,6 +329,59 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY) {
       })
   }
   return , $result
+}
+
+function Convert-TiltRect($x, $y, $w, $h, [int]$bmpW, [int]$originX, [int]$originY) {
+  # The phrase was read on a bitmap turned 90° counter-clockwise. Put the box back.
+  $nx = $bmpW - $y - $h
+  $ny = $x
+  $nw = $h
+  $nh = $w
+  if ($nx -lt 0) { $nw += $nx; $nx = 0 }
+  if ($ny -lt 0) { $nh += $ny; $ny = 0 }
+  if ($nw -lt 1 -or $nh -lt 1) { return $null }
+  return [pscustomobject]@{
+    x = [int]($originX + $nx)
+    y = [int]($originY + $ny)
+    w = [int][Math]::Ceiling($nw)
+    h = [int][Math]::Ceiling($nh)
+  }
+}
+
+# Sideways text. The live shot is only read. A line that touches any upright box is dropped.
+function Get-TiltedPhrases($bmp, [int]$originX, [int]$originY, $horizontal) {
+  $kept = New-Object System.Collections.ArrayList
+  $rot = [XpTurn]::Ccw($bmp)
+  try {
+    $phrases = Get-OcrPhrases $rot 0 0 'donuk' $true
+    $bmpW = [int]$bmp.Width
+    foreach ($p in $phrases) {
+      if ([string]::IsNullOrWhiteSpace([string]$p.text)) { continue }
+      $box = Convert-TiltRect $p.x $p.y $p.w $p.h $bmpW $originX $originY
+      if ($null -eq $box) { continue }
+      $hit = $false
+      foreach ($q in @($horizontal) + @($kept)) {
+        if ($null -eq $q) { continue }
+        if ((Test-Overlap $box $q) -gt 0) { $hit = $true; break }
+      }
+      if ($hit) { continue }
+      $words = New-Object System.Collections.ArrayList
+      foreach ($wd in @($p.words)) {
+        if ($null -eq $wd) { continue }
+        $wb = Convert-TiltRect $wd.x $wd.y $wd.w $wd.h $bmpW $originX $originY
+        if ($null -eq $wb) { continue }
+        [void]$words.Add([pscustomobject]@{ t = [string]$wd.t; x = $wb.x; y = $wb.y; w = $wb.w; h = $wb.h })
+      }
+      [void]$kept.Add([pscustomobject]@{
+          text = [string]$p.text; type = 'Text'; src = 'ocr'
+          x = $box.x; y = $box.y; w = $box.w; h = $box.h
+          words = $words
+        })
+    }
+  } finally {
+    $rot.Dispose()
+  }
+  return , $kept
 }
 
 function Get-ScanRoots($win, [int]$ownPid, [bool]$fresh) {
@@ -602,22 +702,36 @@ function Invoke-Scan($P) {
   $ocr = New-Object System.Collections.ArrayList
   $ocrOk = $false
   $shot = ''
+  $sideCount = 0
   if ($P.ocr -ne $false) {
     $ocrOk = Initialize-Ocr
     if ($ocrOk) { $ocr = Get-OcrPhrases $bmp $rect.x $rect.y }
     try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
   }
+  # Picture for the window, taken before the turned pass. That pass never draws this copy.
+  $shotBmp = $null
+  $mode = [string]$P.image
+  if ($mode -eq 'plain' -or $mode -eq 'marked') { $shotBmp = Copy-Bitmap32 $bmp }
+  if ($P.tilt -eq $true -and $ocrOk) {
+    try {
+      $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
+      $sideCount = @($tilted).Count
+      foreach ($p in @($tilted)) { if ($null -ne $p) { [void]$ocr.Add($p) } }
+    } catch {
+      $sideCount = 0
+    }
+  }
   $items = Merge-Items $uia $ocr
-  Save-DebugPng $bmp 'onizleme'
+  Save-DebugPng $(if ($null -ne $shotBmp) { $shotBmp } else { $bmp }) 'onizleme'
 
   $img = $null
-  $mode = [string]$P.image
-  if ($mode -eq 'plain' -or $mode -eq 'marked') {
+  if ($null -ne $shotBmp) {
     $maxW = 1400
     if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
     $snap = 0
     if ($P.snap) { $snap = [int]$P.snap }
-    $img = ConvertTo-JpegBase64 $bmp $items $rect ($mode -eq 'marked') $maxW $snap
+    $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap
+    $shotBmp.Dispose()
   }
   $sig = ''
   if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
@@ -643,13 +757,13 @@ function Invoke-Scan($P) {
       'yontem: Graphics.CopyFromScreen (BitBlt, SRCCOPY)',
       'printWindow: yok',
       'windowsGraphicsCapture: yok',
-      'onizleme: opak kare, PNG dosyasi.',
+      'onizleme: donus turundan once kopyalanan opak kare.',
       ('pencere: {0}' -f $wname),
       ('sinif: {0}' -f $wclass),
       ('hwnd: {0}' -f $hwnd),
       ('pencere olcusu: {0}' -f $wrect),
       ('yakalanan rect: {0},{1} {2}x{3}' -f $rect.x, $rect.y, $rect.w, $rect.h),
-      'dosyalar: ham, opak, ocr, monitor, onizleme'
+      'dosyalar: ham, opak, ocr, donuk, monitor, onizleme'
     )
     try { Set-Content -LiteralPath $debugNote -Value ($lines -join "`r`n") -Encoding UTF8 } catch { $debugNote = '' }
   }
@@ -666,6 +780,7 @@ function Invoke-Scan($P) {
     sig    = $sig
     uiaSkipped = $script:UiaSkipped
     shot   = $shot
+    sideCount = $sideCount
     captureDebug = $debugNote
   }
 }
