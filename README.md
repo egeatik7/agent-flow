@@ -14,7 +14,7 @@ sayfanın içine bakar. Emin olamadığı yerde OpenRouter’daki modele sorar.
   - Bu tur bulunan hedef geçen turlarla çok çelişirse (başka pencere, başka öğe türü, ekranın bambaşka yeri) tıklamadan
     önce bir kez daha bakılır; API anahtarı varsa model iki seçeneği görüp karar verir.
 - Tırnak içinde yazdığın yazı (`“Oluştur”`) her zaman birebir aranır.
-- Araç çubuğunda **Yeni Akış**’ın sağındaki **Hafızayı Sil**, bütün node’ların hafızasını ve İnisiyatif’in kayıtlı yolunu birden temizler. Akışın kendisi durur.
+- Araç çubuğundaki **Hafızayı Sil**, bütün node’ların hafızasını ve İnisiyatif’in kayıtlı yolunu birden temizler. Akışın kendisi durur.
 
 ## Tuvaller
 

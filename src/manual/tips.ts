@@ -175,7 +175,6 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Paketi çıkar', { title: 'Paketi çıkar', text: 'Paketi dağıtır. İçindeki node’lar tuvale geri döner, paket node’u kalkar. Dışarıdaki oklar eski yerlerine bağlanır.' }],
     ['Paketten çık', { title: 'Paketten çık', text: 'İçeride yaptığın değişiklikleri pakete yazar ve dışarıdaki akışa döner. Paket yine tek node olarak durur.' }],
     ['Hafızayı Sil', { title: 'Hafızayı Sil', text: 'Bütün node’ların öğrendiği hedefleri ve İnisiyatif’in kayıtlı yollarını unutturur. Akış, liste ve yazdığın adımlar durur.' }],
-    ['Yeni Akış', { title: 'Yeni Akış', text: 'Açık tuvali boşaltır, yalnızca Başlangıç kalır. Onay sorar. Diğer tuvaller durur.' }],
     ['Düzenle', { title: 'Düzenle', text: 'Node’ları soldan sağa, okların sırasına göre dizer. Bağlantıları değiştirmez.' }],
     ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Açık tuvali Başlangıç’tan itibaren çalıştırır. Diğer tuvaller durur. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
     ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Kutular, listedeki işaretli satırdan devam eder; paket içindeki kutular da. Bir kutu “bitti” dediyse işareti 1. öğededir, sıradaki klasör baştan gider. Yarıda duran kutunun işareti o dosyada kalır. Ajanı Çalıştır hepsini 1. öğeden başlatır.' }],
@@ -211,6 +210,9 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
   }
   if (t === 'Temizle' && el.closest('.locator-box')) {
     return { title: 'Hedefi kaldır', text: 'Bu node’a Ekrandan Seç veya İmleçle Yakala ile bağlanan öğeyi unutturur. Ne aranacağı yine yazdığın metinden bulunur.' }
+  }
+  if (t === 'Dosya' && el.closest('.menubar')) {
+    return { title: 'Dosya', text: 'İçe Aktar ve Dışa Aktar burada. İçe Aktar açık tuvale bir JSON yükler. Dışa Aktar yalnız açık tuvali indirir.' }
   }
   if (t === 'Ayarlar' && el.closest('.menubar')) {
     return { title: 'Ayarlar', text: 'Sağ paneli Ayarlar sekmesine alır: API anahtarı, modeller, hedef pencere.' }
@@ -468,7 +470,7 @@ function regionTip(el: Element): Tip | null {
     return { title: 'Durum', text: 'Kaç node ve bağlantı olduğu, hangi pencereye bakıldığı ve API anahtarının kayıtlı olup olmadığı.' }
   }
   if (el.classList.contains('menubar')) {
-    return { title: 'Menü', text: 'Akışı dosyaya yazar veya dosyadan açar. Ayarlar ve Ekran Tarayıcı da burada.' }
+    return { title: 'Menü', text: 'Dosya menüsünden akış iner veya açılır. Ayarlar, sağ paneli Ayarlar sekmesine alır.' }
   }
   if (el.classList.contains('toolbar') && !el.closest('.xp-dialog')) {
     return { title: 'Araç çubuğu', text: 'Node ekleme, çalıştırma, durdurma ve hafızayı silme. Bir düğmenin üzerinde dur; ne yaptığı burada yazılır.' }

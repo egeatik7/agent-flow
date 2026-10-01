@@ -134,6 +134,8 @@ body {
 }
 
 .menubar {
+  position: relative;
+  z-index: 40;
   display: flex;
   align-items: center;
   gap: 1px;
@@ -149,7 +151,8 @@ body {
   cursor: pointer;
 }
 
-.menubar button:hover {
+.menubar button:hover,
+.menubar button.open {
   background: #316ac5;
   color: #fff;
 }
@@ -321,6 +324,10 @@ body {
   top: 100%;
   left: 0;
   margin-top: 2px;
+}
+
+.file-menu {
+  min-width: 148px;
 }
 
 .dropdown-menu button,

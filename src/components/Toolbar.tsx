@@ -17,7 +17,6 @@ type Props = {
   onRunFromSelected: () => void
   onStop: () => void
   onLayout: () => void
-  onClear: () => void
   onForget: () => void
   ocrEngine: OcrEngine
   onOcrEngine: (engine: OcrEngine) => void
@@ -110,9 +109,6 @@ export default function Toolbar(p: Props) {
 
       <button type="button" className="xp-btn" onClick={p.onLayout} disabled={p.running}>
         Düzenle
-      </button>
-      <button type="button" className="xp-btn" onClick={p.onClear} disabled={p.running}>
-        Yeni Akış
       </button>
       <button
         type="button"

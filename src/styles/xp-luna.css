@@ -93,6 +93,7 @@
 }
 
 .menubar button:hover,
+.menubar button.open,
 .dropdown-menu button:hover,
 .ctx-menu button:hover {
   background: linear-gradient(180deg, #4b93f5 0%, #1d63d4 55%, #1654c0 100%);

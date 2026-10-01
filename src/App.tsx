@@ -137,6 +137,7 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   const [sideTab, setSideTab] = useState<SideTab>('node')
+  const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
@@ -158,6 +159,23 @@ export default function App() {
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const fileRef = useRef<HTMLInputElement>(null)
+  const fileMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!fileOpen) return
+    const close = (e: MouseEvent) => {
+      if (!fileMenuRef.current?.contains(e.target as Node)) setFileOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFileOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [fileOpen])
 
   const pushLog = useCallback((level: LogLevel, message: string) => {
     setLogs((prev) => [...prev.slice(-400), { id: newId(), level, message, at: Date.now() }])
@@ -884,21 +902,6 @@ export default function App() {
     }
   }
 
-  const newFlow = () => {
-    const whole = rooted(graphRef.current, stackRef.current)
-    if (whole.nodes.some((n) => n.kind !== 'start') && !window.confirm('Bu tuvaldeki akış silinsin mi?')) return
-    const fresh = initialGraph()
-    graphRef.current = fresh
-    stackRef.current = []
-    setStack([])
-    setGraph(fresh)
-    setSelectedNodeId(null)
-    setSelectedIds([])
-    selectedIdsRef.current = []
-    setSelectedEdgeId(null)
-    setStepStatus({})
-  }
-
   const forgetAll = () => {
     let count = 0
     const cleared = mapNodes(graph, (n) => {
@@ -922,10 +925,38 @@ export default function App() {
       <div className="xp-window">
         <TitleBar />
         <div className="menubar">
-          <button type="button" onClick={exportGraph}>Dışa Aktar</button>
-          <button type="button" onClick={() => fileRef.current?.click()}>İçe Aktar</button>
-          <button type="button" onClick={() => setSideTab('settings')}>Ayarlar</button>
-          <button type="button" onClick={() => openScanner(null)}>Ekran Tarayıcı</button>
+          <div className="dropdown" ref={fileMenuRef}>
+            <button type="button" className={fileOpen ? 'open' : ''} onClick={() => setFileOpen((o) => !o)}>
+              Dosya
+            </button>
+            {fileOpen && (
+              <div className="dropdown-menu file-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setFileOpen(false)
+                    fileRef.current?.click()
+                  }}
+                >
+                  İçe Aktar
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setFileOpen(false)
+                    exportGraph()
+                  }}
+                >
+                  Dışa Aktar
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={() => setSideTab('settings')}>
+            Ayarlar
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -961,7 +992,6 @@ export default function App() {
           onRunFromSelected={() => selectedNodeId && run(selectedNodeId)}
           onStop={stop}
           onLayout={() => setGraph((g) => autoLayout(g))}
-          onClear={newFlow}
           onForget={forgetAll}
           ocrEngine={settings.ocrEngine === 'onnx' ? 'onnx' : 'windows'}
           onOcrEngine={(ocrEngine) => {
