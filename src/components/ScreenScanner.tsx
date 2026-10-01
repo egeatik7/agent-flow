@@ -14,6 +14,13 @@ function norm(s: string) {
   return s.replace(/[İIı]/g, 'i').toLowerCase()
 }
 
+function bytesOf(data: string): Uint8Array {
+  const bin = atob(data)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
 export default function ScreenScanner(p: Props) {
   const [scope, setScope] = useState(p.defaultWindow)
   const [result, setResult] = useState<ScanResult | null>(null)
@@ -54,7 +61,16 @@ export default function ScreenScanner(p: Props) {
 
   const area = result?.area
   const img = result?.image
-  const src = img ? `data:${img.mime ?? 'image/jpeg'};base64,${img.data}` : null
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!img?.data) {
+      setSrc(null)
+      return
+    }
+    const url = URL.createObjectURL(new Blob([bytesOf(img.data)], { type: img.mime || 'image/png' }))
+    setSrc(url)
+    return () => URL.revokeObjectURL(url)
+  }, [img?.data, img?.mime])
 
   return (
     <div className="modal-backdrop" onMouseDown={p.onClose}>

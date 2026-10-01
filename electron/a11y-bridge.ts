@@ -169,10 +169,10 @@ export async function listWindows(): Promise<{ title: string; handle: string }[]
 const PLACEHOLDER_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
-function readPreview(file: string, w: number, h: number): ScanResult['image'] {
+function readPreview(file: string, w: number, h: number, mime?: string): ScanResult['image'] {
   const data = fs.readFileSync(file).toString('base64')
   fs.unlink(file, () => {})
-  return { data, w, h, mime: 'image/jpeg' }
+  return { data, w, h, mime: mime || 'image/jpeg' }
 }
 
 export async function scan(opts: {
@@ -224,7 +224,7 @@ export async function scan(opts: {
       tilt: opts.tilt === true,
       debugDir: opts.debugDir || '',
     },
-    90000
+    180000
   )
   const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
   let onnx = false
@@ -265,7 +265,7 @@ export async function scan(opts: {
   const carried = rest as ScanResult & { image?: { path?: string; data?: string; w?: number; h?: number; mime?: string } | null }
   let image = carried.image ?? null
   if (image?.path && fs.existsSync(image.path)) {
-    image = readPreview(image.path, image.w ?? 0, image.h ?? 0)
+    image = readPreview(image.path, image.w ?? 0, image.h ?? 0, image.mime)
   }
   return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine }
 }
@@ -276,7 +276,7 @@ export async function crop(rect: { x: number; y: number; w: number; h: number },
 }> {
   if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
   const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', { ...rect, maxW })
-  if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h) ?? got.image
+  if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h, got.image.mime) ?? got.image
   return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
 

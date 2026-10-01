@@ -527,6 +527,14 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
     $w = [Math]::Max($snap, [int]([Math]::Round($w / [double]$snap)) * $snap)
     $h = [Math]::Max($snap, [int]([Math]::Round($h / [double]$snap)) * $snap)
   }
+  # The scanner preview has no boxes. Save the same pixel copy as the diagnostic PNG.
+  # Drawing the shot into a new bitmap is what turned Blender and Chrome gray.
+  if (-not $marks) {
+    $copy = Copy-Bitmap32 $bmp
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-preview-{0}.png" -f ([guid]::NewGuid().ToString('N')))
+    try { $copy.Save($path, [System.Drawing.Imaging.ImageFormat]::Png) } finally { $copy.Dispose() }
+    return [pscustomobject]@{ path = $path; data = ''; w = [int]$bmp.Width; h = [int]$bmp.Height; mime = 'image/png' }
+  }
   # 24-bit copy has no alpha, so scaling cannot turn the shot gray.
   $solid = New-Bitmap24 $bmp
   $out = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
