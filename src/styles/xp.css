@@ -1735,6 +1735,10 @@ body {
   margin-top: 8px;
 }
 
+.ramp-presets .save {
+  margin-left: auto;
+}
+
 .shot-canvas {
   display: block;
   width: 100%;

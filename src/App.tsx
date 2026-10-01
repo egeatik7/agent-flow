@@ -1187,9 +1187,9 @@ export default function App() {
           defaultWindow={settings.targetWindow}
           valueLo={settings.valueLo}
           valueHi={settings.valueHi}
-          onRamp={(lo, hi) => {
+          onSave={async (lo, hi) => {
             setSettings((s) => ({ ...s, valueLo: lo, valueHi: hi }))
-            if (api) void api.saveSettings({ valueLo: lo, valueHi: hi })
+            if (api) await api.saveSettings({ valueLo: lo, valueHi: hi })
             else localStorage.setItem(LOCAL_SETTINGS, JSON.stringify({ ...settingsRef.current, valueLo: lo, valueHi: hi }))
           }}
           onScan={scanScreen}

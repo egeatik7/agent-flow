@@ -8,7 +8,7 @@ type Props = {
   defaultWindow: string
   valueLo: number
   valueHi: number
-  onRamp: (lo: number, hi: number) => void
+  onSave: (lo: number, hi: number) => void | Promise<void>
   onScan: (windowTitle: string, ramp: { lo: number; hi: number }) => Promise<ScanResult>
   onPick: (item: ScreenItem) => void
   onClose: () => void
@@ -40,17 +40,17 @@ export default function ScreenScanner(p: Props) {
   const trackRef = useRef<HTMLDivElement>(null)
   const dragStop = useRef<'lo' | 'hi' | null>(null)
   const rampNow = useRef({ lo: p.valueLo, hi: p.valueHi })
-  const rampTimer = useRef<number | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseRef = useRef<ImageData | null>(null)
   const [painted, setPainted] = useState(false)
 
   useEffect(() => {
+    rampNow.current = { lo: p.valueLo, hi: p.valueHi }
     setLo(p.valueLo)
     setHi(p.valueHi)
   }, [p.valueLo, p.valueHi])
 
-  const setRamp = (nextLo: number, nextHi: number, flush = false) => {
+  const setRamp = (nextLo: number, nextHi: number) => {
     const a = Math.min(1, Math.max(0, nextLo))
     const b = Math.min(1, Math.max(0, nextHi))
     const lo2 = Math.min(a, b)
@@ -58,15 +58,19 @@ export default function ScreenScanner(p: Props) {
     rampNow.current = { lo: lo2, hi: hi2 }
     setLo(lo2)
     setHi(hi2)
-    if (rampTimer.current) window.clearTimeout(rampTimer.current)
-    if (flush) p.onRamp(lo2, hi2)
-    else rampTimer.current = window.setTimeout(() => p.onRamp(lo2, hi2), 80)
+  }
+
+  const saved =
+    Math.abs(lo - p.valueLo) < 0.005 && Math.abs(hi - p.valueHi) < 0.005
+
+  const saveRamp = () => {
+    const now = rampNow.current
+    return p.onSave(now.lo, now.hi)
   }
 
   const scan = async () => {
     setLoading(true)
     setError(null)
-    p.onRamp(lo, hi)
     try {
       setResult(await p.onScan(scope, { lo, hi }))
     } catch (e) {
@@ -242,7 +246,7 @@ export default function ScreenScanner(p: Props) {
             {rampOpen && (
               <div className="dropdown-menu ramp-menu" onMouseDown={(e) => e.stopPropagation()}>
                 <div className="ramp-title">Value ramp</div>
-                <p className="ramp-hint">Soldaki durak giriş 0’ın çıkışı, sağdaki durak giriş 1’in çıkışı. Görüntü hemen değişir. Ekranı Tara bu ayarla okur.</p>
+                <p className="ramp-hint">Soldaki durak giriş 0’ın çıkışı, sağdaki durak giriş 1’in çıkışı. Görüntü hemen değişir. Kaydet’e basınca bir sonraki açılışta da durur.</p>
                 <div
                   className="ramp-track"
                   ref={trackRef}
@@ -259,8 +263,6 @@ export default function ScreenScanner(p: Props) {
                   }}
                   onPointerUp={() => {
                     dragStop.current = null
-                    const now = rampNow.current
-                    setRamp(now.lo, now.hi, true)
                   }}
                 >
                   <div
@@ -304,6 +306,9 @@ export default function ScreenScanner(p: Props) {
                   </button>
                   <button type="button" className="xp-btn" onClick={() => setRamp(0.15, 0.8)}>
                     0.15–0.80
+                  </button>
+                  <button type="button" className="xp-btn save" disabled={saved} onClick={() => void saveRamp()}>
+                    {saved ? 'Kayıtlı' : 'Kaydet'}
                   </button>
                 </div>
               </div>

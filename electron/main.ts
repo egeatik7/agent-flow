@@ -229,10 +229,14 @@ app.whenReady().then(() => {
     const hidden = await hideSelf()
     try {
       const s = getSettings()
-      const next = clampRamp(ramp?.lo ?? s.valueLo, ramp?.hi ?? s.valueHi)
+      const saved = clampRamp(s.valueLo, s.valueHi)
+      const next = clampRamp(ramp?.lo ?? saved.lo, ramp?.hi ?? saved.hi)
       bridge.setValueRamp(next.lo, next.hi)
-      if (s.valueLo !== next.lo || s.valueHi !== next.hi) store.set('settings', { ...s, valueLo: next.lo, valueHi: next.hi })
-      return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true, debugDir: logsDir() })
+      try {
+        return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true, debugDir: logsDir() })
+      } finally {
+        bridge.setValueRamp(saved.lo, saved.hi)
+      }
     } finally {
       if (hidden) showSelf()
     }
