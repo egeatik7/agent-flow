@@ -201,9 +201,11 @@ export async function scan(opts: {
   ocrEngine?: OcrEngine
   /** Also read a turned copy, and keep only lines the upright pass missed. The preview is already a separate copy. */
   tilt?: boolean
+  /** Stop after Windows OCR and keep the raw frame so ONNX can run later, only if this pass missed. */
+  deferOnnx?: boolean
   /** Folder for raw / OCR / monitor PNGs. Scanner only. */
   debugDir?: string
-}): Promise<ScanResult> {
+}): Promise<ScanResult & { shot?: string }> {
   if (!IS_WIN) {
     return {
       area: { x: 0, y: 0, w: 1920, h: 1080 },
@@ -242,7 +244,8 @@ export async function scan(opts: {
   let engine: OcrEngine = 'windows'
   const shot = r.shot
   const prefer = opts.ocrEngine ?? ocrEngine
-  if (opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
+  const holdShot = opts.deferOnnx === true && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')
+  if (!holdShot && opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
     try {
       const raw = readRawShot(fs.readFileSync(shot))
       const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0)
@@ -276,7 +279,43 @@ export async function scan(opts: {
   if (image?.path && fs.existsSync(image.path)) {
     image = readPreview(image.path, image.w ?? 0, image.h ?? 0, image.mime)
   }
-  return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine }
+  return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine, shot: holdShot ? shot : undefined }
+}
+
+/** Second reader, used only after Windows OCR missed the target. The raw frame is the ramped copy, turned again for sideways text. */
+export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<ScanResult> {
+  const shot = res.shot
+  const { shot: _drop, ...base } = res
+  void _drop
+  if (!shot || !fs.existsSync(shot)) return base
+  try {
+    const raw = readRawShot(fs.readFileSync(shot))
+    const originX = res.area?.x ?? 0
+    const originY = res.area?.y ?? 0
+    const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, originX, originY)
+    const merged = mergeOnnxLines(res.items, lines, 'onnx')
+    const items = merged.items.slice()
+    let sideCount = 0
+    const side = await recognizeSideways(raw.bgra, raw.w, raw.h, originX, originY, items)
+    if (side.length) {
+      items.push(...side)
+      sideCount = side.length
+    }
+    return {
+      ...base,
+      items,
+      onnx: (merged.usedOnnx || sideCount > 0) && !onnxError(),
+      onnxAdded: merged.added + sideCount,
+      sideCount,
+      ocrEngine: merged.usedOnnx ? 'onnx' : base.ocrEngine,
+    }
+  } finally {
+    fs.unlink(shot, () => {})
+  }
+}
+
+export function discardShot(shot?: string) {
+  if (shot) fs.unlink(shot, () => {})
 }
 
 export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{

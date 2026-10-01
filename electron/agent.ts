@@ -160,13 +160,15 @@ export function createAgent(ctx: AgentContext) {
     log('warn', `Hedef pencere “${res.missingWindow}” açık değil, tüm ekran okunuyor. Kalıcı çözüm: Ayarlar > Hedef pencere > “Tüm ekran” > Kaydet.`)
   }
 
-  async function scanFor(withImage: boolean, wide = false): Promise<ScanResult> {
+  async function scanFor(withImage: boolean, wide = false, deferOnnx = false): Promise<ScanResult & { shot?: string }> {
     const s = getSettings()
     const res = await bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
       image: withImage ? 'marked' : 'none',
       fresh: wide,
       tilt: true,
+      ocrEngine: deferOnnx ? 'windows' : undefined,
+      deferOnnx,
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
@@ -336,16 +338,44 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const hasText = !!prompt || !!(loc?.text || loc?.name)?.trim()
-    const scanRes = await scanFor(!!s.apiKey && !!prompt && s.sendScreenshot, wide)
-    const pick = hasText ? await pickFrom(node, scanRes, scanRes.window || win, true) : null
-    if (pick) return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${pick.how})` }
+    const winScan = await scanFor(false, wide, true)
+    let seenItems = winScan.items
+    try {
+      if (hasText) {
+        log('info', 'Hedef Windows OCR ile aranıyor.')
+        const winPick = await pickFrom(node, winScan, winScan.window || win, false)
+        if (winPick) {
+          const reader = winPick.item.src === 'ocr' ? 'Windows OCR' : 'uygulama öğesi'
+          return { ...center(winPick.target), memo: winPick.memo, label: `“${winPick.target.text}” (${reader}, ${winPick.how})` }
+        }
+        log('info', 'Windows OCR bulamadı. ONNX deneniyor.')
+        let onnxScan: ScanResult = winScan
+        try {
+          onnxScan = await bridge.applyOnnx(winScan)
+        } catch (e) {
+          log('warn', `ONNX okunamadı: ${(e as Error).message}`)
+        }
+        seenItems = onnxScan.items
+        const onnxSide = onnxScan.sideCount ? ` +yan ${onnxScan.sideCount}` : ''
+        log('info', `ONNX ${onnxScan.onnxAdded ?? 0}${onnxSide} satır.`)
+        const onnxPick = await pickFrom(node, onnxScan, onnxScan.window || win, false)
+        if (onnxPick) {
+          const reader = onnxPick.item.src === 'ocr' ? 'ONNX' : 'uygulama öğesi'
+          return { ...center(onnxPick.target), memo: onnxPick.memo, label: `“${onnxPick.target.text}” (${reader}, ${onnxPick.how})` }
+        }
+        log('info', 'ONNX de bulamadı.')
+      }
+    } finally {
+      bridge.discardShot(winScan.shot)
+    }
 
-    if (loc?.icon && s.apiKey) {
+    if (s.apiKey && (hasText || loc?.icon)) {
       try {
-        log('info', '[simge] Görsel modele kayıtlı resimle soruluyor.')
-        return await resolveVision(node, true)
+        log('info', 'UI-TARS ekran görüntüsüne bakıyor.')
+        return await locateWithTars(node, wide)
       } catch (e) {
-        log('warn', `[simge] Görsel model de bulamadı: ${(e as Error).message}`)
+        if (e instanceof NotFoundError) log('warn', e.message)
+        else log('warn', `UI-TARS atlandı: ${(e as Error).message}`)
       }
     }
 
@@ -360,7 +390,7 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const explicit = extractTarget(prompt)
-    const seen = sampleTexts(scanRes.items)
+    const seen = sampleTexts(seenItems)
     throw new NotFoundError(
       `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey ? '' : ' (API anahtarı yok, sadece yazı eşleşmesi denendi.)'}${
         seen ? ` Ekranda görülenlerden bazıları: ${seen}` : ''
@@ -383,6 +413,44 @@ export function createAgent(ctx: AgentContext) {
     const t = node.locator?.text || node.locator?.name
     if (t) return `“${t}” yazan yere`
     throw new Error(`“${node.title}”: görsel mod için ekranda neyin bulunacağını yaz.`)
+  }
+
+  /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
+  async function locateWithTars(node: AgentNode, wide = false): Promise<Resolved> {
+    const s = getSettings()
+    if (!s.apiKey) throw new NotFoundError('UI-TARS için API anahtarı yok.')
+    const model = agentModels(s)
+    const prompt = visionPrompt(node)
+    const res = await bridge.scan({
+      windowTitle: wide ? undefined : s.targetWindow || undefined,
+      image: 'plain',
+      uia: false,
+      ocr: false,
+      fresh: wide,
+      maxImageW: isTarsModel(model[0] || '') ? 1288 : 1400,
+      snap: isTarsModel(model[0] || '') ? 28 : 0,
+    })
+    warnMissingWindow(res)
+    if (!res.image) throw new NotFoundError('UI-TARS için ekran görüntüsü alınamadı.')
+    const action = await guiStep({
+      apiKey: s.apiKey,
+      model,
+      goal: `Find this on the screen and click it once: ${prompt}. Do nothing else.`,
+      history: [],
+      screen: res.image,
+    })
+    const pointed = (action.kind === 'click' || action.kind === 'double' || action.kind === 'right') && typeof action.x === 'number' && typeof action.y === 'number'
+    if (!pointed) throw new NotFoundError(`UI-TARS hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
+    const a = res.area
+    const x = a.x + action.x! * a.w
+    const y = a.y + action.y! * a.h
+    log('info', `[UI-TARS] ${action.thought || action.raw}`)
+    return {
+      x,
+      y,
+      label: '[UI-TARS] ekran görüntüsü',
+      memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
+    }
   }
 
   /** Screenshot mode: the vision model looks at the screen, picks a marked box or a raw point, then a zoomed crop refines it. */
@@ -467,8 +535,7 @@ export function createAgent(ctx: AgentContext) {
     return r.answer
   }
 
-  const findTarget = (node: AgentNode, stepNo: number, wide = false) =>
-    node.useVision ? resolveVision(node, wide) : resolveTarget(node, stepNo, wide)
+  const findTarget = (node: AgentNode, stepNo: number, wide = false) => resolveTarget(node, stepNo, wide)
 
   // ---------- after an action: did it land? ----------
 
@@ -675,16 +742,8 @@ export function createAgent(ctx: AgentContext) {
     try {
       return await resolveTarget(plan.lookFor ? { ...node, prompt: `“${plan.lookFor}”` } : node, 0, true)
     } catch {
-      /* the plan's text is not there either */
+      return null
     }
-    if (!node.useVision && getSettings().apiKey) {
-      try {
-        return await resolveVision(node, true)
-      } catch {
-        return null
-      }
-    }
-    return null
   }
 
   /**
@@ -1284,13 +1343,25 @@ export function createAgent(ctx: AgentContext) {
         if (how) return found(how)
       }
       if (text) {
-        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true })
-        noteCjk(res, node.id)
-        const hit = containsTextStrict(res.items, text)
-        if (hit) return found(`ekranda “${hit.text}” (${hit.src === 'ocr' ? 'okunan yazı' : hit.type})`)
-        if (!node.locator && !noted.has(`${node.id}:loose`)) {
-          const near = res.items.find((i) => containsText([i], text))
-          if (near) noteOnce(node.id, 'loose', `“${text}” tam kelime olarak yok ama “${near.text}” içinde geçiyor; Koşul bunu “var” saymıyor. Gerekirse yazıyı “${near.text}” yap.`)
+        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true, ocrEngine: 'windows', deferOnnx: true })
+        try {
+          noteCjk(res, node.id)
+          const hit = containsTextStrict(res.items, text)
+          if (hit) return found(`Windows OCR “${hit.text}”`)
+          let onnxRes: ScanResult = res
+          try {
+            onnxRes = await bridge.applyOnnx(res)
+          } catch {
+            /* Windows lines stay */
+          }
+          const hit2 = containsTextStrict(onnxRes.items, text)
+          if (hit2) return found(`ONNX “${hit2.text}”`)
+          if (!node.locator && !noted.has(`${node.id}:loose`)) {
+            const near = onnxRes.items.find((i) => containsText([i], text))
+            if (near) noteOnce(node.id, 'loose', `“${text}” tam kelime olarak yok ama “${near.text}” içinde geçiyor; Koşul bunu “var” saymıyor. Gerekirse yazıyı “${near.text}” yap.`)
+          }
+        } finally {
+          bridge.discardShot(res.shot)
         }
       }
       if (node.useVision && (text || node.locator?.icon)) {
