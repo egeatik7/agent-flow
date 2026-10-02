@@ -12,6 +12,7 @@ export default function Hud() {
     window.xpAgent ? IDLE : { level: 'info', text: 'deepseek-v4: şimdi Kaydet’e basmalıyım.' }
   )
   const [loop, setLoop] = useState(() => (window.xpAgent ? '' : 'Modeller · 3/12 · kedi.png'))
+  const [method, setMethod] = useState(() => (window.xpAgent ? '' : 'Windows OCR'))
   const [playing, setPlaying] = useState(() => !document.hidden)
 
   useEffect(() => {
@@ -34,10 +35,15 @@ export default function Hud() {
       const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
       setLoop(text)
     })
+    const offMethod = window.xpAgent?.onHudMethod?.((payload) => {
+      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      setMethod(text)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
       offLoop?.()
+      offMethod?.()
     }
   }, [])
 
@@ -54,7 +60,8 @@ export default function Hud() {
         </div>
         <p className="hud-text">{status.text}</p>
       </div>
-      <p className={`hud-loop${loop ? ' on' : ''}`}>{loop}</p>
+      <p className={`hud-line hud-method${method ? ' on' : ''}`}>{method}</p>
+      <p className={`hud-line hud-loop${loop ? ' on' : ''}`}>{loop}</p>
     </div>
   )
 }

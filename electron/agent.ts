@@ -43,6 +43,7 @@ export type AgentContext = {
   settings: () => AppSettings
   shouldStop: () => boolean
   setLoop?: (text: string) => void
+  setMethod?: (text: string) => void
 }
 
 type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
@@ -344,12 +345,14 @@ export function createAgent(ctx: AgentContext) {
         if (stage === 'chrome') {
           const userChrome = await browser.userChromeItems(win || undefined)
           if (!userChrome) continue
+          ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
           const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true)
           if (pick) return { ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }
           log('info', '[chrome] Sayfada bulunamadı.')
         }
         if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)) {
+          ctx.setMethod?.('Kayıtlı öğe')
           try {
             const r = await bridge.locate(loc, win)
             if (r && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
@@ -358,6 +361,7 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if (stage === 'icon' && loc?.icon) {
+          ctx.setMethod?.('Kayıtlı resim')
           try {
             const hit = (await bridge.findImage(loc.icon, loc.windowTitle)) ?? null
             const again = hit && hit.score < ICON_MIN && loc.windowTitle ? await bridge.findImage(loc.icon) : null
@@ -382,6 +386,7 @@ export function createAgent(ctx: AgentContext) {
           continue
         }
         if (stage === 'windows' && quoted) {
+          ctx.setMethod?.('Windows OCR')
           log('info', `“${quoted}” Windows OCR ile aranıyor.`)
           const scan = await windowsScan()
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
@@ -392,6 +397,7 @@ export function createAgent(ctx: AgentContext) {
           log('info', `“${quoted}” Windows OCR’da yok.`)
         }
         if (stage === 'onnx' && quoted) {
+          ctx.setMethod?.('ONNX OCR')
           log('info', `“${quoted}” ONNX ile aranıyor.`)
           const scan = await onnxReady()
           const side = scan.sideCount ? ` +yan ${scan.sideCount}` : ''
@@ -404,12 +410,14 @@ export function createAgent(ctx: AgentContext) {
           log('info', `“${quoted}” ONNX’te yok.`)
         }
         if (stage === 'list' && hasText) {
+          ctx.setMethod?.('Kelime listesi')
           const scan = onnxScan ?? (await windowsScan())
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
           const pick = await pickFrom(node, scan, scan.window || win, true, true)
           if (pick) return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }
         }
         if (stage === 'tars' && s.apiKey && (hasText || loc?.icon)) {
+          ctx.setMethod?.('UI-TARS')
           try {
             log('info', 'UI-TARS ekran görüntüsüne bakıyor.')
             return await locateWithTars(node, wide)
@@ -419,6 +427,7 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if (stage === 'offset' && loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
+          ctx.setMethod?.('Kayıtlı konum')
           try {
             const r = await bridge.windowRect(win)
             log('warn', 'Yazı bulunamadı, kayıttaki konuma tıklanıyor.')

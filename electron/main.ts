@@ -121,7 +121,14 @@ setStopCheck(() => running && stopRequested)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-const agent = createAgent({ log, send, settings: getSettings, shouldStop: () => stopRequested, setLoop: (text) => pushLoop(text) })
+const agent = createAgent({
+  log,
+  send,
+  settings: getSettings,
+  shouldStop: () => stopRequested,
+  setLoop: (text) => pushLoop(text),
+  setMethod: (text) => pushMethod(text),
+})
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
@@ -171,14 +178,15 @@ function destroyHud() {
 }
 
 const HUD_W = 456
-const HUD_H = 138
+const HUD_H = 164
+const HUD_GAP = 4
 
 function placeHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
   const area = screen.getPrimaryDisplay().workArea
   hudWindow.setBounds({
-    x: Math.round(area.x + area.width - HUD_W - 14),
-    y: Math.round(area.y + area.height - HUD_H - 14),
+    x: Math.round(area.x + area.width - HUD_W - HUD_GAP),
+    y: Math.round(area.y + area.height - HUD_H - HUD_GAP),
     width: HUD_W,
     height: HUD_H,
   })
@@ -255,6 +263,11 @@ function pushLoop(text: string) {
   deliverHud('hud:loop', { text }, false)
 }
 
+function pushMethod(text: string) {
+  if (!running || !hudWindow || hudWindow.isDestroyed()) return
+  deliverHud('hud:method', { text }, false)
+}
+
 function pushHud(level: LogLevel, message: string) {
   if (!running || level === 'chat' || !hudWindow || hudWindow.isDestroyed()) return
   const text = message.replace(/\s+/g, ' ').trim()
@@ -274,6 +287,7 @@ function hideHudSoon() {
     if (hudWindow && !hudWindow.isDestroyed()) {
       hudWindow.hide()
       hudWindow.webContents.send('hud:loop', { text: '' })
+      hudWindow.webContents.send('hud:method', { text: '' })
     }
   }, 2200)
 }

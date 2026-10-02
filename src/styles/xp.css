@@ -2011,7 +2011,7 @@ html.hud-root #root {
   padding: 6px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 22px;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   column-gap: 6px;
   row-gap: 4px;
 }
@@ -2080,22 +2080,32 @@ html.hud-root #root {
   background: #7dff7a;
 }
 
-.hud-loop {
+.hud-line {
   grid-column: 2;
-  grid-row: 2;
   margin: 0;
-  height: 22px;
-  line-height: 20px;
-  padding: 0 7px;
+  height: 0;
+  padding: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  border: 0 solid transparent;
   background: transparent;
-  border: 2px solid transparent;
 }
 
-.hud-loop.on {
+.hud-method {
+  grid-row: 2;
+}
+
+.hud-loop {
+  grid-row: 3;
+}
+
+.hud-line.on {
+  height: 22px;
+  line-height: 20px;
+  padding: 0 7px;
   background: #ece9d8;
+  border-width: 2px;
   border-color: #fff #404040 #404040 #fff;
 }
 
