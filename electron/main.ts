@@ -116,10 +116,11 @@ const agent = createAgent({ log, send, settings: getSettings, shouldStop: () => 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   mainWindow = new BrowserWindow({
-    width: Math.min(1320, width),
-    height: Math.min(860, height),
+    width,
+    height,
     minWidth: 980,
     minHeight: 640,
+    show: false,
     frame: false,
     backgroundColor: '#ece9d8',
     icon: path.join(__dirname, '../resources/icon.png'),
@@ -130,6 +131,11 @@ function createWindow() {
       sandbox: false,
     },
     title: 'Nubbo Agent Studio',
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.maximize()
+    mainWindow?.show()
   })
 
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
