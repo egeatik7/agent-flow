@@ -224,6 +224,7 @@ function deliverHud(channel: string, payload: unknown, show: boolean) {
     if (show) {
       if (!hudWindow.isVisible()) hudWindow.showInactive()
       raiseHud()
+      hudWindow.setContentProtection(true)
       hudWindow.setIgnoreMouseEvents(true, { forward: true })
     }
   }

@@ -904,17 +904,30 @@ export default function App() {
 
   const forgetAll = () => {
     let count = 0
-    const cleared = mapNodes(graph, (n) => {
-      if (!n.memory?.length && !n.path?.length && !n.trace?.length) return n
-      count++
-      return { ...n, memory: undefined, path: undefined, trace: undefined }
-    })
+    const wipe = (g: AgentGraph) =>
+      mapNodes(g, (n) => {
+        if (!n.memory?.length && !n.path?.length && !n.trace?.length) return n
+        count++
+        return { ...n, memory: undefined, path: undefined, trace: undefined }
+      })
+    const full = rooted(graphRef.current, stackRef.current)
+    const cleared = wipe(full)
     if (!count) {
       pushLog('info', 'Silinecek hafıza yok.')
       return
     }
-    setGraph(cleared)
-    pushLog('info', `${count} node’un hafızası ve kayıtlı yolu silindi.`)
+    let view = cleared
+    const nextStack: Crumb[] = []
+    for (const crumb of stackRef.current) {
+      nextStack.push({ parent: view, id: crumb.id })
+      const pkg = view.nodes.find((n) => n.id === crumb.id && n.kind === 'package')
+      view = pkg?.inner ?? { nodes: [], edges: [] }
+    }
+    graphRef.current = view
+    stackRef.current = nextStack
+    setStack(nextStack)
+    setGraph(view)
+    pushLog('info', `${count} node’un hafızası silindi. Bu tuvaldeki paketlerin içi de temizlendi.`)
   }
 
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
