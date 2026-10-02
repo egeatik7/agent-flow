@@ -196,9 +196,9 @@ function createHud() {
       sandbox: false,
     },
   })
-  hudWindow.setAlwaysOnTop(true, 'floating')
+  raiseHud()
   hudWindow.setContentProtection(true)
-  hudWindow.setIgnoreMouseEvents(true)
+  hudWindow.setIgnoreMouseEvents(true, { forward: true })
   placeHud()
   const dev = process.env.VITE_DEV_SERVER_URL
   if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
@@ -208,13 +208,24 @@ function createHud() {
   })
 }
 
+function raiseHud() {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  hudWindow.setAlwaysOnTop(true, 'screen-saver')
+  hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  hudWindow.moveTop()
+}
+
 function deliverHud(channel: string, payload: unknown, show: boolean) {
   if (!hudWindow || hudWindow.isDestroyed()) return
   const deliver = () => {
     if (!hudWindow || hudWindow.isDestroyed()) return
     placeHud()
     hudWindow.webContents.send(channel, payload)
-    if (show && !hudWindow.isVisible()) hudWindow.showInactive()
+    if (show) {
+      if (!hudWindow.isVisible()) hudWindow.showInactive()
+      raiseHud()
+      hudWindow.setIgnoreMouseEvents(true, { forward: true })
+    }
   }
   if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
   else deliver()
