@@ -360,7 +360,7 @@ function fieldTip(el: Element): Tip | null {
     return { title: 'İnisiyatif modeli', text: 'Ekrana bakarak çalışan İnisiyatif bu modeli kullanır. Varsayılan UI-TARS’tır. Aynı OpenRouter anahtarı geçerli. Kaydet’e bas.' }
   }
   if (label === 'Model adı') {
-    return { title: 'Model adı', text: 'Yazı listesinden seçim yapan model. Ekran görüntüsü gören bir model olması şart değil. Kaydet’e basınca kalır.' }
+    return { title: 'Model adı', text: 'Yazı listesinden seçim yapan modeller. 1 önce denenir, olmazsa alttakiler. Listenin altındaki Kaydet’e basınca kalır.' }
   }
   for (const [name, tip] of tips) if (label.startsWith(name)) return tip
   if (label) return { title: label, text: 'Bu alan seçili node’un veya ayarın değeridir. Değişiklik, Kaydet düğmesi olanlarda Kaydet’e basınca kalır.' }

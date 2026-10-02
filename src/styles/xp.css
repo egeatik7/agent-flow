@@ -748,6 +748,10 @@ body {
   align-self: flex-start;
 }
 
+.backup-save {
+  margin-top: 6px;
+}
+
 .loop-folder-actions {
   flex-wrap: nowrap;
   margin-top: 4px;

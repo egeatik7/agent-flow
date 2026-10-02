@@ -81,63 +81,61 @@ const CLICK_MODES: { key: ClickMode; label: string }[] = [
   { key: 'right', label: 'Sağ tık' },
 ]
 
-function BackupModels(props: { backups: string[] | undefined; listId: string; onChange: (next: string[]) => void }) {
-  const rows = props.backups ?? []
+function ModelChain(props: {
+  primary: string
+  backups: string[] | undefined
+  listId: string
+  placeholder: string
+  inputId?: string
+  onChange: (primary: string, backups: string[]) => void
+}) {
+  const rows = [props.primary, ...(props.backups ?? [])].slice(0, 5)
+  const setRows = (next: string[]) => {
+    const list = next.length ? next.slice(0, 5) : ['']
+    props.onChange(list[0] ?? '', list.slice(1))
+  }
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir
+    if (j < 0 || j >= rows.length) return
+    const next = rows.slice()
+    const [row] = next.splice(i, 1)
+    next.splice(j, 0, row)
+    setRows(next)
+  }
   return (
     <div className="backup-box">
       {rows.map((name, i) => (
         <div className="backup-row" key={i}>
-          <span className="backup-n">{i + 2}</span>
+          <span className="backup-n">{i + 1}</span>
           <input
             className="xp-input"
+            id={i === 0 ? props.inputId : undefined}
             list={props.listId}
             value={name}
-            placeholder="yedek model adı"
+            placeholder={i === 0 ? props.placeholder : 'yedek model adı'}
             onChange={(e) => {
               const next = rows.slice()
               next[i] = e.target.value
-              props.onChange(next)
+              setRows(next)
             }}
           />
-          <button
-            type="button"
-            className="xp-btn backup-x"
-            title="Yukarı"
-            disabled={i === 0}
-            onClick={() => {
-              const next = rows.slice()
-              const [row] = next.splice(i, 1)
-              next.splice(i - 1, 0, row)
-              props.onChange(next)
-            }}
-          >
+          <button type="button" className="xp-btn backup-x" title="Yukarı" disabled={i === 0} onClick={() => move(i, -1)}>
             ↑
           </button>
-          <button
-            type="button"
-            className="xp-btn backup-x"
-            title="Aşağı"
-            disabled={i === rows.length - 1}
-            onClick={() => {
-              const next = rows.slice()
-              const [row] = next.splice(i, 1)
-              next.splice(i + 1, 0, row)
-              props.onChange(next)
-            }}
-          >
+          <button type="button" className="xp-btn backup-x" title="Aşağı" disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
             ↓
           </button>
           <button
             type="button"
             className="xp-btn backup-x"
-            title="Bu yedeği sil"
-            onClick={() => props.onChange(rows.filter((_, j) => j !== i))}
+            title="Bu modeli sil"
+            onClick={() => setRows(rows.length === 1 ? [''] : rows.filter((_, j) => j !== i))}
           >
             ×
           </button>
         </div>
       ))}
-      <button type="button" className="xp-btn backup-add" disabled={rows.length >= 4} onClick={() => props.onChange([...rows, ''])}>
+      <button type="button" className="xp-btn backup-add" disabled={rows.length >= 5} onClick={() => setRows([...rows, ''])}>
         + Yedek
       </button>
     </div>
@@ -866,11 +864,18 @@ function Settings(p: Props) {
 
       <div className="field">
         <label htmlFor="model">Model adı</label>
-        <SaveRow onSave={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
-          <input id="model" className="xp-input" list="model-list" value={s.model} placeholder="openai/gpt-4o-mini" onChange={(e) => set({ model: e.target.value })} />
-        </SaveRow>
-        <BackupModels listId="model-list" backups={s.modelBackups} onChange={(modelBackups) => set({ modelBackups })} />
-        <p className="hint">Üstteki 1. modeldir. Olmazsa 2, 3, 4, 5 denenir. Hepsi susarsa sıra başa döner. Durdurmak için Ctrl+Shift+Q.</p>
+        <ModelChain
+          primary={s.model}
+          backups={s.modelBackups}
+          listId="model-list"
+          inputId="model"
+          placeholder="openai/gpt-4o-mini"
+          onChange={(model, modelBackups) => set({ model, modelBackups })}
+        />
+        <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
+          Kaydet
+        </button>
+        <p className="hint">Listedeki 1. model önce denenir. Olmazsa 2, 3, 4, 5. Hepsi susarsa sıra başa döner. Durdurmak için Ctrl+Shift+Q.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
@@ -908,16 +913,17 @@ function Settings(p: Props) {
         </p>
         <div className="field">
           <label htmlFor="visionModel">Görsel model adı</label>
-          <SaveRow onSave={() => p.onSaveSettings({ visionModel: s.visionModel.trim(), visionBackups: s.visionBackups ?? [] })}>
-            <input
-              id="visionModel"
-              className="xp-input"
-              list="vision-model-list"
-              value={s.visionModel}
-              placeholder="google/gemini-3.8-flash"
-              onChange={(e) => set({ visionModel: e.target.value })}
-            />
-          </SaveRow>
+          <ModelChain
+            primary={s.visionModel}
+            backups={s.visionBackups}
+            listId="vision-model-list"
+            inputId="visionModel"
+            placeholder="google/gemini-3.8-flash"
+            onChange={(visionModel, visionBackups) => set({ visionModel, visionBackups })}
+          />
+          <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ visionModel: s.visionModel.trim(), visionBackups: s.visionBackups ?? [] })}>
+            Kaydet
+          </button>
           <datalist id="vision-model-list">
             {p.models
               .filter((m) => m.vision)
@@ -929,7 +935,6 @@ function Settings(p: Props) {
             <p className="hint warn">Bu model ekran görüntüsü göremiyor; görsel destekli bir model seç.</p>
           )}
           {visionInfo?.vision && <p className="hint ok">Görsel destekli model.</p>}
-          <BackupModels listId="vision-model-list" backups={s.visionBackups} onChange={(visionBackups) => set({ visionBackups })} />
           <div className="chips">
             {VISION_PRESETS.map((m) => (
               <button type="button" key={m} className="chip" onClick={() => set({ visionModel: m })}>
@@ -952,16 +957,24 @@ function Settings(p: Props) {
         </p>
         <div className="field">
           <label htmlFor="agentModel">Model adı</label>
-          <SaveRow onSave={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>
-            <input
-              id="agentModel"
-              className="xp-input"
-              list="vision-model-list"
-              value={s.agentModel}
-              placeholder="bytedance/ui-tars-1.5-7b"
-              onChange={(e) => set({ agentModel: e.target.value })}
-            />
-          </SaveRow>
+          <ModelChain
+            primary={s.agentModel}
+            backups={s.agentBackups}
+            listId="agent-model-list"
+            inputId="agentModel"
+            placeholder="bytedance/ui-tars-1.5-7b"
+            onChange={(agentModel, agentBackups) => set({ agentModel, agentBackups })}
+          />
+          <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>
+            Kaydet
+          </button>
+          <datalist id="agent-model-list">
+            {p.models
+              .filter((m) => m.vision)
+              .map((m) => (
+                <option key={m.id} value={m.id} />
+              ))}
+          </datalist>
           <div className="chips">
             {AGENT_PRESETS.map((m) => (
               <button type="button" key={m} className="chip" onClick={() => set({ agentModel: m })}>
@@ -969,7 +982,6 @@ function Settings(p: Props) {
               </button>
             ))}
           </div>
-          <BackupModels listId="vision-model-list" backups={s.agentBackups} onChange={(agentBackups) => set({ agentBackups })} />
         </div>
       </fieldset>
 
