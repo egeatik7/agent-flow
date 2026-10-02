@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
-import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
@@ -26,13 +25,10 @@ import {
   chooseScreenTarget,
   guiStep,
   isTarsModel,
-  judgeReaction,
   nextAction,
   type GuiAction,
   type GuiTurn,
-  planStall,
   visionCheck,
-  type ReactionVerdict,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { rememberShot } from './shots'
@@ -299,6 +295,8 @@ export function createAgent(ctx: AgentContext) {
     const loc = node.locator
     const win = s.targetWindow || loc?.windowTitle || ''
     const hasText = !!prompt || !!(loc?.text || loc?.name)?.trim()
+    const marked = extractTarget(prompt)
+    const quoted = marked?.quoted ? marked.text : ''
     const order = activeFindOrder(s.findOrder, s.findOff)
     let winScan: (ScanResult & { shot?: string }) | null = null
     let shotFile = ''
@@ -324,6 +322,15 @@ export function createAgent(ctx: AgentContext) {
       }
       seenItems = onnxScan.items
       return onnxScan
+    }
+
+    const quoteOnScreen = (scan: ScanResult, text: string, where: string): TargetPick | null => {
+      const mem = node.templated ? undefined : memoFor(node)
+      const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
+      const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
+      const hit = matchText(scan.items, text, { anchor, minScore: 60, prefer }) ?? matchFuzzy(scan.items, text, { anchor, minScore: 80, prefer })
+      if (!hit) return null
+      return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }
 
     try {
@@ -365,27 +372,31 @@ export function createAgent(ctx: AgentContext) {
             log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
           }
         }
-        if (stage === 'windows' && hasText) {
-          log('info', 'Hedef Windows OCR ile aranıyor.')
+        if ((stage === 'windows' || stage === 'onnx') && !quoted) {
+          if (stage === 'windows') log('info', 'Tırnak içi yazı yok, yerel OCR atlanıyor.')
+          continue
+        }
+        if (stage === 'windows' && quoted) {
+          log('info', `“${quoted}” Windows OCR ile aranıyor.`)
           const scan = await windowsScan()
-          const pick = await pickFrom(node, scan, scan.window || win, false)
+          const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
             const reader = pick.item.src === 'ocr' ? 'Windows OCR' : 'uygulama öğesi'
             return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }
           }
-          log('info', 'Windows OCR bulamadı.')
+          log('info', `“${quoted}” Windows OCR’da yok.`)
         }
-        if (stage === 'onnx' && hasText) {
-          log('info', 'ONNX deneniyor.')
+        if (stage === 'onnx' && quoted) {
+          log('info', `“${quoted}” ONNX ile aranıyor.`)
           const scan = await onnxReady()
           const side = scan.sideCount ? ` +yan ${scan.sideCount}` : ''
           log('info', `ONNX ${scan.onnxAdded ?? 0}${side} satır.`)
-          const pick = await pickFrom(node, scan, scan.window || win, false)
+          const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
             const reader = pick.item.src === 'ocr' ? 'ONNX' : 'uygulama öğesi'
             return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }
           }
-          log('info', 'ONNX de bulamadı.')
+          log('info', `“${quoted}” ONNX’te yok.`)
         }
         if (stage === 'list' && hasText) {
           const scan = onnxScan ?? (await windowsScan())
@@ -476,216 +487,17 @@ export function createAgent(ctx: AgentContext) {
 
   const findTarget = (node: AgentNode, stepNo: number, wide = false) => resolveTarget(node, stepNo, wide)
 
-  // ---------- after an action: did it land? ----------
-
-  type Snap = { texts: string[]; image: string | null }
-
-  async function snap(label: string): Promise<Snap> {
-    const res = await bridge.scan({ image: 'plain', fresh: true, maxImageW: 1100 })
-    if (res.image?.data) rememberShot(res.image.data, label)
-    return { texts: res.items.map((i) => i.text), image: res.image?.data ?? null }
-  }
-
-  function labelOf(k: ReactionVerdict): string {
-    if (k === 'ready') return 'hazır'
-    if (k === 'missed') return 'tepki yok'
-    if (k === 'loading') return 'yükleniyor'
-    if (k === 'blocked') return 'başka bir şey açıldı'
-    return 'belirsiz'
-  }
-
-  async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
-    const s = getSettings()
-    const model = visionModels(s)
-    if (!s.apiKey || !model || !before.image || !after.image) return v
-    if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
-    try {
-      const r = await judgeReaction({
-        apiKey: s.apiKey,
-        model,
-        system: promptOf(getSettings().llmPrompts, 'reaction'),
-        step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
-        expected: v.expected,
-        ahead: describeAhead(ahead),
-        fresh: v.fresh,
-        before: { data: before.image, w: 0, h: 0 },
-        after: { data: after.image, w: 0, h: 0 },
-      })
-      log('info', `Görsel yorum (${labelOf(r.verdict)}): ${r.reason || 'gerekçe yok'}`)
-      return { ...v, kind: r.verdict, reason: r.reason || v.reason }
-    } catch (e) {
-      log('warn', `Görsel yorum atlandı: ${(e as Error).message}`)
-      return v
-    }
-  }
-
-  function firstGoal(ahead?: StepAhead): { text: string; label: string } | null {
-    for (const n of [ahead?.next, ahead?.then]) {
-      if (!n) continue
-      if (['loop', 'end', 'start', 'wait', 'browser', 'waitFile', 'moveFile', 'ai'].includes(n.kind)) continue
-      const text = expectation({ next: n }).trim()
-      if (!text) continue
-      return { text, label: `“${n.title}” için “${text}”` }
-    }
-    return null
-  }
-
-  /** The next step's own target, without clicking it. Empty goal means there is nothing that should block the run. */
-  async function aheadIsReady(ahead?: StepAhead, quiet = false): Promise<boolean> {
-    const goal = firstGoal(ahead)
-    if (!goal) {
-      if (!quiet) log('info', 'Sırada kontrol edilecek bir öğe yok. Devam ediliyor.')
-      return true
-    }
-    if (process.platform === 'win32') {
-      const res = await bridge.scan({ image: 'none', fresh: true, tilt: true })
-      if (containsText(res.items, goal.text) || matchPrompt(res.items, goal.text)) {
-        log('success', `${goal.label} ekranda. Operasyon bozulmadan devam ediliyor.`)
-        return true
-      }
-    }
-    if (!quiet) log('info', `${goal.label} henüz görünmüyor.`)
-    return false
-  }
-
-  async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
-    const s = getSettings()
-    const model = visionModels(s)
-    if (!s.apiKey || !model) return null
-    let image: { data: string; w: number; h: number } | null = null
-    try {
-      const shot = await snap(`${node.title} plan`)
-      if (shot.image) image = { data: shot.image, w: 0, h: 0 }
-    } catch {
-      /* plan from the text of the problem */
-    }
-    try {
-      return await planStall({
-        apiKey: s.apiKey,
-        system: promptOf(getSettings().llmPrompts, 'stall'),
-        model,
-        step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
-        problem,
-        ahead: describeAhead(ahead),
-        expected: expectation(ahead),
-        image,
-      })
-    } catch (e) {
-      log('warn', `Plan alınamadı: ${(e as Error).message}`)
-      return null
-    }
-  }
-
-  function planLabel(action: 'continue' | 'wait' | 'stop', waitMs: number): string {
-    if (action === 'wait') return `${Math.round(waitMs / 1000)} sn bekle`
-    if (action === 'continue') return 'sıradaki adımı dene'
-    return 'dur'
-  }
-
-  /**
-   * After one click, type, or key. The same command is never pressed twice here.
-   * Page actions confirm through the page; screen actions compare two frames and then check the next target.
-   */
-  /**
-   * After one click, type, or key. The same command is never pressed twice here, and this never fails the step:
-   * if the reaction cannot be confirmed, the next step looks for its own target, waits, and recovers.
-   * Returns whether the reaction was confirmed (only confirmed targets go into memory).
-   */
-  async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, act: () => Promise<void>): Promise<boolean> {
-    if (ahead?.next?.kind === 'condition') {
-      await act()
-      log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım (${ahead.next.title}) ekrana kendisi baktığı için kontrol edilmeden geçiliyor.`)
-      return true
-    }
-    if (process.platform !== 'win32') {
-      await act()
-      return true
-    }
-
-    const expected = expectation(ahead)
-    const before = await snap(`${node.title} önce`)
-    await act()
-
-    await pause(900)
-    const after = await snap(`${node.title} sonra`)
-    let verdict = judgeScreen(before.texts, after.texts, expected)
-    if (verdict.kind === 'loading') {
-      log('info', `Sayfa henüz oturmadı (${verdict.reason}). Basılmadan beklenecek.`)
-      for (let i = 0; i < 3 && verdict.kind === 'loading'; i++) {
-        await pause(2000)
-        const later = await snap(`${node.title} yükleniyor`)
-        verdict = judgeScreen(before.texts, later.texts, expected)
-      }
-    }
-    if (verdict.kind === 'ready') {
-      log('success', `Emin: ${verdict.reason}.`)
-      return true
-    }
-    if (verdict.kind === 'blocked' || verdict.kind === 'unknown') {
-      verdict = await lookCloser(verdict, before, after, node, ahead)
-      if (verdict.kind === 'ready') {
-        log('success', `Emin: ${verdict.reason}.`)
-        return true
-      }
-    }
-
-    log('info', `Tepki net değil (${verdict.reason}). Akış bozulmadan sıradaki adım kontrol edilecek.`)
-    if (await aheadIsReady(ahead)) return true
-
-    log('info', 'Sıradaki öğe henüz yok. Karar vermeden önce beklenecek.')
-    await pause(2500)
-    if (await aheadIsReady(ahead)) return true
-
-    const plan = await askPlan(node, ahead, verdict.reason)
-    if (plan) {
-      log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
-      if (plan.action === 'wait') await pause(plan.waitMs)
-      if (await aheadIsReady(ahead)) return true
-    }
-    log('info', `“${node.title}” sonrası tepki doğrulanamadı; sıradaki adım kendi hedefini arayıp bekleyecek (bu adım hata sayılmadı).`)
-    return false
-  }
-
-  let inRecover = false
-
-  async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>, recover?: () => Promise<T | null>): Promise<T> {
+  async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
     try {
       return await run(false)
     } catch (e) {
       if (!(e instanceof NotFoundError) || stopped()) throw e
       log('warn', `“${title}” bulunamadı. 3 sn sonra ekran yenilenip bir kez daha denenecek.`)
       await pause(REFRESH_RETRY_MS)
-      try {
-        return await run(true)
-      } catch (e2) {
-        if (!(e2 instanceof NotFoundError) || stopped() || inRecover || !recover) throw e2
-        log('warn', `“${title}” hâlâ yok. Durup düşünülecek, hemen vazgeçilmiyor.`)
-        inRecover = true
-        try {
-          const alt = await recover()
-          if (alt) return alt
-          throw e2
-        } finally {
-          inRecover = false
-        }
-      }
+      return await run(true)
     }
   }
 
-  /** The click/type target was not on screen. Wait, ask for a plan, then look once more before the step fails. */
-  async function recoverTarget(node: AgentNode, ahead: StepAhead | undefined): Promise<Resolved | null> {
-    await pause(2000)
-    const plan = await askPlan(node, ahead, `“${node.title}” istediği öğeyi ekranda bulamadı`)
-    if (!plan) return null
-    log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
-    if (plan.action === 'wait') await pause(plan.waitMs)
-    if (plan.action === 'stop') return null
-    try {
-      return await resolveTarget(plan.lookFor ? { ...node, prompt: `“${plan.lookFor}”` } : node, 0, true)
-    } catch {
-      return null
-    }
-  }
 
   /**
    * Koşul with a picked element: its own UI element (enabled), or its saved picture, is on screen right now.
@@ -1223,48 +1035,42 @@ export function createAgent(ctx: AgentContext) {
     step: (id, status) => send('agent:step', { id, status }),
     patchNode: (id, patch) => send('agent:patch', { id, patch }),
     shouldStop: stopped,
-    click: async (node, stepNo, ahead) => {
+    click: async (node, stepNo) => {
       await waitUnlocked()
-      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       const mode = node.clickMode ?? 'left'
-      const confirmed = await ensureActed(node, ahead, async () => {
-        await bridge.clickAt(t.x, t.y, mode)
-        const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
-        log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
-      })
-      if (confirmed) saveMemo(node, t.memo)
+      await bridge.clickAt(t.x, t.y, mode)
+      const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
+      log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
+      saveMemo(node, t.memo)
       await noteForeground()
     },
-    type: async (node, stepNo, ahead) => {
+    type: async (node, stepNo) => {
       await waitUnlocked()
       const text = node.text ?? ''
       const enter = !!node.pressEnter
       const clear = node.clearFirst !== false
       let t: Resolved | null = null
       if (node.prompt?.trim() || node.locator) {
-        t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+        t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       } else {
         await guardFocus(node)
       }
-      const confirmed = await ensureActed(node, ahead, async () => {
-        if (t) {
-          await bridge.clickAt(t.x, t.y, 'left')
-          await sleep(FOCUS_MS)
-          log('info', `Alan seçildi: ${t.label}`)
-        }
-        await typeVerified(text, enter, clear)
-      })
-      if (confirmed) saveMemo(node, t?.memo)
+      if (t) {
+        await bridge.clickAt(t.x, t.y, 'left')
+        await sleep(FOCUS_MS)
+        log('info', `Alan seçildi: ${t.label}`)
+      }
+      await typeVerified(text, enter, clear)
+      saveMemo(node, t?.memo)
       await noteForeground()
     },
-    key: async (node, ahead) => {
+    key: async (node) => {
       await waitUnlocked()
       const keys = node.keys
       if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
       if (!getSettings().targetWindow) await guardFocus(node)
-      await ensureActed(node, ahead, async () => {
-        await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
-      })
+      await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       await noteForeground()
     },
     exists: async (text, node) => {

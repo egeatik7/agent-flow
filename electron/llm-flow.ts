@@ -3,14 +3,14 @@
 export const FIND_STAGE_IDS = ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'] as const
 export type FindStageId = (typeof FIND_STAGE_IDS)[number]
 
-export type PromptId = 'list' | 'tars' | 'screen' | 'initiative' | 'reaction' | 'stall'
+export type PromptId = 'list' | 'tars' | 'screen' | 'initiative'
 
 export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt?: PromptId }[] = [
   { id: 'chrome', title: 'Chrome sayfası', note: '9222 portundaki sayfanın yazıları. Tam eşleşmezse kelime listesi yazı modeline gider.' },
   { id: 'uia', title: 'Kayıtlı öğe', note: 'Yakalanan düğmenin kendi adı. LLM yok.' },
   { id: 'icon', title: 'Kayıtlı resim', note: 'Simge resmi yerelde aranır. LLM yok.' },
-  { id: 'windows', title: 'Windows OCR', note: 'Rampalı kare ve 90° tur. Liste yerelde eşleşir, modele gitmez.' },
-  { id: 'onnx', title: 'ONNX OCR', note: 'Aynı rampalı kare, Windows kaçırdıysa. Modele gitmez.' },
+  { id: 'windows', title: 'Windows OCR', note: 'Yalnızca tırnak içindeki yazıyı rampalı karede ve 90° turda arar. Tırnak yoksa atlanır. Bulunamazsa sıradaki aşama, yani model.' },
+  { id: 'onnx', title: 'ONNX OCR', note: 'Tırnak içindeki yazı Windows’ta yoksa aynı karede aranır. O da yoksa modele geçilir.' },
   { id: 'list', title: 'Kelime listesi → yazı modeli', note: 'OCR’dan çıkan numaralı liste bu prompt ile yazı modeline gider.', prompt: 'list' },
   { id: 'tars', title: 'UI-TARS', note: 'Düz, rampasız ekran görüntüsü. {{hedef}} talimatın yerine yazılır.', prompt: 'tars' },
   { id: 'offset', title: 'Kayıtlı konum', note: 'Eski pencere içi nokta. LLM yok.' },
@@ -19,8 +19,6 @@ export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt
 export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
   { id: 'screen', title: 'Ekran görüntüsü JSON', note: 'UI-TARS olmayan model ekran görüntüsüne bu prompt ile bakar.' },
   { id: 'initiative', title: 'İnisiyatif', note: 'Hedefe giderken her turda numaralı liste ve görüntü bu prompt ile gider.' },
-  { id: 'reaction', title: 'Tepki', note: 'Tıklamadan sonraki iki kare bu prompt ile yorumlanır.' },
-  { id: 'stall', title: 'Takılma', note: 'Hedef bulunamazsa akış bu prompt ile bekler, sürer ya da durur.' },
 ]
 
 export const DEFAULT_FIND_OFF: FindStageId[] = ['list']
@@ -70,22 +68,11 @@ Controls on screen are given as a numbered list. Clicks and typing must target a
 Actions: click, double, right, type, key, wait, done, fail.
 JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`
 
-export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
-Pick one verdict: ready, missed, loading, blocked, unknown.
-JSON only: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<short reason>"}`
-
-export const STALL_PROMPT = `A desktop automation step got no clear reaction, or the next control was not found. Do not break the flow immediately.
-Decision: continue, wait (waitSec from 1 to 8), or stop.
-lookFor: a short string to look for on screen. Empty string if none.
-JSON only: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<short plan>"}`
-
 export const DEFAULT_PROMPTS: Record<PromptId, string> = {
   list: LIST_PROMPT,
   tars: TARS_TEMPLATE,
   screen: SCREEN_PROMPT,
   initiative: INITIATIVE_PROMPT,
-  reaction: REACTION_PROMPT,
-  stall: STALL_PROMPT,
 }
 
 export type LlmPrompts = Partial<Record<PromptId, string>>

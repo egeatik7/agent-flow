@@ -29,10 +29,9 @@ Sırayla, ilk bulunan yerde durur:
 1. **Sayfanın kendisi.** Programın açtığı tarayıcı öndeyse, düğmeler, bağlantılar ve alanlar gerçek adlarıyla okunur.
 2. **Yakalanan öğe.** Node Ekran Tarayıcı ya da İmleçle Yakala ile oluşturulduysa önce uygulamanın kendi öğesi, sonra öğenin
    kayıtlı resminin ekrandaki aynısı aranır (modelsiz, hızlı).
-3. **Ekran.** Önce Windows OCR, bulamazsa ONNX. İkisi de value ramp ve 90° turunu kullanır. İkisi de bulamazsa UI-TARS düz ekran görüntüsüne bakar.
+3. **Ekran.** Node’da tırnak içi yazı varsa önce Windows OCR, bulamazsa ONNX. İkisi de value ramp ve 90° turunu kullanır. Tırnak yoksa ya da ikisi de bulamazsa kelime listesi ve UI-TARS devreye girer.
 
-Hedef bulunamazsa ajan 3 saniye bekleyip tüm ekranı yeniden okur. Yine yoksa durup modele plan sorar (bekle, şu yazıyı
-ara, dur) ve bir kez daha bakar.
+Hedef bulunamazsa ajan 3 saniye bekleyip tüm ekranı bir kez daha okur.
 
 ## Her Öğe İçin (döngü kutusu)
 
@@ -82,15 +81,11 @@ Güvenceler:
   **modelsiz** oynatılır; her adımdan önce ekranın kayıttakine benzediğine bakılır. Ekran farklılaştığı anda model o noktadan devam eder.
 - Hedefe ulaşınca **tamam**, ulaşamazsa **olmadı** çıkışından devam eder.
 
-## Emin olma
+## Eylem sonrası
 
-- Sıradaki node **Koşul** ise eylem bir kez yapılır ve kontrol edilmeden geçilir; o node ekrana kendisi bakar.
-- Ekranda: eylemden önce ve sonra bir kare alınır. Sayfa değiştiyse ve sıradaki yazı geldiyse devam edilir. Tepki net
-  değilse akış hemen bozulmaz: sıradaki adımın hedefi ekranda mı diye bakılır, yoksa beklenir, gerekirse model plan kurar.
-  Aynı komut yeniden basılmaz.
+- Tıklama ve yazma, hedef bulunduktan sonra bir kez yapılır. Ekran tepkisi ayrıca sorulmaz, takılınca plan da kurulmaz.
 - **Yazı Yaz** sonrası alanın içi okunur. Başka bir şey yazıyorsa alan temizlenip bir kez daha yazılır; yine tutmazsa
   adım hata verir. Kutu içindeyse o tur orada kalır ve sıradaki öğeye geçilir.
-- Son 10 ekran karesi `%APPDATA%/xp-agent-studio/shots` altında tutulur, eskisi silinir.
 - Model konuşmaları ajan günlüğüne düşer: giden `API →`, dönen `API ←`.
 
 ## Uzun çalıştırmalarda güvenceler
@@ -99,14 +94,13 @@ Güvenceler:
   (429, 5xx, bağlantı kopması) istek 3 sn sonra bir kez daha denenir.
 - **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı
   döngüsü) orada kalır ve sıradaki öğeye geçilir.
-- **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar ve bekler. Hafızaya yalnızca
-  tepkisi doğrulanan hedefler yazılır.
+- **Hafıza eylemden sonra yazılır.** Tıklama veya yazma yapılınca hedef kayda geçer. Koşul node’u tırnak beklemez: kutusundaki yazıyı doğrudan Windows OCR, sonra ONNX ile arar.
 - **Yazı Yaz güvenlidir.** Ctrl+A / Delete yalnızca odak bir yazı alanındayken gönderilir. Klavyeyle yazılamayan karakterler
   (Çince vb.) pano üzerinden yapıştırılır. Alan biçimlendirme yaptıysa (1.5 → 1,5) sadece uyarılır.
 - **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.
 - **Bilgisayar uyumaz**, ekran kilitlenirse ajan kilit açılana kadar bekler.
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
-- **OCR seçimi:** Araç çubuğunun sağındaki seçim Ekran Tarayıcı’da hangi okuyucunun listeyi dolduracağını belirler. Hedef aranırken sıra sabittir: önce Windows OCR, bulamazsa ONNX, o da bulamazsa UI-TARS düz ekran görüntüsüne bakar. İki okuyucu da value ramp uygulanmış kareye bakar; yan yazı için o kare 90° çevrilir. UI-TARS rampasız, düz kareyi görür.
+- **OCR seçimi:** Araç çubuğunun sağındaki seçim Ekran Tarayıcı’da hangi okuyucunun listeyi dolduracağını belirler. Node hedefinde Windows OCR ve ONNX yalnızca tırnak içindeki yazıda çalışır. Tırnak yoksa, ya da ikisi de bulamazsa, LLM panelinde açık olan model aşamasına geçilir. İki okuyucu da value ramp uygulanmış kareye bakar; yan yazı için o kare 90° çevrilir. UI-TARS rampasız, düz kareyi görür.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
 - **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30). 1.7.38 ilk kez açılınca `logs/1.7.38` yoksa oluşur. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
@@ -179,7 +173,7 @@ npm run pack:win     # release/Nubbo.exe üretir
 ```
 
 - `electron/runner.ts`: akışı yürütür (kutular, kurtarma, kaldığı yerden devam).
-- `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, doğrulama, İnisiyatif).
+- `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, İnisiyatif).
 - `electron/browser.ts`: kullanıcının 9222 portuyla açtığı Chrome’un sayfa yazısı (`playwright-core`).
 - `electron/memory.ts`: hedef hafızası ve çelişki kontrolü.
 - `a11y/`: ekran okuma ve tıklama için PowerShell (`worker.ps1` sürekli açık kalan tek süreç; `screen.ps1` ekran

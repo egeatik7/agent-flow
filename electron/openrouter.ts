@@ -1,5 +1,5 @@
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, SCREEN_PROMPT, TARS_TEMPLATE } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -412,33 +412,6 @@ export async function visionRefine(opts: {
   return readPoint(p)
 }
 
-export type ReactionVerdict = 'ready' | 'missed' | 'loading' | 'blocked' | 'unknown'
-
-/** Two pocket frames: did the action move the screen toward the next step? */
-export async function judgeReaction(opts: {
-  apiKey: string
-  model: string | string[]
-  step: string
-  expected: string
-  ahead: string
-  fresh: string[]
-  before: Img
-  after: Img
-  system?: string
-}): Promise<{ verdict: ReactionVerdict; reason: string }> {
-  const system = opts.system?.trim() || REACTION_PROMPT
-  const text = `Yapılan adım: ${opts.step}
-Sıradaki adımlar: ${opts.ahead || '(yok)'}
-Beklenen yazı veya hedef: ${opts.expected || '(yok)'}
-Sonra ekrana yeni gelen yazılar: ${opts.fresh.length ? opts.fresh.join(' | ') : '(yok)'}
-İlk görüntü adımdan önce, ikinci görüntü adımdan sonradır.`
-  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.before, opts.after])
-  const raw = String(p.verdict ?? p.status ?? '').toLowerCase()
-  const verdict: ReactionVerdict =
-    raw === 'ready' || raw === 'missed' || raw === 'loading' || raw === 'blocked' || raw === 'unknown' ? raw : 'unknown'
-  return { verdict, reason: String(p.reason ?? '').slice(0, 240) }
-}
-
 export async function visionCheck(opts: {
   apiKey: string
   model: string | string[]
@@ -700,50 +673,6 @@ Son ekran görüntüsü ektedir.`
     if (!content.trim()) throw new ModelFailed('boş yanıt')
     return parseJsonAction(content)
   })
-}
-
-export type StallPlan = {
-  action: 'continue' | 'wait' | 'stop'
-  waitMs: number
-  lookFor: string
-  reason: string
-}
-
-/** When a step did not land cleanly: look, wait if needed, and decide before the run is broken. */
-export async function planStall(opts: {
-  apiKey: string
-  model: string | string[]
-  step: string
-  problem: string
-  ahead: string
-  expected: string
-  image?: Img | null
-  system?: string
-}): Promise<StallPlan> {
-  const system = opts.system?.trim() || STALL_PROMPT
-  const text = `Adım: ${opts.step}
-Sorun: ${opts.problem}
-Sıradaki adımlar: ${opts.ahead || '(yok)'}
-Beklenen: ${opts.expected || '(yok)'}`
-  const messages: Message[] = [
-    { role: 'system', content: system },
-    {
-      role: 'user',
-      content: opts.image?.data
-        ? [{ type: 'text', text }, imagePart(opts.image)]
-        : text,
-    },
-  ]
-  const content = await chat(opts.apiKey, opts.model, messages, !!opts.image?.data)
-  const p = parseJson(content)
-  const action = p.action === 'wait' || p.action === 'stop' || p.action === 'continue' ? p.action : 'wait'
-  const sec = Math.min(8, Math.max(1, Math.round(Number(p.waitSec) || 3)))
-  return {
-    action,
-    waitMs: sec * 1000,
-    lookFor: String(p.lookFor ?? '').trim().slice(0, 80),
-    reason: String(p.reason ?? '').slice(0, 240),
-  }
 }
 
 export async function testKey(apiKey: string): Promise<string> {
