@@ -34,6 +34,8 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
 })
 
 let mainWindow: BrowserWindow | null = null
+let hudWindow: BrowserWindow | null = null
+let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 let running = false
 let stopRequested = false
 
@@ -98,6 +100,7 @@ function openRunLog() {
 
 function log(level: LogLevel, message: string) {
   send('agent:log', { level, message })
+  pushHud(level, message)
   if (!runLog) return
   try {
     fs.appendFileSync(runLog, `[${new Date().toLocaleTimeString('tr-TR')}] ${level.toUpperCase().padEnd(7)} ${message}\n`)
@@ -143,7 +146,86 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    if (hudWindow && !hudWindow.isDestroyed()) hudWindow.close()
   })
+}
+
+const HUD_W = 340
+const HUD_H = 78
+
+function placeHud() {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  const area = screen.getPrimaryDisplay().workArea
+  hudWindow.setBounds({
+    x: Math.round(area.x + area.width - HUD_W - 14),
+    y: Math.round(area.y + area.height - HUD_H - 14),
+    width: HUD_W,
+    height: HUD_H,
+  })
+}
+
+function createHud() {
+  hudWindow = new BrowserWindow({
+    width: HUD_W,
+    height: HUD_H,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    closable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    title: '',
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  })
+  hudWindow.setAlwaysOnTop(true, 'floating')
+  hudWindow.setContentProtection(true)
+  hudWindow.setIgnoreMouseEvents(true)
+  placeHud()
+  const dev = process.env.VITE_DEV_SERVER_URL
+  if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
+  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
+  hudWindow.on('closed', () => {
+    hudWindow = null
+  })
+}
+
+function pushHud(level: LogLevel, message: string) {
+  if (!running || level === 'chat' || !hudWindow || hudWindow.isDestroyed()) return
+  const text = message.replace(/\s+/g, ' ').trim()
+  if (!text) return
+  if (hudHideTimer) {
+    clearTimeout(hudHideTimer)
+    hudHideTimer = null
+  }
+  const payload = { level, text: text.length > 220 ? `${text.slice(0, 217)}…` : text }
+  const deliver = () => {
+    if (!hudWindow || hudWindow.isDestroyed()) return
+    placeHud()
+    hudWindow.webContents.send('hud:status', payload)
+    if (!hudWindow.isVisible()) hudWindow.showInactive()
+  }
+  if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
+  else deliver()
+}
+
+function hideHudSoon() {
+  if (hudHideTimer) clearTimeout(hudHideTimer)
+  hudHideTimer = setTimeout(() => {
+    hudHideTimer = null
+    if (hudWindow && !hudWindow.isDestroyed()) hudWindow.hide()
+  }, 2200)
 }
 
 async function hideSelf() {
@@ -162,6 +244,8 @@ function showSelf() {
 
 app.whenReady().then(() => {
   createWindow()
+  createHud()
+  screen.on('display-metrics-changed', placeHud)
   getSettings()
   try {
     ensureLogsDir()
@@ -315,6 +399,7 @@ app.whenReady().then(() => {
     } finally {
       globalShortcut.unregister(STOP_HOTKEY)
       if (powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
+      hideHudSoon()
       running = false
       runLog = ''
       if (hidden) showSelf()
