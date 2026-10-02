@@ -520,7 +520,7 @@ export async function nextAction(opts: {
 }): Promise<AgentAction> {
   const system = opts.system?.trim() || INITIATIVE_PROMPT
   const text = `Hedef: ${opts.goal}
-Adım adı: ${opts.stepTitle}
+Adım: ${opts.stepTitle}
 ${opts.next ? `Bu hedeften sonra akış şuna geçecek: ${opts.next}\n` : ''}${
     opts.lastLap.length ? `Geçen başarılı turda şu sırayla yapıldı (ipucu, ekran farklıysa ekrana uy):\n${opts.lastLap.map((l, i) => `${i + 1}. ${l}`).join('\n')}\n` : ''
   }Şimdiye kadar bu turda yapılanlar:

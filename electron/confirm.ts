@@ -1,5 +1,5 @@
 import { containsText, norm } from './matcher'
-import type { AgentNode } from './graph-types'
+import { NODE_SPECS, type AgentNode } from './graph-types'
 import type { StepAhead } from './runner'
 
 export type VerdictKind = 'ready' | 'missed' | 'loading' | 'blocked' | 'unknown'
@@ -32,7 +32,7 @@ export function expectation(ahead?: StepAhead): string {
 export function describeAhead(ahead?: StepAhead): string {
   const bits = [ahead?.next, ahead?.then]
     .filter((n): n is AgentNode => !!n)
-    .map((n) => `${n.title}${n.prompt?.trim() ? `: ${n.prompt.trim()}` : n.text?.trim() ? `: ${n.text.trim()}` : ''}`)
+    .map((n) => `${NODE_SPECS[n.kind].label}${n.prompt?.trim() ? `: ${n.prompt.trim()}` : n.text?.trim() ? `: ${n.text.trim()}` : ''}`)
   return bits.join(' → ')
 }
 

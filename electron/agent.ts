@@ -4,7 +4,7 @@ import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
   containsTextStrict,
@@ -223,7 +223,7 @@ export function createAgent(ctx: AgentContext) {
         prompt,
         kind: node.kind,
         scan,
-        stepTitle: node.title,
+        stepTitle: NODE_SPECS[node.kind].label,
         sendImage: s.sendScreenshot && !!scan.image,
         onImageFallback: (m) => log('warn', m),
         hint: describeMemory(mem) || undefined,
@@ -261,7 +261,7 @@ export function createAgent(ctx: AgentContext) {
             prompt,
             kind: node.kind,
             scan,
-            stepTitle: node.title,
+            stepTitle: NODE_SPECS[node.kind].label,
             sendImage: s.sendScreenshot && !!scan.image,
             hint: `${describeMemory(mem)}. Bu tur yazı eşleşmesi #${hit.item.id} “${hit.item.text}” öğesini buldu ama ${why}. Talimata göre doğru öğe hangisi?`,
             system: promptOf(s.llmPrompts, 'list'),
@@ -527,7 +527,7 @@ export function createAgent(ctx: AgentContext) {
         apiKey: s.apiKey,
         model,
         system: promptOf(s.llmPrompts, 'reaction'),
-        step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
+        step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
         expected: v.expected,
         ahead: describeAhead(ahead),
         fresh: v.fresh,
@@ -587,7 +587,7 @@ export function createAgent(ctx: AgentContext) {
         apiKey: s.apiKey,
         system: promptOf(s.llmPrompts, 'stall'),
         model,
-        step: `${node.title}${node.prompt?.trim() ? ` — ${node.prompt.trim()}` : ''}`,
+        step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
         problem,
         ahead: describeAhead(ahead),
         expected: expectation(ahead),
@@ -868,7 +868,9 @@ export function createAgent(ctx: AgentContext) {
     const trace: string[] = []
     let lastSig = ''
     let repeats = 0
-    const next = ahead?.next ? `${ahead.next.title}${ahead.next.prompt ? `: ${ahead.next.prompt}` : ahead.next.text ? `: ${ahead.next.text}` : ''}` : undefined
+    const next = ahead?.next
+      ? `${NODE_SPECS[ahead.next.kind].label}${ahead.next.prompt?.trim() ? `: ${ahead.next.prompt.trim()}` : ahead.next.text?.trim() ? `: ${ahead.next.text.trim()}` : ''}`
+      : undefined
 
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
@@ -881,7 +883,7 @@ export function createAgent(ctx: AgentContext) {
         model,
         system: promptOf(s.llmPrompts, 'initiative'),
         goal,
-        stepTitle: node.title,
+        stepTitle: NODE_SPECS[node.kind].label,
         history,
         lastLap,
         listText: describeItems(items, 300),

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import BootScreen from './components/BootScreen'
 import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
@@ -152,7 +151,6 @@ export default function App() {
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
-  const [booting, setBooting] = useState(true)
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
 
@@ -1000,7 +998,6 @@ export default function App() {
 
   return (
     <div className="desktop">
-      {booting && <BootScreen ready={loaded} onDone={() => setBooting(false)} />}
       <div className="xp-window">
         <TitleBar />
         <div className="menubar">
