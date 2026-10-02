@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import nubbo from '../assets/nubbo.png'
+import still from '../assets/nubbo-still.png'
 import type { LogLevel } from '../types'
 
 type Status = { level: LogLevel; text: string }
@@ -7,6 +9,13 @@ const IDLE: Status = { level: 'info', text: 'Ne yaptığı burada yazacak.' }
 
 export default function Hud() {
   const [status, setStatus] = useState<Status>(IDLE)
+  const [playing, setPlaying] = useState(() => !document.hidden)
+
+  useEffect(() => {
+    const onVis = () => setPlaying(!document.hidden)
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.add('hud-root')
@@ -24,8 +33,12 @@ export default function Hud() {
     }
   }, [])
 
+  const mascot = playing ? nubbo : still
   return (
     <div className="hud">
+      <div className="hud-mascot-slot">
+        <img key={mascot} className="hud-mascot" src={mascot} alt="" draggable={false} />
+      </div>
       <div className={`hud-card ${status.level}`}>
         <div className="hud-title">
           <span className="hud-dot" />

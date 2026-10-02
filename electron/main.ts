@@ -150,8 +150,8 @@ function createWindow() {
   })
 }
 
-const HUD_W = 340
-const HUD_H = 78
+const HUD_W = 456
+const HUD_H = 112
 
 function placeHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
