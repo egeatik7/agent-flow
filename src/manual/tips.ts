@@ -351,7 +351,7 @@ function fieldTip(el: Element): Tip | null {
     ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca tekrar tekrar bakar. Süre dolunca “yok” çıkışı kullanılır.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
     ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve İnisiyatif için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
-    ['Görsel model adı', { title: 'Görsel model', text: 'İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Tıklamayı UI-TARS yapar.' }],
+    ['Görsel model adı', { title: 'Görsel model', text: 'Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Tıklamayı UI-TARS yapar.' }],
     ['Hedef pencere', { title: 'Hedef pencere', text: 'Doluysa yalnızca o pencere okunur ve öne alınır. “Tüm ekran” masaüstü dahil her yere bakar. ↻ listeyi yeniler.' }],
     ['Adımlar arası bekleme', { title: 'Adımlar arası bekleme', text: 'Her adımdan sonra bu kadar milisaniye durur. Sayfanın yerleşmesi için. 800 makul bir başlangıçtır.' }],
     ['Maks. adım', { title: 'Maks. adım', text: 'Bir turda bu kadar adımdan fazla çalışılırsa tur durur. Hiç bitmeyen bir bekleme döngüsüne karşı. Kutunun her turu ayrı sayılır.' }],

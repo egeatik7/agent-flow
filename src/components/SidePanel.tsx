@@ -858,7 +858,7 @@ function Settings(p: Props) {
       <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
         <p className="hint">
-          İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Aynı OpenRouter anahtarı kullanılır; model
+          Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Aynı OpenRouter anahtarı kullanılır; model
           görsel destekli olmalı.
         </p>
         <div className="field">
