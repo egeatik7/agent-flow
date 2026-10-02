@@ -1615,46 +1615,6 @@ body {
   color: #9a5a00;
 }
 
-.vision-box {
-  border: 1px solid #c5c2b2;
-  border-radius: 3px;
-  padding: 6px;
-  margin-bottom: 9px;
-  background: #f7f6ef;
-}
-
-.vision-box.on {
-  border-color: #7a4fc9;
-  background: #f3eefc;
-}
-
-.vision-check {
-  align-items: flex-start;
-  margin-bottom: 2px;
-}
-
-.vision-check small {
-  display: block;
-  color: #555;
-  font-size: 10px;
-  margin-top: 1px;
-}
-
-.vision-box .hint {
-  margin: 4px 0 0 20px;
-}
-
-.vision-badge {
-  flex-shrink: 0;
-  padding: 0 5px;
-  border-radius: 2px;
-  font-size: 10px;
-  background: #7a4fc9;
-  color: #fff;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
-  text-shadow: none;
-}
-
 .warn-text {
   color: #b00000;
 }

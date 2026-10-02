@@ -248,7 +248,7 @@ app.whenReady().then(() => {
       const next = clampRamp(ramp?.lo ?? saved.lo, ramp?.hi ?? saved.hi)
       bridge.setValueRamp(next.lo, next.hi)
       try {
-        return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true, debugDir: logsDir() })
+        return await bridge.scan({ windowTitle: windowTitle || undefined, image: 'plain', maxImageW: 1600, tilt: true })
       } finally {
         bridge.setValueRamp(saved.lo, saved.hi)
       }

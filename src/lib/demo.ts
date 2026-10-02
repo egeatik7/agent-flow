@@ -112,10 +112,6 @@ export async function runDemo(
     click: async (n) => {
       const attempt = async () => {
         await pause(350)
-        if (n.useVision) {
-          log('success', `(demo) [görsel] ${settings.visionModel} ekran görüntüsünden seçti ve tıkladı: “${n.prompt || n.title}”`)
-          return
-        }
         const item = demoLocate(n)
         if (!item) {
           throw new Error(
@@ -136,7 +132,7 @@ export async function runDemo(
     },
     type: async (n) => {
       await pause(350)
-      const item = n.prompt?.trim() && !n.useVision ? demoLocate(n) : null
+      const item = n.prompt?.trim() ? demoLocate(n) : null
       log('success', `(demo) ${item ? `“${item.text}” alanına ` : ''}yazıldı: “${n.text ?? ''}”`)
     },
     key: async (n) => {
@@ -153,10 +149,6 @@ export async function runDemo(
     },
     exists: async (text, n) => {
       await pause(250)
-      if (n.useVision) {
-        log('info', `(demo) [görsel] “${text}” → evet`)
-        return true
-      }
       return containsText(ITEMS, text)
     },
   }

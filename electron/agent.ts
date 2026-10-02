@@ -32,8 +32,6 @@ import {
   type GuiTurn,
   planStall,
   visionCheck,
-  visionLocate,
-  visionRefine,
   type ReactionVerdict,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
@@ -150,7 +148,6 @@ export function createAgent(ctx: AgentContext) {
     runTrace.clear()
     runPath.clear()
     noted.clear()
-    lastVisionAt.clear()
     lastFg = null
     warnedMissing.clear()
   }
@@ -428,14 +425,6 @@ export function createAgent(ctx: AgentContext) {
     )
   }
 
-  function visionModelOrThrow(): { apiKey: string; model: string[] } {
-    const s = getSettings()
-    if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')
-    const model = visionModels(s)
-    if (!model.length) throw new Error('Görsel model yok. Ayarlar > Görsel LLM’den bir model yaz.')
-    return { apiKey: s.apiKey, model }
-  }
-
   function visionPrompt(node: AgentNode): string {
     const p = node.prompt?.trim()
     if (p) return p
@@ -483,89 +472,6 @@ export function createAgent(ctx: AgentContext) {
       label: '[UI-TARS] ekran görüntüsü',
       memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
     }
-  }
-
-  /** Screenshot mode: the vision model looks at the screen, picks a marked box or a raw point, then a zoomed crop refines it. */
-  async function resolveVision(node: AgentNode, wide = false): Promise<Resolved> {
-    const { apiKey, model } = visionModelOrThrow()
-    const prompt = visionPrompt(node)
-    const s = getSettings()
-    const scanRes = await bridge.scan({
-      windowTitle: wide ? undefined : s.targetWindow || undefined,
-      image: 'marked',
-      maxImageW: 1600,
-      fresh: wide,
-      tilt: true,
-    })
-    warnMissingWindow(scanRes)
-    const mem = memoFor(node)
-    const hint = describeMemory(mem)
-    log('info', `[görsel] Ekran görüntüsü ${model.join(' → ')} modeline gönderildi (${scanRes.items.length} işaretli öğe).`)
-    const pick = await visionLocate({
-      apiKey,
-      model,
-      system: promptOf(getSettings().llmPrompts, 'screen'),
-      prompt: hint ? `${prompt}\n(Hafıza, sadece ipucu: ${hint})` : prompt,
-      kind: node.kind,
-      scan: scanRes,
-      stepTitle: node.title,
-      reference: node.locator?.icon ? { data: node.locator.icon, w: 0, h: 0, mime: 'image/png' } : undefined,
-    })
-    const win = scanRes.window || ''
-
-    if (pick.kind === 'item') {
-      const item = scanRes.items.find((i) => i.id === pick.id)!
-      log('info', `[görsel] Seçilen: #${item.id} “${item.text}”${pick.reason ? ` — ${pick.reason}` : ''}`)
-      return { ...center(item), memo: memoOf(item, scanRes.area, win), label: `[görsel] “${item.text}”` }
-    }
-    if (pick.kind === 'none') {
-      throw new NotFoundError(`[görsel] Model “${prompt}” hedefini ekranda bulamadı${pick.reason ? `: ${pick.reason}` : ''}.`)
-    }
-
-    const a = scanRes.area
-    const gx = a.x + (pick.nx / 1000) * a.w
-    const gy = a.y + (pick.ny / 1000) * a.h
-    const pointMemo = (x: number, y: number): TargetMemo => ({
-      win,
-      type: 'Nokta',
-      src: 'ocr',
-      rx: a.w ? (x - a.x) / a.w : 0.5,
-      ry: a.h ? (y - a.y) / a.h : 0.5,
-      text: prompt.slice(0, 80),
-      at: Date.now(),
-    })
-    log('info', `[görsel] İlk tahmin @${Math.round(gx)},${Math.round(gy)}${pick.reason ? ` — ${pick.reason}` : ''}; yakınlaştırılıp netleştiriliyor…`)
-    try {
-      const cw = Math.min(520, a.w)
-      const ch = Math.min(340, a.h)
-      const c = await bridge.crop({ x: Math.round(gx - cw / 2), y: Math.round(gy - ch / 2), w: cw, h: ch }, 1040)
-      const r = await visionRefine({ apiKey, model, prompt, image: c.image })
-      if (r) {
-        const fx = c.area.x + (r.x / 1000) * c.area.w
-        const fy = c.area.y + (r.y / 1000) * c.area.h
-        return { x: fx, y: fy, memo: pointMemo(fx, fy), label: '[görsel] netleştirilmiş nokta' }
-      }
-      log('warn', '[görsel] Yakın planda hedef görülmedi, ilk tahmin kullanılıyor.')
-    } catch (e) {
-      log('warn', `[görsel] Netleştirme atlandı: ${(e as Error).message}`)
-    }
-    return { x: gx, y: gy, memo: pointMemo(gx, gy), label: '[görsel] tahmini nokta' }
-  }
-
-  async function visionExists(text: string, node?: AgentNode): Promise<boolean> {
-    const { apiKey, model } = visionModelOrThrow()
-    const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, maxImageW: 1400, fresh: true })
-    if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
-    const icon = node?.locator?.icon
-    const r = await visionCheck({
-      apiKey,
-      model,
-      question: text,
-      image: res.image,
-      reference: icon ? { data: icon, w: 0, h: 0, mime: 'image/png' } : undefined,
-    })
-    log('info', `[görsel] ${text ? `“${text}”` : 'seçilen öğe'} → ${r.answer ? 'evet' : 'hayır'}${r.reason ? ` (${r.reason})` : ''}`)
-    return r.answer
   }
 
   const findTarget = (node: AgentNode, stepNo: number, wide = false) => resolveTarget(node, stepNo, wide)
@@ -846,8 +752,6 @@ export function createAgent(ctx: AgentContext) {
     noted.add(k)
     log('info', msg)
   }
-
-  const lastVisionAt = new Map<string, number>()
 
   // ---------- typing ----------
 
@@ -1357,23 +1261,10 @@ export function createAgent(ctx: AgentContext) {
       await waitUnlocked()
       const keys = node.keys
       if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
-      let t: Resolved | null = null
-      if (node.useVision && node.prompt?.trim()) {
-        t = await withScreenRetry(node.title, (wide) => resolveVision(node, wide), () => recoverTarget(node, ahead))
-      } else if (!getSettings().targetWindow) {
-        await guardFocus(node)
-      }
-      const confirmed = await ensureActed(node, ahead, async () => {
-        if (t) {
-          await bridge.clickAt(t.x, t.y, 'left')
-          await sleep(FOCUS_MS)
-          log('info', `Odaklanıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
-          await bridge.sendKeys(keys)
-          return
-        }
+      if (!getSettings().targetWindow) await guardFocus(node)
+      await ensureActed(node, ahead, async () => {
         await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       })
-      if (confirmed) saveMemo(node, t?.memo)
       await noteForeground()
     },
     exists: async (text, node) => {
@@ -1407,12 +1298,6 @@ export function createAgent(ctx: AgentContext) {
         } finally {
           bridge.discardShot(res.shot)
         }
-      }
-      if (node.useVision && (text || node.locator?.icon)) {
-        const last = lastVisionAt.get(node.id) ?? 0
-        if (Date.now() - last < 5000) return false
-        lastVisionAt.set(node.id, Date.now())
-        if (await visionExists(text, node)) return found('görsel model')
       }
       return false
     },

@@ -203,8 +203,6 @@ export async function scan(opts: {
   tilt?: boolean
   /** Stop after Windows OCR and keep the raw frame so ONNX can run later, only if this pass missed. */
   deferOnnx?: boolean
-  /** Folder for raw / OCR / monitor PNGs. Scanner only. */
-  debugDir?: string
 }): Promise<ScanResult & { shot?: string }> {
   if (!IS_WIN) {
     return {
@@ -233,7 +231,6 @@ export async function scan(opts: {
       tilt: opts.tilt === true,
       valueLo,
       valueHi,
-      debugDir: opts.debugDir || '',
     },
     180000
   )

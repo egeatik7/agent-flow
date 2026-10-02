@@ -29,10 +29,7 @@ Sırayla, ilk bulunan yerde durur:
 1. **Sayfanın kendisi.** Programın açtığı tarayıcı öndeyse, düğmeler, bağlantılar ve alanlar gerçek adlarıyla okunur.
 2. **Yakalanan öğe.** Node Ekran Tarayıcı ya da İmleçle Yakala ile oluşturulduysa önce uygulamanın kendi öğesi, sonra öğenin
    kayıtlı resminin ekrandaki aynısı aranır (modelsiz, hızlı).
-3. **Ekran.** Accessibility tree (UIA) ve OCR yazıları. Tırnak içi yazı birebir aranır; değilse API anahtarı varsa model
-   numaralı listeden seçer, yoksa Türkçe eklere dayanıklı yazı eşleştirmesi yapılır (`Opera’ya` → Opera).
-4. **Ekran görüntüsü.** “Ekran görüntüsüne bakarak yap” açıksa (ya da yukarıdakiler bulamayıp model bir plan kurduysa)
-   görsel model ikon ve yazısız düğmeleri de bulur.
+3. **Ekran.** Önce Windows OCR, bulamazsa ONNX. İkisi de value ramp ve 90° turunu kullanır. İkisi de bulamazsa UI-TARS düz ekran görüntüsüne bakar.
 
 Hedef bulunamazsa ajan 3 saniye bekleyip tüm ekranı yeniden okur. Yine yoksa durup modele plan sorar (bekle, şu yazıyı
 ara, dur) ve bir kez daha bakar.

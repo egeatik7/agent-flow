@@ -6,7 +6,6 @@ import {
   NODE_SPECS,
   TEMPLATE_VARS,
   portLabel,
-  VISION_KINDS,
   listItems,
   loopStartIndex,
   type AgentEdge,
@@ -457,38 +456,6 @@ function AiEditor(p: Props & { n: AgentNode }) {
   )
 }
 
-function VisionToggle(p: Props & { n: AgentNode }) {
-  const { n } = p
-  const on = !!n.useVision
-  const model = (p.settings.visionModel || p.settings.model).trim()
-  const what: Partial<Record<AgentNode['kind'], string>> = {
-    click: 'Tıklanacak yeri görsel LLM ekran görüntüsüne bakarak bulur (ikon, resim, yazısız butonlar dahil).',
-    type: 'Yazılacak alanı görsel LLM ekran görüntüsüne bakarak bulur.',
-    key: 'Tuşlardan önce aşağıdaki yere ekran görüntüsüne bakarak tıklar (odaklanmak için).',
-    condition: 'Önce yazı, seçilen öğe ve simge resmi aranır; bulunamazsa görsel LLM’e (seçilen simgenin resmiyle) sorulur. Beklerken en fazla 5 sn’de bir sorar.',
-  }
-  return (
-    <div className={`vision-box${on ? ' on' : ''}`}>
-      <label className="check vision-check">
-        <input type="checkbox" checked={on} onChange={(e) => p.onUpdateNode({ useVision: e.target.checked })} />
-        <span>
-          <b>Ekran görüntüsüne bakarak yap</b>
-          <small>{what[n.kind]}</small>
-        </span>
-      </label>
-      {on && (
-        <p className="hint">
-          Model: <span className="mono">{model || '—'}</span>{' '}
-          <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>
-            değiştir
-          </button>
-          {!p.settings.apiKey && <><br /><b className="warn-text">API anahtarı kayıtlı değil.</b></>}
-        </p>
-      )}
-    </div>
-  )
-}
-
 function flowRank(graph: AgentGraph): Map<string, number> {
   const order: string[] = []
   const seen = new Set<string>()
@@ -548,8 +515,6 @@ function NodeFields(p: Props & { n: AgentNode }) {
         Pakette ayarları göster
       </label>
 
-      {VISION_KINDS.includes(n.kind) && <VisionToggle {...p} n={n} />}
-
       {n.kind === 'click' && (
         <>
           <div className="field">
@@ -557,11 +522,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
             <textarea
               className="xp-textarea"
               value={n.prompt ?? ''}
-              placeholder={
-                n.useVision
-                  ? 'Örn: sağ üstteki dişli simgesine tıkla\nveya: ilk videonun küçük resmine bas'
-                  : 'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'
-              }
+              placeholder={'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'}
               onChange={(e) => upd({ prompt: e.target.value })}
             />
             <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
@@ -582,7 +543,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
             </div>
             <p className="hint">Masaüstü simgeleri genelde çift tık ister.</p>
           </div>
-          {!n.useVision && <TargetBox {...p} n={n} />}
+          <TargetBox {...p} n={n} />
           <MemoryBox {...p} n={n} />
         </>
       )}
@@ -619,7 +580,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
           </label>
-          {!n.useVision && <TargetBox {...p} n={n} />}
+          <TargetBox {...p} n={n} />
           <MemoryBox {...p} n={n} />
         </>
       )}
@@ -637,17 +598,6 @@ function NodeFields(p: Props & { n: AgentNode }) {
             ))}
           </div>
           <p className="hint">^ = Ctrl, % = Alt, + = Shift. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir.</p>
-          {n.useVision && (
-            <>
-              <label>Önce tıklanacak yer (görsel)</label>
-              <input
-                className="xp-input"
-                value={n.prompt ?? ''}
-                placeholder="Örn: adres çubuğu"
-                onChange={(e) => upd({ prompt: e.target.value })}
-              />
-            </>
-          )}
         </div>
       )}
 
@@ -675,16 +625,16 @@ function NodeFields(p: Props & { n: AgentNode }) {
       {n.kind === 'condition' && (
         <>
           <div className="field">
-            <label>{n.useVision ? 'Ekranda ne görünmeli? (yazı ya da serbest tarif)' : 'Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)'}</label>
+            <label>Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)</label>
             <input
               className="xp-input"
               value={n.text ?? ''}
-              placeholder={n.useVision ? 'Örn: indirme çubuğu %100 olmuş' : 'Örn: İndirme tamamlandı'}
+              placeholder="Örn: İndirme tamamlandı"
               onChange={(e) => upd({ text: e.target.value })}
             />
             <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
           </div>
-          {!n.useVision && <TargetBox {...p} n={n} />}
+          <TargetBox {...p} n={n} />
           <div className="field">
             <label>Görünene kadar bekle (saniye, 0 = bir kez bak)</label>
             <input
@@ -908,7 +858,7 @@ function Settings(p: Props) {
       <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
         <p className="hint">
-          “Ekran görüntüsüne bakarak yap” açık olan node’lar bu modeli kullanır. Aynı OpenRouter anahtarı kullanılır; model
+          Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Aynı OpenRouter anahtarı kullanılır; model
           görsel destekli olmalı.
         </p>
         <div className="field">

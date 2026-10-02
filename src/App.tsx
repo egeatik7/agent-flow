@@ -838,7 +838,7 @@ export default function App() {
         node ? ` → ${node.title}` : ' (yeni Tıkla node’u)'
       }`
     )
-    if (!meaningful && !loc?.icon) pushLog('warn', 'Bu öğenin okunabilir yazısı yok ve resmi alınamadı; node’u “Ekran görüntüsüne bakarak yap” ile çalıştır.')
+    if (!meaningful && !loc?.icon) pushLog('warn', 'Bu öğenin okunabilir yazısı yok ve resmi alınamadı. Tıklama yazı ya da simge bulamazsa UI-TARS’a kalır.')
   }
 
   const run = async (startId?: string) => {

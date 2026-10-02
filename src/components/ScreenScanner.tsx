@@ -318,7 +318,6 @@ export default function ScreenScanner(p: Props) {
             {result ? `${items.length} / ${result.items.length} yazı` : ''}
             {result && !result.ocr ? ' · OCR kapalı' : ''}
             {result?.sideCount ? ` · yan ${result.sideCount}` : ''}
-            {result?.captureDebug ? ` · tanı: ${result.captureDebug}` : ''}
           </span>
         </div>
         <div className="scanner-body">

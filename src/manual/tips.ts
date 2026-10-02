@@ -351,7 +351,7 @@ function fieldTip(el: Element): Tip | null {
     ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca tekrar tekrar bakar. Süre dolunca “yok” çıkışı kullanılır.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
     ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve İnisiyatif için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
-    ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsüne bakan model. “Ekran görüntüsüne bakarak yap” açık node’lar ve İnisiyatif’in “bitti mi” kontrolü bunu kullanır.' }],
+    ['Görsel model adı', { title: 'Görsel model', text: 'Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Tıklamayı UI-TARS yapar.' }],
     ['Hedef pencere', { title: 'Hedef pencere', text: 'Doluysa yalnızca o pencere okunur ve öne alınır. “Tüm ekran” masaüstü dahil her yere bakar. ↻ listeyi yeniler.' }],
     ['Adımlar arası bekleme', { title: 'Adımlar arası bekleme', text: 'Her adımdan sonra bu kadar milisaniye durur. Sayfanın yerleşmesi için. 800 makul bir başlangıçtır.' }],
     ['Maks. adım', { title: 'Maks. adım', text: 'Bir turda bu kadar adımdan fazla çalışılırsa tur durur. Hiç bitmeyen bir bekleme döngüsüne karşı. Kutunun her turu ayrı sayılır.' }],
@@ -373,7 +373,6 @@ function checkTip(el: Element): Tip | null {
   if (t.includes('Pakette ayarları göster')) return { title: 'Pakette ayarları göster', text: 'İşaretliyse bu node’un ayarları, içinde durduğu pakete tıklayınca sağda açılır. Her Öğe İçin kutuları o listede en üstte durur.' }
   if (t.includes('Önce alandaki yazıyı sil')) return { title: 'Önce sil', text: 'Yazmadan önce alanın içini temizler. Odak bir yazı alanı değilse Ctrl+A gönderilmez, sadece yazılır.' }
   if (t.includes('Enter')) return { title: 'Enter’a bas', text: 'Yazı gittikten sonra Enter yollar. Dosya penceresinde bu, seçilen dosyayı açar.' }
-  if (t.includes('Ekran görüntüsüne bakarak yap')) return { title: 'Ekran görüntüsüne bakarak yap', text: 'Açıksa hedefi yazı listesinden değil, ekran görüntüsünden arar. İkon ve yazısız düğmeler için. Görsel model Ayarlar’dan seçilir.' }
   if (t.includes('numaralı ekran görüntüsü')) return { title: 'Numaralı ekran görüntüsü', text: 'Açıksa yazı seçen modele ekranın numaralı bir karesi de gider. Kapalıysa model yalnızca yazı listesini görür.' }
   if (t.includes('küçült')) return { title: 'Çalışırken küçült', text: 'Ajan çalışırken bu pencere küçülür, böylece ekran görüntüsüne girip kendine tıklamaz. Durdurmak için Ctrl+Shift+Q.' }
   return { title: 'Seçenek', text: t }
@@ -453,9 +452,6 @@ function regionTip(el: Element): Tip | null {
       title: 'Değişkenler',
       text: 'Her düğme bu turda değişen bir değerdir. Üzerinde durunca ne olduğu yazılır. Tıklayınca üstteki alanın sonuna eklenir.',
     }
-  }
-  if (el.classList.contains('vision-box')) {
-    return { title: 'Ekran görüntüsü', text: 'Açıksa bu node hedefi ekran görüntüsünden arar. Model, Ayarlar’daki görsel modeldir.' }
   }
   if (el.classList.contains('locator-box')) {
     return { title: 'Hedef', text: 'Ekrandan Seç veya İmleçle Yakala ile bağlanan öğe. Çalışırken önce bu öğe, sonra resmi, sonra yazı aranır.' }

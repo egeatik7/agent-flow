@@ -217,8 +217,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   llmPrompts: {},
 }
 
-export const VISION_KINDS: NodeKind[] = ['click', 'type', 'key', 'condition']
-
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'
 export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'chat'
 
