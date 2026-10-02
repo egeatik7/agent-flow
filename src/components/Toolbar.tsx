@@ -18,6 +18,7 @@ type Props = {
   onStop: () => void
   onLayout: () => void
   onForget: () => void
+  onResetLoops: () => void
   ocrEngine: OcrEngine
   onOcrEngine: (engine: OcrEngine) => void
 }
@@ -118,6 +119,15 @@ export default function Toolbar(p: Props) {
         title="Bütün node’ların hafızasını ve kayıtlı yollarını siler. Akışın kendisi durur."
       >
         Hafızayı Sil
+      </button>
+      <button
+        type="button"
+        className="xp-btn"
+        onClick={p.onResetLoops}
+        disabled={p.running}
+        title="Bu tuvaldeki her döngüyü 1. öğeye alır. Önce dıştakiler, sonra onların ilk öğesine göre iç listeler."
+      >
+        Döngüleri Sıfırla
       </button>
 
       <div className="ocr-pick" title="ONNX seçilince ekran yazısı yalnızca ondan gelir. Windows’un Çinceye uydurduğu satır kullanılmaz.">

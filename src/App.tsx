@@ -917,6 +917,64 @@ export default function App() {
     }
   }
 
+  const resetLoops = async () => {
+    let full = rooted(graphRef.current, stackRef.current)
+    let ticks = 0
+    full = mapNodes(full, (n) => {
+      if (n.kind !== 'loop') return n
+      if (!n.startIndex && n.loopIndex == null) return n
+      ticks++
+      return { ...n, startIndex: 0, loopIndex: undefined }
+    })
+    const find = (g: AgentGraph, id: string): AgentNode | undefined => {
+      for (const n of g.nodes) {
+        if (n.id === id) return n
+        if (n.kind === 'package' && n.inner) {
+          const hit = find(n.inner, id)
+          if (hit) return hit
+        }
+      }
+      return undefined
+    }
+    let lists = 0
+    if (api?.listDir) {
+      for (const id of templateLoops(full).map((n) => n.id)) {
+        const loop = find(full, id)
+        if (!loop) continue
+        const resolved = outsideFolder(full, loop)
+        let files: string[] | null = []
+        try {
+          files = resolved ? await api.listDir(resolved) : []
+        } catch (e) {
+          pushLog('error', errText(e))
+          continue
+        }
+        const next = files ?? []
+        const cur = listItems(loop)
+        if (cur.length !== next.length || cur.some((v, i) => v !== next[i])) lists++
+        full = mapNodes(full, (n) => (n.id === id ? { ...n, items: next, startIndex: 0, loopIndex: undefined } : n))
+        templateSeen.current.set(id, `${id}\n${resolved}`)
+      }
+    }
+    const total = templateLoops(full).length
+    let boxes = 0
+    mapNodes(full, (n) => {
+      if (n.kind === 'loop' && !hasTemplate(n.folder)) boxes++
+      return n
+    })
+    if (!ticks && !lists && boxes + total === 0) {
+      pushLog('info', 'Bu tuvalde döngü yok.')
+      return
+    }
+    writeCanvas(full)
+    pushLog(
+      'info',
+      lists
+        ? `${boxes + total} döngü 1. öğeye alındı. İç listeler dıştakinin ilk öğesine göre güncellendi.`
+        : `${boxes + total} döngü 1. öğeye alındı.`
+    )
+  }
+
   const forgetAll = () => {
     let count = 0
     const wipe = (g: AgentGraph) =>
@@ -1011,6 +1069,7 @@ export default function App() {
           onStop={stop}
           onLayout={() => setGraph((g) => autoLayout(g))}
           onForget={forgetAll}
+          onResetLoops={() => void resetLoops()}
           ocrEngine={settings.ocrEngine === 'onnx' ? 'onnx' : 'windows'}
           onOcrEngine={(ocrEngine) => {
             const prev = settingsRef.current.ocrEngine === 'onnx' ? 'onnx' : 'windows'
