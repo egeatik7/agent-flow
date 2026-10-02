@@ -1,5 +1,5 @@
 import type { NodeKind } from './graph-types'
-import { fillGoal, LIST_PROMPT, SCREEN_PROMPT, TARS_TEMPLATE } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -250,22 +250,22 @@ export async function chooseScreenTarget(opts: {
   const { scan } = opts
   const action =
     opts.kind === 'type'
-      ? 'Kullanıcı bu adımda bir metin kutusuna yazı yazacak: yazılacak ALANI seç (arama kutusu, Edit, giriş alanı).'
-      : 'Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.'
+      ? 'The user is about to type into a text field: choose the FIELD to type into (search box, Edit, input).'
+      : 'The user is about to click somewhere on the screen: choose the text or control to click.'
 
   const system =
     opts.system?.trim() ||
     LIST_PROMPT.replace(
-      'Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.',
+      'The user is about to click somewhere on the screen: choose the text or control to click.',
       action
     )
 
-  const listText = `Ekran alanı: ${scan.area.w}x${scan.area.h} (sol üst ${scan.area.x},${scan.area.y})${scan.window ? `, pencere: ${scan.window}` : ''}
-Öğeler (#numara tür "yazı" @x,y genişlikxyükseklik):
+  const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
+Items (#number type "text" @x,y widthxheight):
 ${describeItems(scan.items)}
 
-Adım: ${opts.stepTitle}
-Talimat: ${opts.prompt}${opts.hint ? `\n\nHafıza: ${opts.hint}\nHafıza sadece ipucudur; ekran farklıysa ekrana göre seç.` : ''}`
+Step: ${opts.stepTitle}
+Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
 
   const withImage = opts.sendImage && !!scan.image
   const build = (img: boolean): Message[] => [
@@ -357,9 +357,9 @@ export type VisionPick =
   | { kind: 'none'; reason: string }
 
 const VISION_ACTION: Partial<Record<NodeKind, string>> = {
-  click: 'tıklanacak yeri',
-  type: 'yazı yazılacak alanı (giriş kutusu, arama çubuğu vb.)',
-  key: 'tuşlara basmadan önce odaklanmak için tıklanacak yeri',
+  click: 'click',
+  type: 'type into (an input, a search box, and so on)',
+  key: 'click before the keypress, so the right place has focus',
 }
 
 export async function visionLocate(opts: {
@@ -378,15 +378,15 @@ export async function visionLocate(opts: {
     .slice(0, 250)
     .map((i) => `#${i.id} "${i.text.replace(/"/g, "'")}"`)
     .join('\n')
-  const system = opts.system?.trim() || `Sen Windows ekran görüntüsüne bakarak işlem yapan bir ajansın. Görevin: talimata göre ${VISION_ACTION[opts.kind] ?? 'hedefi'} bulmak.
-Görüntüde bazı yazı/öğeler numaralı ince kutularla işaretli (mavi: uygulama öğesi, turuncu: okunan yazı). Hedef işaretsiz de olabilir (ikon, resim, boş alan).
-- Hedef numaralı bir kutuysa: {"id": <numara>, "reason": "..."}
-- Değilse hedefin ORTASINI görüntü üzerinde 0-1000 arası normalize koordinatla ver (x: soldan sağa, y: yukarıdan aşağıya): {"x": <0-1000>, "y": <0-1000>, "reason": "..."}
-- Hedef ekranda yoksa: {"found": false, "reason": "..."}
-Sadece JSON yaz.`
-  const text = `Adım: ${opts.stepTitle}
-Talimat: ${opts.prompt}
-${opts.reference ? '\nİKİNCİ resim aranan öğenin kendisidir (daha önce seçilmiş simge/düğme). Birinci resimde (ekran) bunun aynısını bul.\n' : ''}
+  const system = opts.system?.trim() || `You are an agent that looks at a Windows screenshot. Your job: find what the instruction asks you to ${VISION_ACTION[opts.kind] ?? 'locate'}.
+Some text and controls are marked with numbered boxes (blue: application control, orange: text read from the screen). The target may be unmarked (an icon, a picture, an empty area).
+- If the target is a numbered box: {"id": <number>, "reason": "..."}
+- Otherwise give the CENTER of the target as normalized 0-1000 coordinates on the image (x left to right, y top to bottom): {"x": <0-1000>, "y": <0-1000>, "reason": "..."}
+- If the target is not on screen: {"found": false, "reason": "..."}
+JSON only.`
+  const text = `Step: ${opts.stepTitle}
+Instruction: ${opts.prompt}
+${opts.reference ? '\nThe SECOND picture is the control to find (a previously captured icon or button). Find that same thing in the FIRST picture (the screen).\n' : ''}
 İşaretli öğeler:
 ${list || '(yok)'}`
   const p = await visionChat(opts.apiKey, opts.model, system, text, opts.reference ? [opts.scan.image, opts.reference] : [opts.scan.image])
@@ -426,14 +426,7 @@ export async function judgeReaction(opts: {
   after: Img
   system?: string
 }): Promise<{ verdict: ReactionVerdict; reason: string }> {
-  const system = opts.system?.trim() || `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
-Tek bir verdict seç:
-- ready: sıradaki adımın hedefi görünüyor ya da ekran o adıma hazır
-- missed: ekran pratikte aynı, tıklama veya tuş tepki vermemiş
-- loading: sayfa veya içerik hâlâ yükleniyor, hedef henüz gelmedi
-- blocked: tıklama bir şey açtı (diyalog, uyarı, başka sayfa) ama bu, sıradaki adımın istediği şey değil
-- unknown: bu dördünden hiçbiri seçilemiyor
-Sadece JSON: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<kısa gerekçe>"}`
+  const system = opts.system?.trim() || REACTION_PROMPT
   const text = `Yapılan adım: ${opts.step}
 Sıradaki adımlar: ${opts.ahead || '(yok)'}
 Beklenen yazı veya hedef: ${opts.expected || '(yok)'}
@@ -498,17 +491,7 @@ export async function nextAction(opts: {
   next?: string
   system?: string
 }): Promise<AgentAction> {
-  const system = opts.system?.trim() || `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
-Ekrandaki öğeler numaralı listede verilir. Tıklama ve yazma hedefi listeden bir numara olmalı.
-Eylemler:
-- click / double / right: {"id": <numara>}
-- type: {"id": <yazılacak alanın numarası veya null = o an odaktaki alan>, "text": "...", "enter": true|false}
-- key: {"keys": "SendKeys biçimi, örn {ENTER}, {TAB}, ^a, %{F4}"}
-- wait: {"seconds": 1-10} (sayfa yükleniyorsa)
-- done: hedef ekranda gerçekleşmişse
-- fail: hedef bu ekrandan yapılamıyorsa
-Kurallar: aynı eylemi sonuç vermeden üst üste tekrarlama; emin değilsen önce wait kullan; hedef olduysa hemen done de.
-Sadece JSON: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<kısa gerekçe>"}`
+  const system = opts.system?.trim() || INITIATIVE_PROMPT
   const text = `Hedef: ${opts.goal}
 Adım adı: ${opts.stepTitle}
 ${opts.next ? `Bu hedeften sonra akış şuna geçecek: ${opts.next}\n` : ''}${
@@ -737,13 +720,7 @@ export async function planStall(opts: {
   image?: Img | null
   system?: string
 }): Promise<StallPlan> {
-  const system = opts.system?.trim() || `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
-Karar:
-- continue: sıradaki adımın istediği şey bu ekranda var ya da adım denenebilir; akış sürsün
-- wait: sayfa henüz oturmadı, kısa bekle (waitSec 1 ile 8 arası)
-- stop: istenen öğeye bu ekrandan gidilemiyor, durmak gerek
-lookFor: ekranda aranacak kısa yazı. Yoksa boş string.
-Sadece JSON: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<kısa plan>"}`
+  const system = opts.system?.trim() || STALL_PROMPT
   const text = `Adım: ${opts.step}
 Sorun: ${opts.problem}
 Sıradaki adımlar: ${opts.ahead || '(yok)'}

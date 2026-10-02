@@ -19,7 +19,6 @@ function place(el: Element, x: number, y: number, cardW: number, cardH: number):
 }
 
 const STILL_MS = 650
-const STILL_PX = 5
 
 function inCanvas(target: EventTarget | null): boolean {
   return target instanceof Element && !!target.closest('.canvas-wrap, .canvas-scroll')
@@ -75,9 +74,10 @@ export default function HelpManual() {
       }
       const found = findTip(e.target)
       const dist = Math.hypot(pe.clientX - lastX, pe.clientY - lastY)
-      const moved = Number.isFinite(lastX) && dist >= STILL_PX
+      const moved = Number.isFinite(lastX) && dist >= 1
       lastX = pe.clientX
       lastY = pe.clientY
+      if (shown && moved) hide()
       if (shown && found && found.el === current && !moved) {
         window.clearTimeout(hideTimer)
         anchor.current = { el: found.el, x: pe.clientX, y: pe.clientY }

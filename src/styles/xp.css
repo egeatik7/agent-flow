@@ -906,7 +906,10 @@ body {
   color: #003c74;
 }
 
-.llm-panel .save.block {
+.llm-save-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
   margin-top: 10px;
 }
 

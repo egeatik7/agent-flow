@@ -341,7 +341,7 @@ export function refineTarget(item: ScreenItem, text?: string): Target {
 export function describeItems(items: ScreenItem[], limit = 400): string {
   return items
     .slice(0, limit)
-    .map((i) => `#${i.id} ${i.src === 'ocr' ? 'Yazı' : i.type} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}`)
+    .map((i) => `#${i.id} ${i.src === 'ocr' ? 'Text' : i.type} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}`)
     .join('\n')
 }
 

@@ -102,6 +102,34 @@ function BackupModels(props: { backups: string[] | undefined; listId: string; on
           <button
             type="button"
             className="xp-btn backup-x"
+            title="Yukarı"
+            disabled={i === 0}
+            onClick={() => {
+              const next = rows.slice()
+              const [row] = next.splice(i, 1)
+              next.splice(i - 1, 0, row)
+              props.onChange(next)
+            }}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="xp-btn backup-x"
+            title="Aşağı"
+            disabled={i === rows.length - 1}
+            onClick={() => {
+              const next = rows.slice()
+              const [row] = next.splice(i, 1)
+              next.splice(i + 1, 0, row)
+              props.onChange(next)
+            }}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="xp-btn backup-x"
             title="Bu yedeği sil"
             onClick={() => props.onChange(rows.filter((_, j) => j !== i))}
           >

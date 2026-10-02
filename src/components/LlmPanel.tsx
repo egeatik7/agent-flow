@@ -39,6 +39,32 @@ export default function LlmPanel(p: Props) {
   const enabled = (id: FindStageId) => !off.includes(id)
   const toggle = (id: FindStageId) => setOff((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
 
+  const resetStage = (id: FindStageId) => {
+    const spec = FIND_STAGES.find((s) => s.id === id)
+    setPrompts((prev) => {
+      if (!spec?.prompt) return prev
+      const next = { ...prev }
+      delete next[spec.prompt]
+      return next
+    })
+    setOff((prev) => {
+      const without = prev.filter((x) => x !== id)
+      return id === 'list' ? [...without, id] : without
+    })
+    setOrder((prev) => {
+      const rest = prev.filter((x) => x !== id)
+      const at = FIND_STAGES.findIndex((s) => s.id === id)
+      rest.splice(Math.max(0, Math.min(at, rest.length)), 0, id)
+      return rest
+    })
+  }
+
+  const resetAll = () => {
+    setOrder(FIND_STAGES.map((s) => s.id))
+    setOff(['list'])
+    setPrompts({})
+  }
+
   const save = () => {
     const clean: LlmPrompts = {}
     for (const id of Object.keys(DEFAULT_PROMPTS) as PromptId[]) {
@@ -73,6 +99,9 @@ export default function LlmPanel(p: Props) {
                   <button type="button" className="xp-btn" disabled={index === order.length - 1} onClick={() => setOrder((list) => move(list, index, 1))}>
                     ↓
                   </button>
+                  <button type="button" className="xp-btn" title="Bu aşamayı varsayılana çevir" onClick={() => resetStage(id)}>
+                    Sıfırla
+                  </button>
                 </span>
               </div>
               <p className="llm-note">{spec.note}</p>
@@ -86,14 +115,24 @@ export default function LlmPanel(p: Props) {
       <h3 className="llm-extra-title">Diğer LLM çağrıları</h3>
       {EXTRA_PROMPTS.map((spec) => (
         <div key={spec.id} className="llm-stage">
-          <b>{spec.title}</b>
+          <div className="llm-stage-head">
+            <b>{spec.title}</b>
+            <button type="button" className="xp-btn" title="Bu promptu varsayılana çevir" onClick={() => setText(spec.id, DEFAULT_PROMPTS[spec.id])}>
+              Sıfırla
+            </button>
+          </div>
           <p className="llm-note">{spec.note}</p>
           <textarea className="xp-input llm-prompt" rows={6} value={text(spec.id)} onChange={(e) => setText(spec.id, e.target.value)} spellCheck={false} />
         </div>
       ))}
-      <button type="button" className="xp-btn save block" onClick={save}>
-        Kaydet
-      </button>
+      <div className="llm-save-row">
+        <button type="button" className="xp-btn" onClick={resetAll}>
+          Tümünü sıfırla
+        </button>
+        <button type="button" className="xp-btn save" onClick={save}>
+          Kaydet
+        </button>
+      </div>
     </div>
   )
 }

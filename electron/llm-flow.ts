@@ -25,11 +25,11 @@ export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
 
 export const DEFAULT_FIND_OFF: FindStageId[] = ['list']
 
-export const LIST_PROMPT = `Sen bir Windows masaüstü otomasyon ajanısın. Ekranda görünen yazıların ve öğelerin numaralı listesi verilir (UIA = uygulamanın bildirdiği öğe, Yazı = ekran görüntüsünden OCR ile okunan yazı).
-Kullanıcı bu adımda ekranda bir yere tıklayacak: tıklanacak yazıyı/öğeyi seç.
-Kullanıcının talimatındaki isim ekrandaki yazıyla birebir aynı olmayabilir (Türkçe ekler, büyük/küçük harf, OCR hataları): anlamca en uygun öğeyi seç. Konum ifadelerini (tepedeki, sağdaki, alttaki) koordinatlara göre değerlendir.
-Yanıtı SADECE JSON olarak ver: {"id": <numara veya null>, "text": "<tıklanacak yazının kendisi>", "reason": "<kısa gerekçe>"}
-Uygun öğe yoksa id=null ver.`
+export const LIST_PROMPT = `You are a Windows desktop automation agent. You receive a numbered list of the text and controls visible on the screen (UIA = a control the application reported, Text = writing read from the screenshot by OCR).
+The user is about to click somewhere on the screen: choose the text or control to click.
+The name in the instruction may not match the on-screen text exactly (Turkish suffixes, letter case, OCR mistakes): choose the item that fits the meaning. Judge location phrases (at the top, on the right, at the bottom) from the coordinates. Also consider the application name, picture its layout, and decide which area should be clicked.
+Reply with JSON only: {"id": <number or null>, "text": "<the text to click>", "reason": "<short reason>"}
+If no item fits, set id to null.`
 
 export const TARS_TEMPLATE = `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
 
@@ -53,31 +53,31 @@ finished(content='xxx')
 call_user()
 
 ## Note
-- Use Turkish in Thought part.
+- Write Thought in English.
 - Write a small plan and finally summarize your next action in one sentence in Thought part.
 - The computer runs Windows.
 
 ## User Instruction
 {{hedef}}`
 
-export const SCREEN_PROMPT = `Sen Windows'ta çalışan bir bilgisayar kullanım ajanısın. Her turda sana hedef, önceki adımların ve SON ekran görüntüsü verilir. Hedefe giden SIRADAKİ TEK eylemi seç.
-Koordinatlar ekran görüntüsü üzerinde 0-1000 arası normalize: x soldan sağa, y yukarıdan aşağıya. Hedefin tam ortasını ver.
-Eylemler: click, double, right, drag, hotkey, type, scroll, wait, finished, call_user.
-Sadece JSON: {"thought":"<Türkçe kısa plan>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
+export const SCREEN_PROMPT = `You are a computer-use agent on Windows. Each turn you receive the goal, your previous steps, and the LATEST screenshot. Choose the SINGLE next action toward the goal.
+Coordinates are normalized 0-1000 on the screenshot: x from the left, y from the top. Point at the center of the target.
+Actions: click, double, right, drag, hotkey, type, scroll, wait, finished, call_user.
+JSON only: {"thought":"<short plan>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
 
-export const INITIATIVE_PROMPT = `Sen Windows'ta ya da bir web sayfasında adım adım çalışan bir otomasyon ajanısın. Kullanıcının hedefi için SIRADAKİ TEK eylemi seç.
-Ekrandaki öğeler numaralı listede verilir. Tıklama ve yazma hedefi listeden bir numara olmalı.
-Eylemler: click, double, right, type, key, wait, done, fail.
-Sadece JSON: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<kısa gerekçe>"}`
+export const INITIATIVE_PROMPT = `You are an automation agent working step by step on Windows or in a web page. Choose the SINGLE next action toward the user's goal.
+Controls on screen are given as a numbered list. Clicks and typing must target a number from that list.
+Actions: click, double, right, type, key, wait, done, fail.
+JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`
 
-export const REACTION_PROMPT = `Bir otomasyon adımının ÖNCESİ ve SONRASI olmak üzere iki ekran görüntüsü verilir. Sıradaki adımın mümkün olup olmadığına karar ver.
-Tek bir verdict seç: ready, missed, loading, blocked, unknown.
-Sadece JSON: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<kısa gerekçe>"}`
+export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
+Pick one verdict: ready, missed, loading, blocked, unknown.
+JSON only: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<short reason>"}`
 
-export const STALL_PROMPT = `Bir masaüstü otomasyon adımı net tepki vermedi ya da sıradaki öğe bulunamadı. Akışı hemen bozma.
-Karar: continue, wait (waitSec 1 ile 8), stop.
-lookFor: ekranda aranacak kısa yazı. Yoksa boş string.
-Sadece JSON: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<kısa plan>"}`
+export const STALL_PROMPT = `A desktop automation step got no clear reaction, or the next control was not found. Do not break the flow immediately.
+Decision: continue, wait (waitSec from 1 to 8), or stop.
+lookFor: a short string to look for on screen. Empty string if none.
+JSON only: {"action":"continue|wait|stop","waitSec":3,"lookFor":"","reason":"<short plan>"}`
 
 export const DEFAULT_PROMPTS: Record<PromptId, string> = {
   list: LIST_PROMPT,
@@ -120,6 +120,7 @@ export function normalizePrompts(raw: unknown): LlmPrompts {
     if (!PROMPT_SET.has(k) || typeof v !== 'string') continue
     const text = v.trim()
     if (!text || text === DEFAULT_PROMPTS[k as PromptId].trim()) continue
+    if (/Sen bir |Sadece JSON|SADECE JSON|Bir otomasyon adımının|Bir masaüstü otomasyon|Program adını da değerlendirerek/.test(text)) continue
     out[k as PromptId] = v
   }
   return out
