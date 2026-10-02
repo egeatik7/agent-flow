@@ -208,12 +208,15 @@ function createHud() {
       sandbox: false,
     },
   })
+  hudWindow.setAlwaysOnTop(true, 'floating')
+  // Set once, before the first show. Applying it again after the window is
+  // visible drops a transparent window off the Windows desktop.
   hudWindow.setContentProtection(true)
-  hudWindow.setIgnoreMouseEvents(true, { forward: true })
+  hudWindow.setIgnoreMouseEvents(true)
   placeHud()
   const dev = process.env.VITE_DEV_SERVER_URL
-  if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1#hud`)
-  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' }, hash: 'hud' })
+  if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
+  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
   hudWindow.on('closed', () => {
     if (hudWindow && !hudWindow.isDestroyed()) return
     hudWindow = null
@@ -229,10 +232,10 @@ function raiseHud() {
 function revealHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
   placeHud()
-  if (!hudWindow.isVisible()) hudWindow.showInactive()
+  hudWindow.showInactive()
   raiseHud()
-  hudWindow.setContentProtection(true)
-  hudWindow.setIgnoreMouseEvents(true, { forward: true })
+  if (!hudWindow.isVisible()) hudWindow.show()
+  raiseHud()
 }
 
 function deliverHud(channel: string, payload: unknown, show: boolean) {
