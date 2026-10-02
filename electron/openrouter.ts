@@ -58,10 +58,35 @@ const HEADERS = (apiKey: string) => ({
 type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }
 
 let chatLogger: ((line: string) => void) | null = null
+let voiceLogger: ((line: string) => void) | null = null
 
 /** The agent log receives every completion request and response. Images are noted, not pasted. */
 export function setChatLogger(fn: ((line: string) => void) | null) {
   chatLogger = fn
+}
+
+/** A short line in the corner report: the model that answered, then what it said. */
+export function setVoiceLogger(fn: ((line: string) => void) | null) {
+  voiceLogger = fn
+}
+
+function shortModel(model: string): string {
+  return (model.split('/').pop() || model).trim() || model
+}
+
+function modelSaid(model: string, content: string): string | null {
+  const raw = content.trim()
+  if (!raw || /^hata\b/i.test(raw)) return null
+  let said = ''
+  const thought = raw.match(/Thought:\s*([\s\S]+?)(?:\n\s*Action:|$)/i)
+  if (thought) said = thought[1].replace(/\s+/g, ' ').trim()
+  else {
+    const p = parseJson(raw)
+    said = String(p.thought ?? p.reason ?? '').replace(/\s+/g, ' ').trim()
+  }
+  if (said.length < 2) return null
+  if (said.length > 180) said = `${said.slice(0, 177)}…`
+  return `${shortModel(model)}: ${said}`
 }
 
 function clip(s: string, n = 6000): string {
@@ -184,6 +209,8 @@ async function chatOnce(
     }
     const content = data.choices?.[0]?.message?.content ?? ''
     reportIn(content)
+    const said = modelSaid(model, content)
+    if (said) voiceLogger?.(said)
     return content
   }
   try {

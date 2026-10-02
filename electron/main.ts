@@ -4,7 +4,7 @@ import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
-import { listModels, setChatLogger, setStopCheck, testKey, visionDescribe } from './openrouter'
+import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -98,9 +98,12 @@ function openRunLog() {
   for (const old of shots.slice(0, Math.max(0, shots.length - 100))) fs.rmSync(path.join(dir, old), { force: true })
 }
 
-function log(level: LogLevel, message: string) {
+let voiceHoldUntil = 0
+
+function log(level: LogLevel, message: string, forceHud = false) {
   send('agent:log', { level, message })
-  pushHud(level, message)
+  const held = !forceHud && Date.now() < voiceHoldUntil && level !== 'error' && level !== 'warn'
+  if (!held) pushHud(level, message)
   if (!runLog) return
   try {
     fs.appendFileSync(runLog, `[${new Date().toLocaleTimeString('tr-TR')}] ${level.toUpperCase().padEnd(7)} ${message}\n`)
@@ -110,11 +113,15 @@ function log(level: LogLevel, message: string) {
 }
 
 setChatLogger((line) => log('chat', line))
+setVoiceLogger((line) => {
+  voiceHoldUntil = Date.now() + 1800
+  log('info', line, true)
+})
 setStopCheck(() => running && stopRequested)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-const agent = createAgent({ log, send, settings: getSettings, shouldStop: () => stopRequested })
+const agent = createAgent({ log, send, settings: getSettings, shouldStop: () => stopRequested, setLoop: (text) => pushLoop(text) })
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
@@ -151,7 +158,7 @@ function createWindow() {
 }
 
 const HUD_W = 456
-const HUD_H = 112
+const HUD_H = 138
 
 function placeHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
@@ -201,6 +208,23 @@ function createHud() {
   })
 }
 
+function deliverHud(channel: string, payload: unknown, show: boolean) {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  const deliver = () => {
+    if (!hudWindow || hudWindow.isDestroyed()) return
+    placeHud()
+    hudWindow.webContents.send(channel, payload)
+    if (show && !hudWindow.isVisible()) hudWindow.showInactive()
+  }
+  if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
+  else deliver()
+}
+
+function pushLoop(text: string) {
+  if (!running || !hudWindow || hudWindow.isDestroyed()) return
+  deliverHud('hud:loop', { text }, false)
+}
+
 function pushHud(level: LogLevel, message: string) {
   if (!running || level === 'chat' || !hudWindow || hudWindow.isDestroyed()) return
   const text = message.replace(/\s+/g, ' ').trim()
@@ -210,21 +234,17 @@ function pushHud(level: LogLevel, message: string) {
     hudHideTimer = null
   }
   const payload = { level, text: text.length > 220 ? `${text.slice(0, 217)}…` : text }
-  const deliver = () => {
-    if (!hudWindow || hudWindow.isDestroyed()) return
-    placeHud()
-    hudWindow.webContents.send('hud:status', payload)
-    if (!hudWindow.isVisible()) hudWindow.showInactive()
-  }
-  if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
-  else deliver()
+  deliverHud('hud:status', payload, true)
 }
 
 function hideHudSoon() {
   if (hudHideTimer) clearTimeout(hudHideTimer)
   hudHideTimer = setTimeout(() => {
     hudHideTimer = null
-    if (hudWindow && !hudWindow.isDestroyed()) hudWindow.hide()
+    if (hudWindow && !hudWindow.isDestroyed()) {
+      hudWindow.hide()
+      hudWindow.webContents.send('hud:loop', { text: '' })
+    }
   }, 2200)
 }
 

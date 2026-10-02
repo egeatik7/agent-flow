@@ -35,6 +35,8 @@ export type Executor = {
   patchNode?: (id: string, patch: Partial<AgentNode>) => void
   /** A lap hit an error: keep a picture of the screen for later. */
   captureFailure?: (label: string) => Promise<void>
+  /** The loop item the current node is inside. Empty when the node is not in a loop. */
+  setLoop?: (text: string) => void
 }
 
 export class StoppedError extends Error {
@@ -122,6 +124,7 @@ export async function runGraph(
   const root = opts.root ?? graph
 
   let vars: Record<string, string> = { sira: '1' }
+  const loopNotes: string[] = []
   let steps = 0
   const warnedLeave = new Set<string>()
 
@@ -384,12 +387,15 @@ export async function runGraph(
     const outer = vars
     let entry: AgentNode | undefined = startAt
     let lastFail = ''
+    loopNotes.push('')
     try {
       for (let idx = from; idx < keys.length; idx++) {
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
         patch(loop.id, { loopIndex: idx, startIndex: idx })
+        loopNotes[loopNotes.length - 1] = isList ? `${loop.title} · ${idx + 1}/${keys.length} · ${label}` : `${loop.title} · ${idx + 1}/${keys.length}. tur`
+        ex.setLoop?.(loopNotes.join('   ·   '))
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 })
@@ -409,6 +415,8 @@ export async function runGraph(
         entry = undefined
       }
     } finally {
+      loopNotes.pop()
+      ex.setLoop?.(loopNotes.join('   ·   '))
       vars = outer
     }
 

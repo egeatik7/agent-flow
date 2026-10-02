@@ -46,6 +46,7 @@ export type XpAgentApi = {
   onAgentStep: (cb: (payload: unknown) => void) => () => void
   onAgentPatch: (cb: (payload: unknown) => void) => () => void
   onHud?: (cb: (payload: unknown) => void) => () => void
+  onHudLoop?: (cb: (payload: unknown) => void) => () => void
   pickFolder: (extensions: string[]) => Promise<{ folder: string; files: string[] } | null>
   listDir: (dir: string) => Promise<string[] | null>
   pickDir: () => Promise<string | null>

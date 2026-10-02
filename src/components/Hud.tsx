@@ -8,7 +8,10 @@ type Status = { level: LogLevel; text: string }
 const IDLE: Status = { level: 'info', text: 'Ne yaptığı burada yazacak.' }
 
 export default function Hud() {
-  const [status, setStatus] = useState<Status>(IDLE)
+  const [status, setStatus] = useState<Status>(() =>
+    window.xpAgent ? IDLE : { level: 'info', text: 'deepseek-v4: şimdi Kaydet’e basmalıyım.' }
+  )
+  const [loop, setLoop] = useState(() => (window.xpAgent ? '' : 'Modeller · 3/12 · kedi.png'))
   const [playing, setPlaying] = useState(() => !document.hidden)
 
   useEffect(() => {
@@ -27,9 +30,14 @@ export default function Hud() {
       const level = p.level === 'warn' || p.level === 'error' || p.level === 'success' || p.level === 'info' ? p.level : 'info'
       setStatus({ level, text })
     })
+    const offLoop = window.xpAgent?.onHudLoop?.((payload) => {
+      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      setLoop(text)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
+      offLoop?.()
     }
   }, [])
 
@@ -46,6 +54,7 @@ export default function Hud() {
         </div>
         <p className="hud-text">{status.text}</p>
       </div>
+      <p className={`hud-loop${loop ? ' on' : ''}`}>{loop}</p>
     </div>
   )
 }

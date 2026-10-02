@@ -2009,14 +2009,17 @@ html.hud-root #root {
 .hud {
   height: 100%;
   padding: 6px;
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 22px;
+  column-gap: 6px;
+  row-gap: 4px;
 }
 
 .hud-mascot-slot {
-  flex: 0 0 auto;
-  align-self: stretch;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100%;
   aspect-ratio: 1;
   min-height: 0;
 }
@@ -2032,10 +2035,11 @@ html.hud-root #root {
 }
 
 .hud-card {
-  flex: 1;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
-  height: auto;
-  align-self: stretch;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #ece9d8;
@@ -2074,6 +2078,25 @@ html.hud-root #root {
 
 .hud-card.success .hud-dot {
   background: #7dff7a;
+}
+
+.hud-loop {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+  height: 22px;
+  line-height: 20px;
+  padding: 0 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: transparent;
+  border: 2px solid transparent;
+}
+
+.hud-loop.on {
+  background: #ece9d8;
+  border-color: #fff #404040 #404040 #fff;
 }
 
 .hud-text {

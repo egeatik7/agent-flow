@@ -94,7 +94,7 @@ Güvenceler:
 
 ## Uzun çalıştırmalarda güvenceler
 
-- **Sağ alt rapor.** Çalışırken ekranın sağ altında o anki adım yazar. Bu pencere ekran görüntüsüne girmez, öğe listesine düşmez ve tıklamalar içinden geçer; Nubbo kendi raporunu okuyamaz.
+- **Sağ alt rapor.** Çalışırken ekranın sağ altında o anki adım yazar. Node bir döngünün içindeyse kutunun altında, görev çubuğuna binmeden, kaçıncı öğe olduğu ve öğenin adı durur. Cevap veren model kendi kod adıyla konuşur (`deepseek-v4: …`). Bu pencere ekran görüntüsüne girmez, öğe listesine düşmez ve tıklamalar içinden geçer; Nubbo kendi raporunu okuyamaz.
 - **Durdurma her an çalışır.** Model istekleri 90 sn’de kesilir; Ctrl+Shift+Q bekleyen isteği de hemen iptal eder. Geçici hatalarda
   (429, 5xx, bağlantı kopması) istek 3 sn sonra bir kez daha denenir.
 - **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı

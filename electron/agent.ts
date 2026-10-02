@@ -42,6 +42,7 @@ export type AgentContext = {
   send: (channel: string, payload: unknown) => void
   settings: () => AppSettings
   shouldStop: () => boolean
+  setLoop?: (text: string) => void
 }
 
 type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
@@ -1233,6 +1234,7 @@ export function createAgent(ctx: AgentContext) {
     step: (id, status) => send('agent:step', { id, status }),
     patchNode: (id, patch) => send('agent:patch', { id, patch }),
     shouldStop: stopped,
+    setLoop: (text) => ctx.setLoop?.(text),
     click: async (node, stepNo, ahead) => {
       await waitUnlocked()
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
