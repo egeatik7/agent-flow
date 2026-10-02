@@ -334,7 +334,7 @@ export function createAgent(ctx: AgentContext) {
       const mem = node.templated ? undefined : memoFor(node)
       const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
       const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
-      const hit = matchText(scan.items, text, { anchor, minScore: 60, prefer }) ?? matchFuzzy(scan.items, text, { anchor, minScore: 80, prefer })
+      const hit = matchText(scan.items, text, { anchor, minScore: 100, prefer })
       if (!hit) return null
       return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }
@@ -872,6 +872,7 @@ export function createAgent(ctx: AgentContext) {
 
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
+      ctx.setMethod?.('İnisiyatif')
       const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400, tilt: true })
       const items = res.items
       const image = res.image
@@ -1124,6 +1125,7 @@ export function createAgent(ctx: AgentContext) {
     const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
     const history: GuiTurn[] = []
     let path: PathStep[] = []
+    ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
     log('info', `İnisiyatif (${model.join(' → ')}${tars ? ', UI-TARS sırada' : ''}): ${goal}`)
     if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
 
@@ -1156,6 +1158,7 @@ export function createAgent(ctx: AgentContext) {
     let rejected = 0
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
+      ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
       await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)
       if (prev && lastKind !== 'wait' && sigDiff(prev.sig, shot.sig) < STILL_DIFF) still++

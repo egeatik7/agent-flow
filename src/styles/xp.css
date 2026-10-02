@@ -2100,6 +2100,7 @@ html.hud-root,
 html.hud-root body,
 html.hud-root #root {
   background: transparent;
+  overflow: hidden;
 }
 
 .hud {
@@ -2107,9 +2108,10 @@ html.hud-root #root {
   padding: 6px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) 26px 26px;
   column-gap: 6px;
   row-gap: 4px;
+  overflow: hidden;
 }
 
 .hud-mascot-slot {
@@ -2136,6 +2138,8 @@ html.hud-root #root {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #ece9d8;
@@ -2179,13 +2183,16 @@ html.hud-root #root {
 .hud-line {
   grid-column: 2;
   margin: 0;
-  height: 0;
-  padding: 0;
+  height: 22px;
+  max-height: 22px;
+  line-height: 20px;
+  padding: 0 7px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  border: 0 solid transparent;
+  border: 2px solid transparent;
   background: transparent;
+  box-sizing: border-box;
 }
 
 .hud-method {
@@ -2197,11 +2204,7 @@ html.hud-root #root {
 }
 
 .hud-line.on {
-  height: 22px;
-  line-height: 20px;
-  padding: 0 7px;
   background: #ece9d8;
-  border-width: 2px;
   border-color: #fff #404040 #404040 #fff;
 }
 
@@ -2209,6 +2212,7 @@ html.hud-root #root {
   margin: 0;
   padding: 5px 7px 6px;
   line-height: 1.35;
+  max-height: 4.2em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
