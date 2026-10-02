@@ -2003,7 +2003,7 @@ body {
 html.hud-root,
 html.hud-root body,
 html.hud-root #root {
-  background: #ece9d8;
+  background: transparent;
 }
 
 .hud {

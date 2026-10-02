@@ -151,10 +151,23 @@ function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
 
+  mainWindow.on('close', () => {
+    destroyHud()
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
-    if (hudWindow && !hudWindow.isDestroyed()) hudWindow.close()
   })
+}
+
+function destroyHud() {
+  const w = hudWindow
+  if (!w || w.isDestroyed()) {
+    hudWindow = null
+    return
+  }
+  hudWindow = null
+  w.removeAllListeners('closed')
+  w.destroy()
 }
 
 const HUD_W = 456
@@ -177,19 +190,17 @@ function createHud() {
     height: HUD_H,
     show: false,
     frame: false,
-    transparent: false,
+    transparent: true,
     resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
-    closable: false,
     focusable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    hasShadow: true,
+    hasShadow: false,
     title: '',
-    backgroundColor: '#ece9d8',
-    type: 'toolbar',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -204,28 +215,21 @@ function createHud() {
   if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1#hud`)
   else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' }, hash: 'hud' })
   hudWindow.on('closed', () => {
+    if (hudWindow && !hudWindow.isDestroyed()) return
     hudWindow = null
   })
 }
 
 function raiseHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
-  try {
-    hudWindow.setAlwaysOnTop(true, 'screen-saver')
-    hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-    hudWindow.moveTop()
-  } catch {
-    /* an older Windows build may reject one of these; the window still shows */
-  }
+  hudWindow.setAlwaysOnTop(true)
+  hudWindow.moveTop()
 }
 
 function revealHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
   placeHud()
-  if (!hudWindow.isVisible()) {
-    hudWindow.showInactive()
-    if (!hudWindow.isVisible()) hudWindow.show()
-  }
+  if (!hudWindow.isVisible()) hudWindow.showInactive()
   raiseHud()
   hudWindow.setContentProtection(true)
   hudWindow.setIgnoreMouseEvents(true, { forward: true })
@@ -423,6 +427,7 @@ app.whenReady().then(() => {
       if (s.hideWhileRunning) {
         log('info', 'Uygulama küçültülüyor; durdurmak için Ctrl+Shift+Q.')
         hidden = await hideSelf()
+        revealHud()
       }
       await runGraph(graph, agent.executor, {
         maxSteps: Math.max(1, s.maxSteps),
@@ -481,11 +486,18 @@ app.whenReady().then(() => {
   })
 })
 
+app.on('before-quit', () => {
+  destroyHud()
+  bridge.shutdown()
+})
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  bridge.shutdown()
 })
 
 app.on('window-all-closed', () => {
+  destroyHud()
   bridge.shutdown()
   app.quit()
 })
