@@ -99,33 +99,51 @@ function isFatal(e: unknown) {
 export async function runGraph(
   graph: AgentGraph,
   ex: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; startId?: string; nested?: boolean; root?: AgentGraph; resume?: boolean; packagePath?: string[] }
+  opts: {
+    maxSteps: number
+    stepDelayMs: number
+    startId?: string
+    nested?: boolean
+    root?: AgentGraph
+    resume?: boolean
+    packagePath?: string[]
+    /** This node already finished. Continue from its sonraki step, then climb out of the boxes around it. */
+    afterNodeId?: string
+    /** Shared step count when a run climbs out of packages. */
+    tally?: { n: number }
+  }
 ): Promise<void> {
   if (opts.packagePath?.length) {
-    let inner = graph
+    const layers: { parent: AgentGraph; pkg: AgentNode }[] = []
+    let cursor = graph
     for (const id of opts.packagePath) {
-      const pkg = inner.nodes.find((n) => n.id === id && n.kind === 'package')
+      const pkg = cursor.nodes.find((n) => n.id === id && n.kind === 'package')
       if (!pkg?.inner) throw new Error('Açık paket bu akışta yok.')
-      inner = pkg.inner
+      layers.push({ parent: cursor, pkg })
+      cursor = pkg.inner
     }
-    await runGraph(inner, ex, {
+    const shared = {
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,
-      startId: opts.startId,
-      nested: opts.nested,
       root: opts.root ?? graph,
       resume: opts.resume,
-    })
+      tally: opts.tally ?? { n: 0 },
+    }
+    await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const { parent, pkg } = layers[i]
+      await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id })
+    }
     return
   }
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
-  const entry = findEntry(graph, opts.startId)
-  if (!entry) throw new Error('Başlangıç node’u bulunamadı.')
+  const entry = opts.afterNodeId ? undefined : findEntry(graph, opts.startId)
+  if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
   const root = opts.root ?? graph
 
   let vars: Record<string, string> = { sira: '1' }
   const loopNotes: string[] = []
-  let steps = 0
+  const tally = opts.tally ?? { n: 0 }
   const warnedLeave = new Set<string>()
 
   const patch = (id: string, p: Partial<AgentNode>) => {
@@ -252,7 +270,7 @@ export async function runGraph(
           return 'next'
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume })
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, tally })
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'
@@ -287,18 +305,18 @@ export async function runGraph(
           throw new LapLimitError(`Bu tur ${opts.maxSteps} adımı geçti (sonsuz döngü olabilir: örn. Koşul → Zamanlayıcı döngüsü hiç bitmedi).`)
         }
         budget.used++
-        steps++
+        tally.n++
         ex.step(node.id, 'running')
         try {
           const live = renderNode(node, vars)
-          port = await execStep(node, live, steps, peekAhead(node, scope))
+          port = await execStep(node, live, tally.n, peekAhead(node, scope))
         } catch (e) {
           ex.step(node.id, 'error')
           throw e
         }
         ex.step(node.id, 'done')
         if (port === 'end') {
-          ex.log('success', `“${node.title}” ile akış bitti (${steps} adım).`)
+          ex.log('success', opts.nested ? `“${node.title}” bu katmanı bitirdi.` : `“${node.title}” ile akış bitti (${tally.n} adım).`)
           throw new EndFlow()
         }
       }
@@ -331,7 +349,7 @@ export async function runGraph(
    * Runs the box. A full run walks every item from the first.
    * A run that starts inside the box (`startAt`) continues from the ticked item through the end.
    */
-  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode): Promise<string> => {
+  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false): Promise<string> => {
     ex.step(loop.id, 'running')
     const first = lapStart(loop)
     if (!first) {
@@ -374,7 +392,8 @@ export async function runGraph(
     }
     const keys = fromFolder ?? loopKeys(loop)
     const isList = fromFolder != null || listItems(loop).length > 0
-    const from = loopStartIndex(loop, keys.length, !!opts.resume)
+    const fromBase = loopStartIndex(loop, keys.length, !!opts.resume)
+    const from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'
     if (from > 0) {
@@ -421,12 +440,14 @@ export async function runGraph(
     }
 
     const ran = keys.length - from
-    ex.log(
-      'success',
-      from > 0
-        ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
-        : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
-    )
+    if (from < keys.length) {
+      ex.log(
+        'success',
+        from > 0
+          ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
+          : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
+      )
+    }
     const held = loop.startIndex
     patch(loop.id, { loopIndex: undefined, startIndex: 0 })
     if (typeof held === 'number' && held > 0) ex.log('info', `“${loop.title}”: işaret 1. öğeye döndü.`)
@@ -444,17 +465,39 @@ export async function runGraph(
   }
 
   try {
-    const owner = ownerOf(graph, entry.id)
-    if (owner) {
-      ex.log('info', `“${entry.title}”, “${owner.title}” kutusunun içinde. Kutu bu node’dan başlıyor.`)
-      await runLoop(owner, ownerOf(graph, owner.id) ?? null, entry)
-      await continueAfter(owner)
-    } else {
-      await runChain(entry, null)
+    const done = opts.afterNodeId ? byId.get(opts.afterNodeId) : undefined
+    if (opts.afterNodeId && !done) throw new Error('Paketin devamı bu akışta yok.')
+    if (done) {
+      const owner = ownerOf(graph, done.id) ?? null
+      const edge = graph.edges.find((e) => e.from === done.id && e.fromPort === 'next')
+      const nxt = edge ? enterable(edge.to, owner) : null
+      if (owner && nxt) {
+        ex.log('info', `“${done.title}” bitti. “${owner.title}” “${nxt.title}” ile sürüyor.`)
+        await runLoop(owner, ownerOf(graph, owner.id) ?? null, nxt)
+        await continueAfter(owner)
+      } else if (owner) {
+        ex.log('info', `“${done.title}” bitti. “${owner.title}” kalan öğelerden sürüyor.`)
+        await runLoop(owner, ownerOf(graph, owner.id) ?? null, undefined, true)
+        await continueAfter(owner)
+      } else if (nxt) {
+        ex.log('info', `“${done.title}” bitti, “${nxt.title}” ile devam ediliyor.`)
+        await runChain(nxt, null)
+      } else {
+        ex.log('info', `“${done.title}” sonrası bağlı bir adım yok.`)
+      }
+    } else if (entry) {
+      const owner = ownerOf(graph, entry.id)
+      if (owner) {
+        ex.log('info', `“${entry.title}”, “${owner.title}” kutusunun içinde. Kutu bu node’dan başlıyor.`)
+        await runLoop(owner, ownerOf(graph, owner.id) ?? null, entry)
+        await continueAfter(owner)
+      } else {
+        await runChain(entry, null)
+      }
     }
   } catch (e) {
     if (e instanceof EndFlow) return
     throw e
   }
-  if (!opts.nested) ex.log('success', `Akış tamamlandı (${steps} adım).`)
+  if (!opts.nested) ex.log('success', `Akış tamamlandı (${tally.n} adım).`)
 }
