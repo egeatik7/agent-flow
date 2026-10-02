@@ -177,7 +177,7 @@ function createHud() {
     height: HUD_H,
     show: false,
     frame: false,
-    transparent: true,
+    transparent: false,
     resizable: false,
     movable: false,
     minimizable: false,
@@ -186,9 +186,10 @@ function createHud() {
     focusable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    hasShadow: false,
+    hasShadow: true,
     title: '',
-    backgroundColor: '#00000000',
+    backgroundColor: '#ece9d8',
+    type: 'toolbar',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -196,13 +197,12 @@ function createHud() {
       sandbox: false,
     },
   })
-  raiseHud()
   hudWindow.setContentProtection(true)
   hudWindow.setIgnoreMouseEvents(true, { forward: true })
   placeHud()
   const dev = process.env.VITE_DEV_SERVER_URL
-  if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
-  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
+  if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1#hud`)
+  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' }, hash: 'hud' })
   hudWindow.on('closed', () => {
     hudWindow = null
   })
@@ -210,9 +210,25 @@ function createHud() {
 
 function raiseHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
-  hudWindow.setAlwaysOnTop(true, 'screen-saver')
-  hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  hudWindow.moveTop()
+  try {
+    hudWindow.setAlwaysOnTop(true, 'screen-saver')
+    hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    hudWindow.moveTop()
+  } catch {
+    /* an older Windows build may reject one of these; the window still shows */
+  }
+}
+
+function revealHud() {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  placeHud()
+  if (!hudWindow.isVisible()) {
+    hudWindow.showInactive()
+    if (!hudWindow.isVisible()) hudWindow.show()
+  }
+  raiseHud()
+  hudWindow.setContentProtection(true)
+  hudWindow.setIgnoreMouseEvents(true, { forward: true })
 }
 
 function deliverHud(channel: string, payload: unknown, show: boolean) {
@@ -221,12 +237,7 @@ function deliverHud(channel: string, payload: unknown, show: boolean) {
     if (!hudWindow || hudWindow.isDestroyed()) return
     placeHud()
     hudWindow.webContents.send(channel, payload)
-    if (show) {
-      if (!hudWindow.isVisible()) hudWindow.showInactive()
-      raiseHud()
-      hudWindow.setContentProtection(true)
-      hudWindow.setIgnoreMouseEvents(true, { forward: true })
-    }
+    if (show) revealHud()
   }
   if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
   else deliver()

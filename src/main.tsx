@@ -6,7 +6,7 @@ import HelpManual from './manual/HelpManual'
 import './styles/xp.css'
 import './styles/xp-luna.css'
 
-const hud = new URLSearchParams(window.location.search).get('hud') === '1'
+const hud = new URLSearchParams(window.location.search).get('hud') === '1' || window.location.hash.replace('#', '') === 'hud'
 if (hud) document.documentElement.classList.add('hud-root')
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
