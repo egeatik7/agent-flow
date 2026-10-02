@@ -119,6 +119,18 @@ function rooted(view: AgentGraph, stack: Crumb[]): AgentGraph {
   )
 }
 
+/** The same package path, read back out of a canvas that was edited at the root. */
+function projectView(full: AgentGraph, stack: Crumb[]): { view: AgentGraph; stack: Crumb[] } {
+  let view = full
+  const next: Crumb[] = []
+  for (const crumb of stack) {
+    next.push({ parent: view, id: crumb.id })
+    const pkg = view.nodes.find((n) => n.id === crumb.id && n.kind === 'package')
+    view = pkg?.inner ?? { nodes: [], edges: [] }
+  }
+  return { view, stack: next }
+}
+
 export default function App() {
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -841,16 +853,19 @@ export default function App() {
     if (!meaningful && !loc?.icon) pushLog('warn', 'Bu öğenin okunabilir yazısı yok ve resmi alınamadı. Tıklama yazı ya da simge bulamazsa UI-TARS’a kalır.')
   }
 
+  const writeCanvas = (full: AgentGraph) => {
+    const next = projectView(full, stackRef.current)
+    graphRef.current = next.view
+    stackRef.current = next.stack
+    setStack(next.stack)
+    setGraph(next.view)
+  }
+
   const run = async (startId?: string) => {
     if (graphRef.current.nodes.length === 0) return
-    let g = graphRef.current
-    if (!startId) {
-      g = resetLoopTicks(g)
-      graphRef.current = g
-      setGraph(g)
-    }
+    if (!startId) writeCanvas(resetLoopTicks(rooted(graphRef.current, stackRef.current)))
     const path = stackRef.current.map((c) => c.id)
-    const full = path.length ? rooted(g, stackRef.current) : g
+    const full = path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current
     const name = canvasName()
     setRunning(true)
     setStepStatus({})
@@ -916,17 +931,7 @@ export default function App() {
       pushLog('info', 'Silinecek hafıza yok.')
       return
     }
-    let view = cleared
-    const nextStack: Crumb[] = []
-    for (const crumb of stackRef.current) {
-      nextStack.push({ parent: view, id: crumb.id })
-      const pkg = view.nodes.find((n) => n.id === crumb.id && n.kind === 'package')
-      view = pkg?.inner ?? { nodes: [], edges: [] }
-    }
-    graphRef.current = view
-    stackRef.current = nextStack
-    setStack(nextStack)
-    setGraph(view)
+    writeCanvas(cleared)
     pushLog('info', `${count} node’un hafızası silindi. Bu tuvaldeki paketlerin içi de temizlendi.`)
   }
 
