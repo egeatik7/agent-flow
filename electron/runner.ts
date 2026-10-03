@@ -19,7 +19,7 @@ import { listDirEntries } from './list-dir'
 import { outsideFolder } from './enclosing'
 
 /** The next one or two nodes, already filled with the current loop variables. */
-export type StepAhead = { next?: AgentNode; then?: AgentNode }
+export type StepAhead = { prev?: AgentNode; next?: AgentNode; then?: AgentNode }
 
 export type Executor = {
   log: (level: LogLevel, message: string) => void
@@ -181,12 +181,33 @@ export async function runGraph(
     return n
   }
 
+  const ACTION_KINDS = new Set(['click', 'type', 'key', 'ai'])
+
+  /** The last real action before this node. Boxes, waits and conditions are stepped over. */
+  const previousAction = (node: AgentNode): AgentNode | undefined => {
+    const seen = new Set<string>()
+    let cur: AgentNode | undefined = node
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      const incoming = graph.edges.filter((e) => e.to === cur!.id && ['next', 'true', 'done', 'found', 'loop'].includes(e.fromPort))
+      const from = incoming[0] ? byId.get(incoming[0].from) : undefined
+      if (!from || seen.has(from.id)) return undefined
+      if (ACTION_KINDS.has(from.kind)) return from
+      cur = from
+    }
+    return undefined
+  }
+
   const peekAhead = (node: AgentNode, scope: AgentNode | null): StepAhead => {
+    const prevNode = previousAction(node)
     const next = nextAfter(node, scope)
-    if (!next) return {}
-    const nextScope = ownerOf(graph, next.id) ?? null
-    const then = nextAfter(next, nextScope)
-    return { next: renderNode(next, vars), then: then ? renderNode(then, vars) : undefined }
+    const nextScope = next ? ownerOf(graph, next.id) ?? null : null
+    const then = next ? nextAfter(next, nextScope) : undefined
+    return {
+      prev: prevNode ? renderNode(prevNode, vars) : undefined,
+      next: next ? renderNode(next, vars) : undefined,
+      then: then ? renderNode(then, vars) : undefined,
+    }
   }
 
   const settle = () => interruptibleSleep(opts.stepDelayMs, ex.shouldStop)
