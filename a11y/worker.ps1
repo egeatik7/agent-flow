@@ -17,6 +17,24 @@ function Send-TextPaced([string]$t, [int]$gapMs) {
   }
 }
 
+if (-not ('XpWin' -as [type])) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class XpWin {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr hWnd, StringBuilder lp, int nMax);
+  public static string ClassOf(IntPtr h) {
+    var sb = new StringBuilder(256);
+    if (h == IntPtr.Zero) return "";
+    GetClassName(h, sb, sb.Capacity);
+    return sb.ToString();
+  }
+}
+"@
+}
+
 function Test-TextLike($el) {
   if ($null -eq $el) { return $false }
   if (@('Edit', 'Document', 'ComboBox') -contains (Get-CT $el)) { return $true }
@@ -47,40 +65,103 @@ function Get-TextCandidates($root, [int]$maxDepth) {
   return , $out
 }
 
-function Select-NearestText($cands, $pt) {
-  $best = $null
-  $bestD = [double]::MaxValue
-  foreach ($el in @($cands)) {
-    try {
-      $r = $el.Current.BoundingRectangle
-      if ($r.IsEmpty -or $r.Width -lt 8 -or $r.Height -lt 8 -or $el.Current.IsOffscreen) { continue }
-      $d = [Math]::Abs(($r.X + $r.Width / 2) - $pt.X) + [Math]::Abs(($r.Y + $r.Height / 2) - $pt.Y)
-      if ($d -lt $bestD) { $bestD = $d; $best = $el }
-    } catch {}
+function Get-WinClass($el) {
+  $h = [IntPtr]::Zero
+  $p = $el
+  for ($i = 0; $i -lt 6 -and $h -eq [IntPtr]::Zero -and $null -ne $p; $i++) {
+    try { $h = [IntPtr]$p.Current.NativeWindowHandle } catch { $h = [IntPtr]::Zero }
+    if ($h -ne [IntPtr]::Zero) { break }
+    try { $p = $script:Walker.GetParent($p) } catch { break }
   }
-  return $best
+  try { return [XpWin]::ClassOf($h) } catch { return '' }
 }
 
-# The click landed on a pane around the field. Focus the real edit and click its middle.
-function Move-ToTextField($focus) {
-  $pt = Get-CursorPoint
-  $cands = @(Get-TextCandidates $focus 6)
-  if ($cands.Count -eq 0) {
-    $h = [XpNative]::GetForegroundWindow()
-    if ($h -ne [IntPtr]::Zero) {
-      $top = $null
-      try { $top = $script:AE::FromHandle($h) } catch {}
-      $cands = @(Get-TextCandidates $top 8)
+# An edit inside a combo box is the same field, not a second one.
+function Get-OwnInputs($win) {
+  $all = @(Get-TextCandidates $win 12 | Where-Object { @('Edit', 'Document', 'ComboBox') -contains (Get-CT $_) })
+  $own = @()
+  foreach ($el in $all) {
+    $inside = $false
+    if ((Get-CT $el) -eq 'Edit') {
+      $p = $el
+      for ($i = 0; $i -lt 6; $i++) {
+        try { $p = $script:Walker.GetParent($p) } catch { break }
+        if ($null -eq $p) { break }
+        foreach ($c in $all) {
+          if ((Get-CT $c) -eq 'ComboBox' -and (Test-Same $p $c)) { $inside = $true }
+        }
+        if ($inside) { break }
+      }
     }
+    if (-not $inside) { $own += $el }
   }
-  $best = Select-NearestText $cands $pt
-  if ($null -eq $best) { return $false }
-  try { $best.SetFocus() } catch {}
-  try {
-    $r = $best.Current.BoundingRectangle
-    Invoke-MouseAt ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) 'left'
-  } catch { return $false }
-  Start-Sleep -Milliseconds 180
+  return @($own)
+}
+
+function Find-InputAround($el) {
+  $p = $el
+  for ($i = 0; $i -lt 8 -and $null -ne $p; $i++) {
+    if (Test-TextLike $p) { return $p }
+    $child = $null
+    try { $child = $script:Walker.GetFirstChild($p) } catch {}
+    while ($null -ne $child) {
+      if (Test-TextLike $child) { return $child }
+      try { $child = $script:Walker.GetNextSibling($child) } catch { break }
+    }
+    try { $p = $script:Walker.GetParent($p) } catch { break }
+  }
+  return $null
+}
+
+# The click point's own field, or the only field of an open dialog. Not "whatever edit is nearest".
+function Find-TypeTarget([int]$x, [int]$y) {
+  if ($x -ne 0 -or $y -ne 0) {
+    $hit = $null
+    try { $hit = $script:AE::FromPoint((New-Object System.Windows.Point($x, $y))) } catch {}
+    $around = Find-InputAround $hit
+    if ($null -ne $around) { return @{ el = $around; where = 'tıklanan nokta' } }
+  }
+  $fg = [XpNative]::GetForegroundWindow()
+  $wins = @()
+  if ($fg -ne [IntPtr]::Zero) {
+    try { $wins += $script:AE::FromHandle($fg) } catch {}
+  }
+  foreach ($w in @(Get-TopWindows 0)) {
+    if (Test-UsableWindow $w) { $wins += $w }
+  }
+  $solo = @()
+  $seen = @{}
+  foreach ($w in $wins) {
+    if ((Get-WinClass $w) -ne '#32770') { continue }
+    $inputs = @(Get-OwnInputs $w)
+    if ($inputs.Count -ne 1) { continue }
+    $r = $inputs[0].Current.BoundingRectangle
+    $key = "$([int]$r.X),$([int]$r.Y),$([int]$r.Width),$([int]$r.Height)"
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    $name = ''
+    try { $name = [string]$w.Current.Name } catch {}
+    $solo += @{ el = $inputs[0]; where = $(if ($name) { $name } else { 'iletişim kutusu' }) }
+  }
+  if ($solo.Count -eq 1) { return $solo[0] }
+  return $null
+}
+
+function Set-TextValue($el, [string]$text) {
+  $target = $el
+  if ((Get-CT $el) -eq 'ComboBox') {
+    $edit = @(Get-TextCandidates $el 4 | Where-Object { (Get-CT $_) -eq 'Edit' } | Select-Object -First 1)
+    if ($edit) { $target = $edit[0] }
+  }
+  $vp = $null
+  $holder = $target
+  if (-not $holder.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+    $holder = $el
+    if (-not $holder.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
+  }
+  try { if ($vp.Current.IsReadOnly) { return $false } } catch {}
+  try { $vp.SetValue($text) } catch { return $false }
+  try { $holder.SetFocus() } catch {}
   return $true
 }
 
@@ -146,15 +227,30 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
-      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false }
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = '' }
       $focus = $null
       try { $focus = $script:AE::FocusedElement } catch {}
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
+      $atX = 0
+      $atY = 0
+      if ($P.x) { $atX = [int]$P.x }
+      if ($P.y) { $atY = [int]$P.y }
+      $target = $null
       if ($P.clearFirst -and -not (Test-TextLike $focus)) {
-        if (Move-ToTextField $focus) {
-          try { $focus = $script:AE::FocusedElement } catch {}
-          $out.focusType = Get-CT $focus
+        $target = Find-TypeTarget $atX $atY
+      }
+      if ($null -ne $target -and $P.text) {
+        if (Set-TextValue $target.el ([string]$P.text)) {
           $out.rescued = $true
+          $out.where = [string]$target.where
+          $out.via = 'value'
+          $out.focusType = Get-CT $target.el
+          $out.cleared = $true
+          if ($P.pressEnter) {
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+          }
+          return [pscustomobject]$out
         }
       }
       if ($P.clearFirst) {

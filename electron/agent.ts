@@ -797,9 +797,17 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
-  async function typeVerified(text: string, enter: boolean, clear: boolean) {
-    const typed = await bridge.typeText(text, false, clear)
-    if (typed?.rescued) log('info', 'Odak yazı kutusu değildi. Kutunun kendisi seçildi, yazı oraya gidiyor.')
+  async function typeVerified(text: string, enter: boolean, clear: boolean, at?: { x: number; y: number }) {
+    const typed = await bridge.typeText(text, false, clear, at)
+    if (typed?.via === 'value') {
+      const where = typed.where ? ` (${typed.where})` : ''
+      log('success', `Yazı kutuya doğrudan yazıldı${where}.`)
+      if (enter) {
+        await sleep(240)
+        await bridge.sendKeys('{ENTER}')
+      }
+      return
+    }
     if (typed?.skippedClear) {
       throw new Error(`Odak bir yazı alanı değil (${typed.focusType || 'bilinmiyor'}). Yazı gönderilmedi.`)
     }
@@ -809,7 +817,7 @@ export function createAgent(ctx: AgentContext) {
       let state = v === null ? 'ok' : fieldState(v, text)
       if (state === 'empty' || state === 'wrong') {
         log('warn', `Alanda “${(v ?? '').slice(0, 60)}” yazıyor, beklenen bu değil. Bir kez daha yazılıyor.`)
-        reportTyping(await bridge.typeText(text, false, true))
+        reportTyping(await bridge.typeText(text, false, true, at))
         v = await bridge.focusedValue()
         state = v === null ? 'ok' : fieldState(v, text)
         if (state === 'empty' || state === 'wrong') throw new Error(`Yazı alana gitmedi: alanda “${(v ?? '').slice(0, 60)}” var.`)
@@ -1304,7 +1312,7 @@ export function createAgent(ctx: AgentContext) {
           await sleep(FOCUS_MS)
           log('info', `Alan seçildi: ${t.label}`)
         }
-        await typeVerified(text, enter, clear)
+        await typeVerified(text, enter, clear, t ? { x: t.x, y: t.y } : undefined)
       })
       if (confirmed) saveMemo(node, t?.memo)
       await noteForeground()

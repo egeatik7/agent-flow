@@ -359,12 +359,31 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
   return worker.call('windowRect', { windowTitle })
 }
 
-export type TypeResult = { cleared: boolean; skippedClear: boolean; pasted: boolean; focusType: string; rescued?: boolean }
+export type TypeResult = {
+  cleared: boolean
+  skippedClear: boolean
+  pasted: boolean
+  focusType: string
+  rescued?: boolean
+  where?: string
+  via?: string
+}
 
-export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<TypeResult | null> {
+export async function typeText(
+  text: string,
+  pressEnter: boolean,
+  clearFirst: boolean,
+  at?: { x: number; y: number }
+): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
-  return worker.call<TypeResult>('typeText', { text, pressEnter, clearFirst })
+  return worker.call<TypeResult>('typeText', {
+    text,
+    pressEnter,
+    clearFirst,
+    x: at ? Math.round(at.x) : 0,
+    y: at ? Math.round(at.y) : 0,
+  })
 }
 
 /** Lock screen or secure desktop is up: nothing can be seen or clicked. */
