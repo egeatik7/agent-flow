@@ -439,6 +439,49 @@ export async function visionRefine(opts: {
   return readPoint(p)
 }
 
+export async function chooseTypeField(opts: {
+  apiKey: string
+  model: string | string[]
+  step: string
+  instruction: string
+  text: string
+  ahead: string
+  choices: { id: number; window: string; type: string; name: string; value: string; clicked: boolean }[]
+}): Promise<{ id: number | null; reason: string }> {
+  const lines = opts.choices
+    .map((c) => {
+      const name = c.name ? ` name "${c.name.replace(/"/g, "'")}"` : ''
+      const value = c.value ? ` currently "${c.value.replace(/"/g, "'")}"` : ' currently empty'
+      const hit = c.clicked ? ' The click landed in this field.' : ''
+      return `${c.id}. Window "${c.window.replace(/"/g, "'")}" — ${c.type}${name}${value}.${hit}`
+    })
+    .join('\n')
+  const system = `You choose which text field a Windows automation step should type into.
+You receive the step kind, the node's instruction, the exact text that will be typed, the following steps, and the open windows that have a text field.
+Use the instruction and the following steps to decide. A click landing in a field is only a hint; ignore it when another window matches the instruction.
+Pick one id from the list. If none match, id is null.
+JSON only: {"id": <number or null>, "reason": "<short reason>"}`
+  const text = `Step: ${opts.step}
+Instruction: ${opts.instruction || '(none)'}
+Text to type: ${opts.text}
+Following steps: ${opts.ahead || '(none)'}
+
+Windows:
+${lines}`
+  const content = await chat(
+    opts.apiKey,
+    opts.model,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: text },
+    ],
+    false
+  )
+  const p = parseJson(content)
+  const id = num(p.id)
+  return { id: id === null ? null : Math.round(id), reason: String(p.reason ?? '').slice(0, 240) }
+}
+
 export type ReactionVerdict = 'ready' | 'missed' | 'loading' | 'blocked' | 'unknown'
 
 /** Two pocket frames: did the action move the screen toward the next step? */

@@ -359,6 +359,15 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
   return worker.call('windowRect', { windowTitle })
 }
 
+export type TypeFieldChoice = {
+  id: number
+  window: string
+  type: string
+  name: string
+  value: string
+  clicked: boolean
+}
+
 export type TypeResult = {
   cleared: boolean
   skippedClear: boolean
@@ -367,13 +376,16 @@ export type TypeResult = {
   rescued?: boolean
   where?: string
   via?: string
+  needChoice?: boolean
+  choices?: TypeFieldChoice[]
 }
 
 export async function typeText(
   text: string,
   pressEnter: boolean,
   clearFirst: boolean,
-  at?: { x: number; y: number }
+  at?: { x: number; y: number },
+  fieldId?: number
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
@@ -383,6 +395,8 @@ export async function typeText(
     clearFirst,
     x: at ? Math.round(at.x) : 0,
     y: at ? Math.round(at.y) : 0,
+    ownPid: process.pid,
+    fieldId: fieldId ?? 0,
   })
 }
 

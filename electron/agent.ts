@@ -30,6 +30,7 @@ import {
   nextAction,
   type GuiAction,
   type GuiTurn,
+  chooseTypeField,
   planStall,
   visionCheck,
   type ReactionVerdict,
@@ -797,8 +798,38 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
-  async function typeVerified(text: string, enter: boolean, clear: boolean, at?: { x: number; y: number }) {
-    const typed = await bridge.typeText(text, false, clear, at)
+  async function typeVerified(
+    text: string,
+    enter: boolean,
+    clear: boolean,
+    at?: { x: number; y: number },
+    node?: AgentNode,
+    ahead?: StepAhead
+  ) {
+    let typed = await bridge.typeText(text, false, clear, at)
+    if (typed?.needChoice && typed.choices?.length) {
+      const s = getSettings()
+      const model = textModels(s)
+      if (!s.apiKey || !model.length || !node) {
+        throw new Error('Birden fazla pencerede yazı kutusu var. Hangisine yazılacağını seçmek için API anahtarı gerekli.')
+      }
+      const windows = [...new Set(typed.choices.map((c) => c.window))]
+      log('info', `${windows.length} pencerede yazı kutusu var. Hangisine yazılacağı soruluyor.`)
+      const body = node.prompt?.trim() || ''
+      const pick = await chooseTypeField({
+        apiKey: s.apiKey,
+        model,
+        step: body ? `${NODE_SPECS[node.kind].label}: ${body}` : NODE_SPECS[node.kind].label,
+        instruction: node.prompt?.trim() || '',
+        text,
+        ahead: describeAhead(ahead),
+        choices: typed.choices,
+      })
+      const chosen = typed.choices.find((c) => c.id === pick.id)
+      if (!chosen) throw new Error(`Yazı kutusu seçilemedi${pick.reason ? `: ${pick.reason}` : ''}.`)
+      log('info', `Yazı kutusu: “${chosen.window}”${chosen.name ? ` / ${chosen.name}` : ''}. ${pick.reason}`)
+      typed = await bridge.typeText(text, enter, clear, at, chosen.id)
+    }
     if (typed?.via === 'value') {
       const where = typed.where ? ` (${typed.where})` : ''
       log('success', `Yazı kutuya doğrudan yazıldı${where}.`)
@@ -1312,7 +1343,7 @@ export function createAgent(ctx: AgentContext) {
           await sleep(FOCUS_MS)
           log('info', `Alan seçildi: ${t.label}`)
         }
-        await typeVerified(text, enter, clear, t ? { x: t.x, y: t.y } : undefined)
+        await typeVerified(text, enter, clear, t ? { x: t.x, y: t.y } : undefined, node, ahead)
       })
       if (confirmed) saveMemo(node, t?.memo)
       await noteForeground()

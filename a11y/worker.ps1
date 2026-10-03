@@ -113,38 +113,52 @@ function Find-InputAround($el) {
   return $null
 }
 
-# The click point's own field, or the only field of an open dialog. Not "whatever edit is nearest".
-function Find-TypeTarget([int]$x, [int]$y) {
-  if ($x -ne 0 -or $y -ne 0) {
-    $hit = $null
-    try { $hit = $script:AE::FromPoint((New-Object System.Windows.Point($x, $y))) } catch {}
-    $around = Find-InputAround $hit
-    if ($null -ne $around) { return @{ el = $around; where = 'tıklanan nokta' } }
+function Get-FieldValue($el) {
+  $vp = $null
+  try {
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+      $v = [string]$vp.Current.Value
+      if ($v.Length -gt 80) { return $v.Substring(0, 80) }
+      return $v
+    }
+  } catch {}
+  return ''
+}
+
+function Test-PointInside($el, [int]$x, [int]$y) {
+  if ($x -eq 0 -and $y -eq 0) { return $false }
+  try {
+    $r = $el.Current.BoundingRectangle
+    if ($r.IsEmpty) { return $false }
+    return ($x -ge $r.X -and $x -le ($r.X + $r.Width) -and $y -ge $r.Y -and $y -le ($r.Y + $r.Height))
+  } catch { return $false }
+}
+
+# Every real text field in other apps' windows, in a stable order.
+function Get-TypeChoices([int]$ownPid, [int]$x, [int]$y) {
+  $out = New-Object System.Collections.ArrayList
+  $id = 0
+  foreach ($w in @(Get-TopWindows $ownPid)) {
+    if (-not (Test-UsableWindow $w)) { continue }
+    $title = ''
+    try { $title = [string]$w.Current.Name } catch {}
+    if (-not $title) { continue }
+    foreach ($el in @(Get-OwnInputs $w)) {
+      $id++
+      $name = ''
+      try { $name = [string]$el.Current.Name } catch {}
+      [void]$out.Add([pscustomobject]@{
+        id = $id
+        window = $title
+        type = (Get-CT $el)
+        name = $name
+        value = (Get-FieldValue $el)
+        clicked = (Test-PointInside $el $x $y)
+        el = $el
+      })
+    }
   }
-  $fg = [XpNative]::GetForegroundWindow()
-  $wins = @()
-  if ($fg -ne [IntPtr]::Zero) {
-    try { $wins += $script:AE::FromHandle($fg) } catch {}
-  }
-  foreach ($w in @(Get-TopWindows 0)) {
-    if (Test-UsableWindow $w) { $wins += $w }
-  }
-  $solo = @()
-  $seen = @{}
-  foreach ($w in $wins) {
-    if ((Get-WinClass $w) -ne '#32770') { continue }
-    $inputs = @(Get-OwnInputs $w)
-    if ($inputs.Count -ne 1) { continue }
-    $r = $inputs[0].Current.BoundingRectangle
-    $key = "$([int]$r.X),$([int]$r.Y),$([int]$r.Width),$([int]$r.Height)"
-    if ($seen.ContainsKey($key)) { continue }
-    $seen[$key] = $true
-    $name = ''
-    try { $name = [string]$w.Current.Name } catch {}
-    $solo += @{ el = $inputs[0]; where = $(if ($name) { $name } else { 'iletişim kutusu' }) }
-  }
-  if ($solo.Count -eq 1) { return $solo[0] }
-  return $null
+  return @($out)
 }
 
 function Set-TextValue($el, [string]$text) {
@@ -227,7 +241,7 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
-      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = '' }
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @() }
       $focus = $null
       try { $focus = $script:AE::FocusedElement } catch {}
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
@@ -235,16 +249,37 @@ function Invoke-Op([string]$op, $P) {
       $atY = 0
       if ($P.x) { $atX = [int]$P.x }
       if ($P.y) { $atY = [int]$P.y }
-      $target = $null
-      if ($P.clearFirst -and -not (Test-TextLike $focus)) {
-        $target = Find-TypeTarget $atX $atY
+      $ownPid = 0
+      if ($P.ownPid) { $ownPid = [int]$P.ownPid }
+      $choices = @(Get-TypeChoices $ownPid $atX $atY)
+      $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; window = $_.window; type = $_.type; name = $_.name; value = $_.value; clicked = $_.clicked } })
+      $windows = @($public | ForEach-Object { $_.window } | Select-Object -Unique)
+      $picked = $null
+      if ($P.fieldId) {
+        $picked = @($choices | Where-Object { $_.id -eq [int]$P.fieldId } | Select-Object -First 1)
+        if ($picked) { $picked = $picked[0] }
+      } elseif ($P.clearFirst -and -not (Test-TextLike $focus)) {
+        $hit = @($choices | Where-Object { $_.clicked } | Select-Object -First 1)
+        if ($windows.Count -ge 2) {
+          $out.needChoice = $true
+          $out.choices = $public
+          return [pscustomobject]$out
+        } elseif ($hit.Count -gt 0) {
+          $picked = $hit[0]
+        } elseif ($choices.Count -eq 1) {
+          $picked = $choices[0]
+        } elseif ($choices.Count -gt 1) {
+          $out.needChoice = $true
+          $out.choices = $public
+          return [pscustomobject]$out
+        }
       }
-      if ($null -ne $target -and $P.text) {
-        if (Set-TextValue $target.el ([string]$P.text)) {
+      if ($null -ne $picked -and $P.text) {
+        if (Set-TextValue $picked.el ([string]$P.text)) {
           $out.rescued = $true
-          $out.where = [string]$target.where
+          $out.where = [string]$picked.window
           $out.via = 'value'
-          $out.focusType = Get-CT $target.el
+          $out.focusType = [string]$picked.type
           $out.cleared = $true
           if ($P.pressEnter) {
             Start-Sleep -Milliseconds 200
