@@ -14,6 +14,7 @@ import {
   type LogLevel,
   type StepStatus,
 } from './graph-types'
+import { conditionNeedle } from './confirm'
 import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
 import { outsideFolder } from './enclosing'
@@ -220,12 +221,13 @@ export async function runGraph(
       case 'condition': {
         const text = (live.text ?? '').trim()
         if (!text && !live.locator) throw new Error(`“${live.title}”: koşul için yazı gir ya da Ekrandan Seç ile bir öğe seç.`)
-        const label = text ? `“${text}”` : 'seçilen öğe'
+        const needle = text ? conditionNeedle(text) : ''
+        const label = needle ? `“${needle}”` : 'seçilen öğe'
         const wait = Math.max(0, live.timeoutMs ?? 0)
         const until = Date.now() + wait
         if (wait > 0) ex.log('info', `[${stepNo}] ${label} bekleniyor (en çok ${Math.round(wait / 1000)} sn)…`)
         for (;;) {
-          if (await ex.exists(text, live)) {
+          if (await ex.exists(needle, live)) {
             ex.log('info', `[${stepNo}] Koşul ${label}: var`)
             return 'true'
           }
@@ -376,13 +378,11 @@ export async function runGraph(
     if (hasTemplate(folderRaw)) {
       const resolved = outsideFolder(root, loop)
       if (!resolved) {
-        ex.log('warn', `“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
-        fromFolder = []
+        throw new Error(`“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
       } else {
         const found = listDirEntries(resolved)
         if (!found) {
-          ex.log('warn', `“${loop.title}”: klasör yok: ${resolved}`)
-          fromFolder = []
+          throw new Error(`“${loop.title}”: klasör yok: ${resolved}`)
         } else {
           fromFolder = found
           ex.log('info', `“${loop.title}”: ${resolved} içinde ${found.length} öğe.`)

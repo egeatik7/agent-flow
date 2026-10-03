@@ -887,9 +887,9 @@ function Invoke-MouseAt([int]$x, [int]$y, [string]$button) {
     'double' {
       for ($i = 0; $i -lt 2; $i++) {
         [XpNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 20
+        Start-Sleep -Milliseconds 40
         [XpNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 60
+        Start-Sleep -Milliseconds 120
       }
     }
     default {

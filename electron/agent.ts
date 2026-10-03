@@ -798,7 +798,11 @@ export function createAgent(ctx: AgentContext) {
 
   /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
   async function typeVerified(text: string, enter: boolean, clear: boolean) {
-    reportTyping(await bridge.typeText(text, false, clear))
+    const typed = await bridge.typeText(text, false, clear)
+    if (typed?.skippedClear) {
+      throw new Error(`Odak bir yazı alanı değil (${typed.focusType || 'bilinmiyor'}). Yazı gönderilmedi.`)
+    }
+    reportTyping(typed)
     if (text) {
       let v = await bridge.focusedValue()
       let state = v === null ? 'ok' : fieldState(v, text)
@@ -843,12 +847,15 @@ export function createAgent(ctx: AgentContext) {
     const fg = await bridge.foreground()
     if (!fg || fg.pid === lastFg.pid) return
     if (FOCUS_THIEVES.test(fg.proc ?? '') || fg.pid === process.pid) {
+      if (!lastFg.title.trim()) {
+        throw new Error(`Odak “${fg.title || fg.proc}” penceresine kaydı. Geri getirilecek pencerenin adı yok, tuş gönderilmiyor.`)
+      }
       log('warn', `Odak “${fg.title || fg.proc}” penceresine kaymış; “${lastFg.title}” yeniden öne getiriliyor.`)
       try {
         await bridge.windowRect(lastFg.title)
         await sleep(300)
       } catch {
-        log('warn', `“${lastFg.title}” öne getirilemedi; tuşlar şu an öndeki pencereye gidecek.`)
+        throw new Error(`“${lastFg.title}” öne getirilemedi. Tuşlar “${fg.title || fg.proc}” penceresine gönderilmiyor.`)
       }
     } else {
       noteOnce(node.id, `fg:${fg.pid}`, `Not: öndeki pencere değişti (“${fg.title || fg.proc}”). “${node.title}” tuşları bu pencereye gönderilecek.`)
@@ -1052,7 +1059,7 @@ export function createAgent(ctx: AgentContext) {
       const r = await visionCheck({
         apiKey: s.apiKey,
         model,
-        question: `Şu görev bu ekranda tamamlanmış görünüyor mu (son hâline bak)? Görev: ${goal}`,
+        question: `Görev istenen sonuca ulaşmış mı? Bir programı açmak, penceresinin açık ve kullanılabilir olmasıdır. “bitir”, “finish” veya “complete” programı kapatmak değildir. Metinde kapat, çık, quit, exit veya kill yoksa uygulamayı kapatmayı isteme. Görev: ${goal}`,
         image: shot.img,
       })
       return { ok: r.answer, reason: r.reason }
@@ -1155,15 +1162,16 @@ export function createAgent(ctx: AgentContext) {
     }
 
     let prev: Shot | null = null
-    let lastKind: GuiAction['kind'] | null = null
     let still = 0
+    let quietWaits = 0
     let rejected = 0
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
       ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
       await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)
-      if (prev && lastKind !== 'wait' && sigDiff(prev.sig, shot.sig) < STILL_DIFF) still++
+      const unchanged = !!prev && sigDiff(prev.sig, shot.sig) < STILL_DIFF
+      if (unchanged) still++
       else still = 0
       if (still >= 6) {
         log('warn', 'Ekran 6 eylemdir değişmiyor. İnisiyatif burada duruyor.')
@@ -1195,15 +1203,33 @@ export function createAgent(ctx: AgentContext) {
         rejected++
         log('warn', `Model “bitti” dedi ama kontrol onaylamadı${v.reason ? `: ${v.reason}` : ''}.`)
         if (rejected >= 2) return false
-        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: `Kontrol: görev henüz tamamlanmamış görünüyor (${v.reason || 'eksik adım var'}). Eksik kalanı yap.` })
+        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: `Kontrol: görev henüz tamamlanmamış görünüyor (${v.reason || 'eksik adım var'}). Eksik kalanı yap. Do not close the application.` })
         prev = shot
-        lastKind = 'wait'
         continue
       }
       if (a.kind === 'call_user') {
         log('warn', `Model yardım istedi, İnisiyatif duruyor: ${a.thought || 'gerekçe yok'}`)
         return false
       }
+
+      if (a.kind === 'wait' && unchanged) {
+        quietWaits++
+        if (quietWaits >= 2) {
+          log('warn', 'Ekran beklerken değişmedi. Aynı bekleme tekrarlanmıyor.')
+          history.push({
+            thought: a.thought,
+            raw: a.raw,
+            image: shot.img,
+            note: 'The screen did not change while you waited. The last click did not take effect. Do not wait again. Try another way, or use a different control.',
+          })
+          prev = shot
+          if (quietWaits >= 4) {
+            log('warn', 'Bekleme ekranı açmadı. İnisiyatif burada duruyor.')
+            return false
+          }
+          continue
+        }
+      } else if (a.kind !== 'wait') quietWaits = 0
 
       const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img }
       try {
@@ -1234,7 +1260,6 @@ export function createAgent(ctx: AgentContext) {
       }
       history.push(turn)
       prev = shot
-      lastKind = a.kind
       await pause(a.kind === 'wait' ? 0 : a.kind === 'type' || a.kind === 'hotkey' ? 700 : 1000)
     }
     log('warn', `İnisiyatif ${max} eylemde hedefe ulaşamadı.`)

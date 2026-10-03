@@ -100,6 +100,7 @@ function Invoke-Op([string]$op, $P) {
           $out.cleared = $true
         } else {
           $out.skippedClear = $true
+          return [pscustomobject]$out
         }
       }
       $text = [string]$P.text

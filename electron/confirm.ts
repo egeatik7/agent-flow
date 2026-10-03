@@ -14,11 +14,25 @@ export type Verdict = {
 
 const LOADING = /yuklen|loading|please wait|lutfen bekle|isleniyor|bekleyin|processing|tamamlani/
 
+/** The first quoted token in a condition, or the whole text when it is already short. */
+export function conditionNeedle(text: string): string {
+  const t = text.trim()
+  const q = t.match(/[“"«„]([^”"»“]{1,80})[”"»“]/)
+  if (q?.[1]?.trim()) return q[1].trim()
+  return t
+}
+
 /** The next node's own words are the result this step should make possible. */
 export function expectation(ahead?: StepAhead): string {
   const n = ahead?.next
   if (!n) return ''
-  if (n.kind === 'condition') return (n.text || n.locator?.text || '').trim()
+  if (n.kind === 'condition') {
+    const text = (n.text || '').trim()
+    const needle = conditionNeedle(text)
+    if (needle && needle.length <= 80 && needle !== text) return needle
+    if (text.length <= 48) return text
+    return (n.locator?.text || '').trim()
+  }
   if (n.kind === 'click' || n.kind === 'type' || n.kind === 'key') {
     const quoted = (n.prompt || '').match(/[“"«„]([^”"»“]{1,80})[”"»“]/)
     if (quoted?.[1]?.trim()) return quoted[1].trim()
