@@ -799,6 +799,7 @@ export function createAgent(ctx: AgentContext) {
   /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
   async function typeVerified(text: string, enter: boolean, clear: boolean) {
     const typed = await bridge.typeText(text, false, clear)
+    if (typed?.rescued) log('info', 'Odak yazı kutusu değildi. Kutunun kendisi seçildi, yazı oraya gidiyor.')
     if (typed?.skippedClear) {
       throw new Error(`Odak bir yazı alanı değil (${typed.focusType || 'bilinmiyor'}). Yazı gönderilmedi.`)
     }

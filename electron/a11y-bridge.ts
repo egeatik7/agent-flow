@@ -359,7 +359,7 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
   return worker.call('windowRect', { windowTitle })
 }
 
-export type TypeResult = { cleared: boolean; skippedClear: boolean; pasted: boolean; focusType: string }
+export type TypeResult = { cleared: boolean; skippedClear: boolean; pasted: boolean; focusType: string; rescued?: boolean }
 
 export async function typeText(text: string, pressEnter: boolean, clearFirst: boolean): Promise<TypeResult | null> {
   if (!IS_WIN) return null

@@ -17,6 +17,73 @@ function Send-TextPaced([string]$t, [int]$gapMs) {
   }
 }
 
+function Test-TextLike($el) {
+  if ($null -eq $el) { return $false }
+  if (@('Edit', 'Document', 'ComboBox') -contains (Get-CT $el)) { return $true }
+  $vp = $null
+  try { return $el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) } catch { return $false }
+}
+
+function Get-TextCandidates($root, [int]$maxDepth) {
+  $out = New-Object System.Collections.ArrayList
+  if ($null -eq $root) { return , $out }
+  $queue = New-Object System.Collections.Generic.Queue[object]
+  $queue.Enqueue(@{ el = $root; d = 0 })
+  $seen = 0
+  while ($queue.Count -gt 0 -and $seen -lt 500) {
+    $pair = $queue.Dequeue()
+    $el = $pair.el
+    $d = [int]$pair.d
+    $seen++
+    if (Test-TextLike $el) { [void]$out.Add($el) }
+    if ($d -ge $maxDepth) { continue }
+    $child = $null
+    try { $child = $script:Walker.GetFirstChild($el) } catch {}
+    while ($null -ne $child) {
+      $queue.Enqueue(@{ el = $child; d = ($d + 1) })
+      try { $child = $script:Walker.GetNextSibling($child) } catch { break }
+    }
+  }
+  return , $out
+}
+
+function Select-NearestText($cands, $pt) {
+  $best = $null
+  $bestD = [double]::MaxValue
+  foreach ($el in @($cands)) {
+    try {
+      $r = $el.Current.BoundingRectangle
+      if ($r.IsEmpty -or $r.Width -lt 8 -or $r.Height -lt 8 -or $el.Current.IsOffscreen) { continue }
+      $d = [Math]::Abs(($r.X + $r.Width / 2) - $pt.X) + [Math]::Abs(($r.Y + $r.Height / 2) - $pt.Y)
+      if ($d -lt $bestD) { $bestD = $d; $best = $el }
+    } catch {}
+  }
+  return $best
+}
+
+# The click landed on a pane around the field. Focus the real edit and click its middle.
+function Move-ToTextField($focus) {
+  $pt = Get-CursorPoint
+  $cands = @(Get-TextCandidates $focus 6)
+  if ($cands.Count -eq 0) {
+    $h = [XpNative]::GetForegroundWindow()
+    if ($h -ne [IntPtr]::Zero) {
+      $top = $null
+      try { $top = $script:AE::FromHandle($h) } catch {}
+      $cands = @(Get-TextCandidates $top 8)
+    }
+  }
+  $best = Select-NearestText $cands $pt
+  if ($null -eq $best) { return $false }
+  try { $best.SetFocus() } catch {}
+  try {
+    $r = $best.Current.BoundingRectangle
+    Invoke-MouseAt ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) 'left'
+  } catch { return $false }
+  Start-Sleep -Milliseconds 180
+  return $true
+}
+
 function Invoke-Op([string]$op, $P) {
   Set-HudHandle $P
   switch ($op) {
@@ -79,19 +146,20 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
-      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = '' }
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false }
       $focus = $null
       try { $focus = $script:AE::FocusedElement } catch {}
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
+      if ($P.clearFirst -and -not (Test-TextLike $focus)) {
+        if (Move-ToTextField $focus) {
+          try { $focus = $script:AE::FocusedElement } catch {}
+          $out.focusType = Get-CT $focus
+          $out.rescued = $true
+        }
+      }
       if ($P.clearFirst) {
         # Ctrl+A / Delete only inside a text field; elsewhere it would select and delete the app's content.
-        $textLike = $false
-        if ($null -ne $focus) {
-          $vp = $null
-          if ($focus.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $textLike = $true }
-          if (@('Edit', 'Document', 'ComboBox') -contains $out.focusType) { $textLike = $true }
-        }
-        if ($textLike) {
+        if (Test-TextLike $focus) {
           Start-Sleep -Milliseconds 120
           [System.Windows.Forms.SendKeys]::SendWait('^a')
           Start-Sleep -Milliseconds 280
