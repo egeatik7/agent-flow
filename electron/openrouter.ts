@@ -123,7 +123,12 @@ export class FatalApiError extends Error {}
 /** This model could not answer. The next name in the list should be tried. */
 export class ModelFailed extends Error {}
 
+/** This model will not answer however often it is asked: wrong name or request (400/404/422), empty or unreadable answer. Outages and rate limits are not this. */
+export class ModelRejected extends ModelFailed {}
+
 const CYCLE_PAUSE_MS = 4000
+/** Whole rounds in a row in which every model was rejected for good before the step gives up. */
+const MAX_REJECTED_CYCLES = 8
 
 export function asModelChain(model: string | string[] | undefined): string[] {
   const raw = Array.isArray(model) ? model : [model ?? '']
@@ -143,12 +148,16 @@ function brief(err: unknown): string {
 
 /**
  * Tries each model once. After the last one fails, waits and starts again at the first.
- * Stops only when the user stops, or the key / balance is rejected.
+ * Stops when the user stops, the key / balance is rejected, or every model was rejected for good
+ * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits keep waiting and retrying.
  */
 export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS): Promise<T> {
   const chain = asModelChain(models)
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
+  let rejectedCycles = 0
   for (;;) {
+    let allRejected = true
+    let lastError = ''
     for (let i = 0; i < chain.length; i++) {
       if (stopCheck()) throw new StoppedError()
       const model = chain[i]
@@ -156,10 +165,16 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         return await run(model)
       } catch (e) {
         if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+        if (!(e instanceof ModelRejected)) allRejected = false
+        lastError = brief(e)
         const last = i === chain.length - 1
         const next = chain[(i + 1) % chain.length]
         chatLogger?.(last ? `${model} olmadı (${brief(e)}). Sıra başa dönüyor.` : `${model} olmadı (${brief(e)}). ${next} deneniyor.`)
       }
+    }
+    rejectedCycles = allRejected ? rejectedCycles + 1 : 0
+    if (rejectedCycles >= MAX_REJECTED_CYCLES) {
+      throw new Error(`Hiçbir model cevap vermedi: ${rejectedCycles} tur üst üste reddedildi (model adını ve ayarları kontrol et). Son hata: ${lastError}`)
     }
     chatLogger?.(`Modellerin hepsi susuyor. ${Math.round(pauseMs / 1000)} sn sonra ${chain[0]} yeniden denenecek.`)
     await stoppableWait(pauseMs)
@@ -192,13 +207,14 @@ async function chatOnce(
       if (res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
       if (res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
       if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
-      throw new ModelFailed(`OpenRouter ${res.status}: ${res.text.slice(0, 200)}`)
+      const message = `OpenRouter ${res.status}: ${res.text.slice(0, 200)}`
+      throw [400, 404, 422].includes(res.status) ? new ModelRejected(message) : new ModelFailed(message)
     }
     let data: { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
     try {
       data = JSON.parse(res.text)
     } catch {
-      throw new ModelFailed('OpenRouter yanıtı okunamadı.')
+      throw new ModelRejected('OpenRouter yanıtı okunamadı.')
     }
     if (data.error?.message) {
       const msg = data.error.message
@@ -234,14 +250,14 @@ async function chat(
   return runModelChain(asModelChain(model), async (name) => {
     try {
       const text = await chatOnce(apiKey, name, messages, hasImage, opts)
-      if (!text.trim()) throw new ModelFailed('boş yanıt')
+      if (!text.trim()) throw new ModelRejected('boş yanıt')
       return text
     } catch (e) {
       if (!(e instanceof ImageUnsupportedError)) throw e
-      if (!withoutImage) throw new ModelFailed(`${name} ekran görüntüsü kabul etmiyor.`)
+      if (!withoutImage) throw new ModelRejected(`${name} ekran görüntüsü kabul etmiyor.`)
       chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
       const text = await chatOnce(apiKey, name, withoutImage, false, opts)
-      if (!text.trim()) throw new ModelFailed('boş yanıt')
+      if (!text.trim()) throw new ModelRejected('boş yanıt')
       return text
     }
   })
@@ -752,7 +768,7 @@ export async function guiStep(opts: {
       }
       messages.push({ role: 'user', content: [imagePart(opts.screen)] })
       const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, maxTokens: 1000 })
-      if (!content.trim()) throw new ModelFailed('boş yanıt')
+      if (!content.trim()) throw new ModelRejected('boş yanıt')
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
     const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
@@ -767,7 +783,7 @@ Son ekran görüntüsü ektedir.`
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
     ]
     const content = await chatOnce(opts.apiKey, model, messages, true)
-    if (!content.trim()) throw new ModelFailed('boş yanıt')
+    if (!content.trim()) throw new ModelRejected('boş yanıt')
     return parseJsonAction(content)
   })
 }
