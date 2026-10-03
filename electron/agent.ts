@@ -828,7 +828,7 @@ export function createAgent(ctx: AgentContext) {
       const chosen = typed.choices.find((c) => c.id === pick.id)
       if (!chosen) throw new Error(`Yazı kutusu seçilemedi${pick.reason ? `: ${pick.reason}` : ''}.`)
       log('info', `Yazı kutusu: “${chosen.window}”${chosen.name ? ` / ${chosen.name}` : ''}. ${pick.reason}`)
-      typed = await bridge.typeText(text, enter, clear, at, chosen.id)
+      typed = await bridge.typeText(text, false, clear, at, chosen.id)
     }
     if (typed?.via === 'value') {
       const where = typed.where ? ` (${typed.where})` : ''
