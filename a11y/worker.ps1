@@ -18,6 +18,7 @@ function Send-TextPaced([string]$t, [int]$gapMs) {
 }
 
 function Invoke-Op([string]$op, $P) {
+  Set-HudHandle $P
   switch ($op) {
     'ping' {
       return [pscustomobject]@{ ocr = (Initialize-Ocr); ps = $PSVersionTable.PSVersion.ToString() }

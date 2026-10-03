@@ -137,6 +137,18 @@ class Worker {
 
 const worker = new Worker()
 
+let hudHandle: () => string = () => ''
+
+/** HWND of the on-screen status card, so a grab can hide it for that instant. */
+export function setHudHandle(get: () => string) {
+  hudHandle = get
+}
+
+function withHud<T extends object>(payload: T): T & { hudHwnd?: string } {
+  const hudHwnd = hudHandle()
+  return hudHwnd ? { ...payload, hudHwnd } : payload
+}
+
 let ocrEngine: OcrEngine = 'windows'
 let valueLo = 0.15
 let valueHi = 0.8
@@ -221,7 +233,7 @@ export async function scan(opts: {
   }
   const r = await worker.call<ScanResult & { shot?: string }>(
     'scan',
-    {
+    withHud({
       windowTitle: opts.windowTitle || '',
       image: opts.image ?? 'none',
       maxImageW: opts.maxImageW ?? 1400,
@@ -235,7 +247,7 @@ export async function scan(opts: {
       tilt: opts.tilt === true,
       valueLo,
       valueHi,
-    },
+    }),
     180000
   )
   const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
@@ -324,7 +336,7 @@ export async function crop(rect: { x: number; y: number; w: number; h: number },
   image: { data: string; w: number; h: number; mime?: string }
 }> {
   if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
-  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', { ...rect, maxW })
+  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', withHud({ ...rect, maxW }))
   if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h, got.image.mime) ?? got.image
   return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
@@ -378,7 +390,7 @@ export async function ocrInfo(): Promise<{ ok: boolean; main: string; extra: str
 export async function patchAt(x: number, y: number, size = 64): Promise<{ data: string; w: number; h: number } | null> {
   if (!IS_WIN) return null
   try {
-    return await worker.call('patch', { x: Math.round(x), y: Math.round(y), size }, 15000)
+    return await worker.call('patch', withHud({ x: Math.round(x), y: Math.round(y), size }), 15000)
   } catch {
     return null
   }
@@ -392,7 +404,7 @@ export async function sendKeys(keys: string, windowTitle?: string): Promise<void
 /** The element under a scanner box, with a picture of the box. */
 export async function pickAt(box: { x: number; y: number; w: number; h: number }): Promise<Locator | null> {
   if (!IS_WIN) return null
-  return worker.call('pick', { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) }, 30000)
+  return worker.call('pick', withHud({ x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) }), 30000)
 }
 
 /** Where a saved icon picture is on screen now (score 0–1). */
@@ -402,7 +414,7 @@ export async function findImage(
   region?: { x: number; y: number; w: number; h: number }
 ): Promise<{ x: number; y: number; score: number; window: string } | null> {
   if (!IS_WIN) return null
-  return worker.call('findImage', { icon, windowTitle: windowTitle || '', region: region ?? null }, 30000)
+  return worker.call('findImage', withHud({ icon, windowTitle: windowTitle || '', region: region ?? null }), 30000)
 }
 
 export async function drag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
@@ -445,5 +457,5 @@ export async function captureAtCursor(): Promise<Locator | null> {
   if (!IS_WIN) {
     return { name: 'Model Seç', text: 'Model Seç', controlType: 'Button', path: '0/1', windowTitle: 'Demo Uygulama', x: 475, y: 215 }
   }
-  return worker.call('capture', {})
+  return worker.call('capture', withHud({}))
 }

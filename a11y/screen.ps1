@@ -77,22 +77,53 @@ function Get-CaptureRect($win) {
   return [pscustomobject]@{ x = $x1; y = $y1; w = $x2 - $x1; h = $y2 - $y1 }
 }
 
+$script:HudHwnd = [IntPtr]::Zero
+
+function Set-HudHandle($P) {
+  $script:HudHwnd = [IntPtr]::Zero
+  if ($null -eq $P) { return }
+  $raw = ''
+  try { $raw = [string]$P.hudHwnd } catch { return }
+  if (-not $raw) { return }
+  try { $script:HudHwnd = New-Object IntPtr ([int64]$raw) } catch { $script:HudHwnd = [IntPtr]::Zero }
+}
+
+# CopyFromScreen sees the tracking card. Hide that window for the grab, then put it back.
+function Copy-Screen($rect) {
+  $hwnd = $script:HudHwnd
+  $hidden = $false
+  if ($null -ne $hwnd -and $hwnd -ne [IntPtr]::Zero) {
+    try {
+      if ([XpNative]::IsWindowVisible($hwnd)) {
+        [void][XpNative]::ShowWindow($hwnd, 0)
+        $hidden = $true
+        try { [void][XpNative]::DwmFlush() } catch {}
+        Start-Sleep -Milliseconds 80
+      }
+    } catch {}
+  }
+  try {
+    $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
+    $g.Dispose()
+    return $bmp
+  } finally {
+    if ($hidden) {
+      try { [void][XpNative]::ShowWindow($hwnd, 4) } catch {}
+    }
+  }
+}
+
 function Get-ScreenBitmap($rect) {
-  $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
-  $g.Dispose()
+  $bmp = Copy-Screen $rect
   # BitBlt leaves alpha at 0. A later draw then treats the whole shot as transparent and it comes out gray.
   Set-BitmapOpaque $bmp
   return $bmp
 }
 
 function Capture-Raw($rect) {
-  $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
-  $g.Dispose()
-  return $bmp
+  return (Copy-Screen $rect)
 }
 
 function Set-BitmapOpaque($bmp) {

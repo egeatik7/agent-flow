@@ -233,6 +233,26 @@ function createHud() {
   })
 }
 
+function hudNativeHandle(): string {
+  if (!hudWindow || hudWindow.isDestroyed() || !hudWindow.isVisible()) return ''
+  try {
+    const buf = hudWindow.getNativeWindowHandle()
+    if (buf.length >= 8) {
+      const value = buf.readBigUInt64LE(0)
+      return value === 0n ? '' : value.toString()
+    }
+    if (buf.length >= 4) {
+      const value = buf.readUInt32LE(0)
+      return value ? String(value) : ''
+    }
+  } catch {
+    /* window is already gone */
+  }
+  return ''
+}
+
+bridge.setHudHandle(hudNativeHandle)
+
 function raiseHud() {
   if (!hudWindow || hudWindow.isDestroyed()) return
   hudWindow.setAlwaysOnTop(true)
