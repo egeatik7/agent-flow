@@ -1,8 +1,8 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.7.75",
+  "version": "1.7.76",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/boot.js",
   "author": "Nubbo Agent Studio",
   "license": "MIT",
   "private": true,
@@ -14,7 +14,7 @@
     "build:main": "tsc -p tsconfig.node.json --outDir dist-electron",
     "build:electron": "npm run build:renderer && npm run build:main",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
-    "pack:win": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
+    "pack:win": "python3 scripts/make-splash-bmp.py && npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
     "pack:dir": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
   },
   "build": {
@@ -27,6 +27,8 @@
       "dist/**/*",
       "dist-electron/**/*",
       "resources/icon.png",
+      "resources/boot/**/*",
+      "!resources/boot/splash.bmp",
       "package.json",
       "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
       "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
@@ -65,7 +67,8 @@
       "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "Nubbo.exe"
+      "artifactName": "Nubbo.exe",
+      "splashImage": "resources/boot/splash.bmp"
     },
     "asar": true,
     "afterPack": "scripts/after-pack.cjs"

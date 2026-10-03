@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nubbo Agent Studio</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #3a6ea5;
+        font-family: Tahoma, "Segoe UI", sans-serif;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .win {
+        width: 380px;
+        background: #ece9d8;
+        border: 2px solid #fff;
+        border-right-color: #404040;
+        border-bottom-color: #404040;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+      }
+      .title {
+        height: 22px;
+        padding: 3px 8px 0;
+        color: #fff;
+        font-weight: bold;
+        background: linear-gradient(180deg, #0997ff 0%, #0058ee 18%, #0050ee 55%, #003dd7 100%);
+      }
+      .body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 16px 22px 18px;
+      }
+      .mascot {
+        width: 148px;
+        height: 148px;
+        display: block;
+        pointer-events: none;
+        image-rendering: pixelated;
+      }
+      .logo {
+        display: block;
+        width: 210px;
+        height: auto;
+        margin-top: -4px;
+        pointer-events: none;
+        image-rendering: pixelated;
+      }
+      .ver {
+        margin: 2px 0 14px;
+        font-size: 11px;
+        color: #555;
+      }
+      .track {
+        position: relative;
+        width: 100%;
+        height: 22px;
+        background: #fff;
+        border: 2px solid #808080;
+        border-right-color: #fff;
+        border-bottom-color: #fff;
+        box-shadow: inset 1px 1px 0 #404040;
+        overflow: hidden;
+      }
+      .fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 28%;
+        background: linear-gradient(180deg, #3c8aff 0%, #1657d9 55%, #0a3f9e 100%);
+        transition: width 160ms linear;
+      }
+      .cap {
+        position: relative;
+        z-index: 1;
+        margin: 0;
+        height: 18px;
+        line-height: 18px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: bold;
+        color: #000;
+        text-shadow: 1px 0 #fff, -1px 0 #fff, 0 1px #fff, 0 -1px #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <div class="title">Nubbo Agent Studio</div>
+      <div class="body">
+        <img class="mascot" src="nubbo.png" alt="" draggable="false" />
+        <img class="logo" src="nubbo-logo.png" alt="Nubbo Agent Studio" draggable="false" />
+        <p class="ver" id="ver"></p>
+        <div class="track">
+          <div class="fill" id="fill"></div>
+          <p class="cap" id="cap">Süreç açılıyor…  28%</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.boot = function (pct, line) {
+        var n = Math.max(0, Math.min(100, Math.round(pct)))
+        document.getElementById('fill').style.width = n + '%'
+        document.getElementById('cap').textContent = line + '  ' + n + '%'
+      }
+      window.bootVer = function (version) {
+        document.getElementById('ver').textContent = version ? 'version: ' + version : ''
+      }
+    </script>
+  </body>
+</html>

@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
+  bootReady: () => ipcRenderer.send('boot:ready'),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (partial: unknown) => ipcRenderer.invoke('settings:save', partial),

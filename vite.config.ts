@@ -13,7 +13,7 @@ export default defineConfig({
     react(),
     electron({
       main: {
-        entry: 'electron/main.ts',
+        entry: 'electron/boot.ts',
         vite: {
           build: {
             outDir: 'dist-electron',

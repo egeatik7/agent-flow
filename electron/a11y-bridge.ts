@@ -150,10 +150,14 @@ export function setValueRamp(lo: number, hi: number) {
   valueHi = hi
 }
 
-export function warmUp() {
-  if (!IS_WIN) return
-  worker.call('ping').catch(() => {})
+/** Starts the automation worker. Resolves when it answers, or immediately off Windows. */
+export function warmUp(): Promise<void> {
+  if (!IS_WIN) return Promise.resolve()
   warmOnnx().catch(() => {})
+  return worker.call('ping').then(
+    () => undefined,
+    () => undefined
+  )
 }
 
 export function shutdown() {

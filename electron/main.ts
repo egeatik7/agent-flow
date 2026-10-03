@@ -23,8 +23,7 @@ import { normalizeFind, normalizePrompts } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 
-// Keep the existing profile folder. The visible name can change without moving saved flows or the API key.
-app.setPath('userData', path.join(app.getPath('appData'), 'xp-agent-studio'))
+// boot.ts sets this before the app is ready. Repeating it afterwards throws.
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
@@ -35,6 +34,9 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
 
 let mainWindow: BrowserWindow | null = null
 let hudWindow: BrowserWindow | null = null
+let reportBoot: (pct: number, line: string) => void = () => {}
+let closeBoot: () => void = () => {}
+let appRevealed = false
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 let running = false
 let stopRequested = false
@@ -150,11 +152,11 @@ function createWindow() {
     title: 'Nubbo Agent Studio',
   })
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.maximize()
-    mainWindow?.show()
+  mainWindow.webContents.on('did-finish-load', () => {
+    reportBoot(94, 'Tuval yükleniyor…')
   })
 
+  reportBoot(88, 'Arayüz yükleniyor…')
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
 
@@ -306,17 +308,46 @@ function showSelf() {
   mainWindow.focus()
 }
 
-app.whenReady().then(() => {
-  createWindow()
-  createHud()
-  screen.on('display-metrics-changed', placeHud)
+function revealApp() {
+  if (appRevealed) return
+  appRevealed = true
+  reportBoot(100, 'Hazır')
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      closeBoot()
+      return
+    }
+    mainWindow.maximize()
+    mainWindow.show()
+    closeBoot()
+    mainWindow.focus()
+  }, 280)
+}
+
+/** Called from boot.ts once the splash window is already on screen. */
+export async function startApp(report: (pct: number, line: string) => void, closeSplash: () => void) {
+  reportBoot = report
+  closeBoot = closeSplash
+  const failsafe = setTimeout(revealApp, 20000)
+  ipcMain.on('boot:ready', () => {
+    clearTimeout(failsafe)
+    revealApp()
+  })
+
+  report(58, 'Kayıtlar okunuyor…')
   getSettings()
   try {
     ensureLogsDir()
   } catch {
     /* the run path creates it again before writing a log or an error shot */
   }
-  bridge.warmUp()
+  report(68, 'Erişilebilirlik köprüsü…')
+  await Promise.race([bridge.warmUp(), sleep(8000)])
+
+  report(78, 'Pencere kuruluyor…')
+  createWindow()
+  createHud()
+  screen.on('display-metrics-changed', placeHud)
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
   ipcMain.handle('window:maximize', () => {
@@ -501,7 +532,7 @@ app.whenReady().then(() => {
     if (!shot.image) throw new Error('Ekran görüntüsü alınamadı.')
     return { model: models[0] ?? '', text: await visionDescribe({ apiKey: s.apiKey, model: models, image: shot.image }) }
   })
-})
+}
 
 app.on('before-quit', () => {
   destroyHud()

@@ -25,6 +25,7 @@ export type XpAgentApi = {
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
+  bootReady?: () => void
   getSettings: () => Promise<AppSettings>
   saveSettings: (partial: Partial<AppSettings>) => Promise<AppSettings>
   getGraph: () => Promise<AgentGraph>
