@@ -26,13 +26,13 @@ import {
   chooseScreenTarget,
   guiStep,
   isTarsModel,
-  judgeReaction,
   nextAction,
   type GuiAction,
   type GuiTurn,
   planStall,
+  reportAfterClick,
   visionCheck,
-  type ReactionVerdict,
+  type AfterAction,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { rememberShot } from './shots'
@@ -509,36 +509,39 @@ export function createAgent(ctx: AgentContext) {
     return { texts: res.items.map((i) => i.text), image: res.image?.data ?? null }
   }
 
-  function labelOf(k: ReactionVerdict): string {
-    if (k === 'ready') return 'hazır'
-    if (k === 'missed') return 'tepki yok'
-    if (k === 'loading') return 'yükleniyor'
-    if (k === 'blocked') return 'başka bir şey açıldı'
-    return 'belirsiz'
+  function stepLine(n: AgentNode): string {
+    const body = n.prompt?.trim() || n.text?.trim() || ''
+    return body ? `${NODE_SPECS[n.kind].label}: ${body}` : NODE_SPECS[n.kind].label
   }
 
-  async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
+  function afterLabel(action: AfterAction, waitMs: number, lookFor: string): string {
+    if (action === 'proceed') return 'tıklama yerine ulaştı, sıradaki adıma geç'
+    if (action === 'continue') return 'sıradaki hedef zaten ekranda, devam'
+    if (action === 'wait') return `${Math.round(waitMs / 1000)} sn bekle`
+    return lookFor ? `tıklama kaçtı, “${lookFor}” bir kez daha aranacak` : 'tıklama kaçtı, sıradaki adım kendi hedefini arayacak'
+  }
+
+  /** One report when the local before/after check is unsure. Null means no model call. */
+  async function askAfter(node: AgentNode, ahead: StepAhead | undefined, verdict: Verdict, before: Snap, after: Snap) {
     const s = getSettings()
     const model = visionModels(s)
-    if (!s.apiKey || !model.length || !before.image || !after.image) return v
-    if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
+    if (!s.apiKey || !model.length || !before.image || !after.image) return null
     try {
-      const r = await judgeReaction({
+      return await reportAfterClick({
         apiKey: s.apiKey,
         model,
         system: promptOf(s.llmPrompts, 'reaction'),
-        step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
-        expected: v.expected,
+        step: stepLine(node),
+        expected: verdict.expected,
         ahead: describeAhead(ahead),
-        fresh: v.fresh,
+        fresh: verdict.fresh,
+        local: verdict.reason,
         before: { data: before.image, w: 0, h: 0 },
         after: { data: after.image, w: 0, h: 0 },
       })
-      log('info', `Görsel yorum (${labelOf(r.verdict)}): ${r.reason || 'gerekçe yok'}`)
-      return { ...v, kind: r.verdict, reason: r.reason || v.reason }
     } catch (e) {
-      log('warn', `Görsel yorum atlandı: ${(e as Error).message}`)
-      return v
+      log('warn', `Tepki raporu alınamadı: ${(e as Error).message}`)
+      return null
     }
   }
 
@@ -571,6 +574,12 @@ export function createAgent(ctx: AgentContext) {
     return false
   }
 
+  async function textOnScreen(text: string): Promise<boolean> {
+    if (process.platform !== 'win32' || !text.trim()) return false
+    const res = await bridge.scan({ image: 'none', fresh: true, tilt: true })
+    return containsText(res.items, text) || !!matchPrompt(res.items, text)
+  }
+
   async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
     const s = getSettings()
     const model = visionModels(s)
@@ -587,7 +596,7 @@ export function createAgent(ctx: AgentContext) {
         apiKey: s.apiKey,
         system: promptOf(s.llmPrompts, 'stall'),
         model,
-        step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
+        step: stepLine(node),
         problem,
         ahead: describeAhead(ahead),
         expected: expectation(ahead),
@@ -640,28 +649,35 @@ export function createAgent(ctx: AgentContext) {
       log('success', `Emin: ${verdict.reason}.`)
       return true
     }
-    if (verdict.kind === 'blocked' || verdict.kind === 'unknown') {
-      verdict = await lookCloser(verdict, before, after, node, ahead)
-      if (verdict.kind === 'ready') {
-        log('success', `Emin: ${verdict.reason}.`)
+
+    log('info', `Tepki net değil (${verdict.reason}). Modele durum raporu soruluyor.`)
+    const report = await askAfter(node, ahead, verdict, before, after)
+    if (!report) {
+      if (await aheadIsReady(ahead)) return true
+      await pause(2500)
+      if (await aheadIsReady(ahead)) return true
+      log('info', `“${node.title}” sonrası tepki doğrulanamadı; sıradaki adım kendi hedefini arayıp bekleyecek (bu adım hata sayılmadı).`)
+      return false
+    }
+    log('info', `Karar: ${afterLabel(report.action, report.waitMs, report.lookFor)}. ${report.reason}`)
+    if (report.action === 'proceed' || report.action === 'continue') return true
+    if (report.action === 'wait') {
+      await pause(report.waitMs)
+      const later = await snap(`${node.title} beklendi`)
+      const again = judgeScreen(before.texts, later.texts, expected)
+      if (again.kind === 'ready') {
+        log('success', `Emin: ${again.reason}.`)
         return true
       }
-    }
-
-    log('info', `Tepki net değil (${verdict.reason}). Akış bozulmadan sıradaki adım kontrol edilecek.`)
-    if (await aheadIsReady(ahead)) return true
-
-    log('info', 'Sıradaki öğe henüz yok. Karar vermeden önce beklenecek.')
-    await pause(2500)
-    if (await aheadIsReady(ahead)) return true
-
-    const plan = await askPlan(node, ahead, verdict.reason)
-    if (plan) {
-      log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
-      if (plan.action === 'wait') await pause(plan.waitMs)
       if (await aheadIsReady(ahead)) return true
+      log('info', `“${node.title}” sonrası bekleme yetmedi; sıradaki adım kendi hedefini arayacak (bu adım hata sayılmadı).`)
+      return false
     }
-    log('info', `“${node.title}” sonrası tepki doğrulanamadı; sıradaki adım kendi hedefini arayıp bekleyecek (bu adım hata sayılmadı).`)
+    if (report.lookFor && (await textOnScreen(report.lookFor))) {
+      log('success', `“${report.lookFor}” ekranda. Operasyon bozulmadan devam ediliyor.`)
+      return true
+    }
+    log('info', `“${node.title}” sonrası tıklama kaçmış görünüyor; sıradaki adım kendi hedefini arayacak (bu adım hata sayılmadı).`)
     return false
   }
 
@@ -694,7 +710,7 @@ export function createAgent(ctx: AgentContext) {
   /** The click/type target was not on screen. Wait, ask for a plan, then look once more before the step fails. */
   async function recoverTarget(node: AgentNode, ahead: StepAhead | undefined): Promise<Resolved | null> {
     await pause(2000)
-    const plan = await askPlan(node, ahead, `“${node.title}” istediği öğeyi ekranda bulamadı`)
+    const plan = await askPlan(node, ahead, `${NODE_SPECS[node.kind].label} istediği öğeyi ekranda bulamadı`)
     if (!plan) return null
     log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
     if (plan.action === 'wait') await pause(plan.waitMs)

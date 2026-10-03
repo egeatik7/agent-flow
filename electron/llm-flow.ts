@@ -19,7 +19,7 @@ export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt
 export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
   { id: 'screen', title: 'Ekran görüntüsü JSON', note: 'UI-TARS olmayan model ekran görüntüsüne bu prompt ile bakar.' },
   { id: 'initiative', title: 'İnisiyatif', note: 'Hedefe giderken her turda numaralı liste ve görüntü bu prompt ile gider.' },
-  { id: 'reaction', title: 'Tepki', note: 'Tıklamadan sonraki iki kare bu prompt ile yorumlanır.' },
+  { id: 'reaction', title: 'Tepki', note: 'Tıklama net değilse önceki ve sonraki kare bu prompt ile gider. Model devam, bekle ya da bir kez daha bak der.' },
   { id: 'stall', title: 'Takılma', note: 'Hedef bulunamazsa akış bu prompt ile bekler, sürer ya da durur.' },
 ]
 
@@ -70,9 +70,12 @@ Controls on screen are given as a numbered list. Clicks and typing must target a
 Actions: click, double, right, type, key, wait, done, fail.
 JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`
 
-export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
-Pick one verdict: ready, missed, loading, blocked, unknown.
-JSON only: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<short reason>"}`
+export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER one click, type, or key. A local check already looked and was not sure. Say what changed, then pick exactly one action. Do not invent a click or a new step.
+- proceed: the action landed; the next step can run
+- wait: the screen is still settling; waitSec is 1 to 8
+- continue: the next step's own target is already visible
+- retry: the action missed; lookFor is a short string to check for once on the screen. Empty if there is nothing to look for.
+JSON only: {"action":"proceed|wait|continue|retry","waitSec":3,"lookFor":"","reason":"<short reason>"}`
 
 export const STALL_PROMPT = `A desktop automation step got no clear reaction, or the next control was not found. Do not break the flow immediately.
 Decision: continue, wait (waitSec from 1 to 8), or stop.

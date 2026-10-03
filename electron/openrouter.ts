@@ -439,31 +439,47 @@ export async function visionRefine(opts: {
   return readPoint(p)
 }
 
-export type ReactionVerdict = 'ready' | 'missed' | 'loading' | 'blocked' | 'unknown'
+export type AfterAction = 'proceed' | 'wait' | 'continue' | 'retry'
 
-/** Two pocket frames: did the action move the screen toward the next step? */
-export async function judgeReaction(opts: {
+/** After a click the local check could not settle: one report, one of four actions. No new click. */
+export async function reportAfterClick(opts: {
   apiKey: string
   model: string | string[]
   step: string
   expected: string
   ahead: string
   fresh: string[]
+  local: string
   before: Img
   after: Img
   system?: string
-}): Promise<{ verdict: ReactionVerdict; reason: string }> {
+}): Promise<{ action: AfterAction; waitMs: number; lookFor: string; reason: string }> {
   const system = opts.system?.trim() || REACTION_PROMPT
-  const text = `Yapılan adım: ${opts.step}
+  const text = `Yerel kontrol emin olamadı: ${opts.local || 'ekran net değil'}
+Yapılan adım: ${opts.step}
 Sıradaki adımlar: ${opts.ahead || '(yok)'}
 Beklenen yazı veya hedef: ${opts.expected || '(yok)'}
 Sonra ekrana yeni gelen yazılar: ${opts.fresh.length ? opts.fresh.join(' | ') : '(yok)'}
-İlk görüntü adımdan önce, ikinci görüntü adımdan sonradır.`
+İlk görüntü adımdan önce, ikinci görüntü adımdan sonradır.
+Ne yapmalıyız? Yeni bir tıklama uydurma.`
   const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.before, opts.after])
-  const raw = String(p.verdict ?? p.status ?? '').toLowerCase()
-  const verdict: ReactionVerdict =
-    raw === 'ready' || raw === 'missed' || raw === 'loading' || raw === 'blocked' || raw === 'unknown' ? raw : 'unknown'
-  return { verdict, reason: String(p.reason ?? '').slice(0, 240) }
+  const named = String(p.action ?? '').toLowerCase()
+  const verdict = String(p.verdict ?? p.status ?? '').toLowerCase()
+  const action: AfterAction =
+    named === 'proceed' || named === 'wait' || named === 'continue' || named === 'retry'
+      ? named
+      : verdict === 'ready'
+        ? 'proceed'
+        : verdict === 'missed'
+          ? 'retry'
+          : 'wait'
+  const sec = Math.min(8, Math.max(1, Math.round(Number(p.waitSec) || 3)))
+  return {
+    action,
+    waitMs: sec * 1000,
+    lookFor: String(p.lookFor ?? '').trim().slice(0, 80),
+    reason: String(p.reason ?? '').slice(0, 240),
+  }
 }
 
 export async function visionCheck(opts: {
