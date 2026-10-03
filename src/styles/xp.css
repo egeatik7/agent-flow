@@ -52,9 +52,107 @@ body {
 }
 
 .desktop {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.boot-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3a6ea5;
+}
+
+.boot-window {
+  width: 380px;
+  background: #ece9d8;
+  border: 2px solid #fff;
+  border-right-color: #404040;
+  border-bottom-color: #404040;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+}
+
+.boot-title {
+  height: 22px;
+  padding: 3px 8px 0;
+  color: #fff;
+  font-weight: bold;
+  background: linear-gradient(180deg, #0997ff 0%, #0058ee 18%, #0050ee 55%, #003dd7 100%);
+}
+
+.boot-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 22px 18px;
+}
+
+.boot-mascot {
+  width: 148px;
+  height: 148px;
+  display: block;
+  pointer-events: none;
+  transform: scaleX(-1);
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.boot-logo {
+  display: block;
+  width: 210px;
+  height: auto;
+  margin-top: -4px;
+  pointer-events: none;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.boot-ver {
+  margin: 2px 0 14px;
+  font-size: 11px;
+  color: #555;
+}
+
+.boot-track {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  background: #fff;
+  border: 2px solid #808080;
+  border-right-color: #fff;
+  border-bottom-color: #fff;
+  box-shadow: inset 1px 1px 0 #404040;
+  overflow: hidden;
+}
+
+.boot-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #3c8aff 0%, #1657d9 55%, #0a3f9e 100%);
+}
+
+.boot-caption {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: bold;
+  color: #000;
+  text-shadow:
+    1px 0 #fff,
+    -1px 0 #fff,
+    0 1px #fff,
+    0 -1px #fff;
 }
 
 .xp-window {
