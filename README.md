@@ -84,11 +84,15 @@ Güvenceler:
 ## Emin olma
 
 - Sıradaki node **Koşul** ise eylem bir kez yapılır ve kontrol edilmeden geçilir; o node ekrana kendisi bakar.
-- Ekranda: eylemden önce ve sonra bir kare alınır. Sayfa değiştiyse ve sıradaki yazı geldiyse devam edilir. Tepki net
-  değilse akış hemen bozulmaz: sıradaki adımın hedefi ekranda mı diye bakılır, yoksa beklenir, gerekirse model plan kurar.
-  Aynı komut yeniden basılmaz.
-- **Yazı Yaz** sonrası alanın içi okunur. Başka bir şey yazıyorsa alan temizlenip bir kez daha yazılır; yine tutmazsa
-  adım hata verir. Kutu içindeyse o tur orada kalır ve sıradaki öğeye geçilir.
+- Ekranda: eylemden önce ve sonra bir kare alınır. Sıradaki hedefin yeni görünmesi sonuç sinyalidir; zaten duran
+  bir etiket veya ilgisiz ekran değişimi tek başına başarı sayılmaz. Tepki belirsizse sonraki adım kendi hedefini
+  kullanır; önceki adımın hafızasına doğrulanmış hedef yazılmaz. Aynı komut yeniden basılmaz.
+- Alan seçen **Tıkla → Yazı Yaz** adımlarında tıklama noktası Yaz node'una aktarılır. Yazma önce öndeki penceredeki
+  ilgili alanı bulur; salt okunur öğeler aday değildir. UIA bir Pane bildirirse gerçek Windows edit odağı da okunur.
+- **Yazı Yaz** sonrası yazılan alanın değeri okunur; Enter kapalıysa tam ekran karşılaştırması yapılmaz. Başka bir
+  şey yazıyorsa alan temizlenip bir kez daha yazılır; yine tutmazsa adım hata verir. Model alan seçerse Windows
+  tarafında aynı öğe saklanır; liste sırası değişince başka alanın üzerine yazılmaz. Alan kapanırsa veya pencere
+  değişirse yazı gönderilmez. Enter, yazma ve değer kontrolünden sonra tek kez gönderilir.
 - Son ekran kareleri `%APPDATA%/xp-agent-studio/shots` altında tutulur, eskisi silinir.
 - Model konuşmaları ajan günlüğüne düşer: giden `API →`, dönen `API ←`.
 
@@ -177,6 +181,19 @@ npm run dev          # Electron + Vite (hot reload)
 npm run dev:web      # Sadece arayüz, tarayıcıda http://127.0.0.1:4521 (tıklamalar simüle)
 npm run pack:win     # release/Nubbo.exe üretir
 ```
+
+Odak/yazma regresyon kontrolleri:
+
+```powershell
+npm run test:input
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-worker.ps1
+```
+
+İlk komut TypeScript ajanını, ikinci komut gerçek worker fonksiyonlarını taklit edilen alanlarla sınar.
+İkincisi PowerShell 7'de `pwsh -NoProfile -File scripts/test-worker.ps1` ile de çalışır.
+Bu testler gerçek Windows UIA, Blender veya Hunyuan oturumlarının yerine geçmez. Windows kontrolünde
+Çalıştır alanına bir EXE yolu yazmayı ve FolderBatcher'da Kaynak/Hedef etiketlerine ayrı ayrı tıklayıp
+ilgili kutulara farklı yollar yazmayı dene; diğer alanın değerinin korunduğunu kontrol et.
 
 - `electron/runner.ts`: akışı yürütür (kutular, kurtarma, kaldığı yerden devam).
 - `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, tepki, takılma, İnisiyatif).
