@@ -59,6 +59,12 @@ class LapLimitError extends Error {}
 
 type Budget = { used: number }
 
+/** Counts shared by a whole run, including the packages it climbs out of. `failed` is loop items or laps that ended on an error. */
+type Tally = { n: number; failed: number }
+
+/** At most this many item names are listed in the end-of-loop summary. */
+const FAILED_NAMES_SHOWN = 5
+
 function isApiDown(message: string): boolean {
   return /resourceexhausted|rate limit|quota|too many requests|429|402|401|bakiye|upstream error|openrouter \d{3}/i.test(message)
 }
@@ -110,8 +116,8 @@ export async function runGraph(
     packagePath?: string[]
     /** This node already finished. Continue from its sonraki step, then climb out of the boxes around it. */
     afterNodeId?: string
-    /** Shared step count when a run climbs out of packages. */
-    tally?: { n: number }
+    /** Shared step and failure count when a run climbs out of packages. */
+    tally?: Tally
   }
 ): Promise<void> {
   if (opts.packagePath?.length) {
@@ -128,7 +134,7 @@ export async function runGraph(
       stepDelayMs: opts.stepDelayMs,
       root: opts.root ?? graph,
       resume: opts.resume,
-      tally: opts.tally ?? { n: 0 },
+      tally: opts.tally ?? { n: 0, failed: 0 },
     }
     await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
     for (let i = layers.length - 1; i >= 0; i--) {
@@ -144,8 +150,12 @@ export async function runGraph(
 
   let vars: Record<string, string> = { sira: '1' }
   const loopNotes: string[] = []
-  const tally = opts.tally ?? { n: 0 }
+  const tally: Tally = opts.tally ?? { n: 0, failed: 0 }
   const warnedLeave = new Set<string>()
+
+  /** The closing line of a run: green only if no loop item ended on an error. */
+  const closing = (text: string): [LogLevel, string] =>
+    tally.failed > 0 ? ['warn', `${text} ${tally.failed} öğe/tur hatayla bitti; hataları yukarıdaki kayıtlarda bul.`] : ['success', text]
 
   const patch = (id: string, p: Partial<AgentNode>) => {
     const n = byId.get(id)
@@ -318,7 +328,8 @@ export async function runGraph(
         }
         ex.step(node.id, 'done')
         if (port === 'end') {
-          ex.log('success', opts.nested ? `“${node.title}” bu katmanı bitirdi.` : `“${node.title}” ile akış bitti (${tally.n} adım).`)
+          if (opts.nested) ex.log('success', `“${node.title}” bu katmanı bitirdi.`)
+          else ex.log(...closing(`“${node.title}” ile akış bitti (${tally.n} adım).`))
           throw new EndFlow()
         }
       }
@@ -406,6 +417,8 @@ export async function runGraph(
     const outer = vars
     let entry: AgentNode | undefined = startAt
     let lastFail = ''
+    let succeeded = 0
+    const failedItems: string[] = []
     loopNotes.push('')
     try {
       for (let idx = from; idx < keys.length; idx++) {
@@ -418,9 +431,12 @@ export async function runGraph(
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 })
+          succeeded++
         } catch (e) {
           if (isFatal(e)) throw e
           const msg = (e as Error).message || String(e)
+          failedItems.push(label)
+          tally.failed++
           ex.log('error', `${label}: ${msg}`)
           await ex.captureFailure?.(label).catch(() => {})
           const again = msg === lastFail
@@ -441,12 +457,18 @@ export async function runGraph(
 
     const ran = keys.length - from
     if (from < keys.length) {
-      ex.log(
-        'success',
-        from > 0
-          ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
-          : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
-      )
+      if (failedItems.length) {
+        const shown = failedItems.slice(0, FAILED_NAMES_SHOWN).join(', ')
+        const more = failedItems.length > FAILED_NAMES_SHOWN ? ` ve ${failedItems.length - FAILED_NAMES_SHOWN} tane daha` : ''
+        ex.log('warn', `“${loop.title}” bitti: ${ran} ${noun} içinde ${succeeded} tamam, ${failedItems.length} hatalı (${shown}${more}).`)
+      } else {
+        ex.log(
+          'success',
+          from > 0
+            ? `“${loop.title}” bitti: ${from + 1}. ${fromWord} itibaren ${ran} ${noun} çalıştı.`
+            : `“${loop.title}” bitti: ${keys.length} ${noun} çalıştı.`
+        )
+      }
     }
     const held = loop.startIndex
     patch(loop.id, { loopIndex: undefined, startIndex: 0 })
@@ -499,5 +521,5 @@ export async function runGraph(
     if (e instanceof EndFlow) return
     throw e
   }
-  if (!opts.nested) ex.log('success', `Akış tamamlandı (${tally.n} adım).`)
+  if (!opts.nested) ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
 }
