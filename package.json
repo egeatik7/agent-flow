@@ -13,6 +13,7 @@
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "build:main": "tsc -p tsconfig.node.json --outDir dist-electron",
     "build:electron": "npm run build:renderer && npm run build:main",
+    "test": "vitest run",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
     "pack:win": "python3 scripts/make-splash-bmp.py && npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
     "pack:dir": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
@@ -93,6 +94,7 @@
     "vite": "^6.0.6",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^5.0.3",
     "wait-on": "^8.0.1"
   }
 }
