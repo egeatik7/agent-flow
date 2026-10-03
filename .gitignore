@@ -11,3 +11,4 @@ out
 .env.*
 release/*.exe
 resources/boot/splash.bmp
+*.exe
