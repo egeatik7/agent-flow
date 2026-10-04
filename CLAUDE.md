@@ -194,7 +194,7 @@ Bir yardımcı araç gerekiyorsa açık bir kullanıcı işi yapmalı, yeniden k
 
 Repo: https://github.com/egeatik7/agent-flow
 
-İncelenen kaynak sürümü: **1.7.84**. Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
+İncelenen kaynak sürümü: **1.7.85**. Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
 
 | Dosya/bölüm | Rol |
 | --- | --- |
@@ -221,7 +221,7 @@ Node’lar ve bağlantılar JSON olarak saklanır. **Mevcut node türlerini, anl
 
 Paylaşılan loglar özellikle Windows Çalıştır penceresi ve FolderBatcher alanlarında odak/yazma sorunları gösteriyordu. Bu loglar Hunyuan–Blender zincirinin saatlerce başarıyla çalıştığını kanıtlamıyordu.
 
-Bu konuşmada 1.7.84 kaynağı üzerinde odak, alan seçimi ve yanlış başarı değerlendirmesi için yerel bir düzeltme hazırlandı. `fix/input-focus-and-confirmation` dalındaki `cba0d5765f13af7b0d9b763b8832877bf011fc40` commit’i GitHub’a gönderilmedi; ZIP/patch olarak teslim edildi. Repoyu yeni klonlayan ajan bu değişikliklerin orada olduğunu varsaymamalıdır.
+Bu konuşmada 1.7.85 kaynağı üzerinde odak, alan seçimi ve yanlış başarı değerlendirmesi için yerel bir düzeltme hazırlandı. `fix/input-focus-and-confirmation` dalındaki `cba0d5765f13af7b0d9b763b8832877bf011fc40` commit’i GitHub’a gönderilmedi; ZIP/patch olarak teslim edildi. Repoyu yeni klonlayan ajan bu değişikliklerin orada olduğunu varsaymamalıdır.
 
 Düzeltme; seçilen alanın kimliğini koruma, adayları öndeki pencereyle sınırlama, native Edit odağını kullanma, etiket–alan ilişkisi, tek Enter, tam değer kontrolü ve gereksiz yazma taramalarını azaltma konularını ele alır. Yedi ajan regresyon testi, taklit UIA ile gerçek worker fonksiyonlarının kontrolleri ve build geçti. Gerçek Windows/Blender/Hunyuan oturumunda uçtan uca doğrulama yapılmadı.
 
