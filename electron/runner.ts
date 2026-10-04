@@ -266,8 +266,8 @@ export async function runGraph(
       case 'browser':
       case 'waitFile':
       case 'moveFile':
-        ex.log('info', `“${node.title}” kaldırıldı, geçiliyor.`)
-        return node.kind === 'waitFile' ? 'found' : 'next'
+        // Skipping would let the next step run as if this one had happened (a file that never arrived).
+        throw new Error(`“${node.title}”: Bu node türü artık desteklenmiyor, akışı güncelleyin.`)
       case 'probe': {
         const picked = (node.text ?? '').trim()
         const names = picked ? [picked] : TEMPLATE_VARS

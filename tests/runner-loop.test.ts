@@ -53,6 +53,22 @@ function nestedGraph(): AgentGraph {
   return { nodes: [start, outer, inner, click], edges: [edge(start, 'next', outer)] }
 }
 
+describe('kaldırılmış node türleri', () => {
+  for (const kind of ['waitFile', 'moveFile', 'browser'] as const) {
+    it(`${kind} sessizce geçilmez: açık bir hata verir ve sonraki adım çalışmaz`, async () => {
+      const start = createNode('start', 0, 0)
+      const removed = createNode(kind, 100, 0)
+      const after = createNode('click', 200, 0)
+      after.prompt = 'sonraki'
+      const port = kind === 'waitFile' ? 'found' : 'next'
+      const graph: AgentGraph = { nodes: [start, removed, after], edges: [edge(start, 'next', removed), edge(removed, port, after)] }
+      const { ex, clicked } = fakeExecutor([])
+      await expect(runGraph(graph, ex, opts)).rejects.toThrow(/artık desteklenmiyor/)
+      expect(clicked).toEqual([])
+    })
+  }
+})
+
 describe('Döngü sonucu doğru raporlanır', () => {
   it('hepsi başarılıysa mevcut mesajlar aynen kalır', async () => {
     const { ex, logs } = fakeExecutor([])
