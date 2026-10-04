@@ -18,7 +18,8 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['electron', 'electron-store', 'onnxruntime-node', 'onnxruntime-common'],
+              // playwright-core is loaded at run time from node_modules; bundling it drags in optional parts (kerberos, chromium-bidi) that are not installed.
+              external: ['electron', 'electron-store', 'onnxruntime-node', 'onnxruntime-common', /^playwright(-core)?(\/.*)?$/, /^chromium-bidi(\/.*)?$/, 'kerberos'],
             },
           },
         },
