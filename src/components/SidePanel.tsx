@@ -58,7 +58,8 @@ const KEY_PRESETS: { label: string; keys: string }[] = [
   { label: 'Ctrl+V', keys: '^v' },
   { label: 'Ctrl+S', keys: '^s' },
   { label: 'Alt+F4', keys: '%{F4}' },
-  { label: 'Win', keys: '^{ESC}' },
+  { label: 'Win', keys: '{WIN}' },
+  { label: 'Win+R', keys: '#r' },
   { label: 'F5', keys: '{F5}' },
   { label: '↓', keys: '{DOWN}' },
   { label: '↑', keys: '{UP}' },
@@ -597,7 +598,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
               </button>
             ))}
           </div>
-          <p className="hint">^ = Ctrl, % = Alt, + = Shift. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir.</p>
+          <p className="hint">^ = Ctrl, % = Alt, + = Shift, # = Windows. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir, #r Çalıştır’ı açar. {'{'}WIN{'}'} yalnızca Windows tuşuna basar.</p>
         </div>
       )}
 

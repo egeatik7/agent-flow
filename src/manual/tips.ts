@@ -25,7 +25,7 @@ const KIND: Record<string, Tip> = {
   },
   key: {
     title: 'Tuş Gönder',
-    text: 'Klavye kısayolu yollar. ^ Ctrl, % Alt, + Shift demektir. Örnek: ^s kaydeder, {ENTER} Enter’a basar.',
+    text: 'Klavye kısayolu yollar. ^ Ctrl, % Alt, + Shift, # Windows tuşu demektir. Örnek: ^s kaydeder, {ENTER} Enter’a basar, #r Çalıştır’ı açar. {WIN} yalnızca Windows tuşuna basar.',
   },
   wait: {
     title: 'Zamanlayıcı',
@@ -344,7 +344,7 @@ function fieldTip(el: Element): Tip | null {
     ['Tıklama türü', { title: 'Tıklama türü', text: 'Tek tık, çift tık veya sağ tık. Simgeler çoğunlukla çift tık ister.' }],
     ['Yazılacak metin', { title: 'Yazılacak metin', text: 'Alana yazılacak şey. Sıradaki dosya için yalnızca {{öğe}} yaz. Sabit bir dosya adı yazarsan her tur aynı dosya gider.' }],
     ['Hangi alana?', { title: 'Hangi alana?', text: 'Yazının gideceği yer. Boşsa o an odaklanan alana yazar. Doluysa önce o yazıyı ekranda bulup oraya tıklar.' }],
-    ['Tuş (SendKeys biçimi)', { title: 'Tuş', text: '^ Ctrl, % Alt, + Shift. Alttaki hazır düğmeler sık kullanılanları doldurur. {{öğe}} bu alanda da değişir.' }],
+    ['Tuş (SendKeys biçimi)', { title: 'Tuş', text: '^ Ctrl, % Alt, + Shift, # Windows. #r Çalıştır’ı açar, {WIN} yalnızca Windows tuşuna basar. Alttaki hazır düğmeler sık kullanılanları doldurur. {{öğe}} bu alanda da değişir.' }],
     ['Önce tıklanacak yer', { title: 'Önce tıklanacak yer', text: 'Tuş gitmeden önce modelin ekranda tıklayacağı yer. Odak yanlış penceredeyse tuş oraya gitmesin diye.' }],
     ['Süre (saniye)', { title: 'Süre', text: 'Zamanlayıcının bekleyeceği saniye. Ekrana bakılmaz.' }],
     ['Ekranda aranacak yazı', { title: 'Aranacak yazı', text: 'Koşul bu yazıyı ekranda arar. Ekranda gerçekten görünen yazıyı yaz. Öğenin iç adındaki caret-down gibi ekler ekranda yoktur, onları yazma.' }],

@@ -17,6 +17,250 @@ function Send-TextPaced([string]$t, [int]$gapMs) {
   }
 }
 
+# SendKeys has no Windows key. "#" holds it (like ^ % +); {WIN}/{LWIN}/{RWIN} tap it.
+# A string with none of those is handed to SendKeys unchanged.
+function Get-SendKeysModifier([char]$ch) {
+  switch ([string]$ch) {
+    '^' { return 0x11 }
+    '%' { return 0x12 }
+    '+' { return 0x10 }
+    '#' { return 0x5B }
+  }
+  return 0
+}
+
+function Add-KeyMods($list, $src) {
+  if ($null -eq $src) { return }
+  foreach ($m in @($src)) {
+    if ($null -ne $m) { [void]$list.Add([int]$m) }
+  }
+}
+
+function Join-KeyMods($first, $second) {
+  $list = New-Object 'System.Collections.Generic.List[int]'
+  Add-KeyMods $list $first
+  Add-KeyMods $list $second
+  return ,([int[]]$list.ToArray())
+}
+
+# Index of the closing brace, or -1. "{{}" and "{}}" are the literal braces.
+function Get-SendKeysBraceEnd([string]$s, [int]$i) {
+  if ($i + 2 -lt $s.Length -and $s[$i + 2] -eq '}' -and ($s[$i + 1] -eq '{' -or $s[$i + 1] -eq '}')) {
+    return $i + 2
+  }
+  return $s.IndexOf('}', $i + 1)
+}
+
+function Get-NamedSendKey([string]$upper) {
+  if (-not $script:SendKeyNames) {
+    $script:SendKeyNames = @{
+      ENTER = 0x0D; ESC = 0x1B; ESCAPE = 0x1B; TAB = 0x09
+      BACKSPACE = 0x08; BS = 0x08; BKSP = 0x08
+      DELETE = 0x2E; DEL = 0x2E; INSERT = 0x2D; INS = 0x2D
+      HOME = 0x24; END = 0x23; PGUP = 0x21; PGDN = 0x22
+      LEFT = 0x25; RIGHT = 0x27; UP = 0x26; DOWN = 0x28
+      HELP = 0x2F; CAPSLOCK = 0x14; NUMLOCK = 0x90; SCROLLLOCK = 0x91
+      PRTSC = 0x2C; BREAK = 0x13
+      ADD = 0x6B; SUBTRACT = 0x6D; MULTIPLY = 0x6A; DIVIDE = 0x6F
+      WIN = 0x5B; LWIN = 0x5B; RWIN = 0x5C
+    }
+  }
+  if ($script:SendKeyNames.ContainsKey($upper)) { return [int]$script:SendKeyNames[$upper] }
+  return -1
+}
+
+function Test-SendKeysHasWin([string]$keys) {
+  if ([string]::IsNullOrEmpty($keys)) { return $false }
+  for ($i = 0; $i -lt $keys.Length; $i++) {
+    $ch = $keys[$i]
+    if ($ch -eq '#') { return $true }
+    if ($ch -ne '{') { continue }
+    $end = Get-SendKeysBraceEnd $keys $i
+    if ($end -lt 0) { return $false }
+    $body = $keys.Substring($i + 1, $end - $i - 1).Trim()
+    $name = $body
+    $sp = $body.LastIndexOf(' ')
+    if ($sp -gt 0) { $name = $body.Substring(0, $sp).Trim() }
+    $upper = $name.ToUpperInvariant()
+    if ($upper -eq 'WIN' -or $upper -eq 'LWIN' -or $upper -eq 'RWIN') { return $true }
+    $i = $end
+  }
+  return $false
+}
+
+function Read-SendKeysBrace([string]$s, [int]$i) {
+  $end = Get-SendKeysBraceEnd $s $i
+  if ($end -lt 0) { throw 'Tuş dizisinde kapanmayan süslü parantez.' }
+  $body = $s.Substring($i + 1, $end - $i - 1).Trim()
+  $next = $end + 1
+  if ($body.Length -eq 0) { throw 'Tuş tanınmadı: {}' }
+  $times = 1
+  $name = $body
+  $sp = $body.LastIndexOf(' ')
+  if ($sp -gt 0) {
+    $tail = $body.Substring($sp + 1)
+    $n = 0
+    if ([int]::TryParse($tail, [ref]$n) -and $n -ge 1) {
+      $head = $body.Substring(0, $sp).Trim()
+      if ($head.Length -gt 0) { $name = $head; $times = $n }
+    }
+  }
+  if ($name.Length -eq 1) {
+    return [pscustomobject]@{ kind = 'char'; char = $name; times = $times; next = $next }
+  }
+  $upper = $name.ToUpperInvariant()
+  if ($upper -match '^F(1[0-9]|2[0-4]|[1-9])$') {
+    $fn = [int]$Matches[1]
+    return [pscustomobject]@{ kind = 'vk'; vk = (0x70 + $fn - 1); times = $times; next = $next }
+  }
+  $vk = Get-NamedSendKey $upper
+  if ($vk -lt 0) { throw "Tuş tanınmadı: {$name}" }
+  return [pscustomobject]@{ kind = 'vk'; vk = $vk; times = $times; next = $next }
+}
+
+function Get-SendKeysGroupEnd([string]$s, [int]$open) {
+  $depth = 1
+  $i = $open + 1
+  while ($i -lt $s.Length) {
+    if ($s[$i] -eq '{') {
+      $end = Get-SendKeysBraceEnd $s $i
+      if ($end -lt 0) { throw 'Tuş dizisinde kapanmayan süslü parantez.' }
+      $i = $end + 1
+      continue
+    }
+    if ($s[$i] -eq '(') { $depth++ }
+    elseif ($s[$i] -eq ')') {
+      $depth--
+      if ($depth -eq 0) { return $i }
+    }
+    $i++
+  }
+  throw 'Tuş dizisinde kapanmayan parantez.'
+}
+
+function Get-SendKeysSteps([string]$s, [int[]]$held) {
+  if ($null -eq $held) { $held = [int[]]@() }
+  $steps = New-Object System.Collections.Generic.List[object]
+  $pending = New-Object 'System.Collections.Generic.List[int]'
+  $i = 0
+  while ($i -lt $s.Length) {
+    $ch = $s[$i]
+    $mod = Get-SendKeysModifier $ch
+    if ($mod -ne 0) {
+      [void]$pending.Add($mod)
+      $i++
+      if ($i -lt $s.Length -and $s[$i] -eq '(') {
+        $close = Get-SendKeysGroupEnd $s $i
+        $inner = $s.Substring($i + 1, $close - $i - 1)
+        $nextHeld = Join-KeyMods $held $pending
+        $pending.Clear()
+        foreach ($st in (Get-SendKeysSteps $inner $nextHeld)) { [void]$steps.Add($st) }
+        $i = $close + 1
+      }
+      continue
+    }
+    if ($ch -eq '(') {
+      $close = Get-SendKeysGroupEnd $s $i
+      $inner = $s.Substring($i + 1, $close - $i - 1)
+      $nextHeld = Join-KeyMods $held $pending
+      $pending.Clear()
+      foreach ($st in (Get-SendKeysSteps $inner $nextHeld)) { [void]$steps.Add($st) }
+      $i = $close + 1
+      continue
+    }
+    if ($ch -eq ')') { throw 'Tuş dizisinde fazla kapanan parantez.' }
+    $mods = Join-KeyMods $held $pending
+    $pending.Clear()
+    if ($ch -eq '~') {
+      [void]$steps.Add([pscustomobject]@{ kind = 'vk'; vk = 0x0D; mods = $mods; times = 1 })
+      $i++
+      continue
+    }
+    if ($ch -eq '{') {
+      $tok = Read-SendKeysBrace $s $i
+      $i = [int]$tok.next
+      if ($tok.kind -eq 'char') {
+        [void]$steps.Add([pscustomobject]@{ kind = 'char'; char = [string]$tok.char; mods = $mods; times = [int]$tok.times })
+      } else {
+        [void]$steps.Add([pscustomobject]@{ kind = 'vk'; vk = [int]$tok.vk; mods = $mods; times = [int]$tok.times })
+      }
+      continue
+    }
+    [void]$steps.Add([pscustomobject]@{ kind = 'char'; char = [string]$ch; mods = $mods; times = 1 })
+    $i++
+  }
+  if ($pending.Count -eq 1) {
+    [void]$steps.Add([pscustomobject]@{ kind = 'vk'; vk = [int]$pending[0]; mods = (Join-KeyMods $held $null); times = 1 })
+  } elseif ($pending.Count -gt 1) {
+    [void]$steps.Add([pscustomobject]@{ kind = 'mods'; mods = (Join-KeyMods $held $pending); times = 1 })
+  }
+  return ,$steps
+}
+
+function Resolve-SendKeysChar([string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { throw 'Tuş boş.' }
+  $ch = [char]$text[0]
+  if ($ch -ge 'a' -and $ch -le 'z') {
+    return [pscustomobject]@{ vk = [int]([char]::ToUpperInvariant($ch)); extra = ([int[]]@()) }
+  }
+  if ($ch -ge 'A' -and $ch -le 'Z') {
+    return [pscustomobject]@{ vk = [int]$ch; extra = ([int[]]@(0x10)) }
+  }
+  if ($ch -ge '0' -and $ch -le '9') {
+    return [pscustomobject]@{ vk = [int]$ch; extra = ([int[]]@()) }
+  }
+  if ($ch -eq ' ') {
+    return [pscustomobject]@{ vk = 0x20; extra = ([int[]]@()) }
+  }
+  $packed = [XpInput]::ScanChar($ch)
+  if ($packed -lt 0) { throw "Bu klavye düzeninde üretilemeyen karakter: $text" }
+  $vk = $packed -band 0xFF
+  $state = [int](($packed -band 0xFF00) / 256)
+  $extra = New-Object 'System.Collections.Generic.List[int]'
+  if (($state -band 1) -ne 0) { $extra.Add(0x10) }
+  if (($state -band 2) -ne 0) { $extra.Add(0x11) }
+  if (($state -band 4) -ne 0) { $extra.Add(0x12) }
+  return [pscustomobject]@{ vk = $vk; extra = ([int[]]$extra.ToArray()) }
+}
+
+function Send-ParsedKey($step) {
+  $mods = New-Object 'System.Collections.Generic.List[int]'
+  foreach ($m in @($step.mods)) {
+    if ($null -eq $m) { continue }
+    $mv = [int]$m
+    if (-not $mods.Contains($mv)) { $mods.Add($mv) }
+  }
+  if ($step.kind -eq 'mods') {
+    [XpInput]::Chord([int[]]$mods.ToArray(), 0, 1)
+    return
+  }
+  $times = 1
+  if ($null -ne $step.times) { $times = [int]$step.times }
+  if ($times -lt 1) { $times = 1 }
+  $vk = 0
+  if ($step.kind -eq 'char') {
+    $resolved = Resolve-SendKeysChar ([string]$step.char)
+    $vk = [int]$resolved.vk
+    foreach ($m in @($resolved.extra)) {
+      if ($null -eq $m) { continue }
+      $mv = [int]$m
+      if (-not $mods.Contains($mv)) { $mods.Add($mv) }
+    }
+  } else {
+    $vk = [int]$step.vk
+  }
+  [XpInput]::Chord([int[]]$mods.ToArray(), $vk, $times)
+}
+
+function Send-KeyString([string]$keys) {
+  if (-not (Test-SendKeysHasWin $keys)) {
+    [System.Windows.Forms.SendKeys]::SendWait([string]$keys)
+    return
+  }
+  $steps = Get-SendKeysSteps $keys ([int[]]@())
+  foreach ($step in $steps) { Send-ParsedKey $step }
+}
+
 if (-not ('XpWin' -as [type])) {
   Add-Type -TypeDefinition @"
 using System;
@@ -578,7 +822,7 @@ function Invoke-Op([string]$op, $P) {
         $win = Find-WindowOrNull ([string]$P.windowTitle)
         if ($null -ne $win) { Enter-Window $win }
       }
-      [System.Windows.Forms.SendKeys]::SendWait([string]$P.keys)
+      Send-KeyString ([string]$P.keys)
       return $true
     }
     'foreground' {

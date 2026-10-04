@@ -46,6 +46,7 @@ public static class XpInput {
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
 
   public static void Wheel(int x, int y, int clicks, bool horizontal) {
     SetCursorPos(x, y);
@@ -80,7 +81,7 @@ public static class XpInput {
     {"capslock",0x14},{"printscreen",0x2C},{"numpad0",0x60},{"numpad1",0x61},{"numpad2",0x62},{"numpad3",0x63},{"numpad4",0x64},
     {"numpad5",0x65},{"numpad6",0x66},{"numpad7",0x67},{"numpad8",0x68},{"numpad9",0x69}
   };
-  static readonly HashSet<int> Extended = new HashSet<int> { 0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B };
+  static readonly HashSet<int> Extended = new HashSet<int> { 0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B,0x5C };
 
   static int Vk(string name) {
     int v;
@@ -110,6 +111,45 @@ public static class XpInput {
     foreach (var c in codes) { keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero); Thread.Sleep(25); }
     for (int i = codes.Count - 1; i >= 0; i--) { keybd_event((byte)codes[i], 0, (Extended.Contains(codes[i]) ? 1u : 0u) | 2u, UIntPtr.Zero); Thread.Sleep(20); }
     return "";
+  }
+
+  /// One shortcut. Modifiers go down, vk is tapped `times` times, then modifiers come back up.
+  /// vk 0 presses only the modifiers. They are released even when a tap throws.
+  public static void Chord(int[] mods, int vk, int times) {
+    var down = new List<int>();
+    try {
+      if (mods != null) {
+        foreach (var m in mods) {
+          if (m == 0 || down.Contains(m)) continue;
+          down.Add(m);
+          keybd_event((byte)m, 0, Extended.Contains(m) ? 1u : 0u, UIntPtr.Zero);
+          Thread.Sleep(25);
+        }
+      }
+      if (vk != 0) {
+        if (times < 1) times = 1;
+        uint ext = Extended.Contains(vk) ? 1u : 0u;
+        for (int n = 0; n < times; n++) {
+          keybd_event((byte)vk, 0, ext, UIntPtr.Zero);
+          Thread.Sleep(20);
+          keybd_event((byte)vk, 0, ext | 2u, UIntPtr.Zero);
+          if (n + 1 < times) Thread.Sleep(20);
+        }
+      }
+    } finally {
+      for (int i = down.Count - 1; i >= 0; i--) {
+        int m = down[i];
+        keybd_event((byte)m, 0, (Extended.Contains(m) ? 1u : 0u) | 2u, UIntPtr.Zero);
+        Thread.Sleep(20);
+      }
+    }
+  }
+
+  /// Low byte is the virtual key, high byte is the shift state (1 shift, 2 ctrl, 4 alt). -1 if this layout cannot type it.
+  public static int ScanChar(char ch) {
+    short scan = VkKeyScan(ch);
+    if (scan == -1) return -1;
+    return scan & 0xFFFF;
   }
 }
 "@

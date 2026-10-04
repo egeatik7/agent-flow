@@ -40,6 +40,23 @@ namespace System.Windows.Forms {
   public static void SendWait(string k){ Sent.Add(k); if (OnKey != null) OnKey(k); }
  }
 }
+public static class XpInput {
+ public sealed class Hit {
+  public int[] Mods;
+  public int Vk;
+  public int Times;
+ }
+ public static System.Collections.Generic.List<Hit> Chords = new System.Collections.Generic.List<Hit>();
+ public static void Chord(int[] mods, int vk, int times) {
+  if (mods == null) mods = new int[0];
+  Chords.Add(new Hit { Mods = mods, Vk = vk, Times = times });
+ }
+ public static int ScanChar(char ch) {
+  if (ch == '#') return (1 << 8) | 0x33;
+  if (ch == '+') return (1 << 8) | 0xBB;
+  return -1;
+ }
+}
 '@
 $script:AE = [MockAE]
 $script:Writes = New-Object System.Collections.ArrayList
@@ -259,4 +276,106 @@ SetupForm; UseKeyboard $false; [XpWin]::Texts[[long]102] = 'OLD PATH'; [XpWin]::
 $r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
 Check ([XpWin]::SelectAllCalls -eq 0) 'A password box is never read, so the fallback is not used on it'
 
-Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A.'
+# --- Tuş Gönder: Windows key, without sending the rest of SendKeys down a new path. ---
+function Reset-Keys {
+  [System.Windows.Forms.SendKeys]::Sent.Clear()
+  [XpInput]::Chords.Clear()
+}
+function KeyOp([string]$keys) {
+  Reset-Keys
+  [void](Invoke-Op 'keys' ([pscustomobject]@{ keys = $keys }))
+}
+function Check-Sent([string]$expect, [string]$message) {
+  $sent = @([System.Windows.Forms.SendKeys]::Sent)
+  $chords = @([XpInput]::Chords)
+  if ($sent.Count -ne 1 -or [string]$sent[0] -ne $expect -or $chords.Count -ne 0) {
+    throw "$message (sent=[$($sent -join '|')] chords=$($chords.Count))"
+  }
+}
+function Check-Chord([int]$index, [int]$vk, [int]$times, $mods, [string]$message) {
+  if ($null -eq $mods) { $mods = @() }
+  $expect = @($mods)
+  $all = @([XpInput]::Chords)
+  if ($all.Count -le $index) { throw "$message (missing chord $index, have $($all.Count))" }
+  $c = $all[$index]
+  if ([int]$c.Vk -ne $vk -or [int]$c.Times -ne $times) { throw "$message (vk $($c.Vk) x$($c.Times), want $vk x$times)" }
+  $got = @($c.Mods | Where-Object { $null -ne $_ })
+  if ($got.Count -ne $expect.Count) { throw "$message (mods $($got -join '+') != $($expect -join '+'))" }
+  for ($n = 0; $n -lt $expect.Count; $n++) {
+    if ([int]$got[$n] -ne [int]$expect[$n]) { throw "$message (mods $($got -join '+') != $($expect -join '+'))" }
+  }
+}
+function Check-NoSend([string]$message) {
+  if (@([System.Windows.Forms.SendKeys]::Sent).Count -ne 0) { throw "$message (SendKeys was used)" }
+}
+
+KeyOp '^s'
+Check-Sent '^s' 'Ctrl+S stays on SendKeys'
+KeyOp '{ENTER}'
+Check-Sent '{ENTER}' 'Enter stays on SendKeys'
+KeyOp '%{F4}'
+Check-Sent '%{F4}' 'Alt+F4 stays on SendKeys'
+KeyOp '^{ESC}'
+Check-Sent '^{ESC}' 'Ctrl+Esc stays on SendKeys'
+KeyOp '{#}'
+Check-Sent '{#}' 'A braced hash is a literal hash, not the Windows key'
+KeyOp '+(ec)'
+Check-Sent '+(ec)' 'A grouped shortcut with no Windows key stays on SendKeys'
+KeyOp ''
+Check-Sent '' 'An empty shortcut still goes to SendKeys'
+
+KeyOp '#r'
+Check-NoSend 'Win+R must not go through SendKeys'
+Check (@([XpInput]::Chords).Count -eq 1) 'Win+R is one shortcut'
+Check-Chord 0 0x52 1 @(0x5B) 'Win+R holds Left Windows and taps R'
+
+KeyOp '#e'
+Check-Chord 0 0x45 1 @(0x5B) 'Win+E holds Left Windows and taps E without Shift'
+
+KeyOp '#E'
+Check-Chord 0 0x45 1 @(0x5B, 0x10) 'Win+Shift+E when the letter is uppercase'
+
+KeyOp '#+s'
+Check-Chord 0 0x53 1 @(0x5B, 0x10) 'Win+Shift+S is the snip shortcut'
+
+KeyOp '#{F4}'
+Check-Chord 0 0x73 1 @(0x5B) 'Win+F4'
+
+KeyOp '#'
+Check-Chord 0 0x5B 1 @() 'A lone # taps the Windows key'
+
+KeyOp '{WIN}'
+Check-Chord 0 0x5B 1 @() '{WIN} taps the Windows key'
+KeyOp '{lwin}'
+Check-Chord 0 0x5B 1 @() '{LWIN} taps the left Windows key'
+KeyOp '{RWIN}'
+Check-Chord 0 0x5C 1 @() '{RWIN} taps the right Windows key'
+KeyOp '{WIN 2}'
+Check-Chord 0 0x5B 2 @() '{WIN 2} repeats the Windows key'
+
+KeyOp '^(#e)'
+Check-Chord 0 0x45 1 @(0x11, 0x5B) 'A group can hold Ctrl and Windows together'
+
+KeyOp '#(er)'
+Check (@([XpInput]::Chords).Count -eq 2) 'Win held for a group is one shortcut per key'
+Check-Chord 0 0x45 1 @(0x5B) 'Grouped Win+E'
+Check-Chord 1 0x52 1 @(0x5B) 'Grouped Win+R'
+
+KeyOp '^s#e'
+Check-NoSend 'A mixed string that contains Windows is not split back to SendKeys'
+Check-Chord 0 0x53 1 @(0x11) 'Ctrl+S still happens before the Windows shortcut'
+Check-Chord 1 0x45 1 @(0x5B) 'Win+E follows Ctrl+S'
+
+KeyOp '{WIN}{ENTER}'
+Check-Chord 0 0x5B 1 @() 'Windows key in a sequence'
+Check-Chord 1 0x0D 1 @() 'Enter after the Windows key is the real Enter key'
+
+KeyOp '#{#}'
+Check-Chord 0 0x33 1 @(0x5B, 0x10) 'Win plus a literal hash uses the keyboard layout, not a second Windows key'
+
+$bad = ''
+try { KeyOp '#{NOPE}' } catch { $bad = [string]$_.Exception.Message }
+Check ($bad -match 'NOPE') 'An unknown key names itself'
+Check (@([XpInput]::Chords).Count -eq 0) 'A bad Windows shortcut presses nothing'
+
+Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) while other SendKeys strings stay on SendKeys.'
