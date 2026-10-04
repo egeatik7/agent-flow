@@ -102,12 +102,16 @@ function Copy-Screen($rect) {
       }
     } catch {}
   }
+  $bmp = $null
   try {
     $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
-    $g.Dispose()
+    try { $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size) } finally { $g.Dispose() }
     return $bmp
+  } catch {
+    # A grab that fails (lock screen, secure desktop) must not leave its bitmap behind.
+    if ($null -ne $bmp) { $bmp.Dispose() }
+    throw
   } finally {
     if ($hidden) {
       try { [void][XpNative]::ShowWindow($hwnd, 4) } catch {}
@@ -748,64 +752,71 @@ function Invoke-Scan($P) {
   if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
 
   $bmp = Capture-Raw $rect
-  Set-BitmapOpaque $bmp
-  $ocr = New-Object System.Collections.ArrayList
-  $ocrOk = $false
-  $shot = ''
-  $sideCount = 0
-  $script:ValueLo = 0.15
-  $script:ValueHi = 0.80
-  # The window keeps this copy. Value squeeze below touches only the reader bitmap.
+  # Every bitmap below is released even when a step throws; a worker lives for hours.
   $shotBmp = $null
-  $mode = [string]$P.image
-  if ($mode -eq 'plain' -or $mode -eq 'marked') { $shotBmp = Copy-Bitmap32 $bmp }
-  $sig = ''
-  if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
-  if ($P.ocr -ne $false) {
-    $ocrOk = Initialize-Ocr
-    if ($null -ne $P.valueLo) { $script:ValueLo = [double]$P.valueLo }
-    if ($null -ne $P.valueHi) { $script:ValueHi = [double]$P.valueHi }
-    if ($ocrOk) {
-      try { [XpTurn]::CompressValue($bmp, $script:ValueLo, $script:ValueHi) } catch {}
-      $ocr = Get-OcrPhrases $bmp $rect.x $rect.y
+  try {
+    Set-BitmapOpaque $bmp
+    $ocr = New-Object System.Collections.ArrayList
+    $ocrOk = $false
+    $shot = ''
+    $sideCount = 0
+    $script:ValueLo = 0.15
+    $script:ValueHi = 0.80
+    # The window keeps this copy. Value squeeze below touches only the reader bitmap.
+    $shotBmp = $null
+    $mode = [string]$P.image
+    if ($mode -eq 'plain' -or $mode -eq 'marked') { $shotBmp = Copy-Bitmap32 $bmp }
+    $sig = ''
+    if ($P.sig -eq $true) { $sig = [Convert]::ToBase64String([XpImage]::Signature($bmp)) }
+    if ($P.ocr -ne $false) {
+      $ocrOk = Initialize-Ocr
+      if ($null -ne $P.valueLo) { $script:ValueLo = [double]$P.valueLo }
+      if ($null -ne $P.valueHi) { $script:ValueHi = [double]$P.valueHi }
+      if ($ocrOk) {
+        try { [XpTurn]::CompressValue($bmp, $script:ValueLo, $script:ValueHi) } catch {}
+        $ocr = Get-OcrPhrases $bmp $rect.x $rect.y
+      }
+      try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
     }
-    try { $shot = Save-OnnxShot $bmp } catch { $shot = '' }
-  }
-  if ($P.tilt -eq $true -and $ocrOk) {
-    try {
-      $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
-      $sideCount = @($tilted).Count
-      foreach ($p in @($tilted)) { if ($null -ne $p) { [void]$ocr.Add($p) } }
-    } catch {
-      $sideCount = 0
+    if ($P.tilt -eq $true -and $ocrOk) {
+      try {
+        $tilted = Get-TiltedPhrases $bmp ([int]$rect.x) ([int]$rect.y) $ocr
+        $sideCount = @($tilted).Count
+        foreach ($p in @($tilted)) { if ($null -ne $p) { [void]$ocr.Add($p) } }
+      } catch {
+        $sideCount = 0
+      }
     }
-  }
-  $items = Merge-Items $uia $ocr
+    $items = Merge-Items $uia $ocr
 
-  $img = $null
-  if ($null -ne $shotBmp) {
-    $maxW = 1400
-    if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
-    $snap = 0
-    if ($P.snap) { $snap = [int]$P.snap }
-    $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
-    $shotBmp.Dispose()
-  }
-  $bmp.Dispose()
+    $img = $null
+    if ($null -ne $shotBmp) {
+      $maxW = 1400
+      if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
+      $snap = 0
+      if ($P.snap) { $snap = [int]$P.snap }
+      $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
+      $shotBmp.Dispose()
+    }
+    $bmp.Dispose()
 
-  return [pscustomobject]@{
-    area   = $rect
-    items  = $items
-    ocr    = $ocrOk
-    uiaCount = $uia.Count
-    ocrCount = $ocr.Count
-    image  = $img
-    window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
-    missingWindow = $missing
-    sig    = $sig
-    uiaSkipped = $script:UiaSkipped
-    shot   = $shot
-    sideCount = $sideCount
+    return [pscustomobject]@{
+      area   = $rect
+      items  = $items
+      ocr    = $ocrOk
+      uiaCount = $uia.Count
+      ocrCount = $ocr.Count
+      image  = $img
+      window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
+      missingWindow = $missing
+      sig    = $sig
+      uiaSkipped = $script:UiaSkipped
+      shot   = $shot
+      sideCount = $sideCount
+    }
+  } finally {
+    if ($null -ne $shotBmp) { $shotBmp.Dispose() }
+    $bmp.Dispose()
   }
 }
 
@@ -835,25 +846,29 @@ function Get-PatchAt([int]$x, [int]$y, [int]$size) {
 
 function Invoke-FindImage($P) {
   $bytes = [Convert]::FromBase64String([string]$P.icon)
-  $ms = New-Object System.IO.MemoryStream(, $bytes)
-  $tpl = New-Object System.Drawing.Bitmap $ms
-  $win = $null
-  if ($P.windowTitle) { $win = Find-WindowOrNull ([string]$P.windowTitle) }
-  $rect = Get-CaptureRect $win
-  if ($P.region) {
-    $v = Get-VirtualScreen
-    $x1 = [Math]::Max($v.x, [int]$P.region.x); $y1 = [Math]::Max($v.y, [int]$P.region.y)
-    $x2 = [Math]::Min($v.x + $v.w, [int]($P.region.x + $P.region.w)); $y2 = [Math]::Min($v.y + $v.h, [int]($P.region.y + $P.region.h))
-    if ($x2 - $x1 -gt $tpl.Width -and $y2 - $y1 -gt $tpl.Height) { $rect = [pscustomobject]@{ x = $x1; y = $y1; w = $x2 - $x1; h = $y2 - $y1 } }
+  $ms = $null; $tpl = $null; $bmp = $null; $tpl24 = $null
+  try {
+    $ms = New-Object System.IO.MemoryStream(, $bytes)
+    $tpl = New-Object System.Drawing.Bitmap $ms
+    $win = $null
+    if ($P.windowTitle) { $win = Find-WindowOrNull ([string]$P.windowTitle) }
+    $rect = Get-CaptureRect $win
+    if ($P.region) {
+      $v = Get-VirtualScreen
+      $x1 = [Math]::Max($v.x, [int]$P.region.x); $y1 = [Math]::Max($v.y, [int]$P.region.y)
+      $x2 = [Math]::Min($v.x + $v.w, [int]($P.region.x + $P.region.w)); $y2 = [Math]::Min($v.y + $v.h, [int]($P.region.y + $P.region.h))
+      if ($x2 - $x1 -gt $tpl.Width -and $y2 - $y1 -gt $tpl.Height) { $rect = [pscustomobject]@{ x = $x1; y = $y1; w = $x2 - $x1; h = $y2 - $y1 } }
+    }
+    $bmp = Get-ScreenBitmap $rect
+    $tpl24 = New-Object System.Drawing.Bitmap $tpl.Width, $tpl.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $g = [System.Drawing.Graphics]::FromImage($tpl24)
+    $g.DrawImage($tpl, 0, 0, $tpl.Width, $tpl.Height)
+    $g.Dispose()
+    $r = [XpImage]::Find($bmp, $tpl24)
+    return [pscustomobject]@{ x = [int]($rect.x + $r[0]); y = [int]($rect.y + $r[1]); score = [double]$r[2]; window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' }) }
+  } finally {
+    foreach ($d in @($bmp, $tpl, $tpl24, $ms)) { if ($null -ne $d) { $d.Dispose() } }
   }
-  $bmp = Get-ScreenBitmap $rect
-  $tpl24 = New-Object System.Drawing.Bitmap $tpl.Width, $tpl.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-  $g = [System.Drawing.Graphics]::FromImage($tpl24)
-  $g.DrawImage($tpl, 0, 0, $tpl.Width, $tpl.Height)
-  $g.Dispose()
-  $r = [XpImage]::Find($bmp, $tpl24)
-  $bmp.Dispose(); $tpl.Dispose(); $tpl24.Dispose(); $ms.Dispose()
-  return [pscustomobject]@{ x = [int]($rect.x + $r[0]); y = [int]($rect.y + $r[1]); score = [double]$r[2]; window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' }) }
 }
 
 function Get-TextNear([int]$px, [int]$py) {
