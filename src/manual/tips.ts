@@ -344,7 +344,7 @@ function fieldTip(el: Element): Tip | null {
     ['Tıklama türü', { title: 'Tıklama türü', text: 'Tek tık, çift tık veya sağ tık. Simgeler çoğunlukla çift tık ister.' }],
     ['Yazılacak metin', { title: 'Yazılacak metin', text: 'Alana yazılacak şey. Sıradaki dosya için yalnızca {{öğe}} yaz. Sabit bir dosya adı yazarsan her tur aynı dosya gider.' }],
     ['Hangi alana?', { title: 'Hangi alana?', text: 'Yazının gideceği yer. Boşsa o an odaklanan alana yazar. Doluysa önce o yazıyı ekranda bulup oraya tıklar.' }],
-    ['Tuş / Kısayol', { title: 'Tuş', text: 'ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{F4}, #r) de desteklenir. Win düğmesi sona win+ ekler. {{öğe}} bu alanda da değişir.' }],
+    ['Tuş / Kısayol', { title: 'Tuş', text: 'ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{F4}, #r) de desteklenir. Win düğmesi Windows kısayolunu başlatır; tamamlanmış kısayolu win+ ile değiştirir. {{öğe}} bu alanda da değişir.' }],
     ['Önce tıklanacak yer', { title: 'Önce tıklanacak yer', text: 'Tuş gitmeden önce modelin ekranda tıklayacağı yer. Odak yanlış penceredeyse tuş oraya gitmesin diye.' }],
     ['Süre (saniye)', { title: 'Süre', text: 'Zamanlayıcının bekleyeceği saniye. Ekrana bakılmaz.' }],
     ['Ekranda aranacak yazı', { title: 'Aranacak yazı', text: 'Koşul bu yazıyı ekranda arar. Ekranda gerçekten görünen yazıyı yaz. Öğenin iç adındaki caret-down gibi ekler ekranda yoktur, onları yazma.' }],

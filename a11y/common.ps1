@@ -46,7 +46,7 @@ public static class XpInput {
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
-  [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] static extern short VkKeyScanW(char ch);
 
   public static void Wheel(int x, int y, int clicks, bool horizontal) {
     SetCursorPos(x, y);
@@ -73,7 +73,7 @@ public static class XpInput {
   }
 
   static readonly Dictionary<string, int> Named = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) {
-    {"ctrl",0x11},{"control",0x11},{"shift",0x10},{"alt",0x12},{"win",0x5B},{"meta",0x5B},{"cmd",0x5B},{"super",0x5B},
+    {"ctrl",0x11},{"control",0x11},{"shift",0x10},{"alt",0x12},{"win",0x5B},{"lwin",0x5B},{"rwin",0x5C},{"meta",0x5B},{"cmd",0x5B},{"super",0x5B},
     {"enter",0x0D},{"return",0x0D},{"esc",0x1B},{"escape",0x1B},{"tab",0x09},{"space",0x20},{"backspace",0x08},
     {"delete",0x2E},{"del",0x2E},{"insert",0x2D},{"home",0x24},{"end",0x23},{"pageup",0x21},{"pagedown",0x22},
     {"left",0x25},{"up",0x26},{"right",0x27},{"down",0x28},{"arrowleft",0x25},{"arrowup",0x26},{"arrowright",0x27},{"arrowdown",0x28},
@@ -97,19 +97,39 @@ public static class XpInput {
     return -1;
   }
 
-  /// Presses a combination like ["ctrl","shift","a"]: modifiers down, key tap, modifiers up.
+  // Do not sleep during cleanup: a second interrupted sleep must not skip the remaining keys.
+  // Attempt every release even if one native call throws, then report that error.
+  static void ReleaseKeys(List<int> down) {
+    Exception first = null;
+    for (int i = down.Count - 1; i >= 0; i--) {
+      int key = down[i];
+      try { keybd_event((byte)key, 0, (Extended.Contains(key) ? 1u : 0u) | 2u, UIntPtr.Zero); }
+      catch (Exception e) { if (first == null) first = e; }
+    }
+    if (first != null) throw new InvalidOperationException("KEY_RELEASE_FAILED", first);
+  }
+
+  /// Validate the whole shortcut first. Every pressed key is released, including on an exception.
   public static string Combo(string[] names) {
+    if (names == null || names.Length == 0) return "EMPTY";
     var codes = new List<int>();
     foreach (var raw in names) {
+      if (raw == null) return "UNKNOWN_KEY: null";
       var n = raw.Trim();
       if (n.Length == 0) continue;
       int v = Vk(n);
       if (v < 0) return "UNKNOWN_KEY: " + n;
-      codes.Add(v);
+      if (!codes.Contains(v)) codes.Add(v);
     }
     if (codes.Count == 0) return "EMPTY";
-    foreach (var c in codes) { keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero); Thread.Sleep(25); }
-    for (int i = codes.Count - 1; i >= 0; i--) { keybd_event((byte)codes[i], 0, (Extended.Contains(codes[i]) ? 1u : 0u) | 2u, UIntPtr.Zero); Thread.Sleep(20); }
+    var down = new List<int>();
+    try {
+      foreach (var c in codes) {
+        down.Add(c);
+        keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero);
+        Thread.Sleep(25);
+      }
+    } finally { ReleaseKeys(down); }
     return "";
   }
 
@@ -130,24 +150,23 @@ public static class XpInput {
         if (times < 1) times = 1;
         uint ext = Extended.Contains(vk) ? 1u : 0u;
         for (int n = 0; n < times; n++) {
-          keybd_event((byte)vk, 0, ext, UIntPtr.Zero);
-          Thread.Sleep(20);
-          keybd_event((byte)vk, 0, ext | 2u, UIntPtr.Zero);
+          try {
+            keybd_event((byte)vk, 0, ext, UIntPtr.Zero);
+            Thread.Sleep(20);
+          } finally {
+            keybd_event((byte)vk, 0, ext | 2u, UIntPtr.Zero);
+          }
           if (n + 1 < times) Thread.Sleep(20);
         }
       }
     } finally {
-      for (int i = down.Count - 1; i >= 0; i--) {
-        int m = down[i];
-        keybd_event((byte)m, 0, (Extended.Contains(m) ? 1u : 0u) | 2u, UIntPtr.Zero);
-        Thread.Sleep(20);
-      }
+      ReleaseKeys(down);
     }
   }
 
   /// Low byte is the virtual key, high byte is the shift state (1 shift, 2 ctrl, 4 alt). -1 if this layout cannot type it.
   public static int ScanChar(char ch) {
-    short scan = VkKeyScan(ch);
+    short scan = VkKeyScanW(ch);
     if (scan == -1) return -1;
     return scan & 0xFFFF;
   }

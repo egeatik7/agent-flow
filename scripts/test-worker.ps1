@@ -334,6 +334,14 @@ KeyOp '%{F4}'
 Check-Sent '%{F4}' 'Alt+F4 stays on SendKeys'
 KeyOp '^{ESC}'
 Check-Sent '^{ESC}' 'Ctrl+Esc stays on SendKeys'
+KeyOp '+a'
+Check-Sent '+a' 'Legacy Shift+A must retain the Shift prefix'
+KeyOp '+s'
+Check-Sent '+s' 'Legacy Shift+S must retain the Shift prefix'
+KeyOp 'A'
+Check-Sent 'A' 'A bare uppercase letter must not be lowercased'
+KeyOp 'a+b'
+Check-Sent 'a+b' 'A legacy sequence must not become two simultaneous plain keys'
 KeyOp '{#}'
 Check-Sent '{#}' 'A braced hash is a literal hash, not the Windows key'
 KeyOp '+(ec)'
@@ -437,5 +445,17 @@ $bad = ''
 try { KeyOp 'ctrl+nope' } catch { $bad = [string]$_.Exception.Message }
 Check ($bad -match 'nope') 'An unknown plain piece names itself'
 Check (@([XpInput]::Plain).Count -eq 0 -and @([System.Windows.Forms.SendKeys]::Sent).Count -eq 0) 'A bad plain shortcut presses nothing'
+
+foreach ($invalid in @('ctrl+[', 'ctrl++s', 'ctrl+', 'ctrl+shift+', 'win+{TAB}', 'ctrl+f4%{ENTER}', 'win+rwin+')) {
+  $bad = ''
+  try { KeyOp $invalid } catch { $bad = [string]$_.Exception.Message }
+  Check ($bad.Length -gt 0) "Invalid plain shortcut must fail: $invalid"
+  Check (@([XpInput]::Plain).Count -eq 0 -and @([XpInput]::Chords).Count -eq 0 -and @([System.Windows.Forms.SendKeys]::Sent).Count -eq 0) "Invalid shortcut must send no input: $invalid"
+}
+
+Reset-Keys
+$bad = ''
+try { Send-KeyString '#rΩ' } catch { $bad = [string]$_.Exception.Message }
+Check ($bad.Length -gt 0 -and @([XpInput]::Chords).Count -eq 0) 'Validate later characters before executing an earlier Windows shortcut'
 
 Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) and plain shortcuts (win+r, ctrl+s) while old SendKeys strings stay on SendKeys.'

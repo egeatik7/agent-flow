@@ -2,6 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import ProbeMark from './ProbeMark'
+import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
 import {
   NODE_SPECS,
   TEMPLATE_VARS,
@@ -48,25 +49,6 @@ type Props = {
   onPickDir: () => Promise<string | null>
   capturing: number
 }
-
-const KEY_PRESETS: { label: string; keys: string; append?: boolean }[] = [
-  { label: 'Enter', keys: 'enter' },
-  { label: 'Tab', keys: 'tab' },
-  { label: 'Esc', keys: 'esc' },
-  { label: 'Ctrl+A', keys: 'ctrl+a' },
-  { label: 'Ctrl+C', keys: 'ctrl+c' },
-  { label: 'Ctrl+V', keys: 'ctrl+v' },
-  { label: 'Ctrl+S', keys: 'ctrl+s' },
-  { label: 'Alt+F4', keys: 'alt+f4' },
-  { label: 'Win', keys: 'win+', append: true },
-  { label: 'Win+R', keys: 'win+r' },
-  { label: 'Win+D', keys: 'win+d' },
-  { label: 'Win+E', keys: 'win+e' },
-  { label: 'Win+Tab', keys: 'win+tab' },
-  { label: 'F5', keys: 'f5' },
-  { label: '↓', keys: 'down' },
-  { label: '↑', keys: 'up' },
-]
 
 const VISION_PRESETS = [
   'google/gemini-3.8-flash',
@@ -600,7 +582,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
                 type="button"
                 key={k.label}
                 className="chip"
-                onClick={() => upd({ keys: k.append ? `${n.keys ?? ''}${k.keys}` : k.keys })}
+                onClick={() => upd({ keys: k.append ? winPrefix(n.keys) : k.keys })}
               >
                 {k.label}
               </button>

@@ -223,7 +223,7 @@ function Resolve-SendKeysChar([string]$text) {
   return [pscustomobject]@{ vk = $vk; extra = ([int[]]$extra.ToArray()) }
 }
 
-function Send-ParsedKey($step) {
+function Resolve-ParsedKey($step) {
   $mods = New-Object 'System.Collections.Generic.List[int]'
   foreach ($m in @($step.mods)) {
     if ($null -eq $m) { continue }
@@ -231,8 +231,7 @@ function Send-ParsedKey($step) {
     if (-not $mods.Contains($mv)) { $mods.Add($mv) }
   }
   if ($step.kind -eq 'mods') {
-    [XpInput]::Chord([int[]]$mods.ToArray(), 0, 1)
-    return
+    return [pscustomobject]@{ mods = [int[]]$mods.ToArray(); vk = 0; times = 1 }
   }
   $times = 1
   if ($null -ne $step.times) { $times = [int]$step.times }
@@ -249,11 +248,18 @@ function Send-ParsedKey($step) {
   } else {
     $vk = [int]$step.vk
   }
-  [XpInput]::Chord([int[]]$mods.ToArray(), $vk, $times)
+  return [pscustomobject]@{ mods = [int[]]$mods.ToArray(); vk = $vk; times = $times }
+}
+
+function Test-PlainModifier([string]$name) {
+  return @('ctrl', 'control', 'shift', 'alt', 'win', 'lwin', 'rwin', 'meta', 'cmd', 'super') -contains $name
 }
 
 function Test-PlainKey([string]$name) {
-  $words = @('ctrl', 'control', 'shift', 'alt', 'win', 'enter', 'return', 'esc', 'escape', 'tab', 'up', 'down', 'left', 'right', 'space', 'backspace', 'delete', 'del', 'home', 'end', 'pageup', 'pagedown', 'insert')
+  if (Test-PlainModifier $name) { return $true }
+  $words = @('enter', 'return', 'esc', 'escape', 'tab', 'up', 'down', 'left', 'right', 'space', 'backspace', 'delete', 'del', 'home', 'end', 'pageup', 'pagedown', 'insert',
+    'arrowleft', 'arrowup', 'arrowright', 'arrowdown', 'capslock', 'printscreen', 'minus', 'plus', 'comma', 'period', 'slash',
+    'numpad0', 'numpad1', 'numpad2', 'numpad3', 'numpad4', 'numpad5', 'numpad6', 'numpad7', 'numpad8', 'numpad9')
   if ($words -contains $name) { return $true }
   if ($name.Length -eq 1) {
     $c = [char]$name[0]
@@ -263,20 +269,35 @@ function Test-PlainKey([string]$name) {
   return $false
 }
 
-# ctrl+s, win+r, alt+f4, enter. A single unknown word is left for SendKeys to type.
+# Only named keys or a NAMED leading modifier opt in to the new syntax.
+# +a, A, a+b and every other legacy string must not be split, lowercased or rewritten.
 function Get-PlainChord([string]$keys) {
   if ([string]::IsNullOrWhiteSpace($keys)) { return $null }
   $t = $keys.Trim().ToLowerInvariant()
-  if ($t -notmatch '^[a-z0-9+\s]+$') { return $null }
-  $parts = @($t.Split('+') | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
-  if ($parts.Count -eq 0) { return $null }
+  $plus = $t.IndexOf('+')
+  if ($plus -lt 0) {
+    if ($t.Length -le 1 -or -not (Test-PlainKey $t)) { return $null }
+    return ,([string[]]@($t))
+  }
+  $first = $t.Substring(0, $plus).Trim()
+  if (-not (Test-PlainModifier $first)) { return $null }
+  # Preserve empty pieces so a typo such as ctrl++s cannot silently become ctrl+s.
+  $parts = @($t.Split('+') | ForEach-Object { $_.Trim() })
+  # The Win button leaves a prefix in the field; executing that one prefix taps Windows.
+  if ($parts.Count -eq 2 -and $parts[1] -eq '' -and @('win', 'lwin', 'rwin', 'meta', 'cmd', 'super') -contains $first) {
+    return ,([string[]]@($first))
+  }
   foreach ($p in $parts) {
+    if ($p.Length -eq 0) { throw 'Kısayolda boş tuş var. Örn: win+r veya ctrl+s.' }
     if (-not (Test-PlainKey $p)) {
-      if ($parts.Count -eq 1) { return $null }
       throw "Tuş tanınmadı: $p"
     }
   }
-  return ,$parts
+  for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+    if (-not (Test-PlainModifier $parts[$i])) { throw 'Kısayolda Ctrl/Alt/Shift/Win önce, hedef tuş en sonda olmalı.' }
+  }
+  if (Test-PlainModifier $parts[$parts.Count - 1]) { throw 'Kısayolun sonunda hedef tuş eksik.' }
+  return ,([string[]]$parts)
 }
 
 function Send-KeyString([string]$keys) {
@@ -291,7 +312,11 @@ function Send-KeyString([string]$keys) {
     return
   }
   $steps = Get-SendKeysSteps $keys ([int[]]@())
-  foreach ($step in $steps) { Send-ParsedKey $step }
+  # Resolve the entire Windows sequence before sending any input. A later invalid
+  # character must not leave the earlier part of a shortcut already executed.
+  $ready = New-Object System.Collections.Generic.List[object]
+  foreach ($step in $steps) { [void]$ready.Add((Resolve-ParsedKey $step)) }
+  foreach ($step in $ready) { [XpInput]::Chord([int[]]$step.mods, [int]$step.vk, [int]$step.times) }
 }
 
 if (-not ('XpWin' -as [type])) {

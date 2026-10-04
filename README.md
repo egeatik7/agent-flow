@@ -195,6 +195,26 @@ Bu testler gerçek Windows UIA, Blender veya Hunyuan oturumlarının yerine geç
 Çalıştır alanına bir EXE yolu yazmayı ve FolderBatcher'da Kaynak/Hedef etiketlerine ayrı ayrı tıklayıp
 ilgili kutulara farklı yollar yazmayı dene; diğer alanın değerinin korunduğunu kontrol et.
 
+Tuş / Kısayol kontrolleri:
+
+```powershell
+npm run test:keys
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-key-input.ps1
+```
+
+İlk test hazır tuş düğmelerini ve Win düğmesinin alanı bozmadığını kontrol eder. İkinci test gerçek
+worker ayrıştırıcısını ve XpInput metotlarını kullanır; işletim sistemi tuş çağrılarını kayda alır,
+masaüstüne tuş basmaz. Hatalı girişlerin hiçbir tuş göndermediğini ve hata sırasında tuşların
+bırakılmasının denendiğini sınar. PowerShell 7'de `pwsh -NoProfile -File scripts/test-key-input.ps1`
+ile de çalışır. Gerçek Windows oturumunda Win+R, Win+E, Win+D ve Win+Tab ayrıca denenmelidir.
+
+Yeni yazım: `win+r`, `ctrl+s`, `win+shift+s`, `enter`. Eski `^s`, `%{F4}`, `+a`, `A`, `#r`
+gibi değerler yeniden yazılmaz; `#r` Windows+R'dir, `{WIN}` / `{LWIN}` / `{RWIN}` Windows tuşuna basar.
+`win+` tek başına Windows tuşuna basar. Win düğmesi boş veya tamamlanmış alanda `win+` başlatır;
+`ctrl+` gibi bir önekte `ctrl+win+` oluşturur ve Windows'u ikinci kez eklemez.
+`ctrl++s` veya `win+{TAB}` gibi hatalı/karışık yeni yazımlar hata verir, metin olarak yazılmaz.
+Yazı Yaz node'u bu kısayol ayrıştırıcısından geçmez.
+
 - `electron/runner.ts`: akışı yürütür (kutular, kurtarma, kaldığı yerden devam).
 - `electron/agent.ts`: adımları yapar (hedef bulma, hafıza, tepki, takılma, İnisiyatif).
 - `electron/browser.ts`: kullanıcının 9222 portuyla açtığı Chrome’un sayfa yazısı (`playwright-core`).
