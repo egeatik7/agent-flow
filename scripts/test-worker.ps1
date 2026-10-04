@@ -25,13 +25,19 @@ public class XpWin {
  public static int GetWindowLong(IntPtr h,int i){ int s; return Styles.TryGetValue(h.ToInt64(), out s) ? s : 0; }
  // Like the real helper: the control's text, or null when it cannot be read.
  public static string ReadText(IntPtr h){ string t; return Texts.TryGetValue(h.ToInt64(), out t) ? t : null; }
+ // EM_SETSEL 0..-1: records the call and, when allowed, marks the text as selected.
+ public static bool SelectAllResult = true;
+ public static int SelectAllCalls = 0;
+ public static bool Selected = false;
+ public static bool SelectAll(IntPtr h){ SelectAllCalls++; if (SelectAllResult) Selected = true; return SelectAllResult; }
 }
 public static class XpText { public static bool CanType(string t){ return true; } }
 namespace System.Windows.Forms {
  // Records keys instead of sending them, so the test never types into a real window.
  public static class SendKeys {
   public static System.Collections.Generic.List<string> Sent = new System.Collections.Generic.List<string>();
-  public static void SendWait(string k){ Sent.Add(k); }
+  public static System.Action<string> OnKey = null;
+  public static void SendWait(string k){ Sent.Add(k); if (OnKey != null) OnKey(k); }
  }
 }
 '@
@@ -152,6 +158,8 @@ function NativePane($id,$name,$x,$y,$width,$height,$handle,$class,$style) {
 }
 function SetupForm {
   $script:TypeChoiceCache.Clear(); $script:Writes.Clear(); [System.Windows.Forms.SendKeys]::Sent.Clear()
+  [System.Windows.Forms.SendKeys]::OnKey = $null
+  [XpWin]::SelectAllCalls = 0; [XpWin]::Selected = $false; [XpWin]::SelectAllResult = $true
   [XpWin]::NativeFocus=[IntPtr]::Zero; [XpWin]::Classes.Clear(); [XpWin]::Texts.Clear(); [XpWin]::Styles.Clear()
   $script:Form = Element 'Dosya Klasorleyici' 'Window' 570 80 780 618
   $kids = @()
@@ -211,4 +219,44 @@ Check (-not $first.choices[4].valueKnown -and $first.choices[4].value -eq '') 'A
 Check (-not $first.choices[3].valueKnown) 'A box that cannot be read in time is unknown, not empty'
 Check ($first.choices[2].valueKnown -and $first.choices[2].value -eq '20') 'Other boxes are still read'
 
-Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes).'
+# --- Clearing a box that ignores Ctrl+A (FolderBatcher). The fake keyboard behaves like the box under test. ---
+# $script:CtrlA says whether Ctrl+A selects the text. Delete removes the text only while it is selected.
+# Any single typed character is appended, like a real edit box.
+function UseKeyboard($ctrlAWorks) {
+  $script:CtrlA = $ctrlAWorks
+  [System.Windows.Forms.SendKeys]::OnKey = [Action[string]]{
+    param($key)
+    $h = [long]102
+    if ($key -eq '^a') { if ($script:CtrlA) { [XpWin]::Selected = $true } }
+    elseif ($key -eq '{DEL}') { if ([XpWin]::Selected) { [XpWin]::Texts[$h] = ''; [XpWin]::Selected = $false } }
+    elseif ($key.Length -eq 1) { [XpWin]::Texts[$h] = [string][XpWin]::Texts[$h] + $key }
+  }
+}
+
+SetupForm; UseKeyboard $false; [XpWin]::Texts[[long]102] = 'OLD PATH'
+$r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
+Check ([XpWin]::SelectAllCalls -eq 1) 'When Ctrl+A leaves text behind, the box is selected with EM_SETSEL'
+Check ([XpWin]::Texts[[long]102] -eq '' -and $r.value -eq '') 'The box is empty after the fallback, and read back as empty'
+
+SetupForm; UseKeyboard $false; [XpWin]::Texts[[long]102] = 'OLD PATH'
+$r = Request @{ text='NEW'; x=$labelClick.x; y=$labelClick.y }
+Check ($r.value -eq 'NEW') 'Typing after the fallback replaces the old text instead of appending to it'
+
+SetupForm; UseKeyboard $true; [XpWin]::Texts[[long]102] = 'OLD PATH'
+$r = Request @{ text='NEW'; x=$labelClick.x; y=$labelClick.y }
+Check ([XpWin]::SelectAllCalls -eq 0) 'Where Ctrl+A works the fallback is never used'
+Check ($r.value -eq 'NEW') 'Where Ctrl+A works the result is the same as before'
+
+SetupForm; UseKeyboard $false; [XpWin]::Texts[[long]102] = 'OLD PATH'; [XpWin]::SelectAllResult = $false
+$r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
+Check ([XpWin]::SelectAllCalls -eq 1 -and $r.value -eq 'OLD PATH') 'If EM_SETSEL does not answer, nothing else is deleted'
+
+SetupForm; UseKeyboard $false; [void][XpWin]::Texts.Remove(102)
+$r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
+Check ([XpWin]::SelectAllCalls -eq 0) 'A box whose text cannot be read is left to Ctrl+A alone'
+
+SetupForm; UseKeyboard $false; [XpWin]::Texts[[long]102] = 'OLD PATH'; [XpWin]::Styles[102] = 0x50010080 -bor 0x20
+$r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
+Check ([XpWin]::SelectAllCalls -eq 0) 'A password box is never read, so the fallback is not used on it'
+
+Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A.'

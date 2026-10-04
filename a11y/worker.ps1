@@ -48,6 +48,14 @@ public static class XpWin {
   }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr result);
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeout")]
+  public static extern IntPtr SendMessageTimeoutPtr(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+  // EM_SETSEL 0..-1: select all text of a classic Edit control, for boxes that ignore Ctrl+A. False when it did not answer in time.
+  public static bool SelectAll(IntPtr h) {
+    if (h == IntPtr.Zero) return false;
+    IntPtr r;
+    return SendMessageTimeoutPtr(h, 0x00B1, IntPtr.Zero, new IntPtr(-1), 2, 500, out r) != IntPtr.Zero;
+  }
   // The text of a classic Edit control, or null when it cannot be read in time (the app is hung) or is too long.
   public static string ReadText(IntPtr h) {
     if (h == IntPtr.Zero) return null;
@@ -507,6 +515,18 @@ function Invoke-Op([string]$op, $P) {
           Start-Sleep -Milliseconds 280
           [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
           Start-Sleep -Milliseconds 200
+          # Some classic edit boxes ignore Ctrl+A. If the box still holds text, select it with EM_SETSEL and delete again.
+          # Only a box whose text can be read is touched, so where Ctrl+A works nothing changes.
+          $left = Get-NativeEditText $focus
+          if ($null -ne $left -and $left.Length -gt 0) {
+            $hwnd = [IntPtr]0
+            try { $hwnd = [IntPtr]$focus.Current.NativeWindowHandle } catch {}
+            if ([XpWin]::SelectAll($hwnd)) {
+              Start-Sleep -Milliseconds 120
+              [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+              Start-Sleep -Milliseconds 200
+            }
+          }
           $out.cleared = $true
         } else {
           $out.skippedClear = $true
