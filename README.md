@@ -121,7 +121,7 @@ Güvenceler:
 | Başlangıç | Akışın giriş noktası | sonra |
 | Tıkla | Ekranda/sayfada yazan yeri bulup tıklar (tek/çift/sağ tık) | sonra |
 | Yazı Yaz | Bir alana (veya o an seçili alana) yazar, alanı okuyup doğrular, isteğe bağlı Enter | sonra |
-| Tuş Gönder | Kısayol/tuş (`{ENTER}`, `^a`, `%{F4}`, `#r`, `{WIN}` …) | sonra |
+| Tuş Gönder | Kısayol (`win+r`, `ctrl+s`, `alt+f4`; eski `^s`, `%{F4}`, `#r` de olur) | sonra |
 | Zamanlayıcı | N saniye bekler | sonra |
 | Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |

@@ -49,20 +49,23 @@ type Props = {
   capturing: number
 }
 
-const KEY_PRESETS: { label: string; keys: string }[] = [
-  { label: 'Enter', keys: '{ENTER}' },
-  { label: 'Tab', keys: '{TAB}' },
-  { label: 'Esc', keys: '{ESC}' },
-  { label: 'Ctrl+A', keys: '^a' },
-  { label: 'Ctrl+C', keys: '^c' },
-  { label: 'Ctrl+V', keys: '^v' },
-  { label: 'Ctrl+S', keys: '^s' },
-  { label: 'Alt+F4', keys: '%{F4}' },
-  { label: 'Win', keys: '{WIN}' },
-  { label: 'Win+R', keys: '#r' },
-  { label: 'F5', keys: '{F5}' },
-  { label: '↓', keys: '{DOWN}' },
-  { label: '↑', keys: '{UP}' },
+const KEY_PRESETS: { label: string; keys: string; append?: boolean }[] = [
+  { label: 'Enter', keys: 'enter' },
+  { label: 'Tab', keys: 'tab' },
+  { label: 'Esc', keys: 'esc' },
+  { label: 'Ctrl+A', keys: 'ctrl+a' },
+  { label: 'Ctrl+C', keys: 'ctrl+c' },
+  { label: 'Ctrl+V', keys: 'ctrl+v' },
+  { label: 'Ctrl+S', keys: 'ctrl+s' },
+  { label: 'Alt+F4', keys: 'alt+f4' },
+  { label: 'Win', keys: 'win+', append: true },
+  { label: 'Win+R', keys: 'win+r' },
+  { label: 'Win+D', keys: 'win+d' },
+  { label: 'Win+E', keys: 'win+e' },
+  { label: 'Win+Tab', keys: 'win+tab' },
+  { label: 'F5', keys: 'f5' },
+  { label: '↓', keys: 'down' },
+  { label: '↑', keys: 'up' },
 ]
 
 const VISION_PRESETS = [
@@ -588,17 +591,22 @@ function NodeFields(p: Props & { n: AgentNode }) {
 
       {n.kind === 'key' && (
         <div className="field">
-          <label>Tuş (SendKeys biçimi)</label>
-          <input className="xp-input mono" value={n.keys ?? ''} onChange={(e) => upd({ keys: e.target.value })} />
+          <label>Tuş / Kısayol</label>
+          <input className="xp-input mono" value={n.keys ?? ''} placeholder="win+r" onChange={(e) => upd({ keys: e.target.value })} />
           <VarChips onInsert={(v) => upd({ keys: append(n.keys, v) })} />
           <div className="chips">
             {KEY_PRESETS.map((k) => (
-              <button type="button" key={k.keys} className="chip" onClick={() => upd({ keys: k.keys })}>
+              <button
+                type="button"
+                key={k.label}
+                className="chip"
+                onClick={() => upd({ keys: k.append ? `${n.keys ?? ''}${k.keys}` : k.keys })}
+              >
                 {k.label}
               </button>
             ))}
           </div>
-          <p className="hint">^ = Ctrl, % = Alt, + = Shift, # = Windows. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir, #r Çalıştır’ı açar. {'{'}WIN{'}'} yalnızca Windows tuşuna basar.</p>
+          <p className="hint">ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{'{F4}'}, #r) de desteklenir.</p>
         </div>
       )}
 

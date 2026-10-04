@@ -47,9 +47,15 @@ public static class XpInput {
   public int Times;
  }
  public static System.Collections.Generic.List<Hit> Chords = new System.Collections.Generic.List<Hit>();
+ public static System.Collections.Generic.List<string> Plain = new System.Collections.Generic.List<string>();
  public static void Chord(int[] mods, int vk, int times) {
   if (mods == null) mods = new int[0];
   Chords.Add(new Hit { Mods = mods, Vk = vk, Times = times });
+ }
+ public static string Combo(string[] names) {
+  if (names == null || names.Length == 0) return "EMPTY";
+  Plain.Add(string.Join("+", names));
+  return "";
  }
  public static int ScanChar(char ch) {
   if (ch == '#') return (1 << 8) | 0x33;
@@ -280,6 +286,7 @@ Check ([XpWin]::SelectAllCalls -eq 0) 'A password box is never read, so the fall
 function Reset-Keys {
   [System.Windows.Forms.SendKeys]::Sent.Clear()
   [XpInput]::Chords.Clear()
+  [XpInput]::Plain.Clear()
 }
 function KeyOp([string]$keys) {
   Reset-Keys
@@ -288,8 +295,17 @@ function KeyOp([string]$keys) {
 function Check-Sent([string]$expect, [string]$message) {
   $sent = @([System.Windows.Forms.SendKeys]::Sent)
   $chords = @([XpInput]::Chords)
-  if ($sent.Count -ne 1 -or [string]$sent[0] -ne $expect -or $chords.Count -ne 0) {
-    throw "$message (sent=[$($sent -join '|')] chords=$($chords.Count))"
+  $plain = @([XpInput]::Plain)
+  if ($sent.Count -ne 1 -or [string]$sent[0] -ne $expect -or $chords.Count -ne 0 -or $plain.Count -ne 0) {
+    throw "$message (sent=[$($sent -join '|')] chords=$($chords.Count) plain=$($plain.Count))"
+  }
+}
+function Check-Plain([string]$expect, [string]$message) {
+  $plain = @([XpInput]::Plain)
+  $sent = @([System.Windows.Forms.SendKeys]::Sent)
+  $chords = @([XpInput]::Chords)
+  if ($plain.Count -ne 1 -or [string]$plain[0] -ne $expect -or $sent.Count -ne 0 -or $chords.Count -ne 0) {
+    throw "$message (plain=[$($plain -join '|')] sent=$($sent.Count) chords=$($chords.Count))"
   }
 }
 function Check-Chord([int]$index, [int]$vk, [int]$times, $mods, [string]$message) {
@@ -307,6 +323,7 @@ function Check-Chord([int]$index, [int]$vk, [int]$times, $mods, [string]$message
 }
 function Check-NoSend([string]$message) {
   if (@([System.Windows.Forms.SendKeys]::Sent).Count -ne 0) { throw "$message (SendKeys was used)" }
+  if (@([XpInput]::Plain).Count -ne 0) { throw "$message (plain chord was used)" }
 }
 
 KeyOp '^s'
@@ -381,4 +398,44 @@ try { KeyOp '#{NOPE}' } catch { $bad = [string]$_.Exception.Message }
 Check ($bad -match 'NOPE') 'An unknown key names itself'
 Check (@([XpInput]::Chords).Count -eq 0) 'A bad Windows shortcut presses nothing'
 
-Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) while other SendKeys strings stay on SendKeys.'
+KeyOp 'win+r'
+Check-Plain 'win+r' 'win+r opens Run'
+KeyOp 'WIN+R'
+Check-Plain 'win+r' 'Plain shortcuts ignore case'
+KeyOp 'win + r'
+Check-Plain 'win+r' 'Spaces around + are ignored'
+KeyOp 'win+'
+Check-Plain 'win' 'win+ is the Windows key on its own'
+KeyOp 'ctrl+s'
+Check-Plain 'ctrl+s' 'ctrl+s'
+KeyOp 'alt+f4'
+Check-Plain 'alt+f4' 'alt+f4'
+KeyOp 'enter'
+Check-Plain 'enter' 'enter'
+KeyOp 'tab'
+Check-Plain 'tab' 'tab'
+KeyOp 'esc'
+Check-Plain 'esc' 'esc'
+KeyOp 'f5'
+Check-Plain 'f5' 'f5'
+KeyOp 'down'
+Check-Plain 'down' 'down'
+KeyOp 'up'
+Check-Plain 'up' 'up'
+KeyOp 'win+d'
+Check-Plain 'win+d' 'win+d'
+KeyOp 'win+e'
+Check-Plain 'win+e' 'win+e'
+KeyOp 'win+tab'
+Check-Plain 'win+tab' 'win+tab'
+KeyOp 'ctrl+shift+s'
+Check-Plain 'ctrl+shift+s' 'ctrl+shift+s keeps order'
+KeyOp 'kaydet'
+Check-Sent 'kaydet' 'A single unknown word is still typed through SendKeys'
+
+$bad = ''
+try { KeyOp 'ctrl+nope' } catch { $bad = [string]$_.Exception.Message }
+Check ($bad -match 'nope') 'An unknown plain piece names itself'
+Check (@([XpInput]::Plain).Count -eq 0 -and @([System.Windows.Forms.SendKeys]::Sent).Count -eq 0) 'A bad plain shortcut presses nothing'
+
+Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) and plain shortcuts (win+r, ctrl+s) while old SendKeys strings stay on SendKeys.'

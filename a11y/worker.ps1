@@ -252,7 +252,40 @@ function Send-ParsedKey($step) {
   [XpInput]::Chord([int[]]$mods.ToArray(), $vk, $times)
 }
 
+function Test-PlainKey([string]$name) {
+  $words = @('ctrl', 'control', 'shift', 'alt', 'win', 'enter', 'return', 'esc', 'escape', 'tab', 'up', 'down', 'left', 'right', 'space', 'backspace', 'delete', 'del', 'home', 'end', 'pageup', 'pagedown', 'insert')
+  if ($words -contains $name) { return $true }
+  if ($name.Length -eq 1) {
+    $c = [char]$name[0]
+    if (($c -ge 'a' -and $c -le 'z') -or ($c -ge '0' -and $c -le '9')) { return $true }
+  }
+  if ($name -match '^f(1[0-9]|2[0-4]|[1-9])$') { return $true }
+  return $false
+}
+
+# ctrl+s, win+r, alt+f4, enter. A single unknown word is left for SendKeys to type.
+function Get-PlainChord([string]$keys) {
+  if ([string]::IsNullOrWhiteSpace($keys)) { return $null }
+  $t = $keys.Trim().ToLowerInvariant()
+  if ($t -notmatch '^[a-z0-9+\s]+$') { return $null }
+  $parts = @($t.Split('+') | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
+  if ($parts.Count -eq 0) { return $null }
+  foreach ($p in $parts) {
+    if (-not (Test-PlainKey $p)) {
+      if ($parts.Count -eq 1) { return $null }
+      throw "Tuş tanınmadı: $p"
+    }
+  }
+  return ,$parts
+}
+
 function Send-KeyString([string]$keys) {
+  $plain = Get-PlainChord $keys
+  if ($null -ne $plain) {
+    $err = [XpInput]::Combo([string[]]$plain)
+    if ($err) { throw $err }
+    return
+  }
   if (-not (Test-SendKeysHasWin $keys)) {
     [System.Windows.Forms.SendKeys]::SendWait([string]$keys)
     return
