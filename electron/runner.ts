@@ -68,8 +68,13 @@ export type RunSummary = { steps: number; failed: number }
 /** At most this many item names are listed in the end-of-loop summary. */
 const FAILED_NAMES_SHOWN = 5
 
-function isApiDown(message: string): boolean {
-  return /resourceexhausted|rate limit|quota|too many requests|429|402|401|bakiye|upstream error|openrouter \d{3}/i.test(message)
+/**
+ * The error text says the model service is down or refusing, so the rest of the list would fail the same way.
+ * A bare 401, 402 or 429 does not count: it can be part of a file name or a coordinate. The codes that matter come as
+ * "OpenRouter 429: …" or in parentheses, "(401)", from openrouter.ts.
+ */
+export function isApiDown(message: string): boolean {
+  return /resourceexhausted|rate limit|quota|too many requests|\((?:401|402|429)\)|bakiye|upstream error|openrouter \d{3}/i.test(message)
 }
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
