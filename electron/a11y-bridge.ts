@@ -211,6 +211,8 @@ export async function scan(opts: {
   primary?: boolean
   /** Round the image size to a multiple of this (UI-TARS wants 28). */
   snap?: number
+  /** Give a plain picture the size maxImageW / snap ask for. A plain picture is otherwise full size (scanner preview). */
+  fit?: boolean
   /** Also return a tiny grayscale signature to tell whether the screen changed. */
   sig?: boolean
   /** Which reader wins. Defaults to the saved choice. */
@@ -243,6 +245,7 @@ export async function scan(opts: {
       fresh: opts.fresh === true,
       primary: opts.primary === true,
       snap: opts.snap ?? 0,
+      fit: opts.fit === true,
       sig: opts.sig === true,
       tilt: opts.tilt === true,
       valueLo,

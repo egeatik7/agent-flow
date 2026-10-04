@@ -469,6 +469,7 @@ export function createAgent(ctx: AgentContext) {
       fresh: wide,
       maxImageW: isTarsModel(model[0] || '') ? 1288 : 1400,
       snap: isTarsModel(model[0] || '') ? 28 : 0,
+      fit: true,
     })
     warnMissingWindow(res)
     if (!res.image) throw new NotFoundError('UI-TARS için ekran görüntüsü alınamadı.')
@@ -1027,6 +1028,7 @@ export function createAgent(ctx: AgentContext) {
       // Under 1 megapixel, so a provider that downsizes images does not shift UI-TARS pixel coordinates.
       maxImageW: tars ? 1288 : 1400,
       snap: tars ? 28 : 0,
+      fit: true,
       sig: true,
     })
     if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')

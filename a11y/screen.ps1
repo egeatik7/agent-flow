@@ -628,7 +628,9 @@ function New-Bitmap24($bmp) {
   return $dst
 }
 
-function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0) {
+# $fit: a caller that wants coordinates from a model (İnisiyatif, UI-TARS) needs the picture at the size it asked for
+# (maxW, snapped to a multiple of $snap), even without boxes. Without it a plain picture stays full size for the scanner preview.
+function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0, [bool]$fit = $false) {
   $scale = [Math]::Min(1.0, $maxW / [double]$bmp.Width)
   $w = [int]($bmp.Width * $scale)
   $h = [int]($bmp.Height * $scale)
@@ -638,7 +640,7 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
   }
   # The scanner preview has no boxes. Save the same pixel copy as the diagnostic PNG.
   # Drawing the shot into a new bitmap is what turned Blender and Chrome gray.
-  if (-not $marks) {
+  if (-not $marks -and -not $fit) {
     $copy = Copy-Bitmap32 $bmp
     $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-preview-{0}.png" -f ([guid]::NewGuid().ToString('N')))
     try { $copy.Save($path, [System.Drawing.Imaging.ImageFormat]::Png) } finally { $copy.Dispose() }
@@ -786,7 +788,7 @@ function Invoke-Scan($P) {
     if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
     $snap = 0
     if ($P.snap) { $snap = [int]$P.snap }
-    $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap
+    $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
     $shotBmp.Dispose()
   }
   $bmp.Dispose()
