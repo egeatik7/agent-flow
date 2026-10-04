@@ -118,6 +118,8 @@ export async function runGraph(
     afterNodeId?: string
     /** Shared step and failure count when a run climbs out of packages. */
     tally?: Tally
+    /** Variables the run starts with. A package gets those of the loop lap it runs in. */
+    vars?: Record<string, string>
   }
 ): Promise<void> {
   if (opts.packagePath?.length) {
@@ -148,7 +150,7 @@ export async function runGraph(
   if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
   const root = opts.root ?? graph
 
-  let vars: Record<string, string> = { sira: '1' }
+  let vars: Record<string, string> = opts.vars ?? { sira: '1' }
   const loopNotes: string[] = []
   const tally: Tally = opts.tally ?? { n: 0, failed: 0 }
   const warnedLeave = new Set<string>()
@@ -282,7 +284,8 @@ export async function runGraph(
           return 'next'
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, tally })
+        // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, tally, vars })
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'
