@@ -137,3 +137,22 @@ describe('eski davranış korunur', () => {
     expect(typed).toEqual(['1', '2', '1', '2'])
   })
 })
+
+describe('paketin içinden başlatma ve kaldığı yerden devam', () => {
+  it('paketin ilk node\'undan başlatınca dış turun değişkenleri gelir, sonra kalan dış turlar sürer', async () => {
+    const { graph, outer, pkg, pkgType } = scenario()
+    outer.startIndex = 1 // Klasor2 turundayız
+    const { ex, typed } = fakeExecutor()
+    await runGraph(graph, ex, { ...opts, packagePath: [pkg.id], startId: pkgType.id, resume: true })
+    expect(typed).toEqual([...lap(2), ...lap(3)])
+  })
+
+  it('iç döngünün ortasından devam: kalan dosya, iç döngüden sonraki node ve kalan dış tur', async () => {
+    const { graph, outer, inner, innerType, pkg } = scenario()
+    outer.startIndex = 1
+    inner.startIndex = 1 // iç döngüde ikinci dosyadayız
+    const { ex, typed } = fakeExecutor()
+    await runGraph(graph, ex, { ...opts, packagePath: [pkg.id], startId: innerType.id, resume: true })
+    expect(typed).toEqual(['DOSYA=b-Klasor2.txt #2/2', 'FIN=Klasor2', ...lap(3)])
+  })
+})

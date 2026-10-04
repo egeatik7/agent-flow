@@ -32,6 +32,17 @@ function shellPackage(root: AgentGraph, nodeId: string): AgentNode | undefined {
   return undefined
 }
 
+/** The package whose inside is exactly `graph`. */
+export function packageHost(root: AgentGraph, graph: AgentGraph): AgentNode | undefined {
+  for (const n of root.nodes) {
+    if (n.kind !== 'package' || !n.inner) continue
+    if (n.inner === graph) return n
+    const deeper = packageHost(n.inner, graph)
+    if (deeper) return deeper
+  }
+  return undefined
+}
+
 /**
  * The Her Öğe İçin just outside `nodeId`.
  * A package is not a wall: a loop inside a package still sees the loop that holds the package.

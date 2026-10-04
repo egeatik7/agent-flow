@@ -17,7 +17,7 @@ import {
 import { conditionNeedle } from './confirm'
 import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
-import { outsideFolder } from './enclosing'
+import { outsideFolder, outsideVars, packageHost } from './enclosing'
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -150,7 +150,10 @@ export async function runGraph(
   if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
   const root = opts.root ?? graph
 
-  let vars: Record<string, string> = opts.vars ?? { sira: '1' }
+  // A run that starts inside a package, or climbs back out through one, has no caller handing it variables.
+  // Take them from the loop outside that package: its ticked row, or the lap the run was on.
+  const host = !opts.vars && graph !== root ? packageHost(root, graph) : undefined
+  let vars: Record<string, string> = opts.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
   const loopNotes: string[] = []
   const tally: Tally = opts.tally ?? { n: 0, failed: 0 }
   const warnedLeave = new Set<string>()
