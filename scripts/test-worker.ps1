@@ -16,10 +16,23 @@ public class MockAE {
 }
 public class XpWin {
  public static IntPtr NativeFocus = IntPtr.Zero;
+ public static System.Collections.Generic.Dictionary<long,string> Classes = new System.Collections.Generic.Dictionary<long,string>();
+ public static System.Collections.Generic.Dictionary<long,string> Texts = new System.Collections.Generic.Dictionary<long,string>();
+ public static System.Collections.Generic.Dictionary<long,int> Styles = new System.Collections.Generic.Dictionary<long,int>();
  public static IntPtr FocusHandle(){return NativeFocus;}
  public static IntPtr GetForegroundWindow(){return new IntPtr(1);}
- public static string ClassOf(IntPtr h){return h.ToInt64()==7 ? "Edit" : "";}
- public static int GetWindowLong(IntPtr h,int i){return 0;}
+ public static string ClassOf(IntPtr h){ string c; if (Classes.TryGetValue(h.ToInt64(), out c)) return c; return h.ToInt64()==7 ? "Edit" : ""; }
+ public static int GetWindowLong(IntPtr h,int i){ int s; return Styles.TryGetValue(h.ToInt64(), out s) ? s : 0; }
+ // Like the real helper: the control's text, or null when it cannot be read.
+ public static string ReadText(IntPtr h){ string t; return Texts.TryGetValue(h.ToInt64(), out t) ? t : null; }
+}
+public static class XpText { public static bool CanType(string t){ return true; } }
+namespace System.Windows.Forms {
+ // Records keys instead of sending them, so the test never types into a real window.
+ public static class SendKeys {
+  public static System.Collections.Generic.List<string> Sent = new System.Collections.Generic.List<string>();
+  public static void SendWait(string k){ Sent.Add(k); }
+ }
 }
 '@
 $script:AE = [MockAE]
@@ -127,4 +140,75 @@ $native.Current.NativeWindowHandle=7
 [MockAE]::Native=$native; [XpWin]::NativeFocus=[IntPtr]7
 Check (Test-TextLike (Get-InputFocus)) 'Use exact native edit focus when UIA focused element is a Pane'
 
-Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus.'
+# --- A classic Win32 form (FolderBatcher): UIA reports every control as a Pane, with no ValuePattern anywhere. ---
+# Positions are the ones measured on the real window. The edit boxes keep their text in the UIA name.
+function NativePane($id,$name,$x,$y,$width,$height,$handle,$class,$style) {
+  $e = Element $id 'Pane' $x $y $width $height
+  $e.Current.Name = $name
+  $e.Current.NativeWindowHandle = $handle
+  [XpWin]::Classes[[long]$handle] = $class
+  [XpWin]::Styles[[long]$handle] = $style
+  return $e
+}
+function SetupForm {
+  $script:TypeChoiceCache.Clear(); $script:Writes.Clear(); [System.Windows.Forms.SendKeys]::Sent.Clear()
+  [XpWin]::NativeFocus=[IntPtr]::Zero; [XpWin]::Classes.Clear(); [XpWin]::Texts.Clear(); [XpWin]::Styles.Clear()
+  $script:Form = Element 'Dosya Klasorleyici' 'Window' 570 80 780 618
+  $kids = @()
+  $fields = @(@('Kaynak klasor',172,''), @('Hedef klasor',214,''), @('Grup boyutu',256,'20'), @('En fazla dosya',298,'0'), @('Dosya filtresi',340,'*'))
+  $handle = 100
+  foreach ($f in $fields) {
+    $handle++; $kids += (NativePane "label $($f[0])" $f[0] 598 $f[1] 215 24 $handle 'Static' 0x50000100)
+    $handle++; $kids += (NativePane "edit $($f[0])" $f[2] 818 ($f[1] - 6) 420 30 $handle 'Edit' 0x50010080)
+    [XpWin]::Texts[[long]$handle] = $f[2]
+  }
+  # The read-only info box at the bottom: an Edit with ES_READONLY (0x800).
+  $kids += (NativePane 'info box' 'Sureler saniye' 598 554 710 125 300 'Edit' 0x50200844)
+  [XpWin]::Texts[300] = 'Sureler saniye'
+  $script:Form.Children = $kids
+  foreach ($el in $kids) { $el.Parent = $script:Form }
+  [MockAE]::Front=$script:Form; [MockAE]::FocusedElement=$script:Form; [MockAE]::Point=$script:Form
+}
+$sourceHandle = 102   # "Kaynak klasor" edit box
+$labelClick = @{ x = 705; y = 184 }   # centre of the "Kaynak klasor" caption (598,172 215x24)
+
+SetupForm
+$first = Request @{ text='' }
+Check $first.needChoice 'Without a click, five boxes need a choice'
+Check ($first.choices.Count -eq 5) 'Five writable boxes; the read-only info box must not be a candidate'
+Check ($first.choices[0].label -eq 'Kaynak klasor' -and $first.choices[2].label -eq 'Grup boyutu') 'Each box is named by the caption on its row'
+Check ($first.choices[0].native -eq 'Edit' -and $first.choices[0].type -eq 'Pane') 'The real window class is reported next to what UIA says'
+Check ($first.choices[2].value -eq '20' -and $first.choices[2].valueKnown) 'The real text is read, not reported as empty'
+Check ($first.choices[0].value -eq '' -and $first.choices[0].valueKnown) 'A truly empty box is known to be empty'
+Check (@($first.choices | Where-Object { $_.related }).Count -eq 0) 'Without a click, no caption points at a box'
+
+SetupForm
+$r = Request @{ text=''; x=$labelClick.x; y=$labelClick.y }
+Check (-not $r.needChoice) 'Clicking a Static caption must resolve to its box without asking the model'
+Check ($script:Writes.Count -eq 0) 'Boxes without a ValuePattern are typed into, not set'
+Check ([MockAE]::FocusedElement.Id -eq 'edit Kaynak klasor') 'The box right of the clicked caption gets the focus'
+Check (($script:Form.Children | Where-Object { $_.Id -eq 'edit Kaynak klasor' }).Id -eq [MockAE]::FocusedElement.Id) 'Only that box is focused'
+Check ([System.Windows.Forms.SendKeys]::Sent -contains '^a' -and [System.Windows.Forms.SendKeys]::Sent -contains '{DEL}') 'Clearing selects all and deletes inside the focused box'
+Check ($r.value -eq '') 'The cleared box is read back as empty from the native text'
+
+SetupForm
+[XpWin]::Texts[[long]$sourceHandle] = 'C:\Resimler'   # what the box holds after the keys were sent
+$r = Request @{ text='C:\Resimler'; x=$labelClick.x; y=$labelClick.y }
+Check (-not $r.needChoice -and $r.value -eq 'C:\Resimler') 'The written text is read back from the native box, so the write can be verified'
+
+SetupForm
+$other = @{ x = 705; y = 226 }   # the "Hedef klasor" caption (598,214)
+$r = Request @{ text=''; x=$other.x; y=$other.y }
+Check ([MockAE]::FocusedElement.Id -eq 'edit Hedef klasor') 'Another caption resolves to its own box'
+
+SetupForm
+[XpWin]::Styles[110] = 0x50010080 -bor 0x20   # ES_PASSWORD on the fifth box (handle 110)
+[XpWin]::Texts[[long]108] = $null
+[void][XpWin]::Texts.Remove(108)               # the fourth box (handle 108): an app that does not answer in time
+$first = Request @{ text='' }
+Check ($first.choices.Count -eq 5) 'Password and unreadable boxes are still candidates'
+Check (-not $first.choices[4].valueKnown -and $first.choices[4].value -eq '') 'A password box is never read; its text is unknown, not empty'
+Check (-not $first.choices[3].valueKnown) 'A box that cannot be read in time is unknown, not empty'
+Check ($first.choices[2].valueKnown -and $first.choices[2].value -eq '20') 'Other boxes are still read'
+
+Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes).'

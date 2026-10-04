@@ -455,6 +455,33 @@ export async function visionRefine(opts: {
   return readPoint(p)
 }
 
+export type TypeChoiceInfo = {
+  id: number
+  window: string
+  type: string
+  native?: string
+  name: string
+  value: string
+  valueKnown?: boolean
+  label?: string
+  clicked: boolean
+  related?: boolean
+}
+
+const quoted = (s: string) => s.replace(/"/g, "'")
+
+/** One candidate field as the model reads it: what it is, its caption, what it holds, and whether the click points at it. */
+export function describeTypeChoice(c: TypeChoiceInfo): string {
+  // Classic Win32 forms report every control as a Pane; the control's own class says what it really is.
+  const kind = c.native && c.native !== c.type ? `${c.native} box (UIA says ${c.type})` : c.type
+  const label = c.label ? ` caption "${quoted(c.label)}"` : ''
+  // UIA puts a classic edit box's text in its name; that is the content, not a caption.
+  const name = c.name && c.name !== c.value ? ` name "${quoted(c.name)}"` : ''
+  const value = c.valueKnown === false ? ' text unknown' : c.value ? ` text "${quoted(c.value)}"` : ' empty'
+  const hit = c.clicked ? ' The click landed in this field.' : c.related ? ' The caption that was clicked belongs to this field.' : ''
+  return `${c.id}. Window "${quoted(c.window)}" — ${kind}, writable,${label}${name}${value}.${hit}`
+}
+
 export async function chooseTypeField(opts: {
   apiKey: string
   model: string | string[]
@@ -462,18 +489,12 @@ export async function chooseTypeField(opts: {
   instruction: string
   text: string
   ahead: string
-  choices: { id: number; window: string; type: string; name: string; value: string; clicked: boolean }[]
+  choices: TypeChoiceInfo[]
 }): Promise<{ id: number | null; reason: string }> {
-  const lines = opts.choices
-    .map((c) => {
-      const name = c.name ? ` name "${c.name.replace(/"/g, "'")}"` : ''
-      const value = c.value ? ` currently "${c.value.replace(/"/g, "'")}"` : ' currently empty'
-      const hit = c.clicked ? ' The click landed in this field.' : ''
-      return `${c.id}. Window "${c.window.replace(/"/g, "'")}" — ${c.type}${name}${value}.${hit}`
-    })
-    .join('\n')
+  const lines = opts.choices.map(describeTypeChoice).join('\n')
   const system = `You choose which text field a Windows automation step should type into.
 You receive the step kind, the node's instruction, the exact text that will be typed, the following steps, and the text fields in the active window.
+Each candidate shows the caption on its row, what it holds now, and whether the click or the clicked caption points at it.
 The candidates belong to the active window. Use the instruction and following steps to identify the intended field. Do not pick an unrelated field just because it can accept text.
 Pick one id from the list. If none match, id is null.
 JSON only: {"id": <number or null>, "reason": "<short reason>"}`

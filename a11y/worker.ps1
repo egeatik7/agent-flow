@@ -46,6 +46,20 @@ public static class XpWin {
     GetClassName(h, sb, sb.Capacity);
     return sb.ToString();
   }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr result);
+  // The text of a classic Edit control, or null when it cannot be read in time (the app is hung) or is too long.
+  public static string ReadText(IntPtr h) {
+    if (h == IntPtr.Zero) return null;
+    IntPtr len;
+    if (SendMessageTimeout(h, 0x000E, IntPtr.Zero, null, 2, 500, out len) == IntPtr.Zero) return null;
+    int n = len.ToInt32();
+    if (n < 0 || n > 32768) return null;
+    var sb = new StringBuilder(n + 2);
+    IntPtr got;
+    if (SendMessageTimeout(h, 0x000D, (IntPtr)(n + 1), sb, 2, 500, out got) == IntPtr.Zero) return null;
+    return sb.ToString();
+  }
 }
 "@
 }
@@ -152,6 +166,34 @@ function Find-InputAround($el) {
   return $null
 }
 
+# The window class of this very element (a classic Win32 control), not of an ancestor.
+function Get-OwnNativeClass($el) {
+  try {
+    $h = [IntPtr]$el.Current.NativeWindowHandle
+    if ($h -eq [IntPtr]::Zero) { return '' }
+    return [XpWin]::ClassOf($h)
+  } catch { return '' }
+}
+
+# A short caption: UIA Text, or a classic Static control that UIA reports as a Pane.
+function Test-LabelLike($el) {
+  if ($null -eq $el) { return $false }
+  return ((Get-CT $el) -eq 'Text') -or ((Get-OwnNativeClass $el) -eq 'Static')
+}
+
+# The real text of a classic Win32 edit box that offers no ValuePattern (UIA reports it as a Pane).
+# Null when it cannot be read: not an edit box, a password box, too long, or the app did not answer in time.
+function Get-NativeEditText($el) {
+  try {
+    $h = [IntPtr]$el.Current.NativeWindowHandle
+    if ($h -eq [IntPtr]::Zero) { return $null }
+    if ([XpWin]::ClassOf($h) -notmatch '^(Edit|RichEdit.*)$') { return $null }
+    if (([XpWin]::GetWindowLong($h, -16) -band 0x20) -ne 0) { return $null }
+    return [XpWin]::ReadText($h)
+  } catch { return $null }
+}
+
+# The field's current text, or null when it cannot be read (unknown is not the same as empty).
 function Get-FieldValue($el) {
   $vp = $null
   try {
@@ -161,7 +203,55 @@ function Get-FieldValue($el) {
       return $v
     }
   } catch {}
-  return ''
+  $native = Get-NativeEditText $el
+  if ($null -eq $native) { return $null }
+  if ($native.Length -gt 80) { return $native.Substring(0, 80) }
+  return $native
+}
+
+# Short captions in a window, with their rectangles.
+function Get-Labels($root) {
+  $out = New-Object System.Collections.ArrayList
+  if ($null -eq $root) { return @() }
+  $queue = New-Object System.Collections.Generic.Queue[object]
+  $queue.Enqueue(@{ el = $root; d = 0 })
+  $seen = 0
+  while ($queue.Count -gt 0 -and $seen -lt 500) {
+    $pair = $queue.Dequeue()
+    $el = $pair.el
+    $d = [int]$pair.d
+    $seen++
+    if ($d -gt 0 -and (Test-LabelLike $el)) {
+      try {
+        $name = [string]$el.Current.Name
+        $r = $el.Current.BoundingRectangle
+        if ($name -and -not $r.IsEmpty -and $r.Width -gt 0 -and $r.Width -lt 400 -and $r.Height -lt 80) {
+          [void]$out.Add([pscustomobject]@{ name = $name; x = $r.X; y = $r.Y; w = $r.Width; h = $r.Height })
+        }
+      } catch {}
+    }
+    if ($d -ge 12) { continue }
+    $child = $null
+    try { $child = $script:Walker.GetFirstChild($el) } catch {}
+    while ($null -ne $child) {
+      $queue.Enqueue(@{ el = $child; d = ($d + 1) })
+      try { $child = $script:Walker.GetNextSibling($child) } catch { break }
+    }
+  }
+  return @($out)
+}
+
+# The caption on the same row, immediately left of the field: at most 120 px away, on the same row within 16 px.
+function Find-FieldLabel($labels, $rect) {
+  $best = $null
+  $bestGap = [double]::MaxValue
+  foreach ($l in @($labels)) {
+    $gap = $rect.X - ($l.x + $l.w)
+    if ($gap -lt -4 -or $gap -ge 120) { continue }
+    if ([Math]::Abs(($rect.Y + $rect.Height / 2) - ($l.y + $l.h / 2)) -ge 16) { continue }
+    if ($gap -lt $bestGap) { $best = $l; $bestGap = $gap }
+  }
+  return $best
 }
 
 function Test-PointInside($el, [int]$x, [int]$y) {
@@ -192,6 +282,7 @@ function Get-TypeChoices([int]$ownPid, [int]$x, [int]$y) {
     $title = ''
     try { $title = [string]$w.Current.Name } catch {}
     if (-not $title) { continue }
+    $mine = @()
     foreach ($el in @(Get-OwnInputs $w)) {
       $id++
       $name = ''
@@ -199,28 +290,46 @@ function Get-TypeChoices([int]$ownPid, [int]$x, [int]$y) {
       $related = $false
       if ($null -ne $point) {
         try { $related = Test-Same $el.Current.LabeledBy $point } catch {}
-        # A small label on the same row can name the immediately adjacent box.
+        # A small caption on the same row can name the immediately adjacent box.
         try {
           $lr = $point.Current.BoundingRectangle
           $er = $el.Current.BoundingRectangle
-          if ((Get-CT $point) -eq 'Text' -and $lr.Width -lt 400 -and $lr.Height -lt 80 -and
+          if ((Test-LabelLike $point) -and $lr.Width -lt 400 -and $lr.Height -lt 80 -and
               $er.X -ge ($lr.X + $lr.Width - 4) -and $er.X - ($lr.X + $lr.Width) -lt 120 -and
               [Math]::Abs(($er.Y + $er.Height / 2) - ($lr.Y + $lr.Height / 2)) -lt 16) { $related = $true }
         } catch {}
       }
       $token = [Guid]::NewGuid().ToString('N')
       $script:TypeChoiceCache[$token] = $el
-      [void]$out.Add([pscustomobject]@{
+      $v = Get-FieldValue $el
+      $entry = [pscustomobject]@{
         id = $id
         token = $token
         window = $title
         type = (Get-CT $el)
+        native = (Get-OwnNativeClass $el)
         name = $name
-        value = (Get-FieldValue $el)
+        value = [string]$v
+        valueKnown = ($null -ne $v)
+        label = ''
         clicked = (Test-PointInside $el $x $y)
         related = $related
         el = $el
-      })
+      }
+      [void]$out.Add($entry)
+      $mine += $entry
+    }
+    # With several fields to tell apart, name each by the caption on its row. Clicking that caption points at its
+    # field even when UIA gives the caption no Text type and no LabeledBy link (classic Win32 forms).
+    if ($mine.Count -ge 2) {
+      $labels = @(Get-Labels $w)
+      foreach ($entry in $mine) {
+        $lbl = $null
+        try { $lbl = Find-FieldLabel $labels $entry.el.Current.BoundingRectangle } catch {}
+        if ($null -eq $lbl) { continue }
+        $entry.label = $lbl.name
+        if (($x -ne 0 -or $y -ne 0) -and $x -ge ($lbl.x - 3) -and $x -le ($lbl.x + $lbl.w + 3) -and $y -ge ($lbl.y - 3) -and $y -le ($lbl.y + $lbl.h + 3)) { $entry.related = $true }
+      }
     }
   }
   return @($out)
@@ -355,7 +464,7 @@ function Invoke-Op([string]$op, $P) {
       } elseif ($P.clearFirst -and (($atX -ne 0 -or $atY -ne 0) -or -not (Test-TextLike $focus))) {
         $script:TypeChoiceCache.Clear()
         $choices = @(Get-TypeChoices $ownPid $atX $atY)
-        $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; token = $_.token; window = $_.window; type = $_.type; name = $_.name; value = $_.value; clicked = $_.clicked } })
+        $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; token = $_.token; window = $_.window; type = $_.type; native = $_.native; name = $_.name; value = $_.value; valueKnown = $_.valueKnown; label = $_.label; clicked = $_.clicked; related = $_.related } })
         $hit = @($choices | Where-Object { $_.clicked -or $_.related })
         if ($hit.Count -eq 1) {
           $picked = $hit[0]
@@ -421,6 +530,11 @@ function Invoke-Op([string]$op, $P) {
       try {
         if ($null -ne $focus -and $focus.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $out.value = [string]$vp.Current.Value }
       } catch {}
+      # A classic Win32 edit box has no ValuePattern; read what it really holds so the write can be verified.
+      if ($null -eq $out.value -and $null -ne $focus) {
+        $native = Get-NativeEditText $focus
+        if ($null -ne $native) { $out.value = $native }
+      }
       if ($P.pressEnter) {
         Start-Sleep -Milliseconds 240
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -463,6 +577,8 @@ function Invoke-Op([string]$op, $P) {
       if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
         return [pscustomobject]@{ value = [string]$vp.Current.Value; type = (Get-CT $el) }
       }
+      $native = Get-NativeEditText $el
+      if ($null -ne $native) { return [pscustomobject]@{ value = $native; type = (Get-CT $el) } }
       return $null
     }
     'inputState' {

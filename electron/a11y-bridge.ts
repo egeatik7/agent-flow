@@ -364,10 +364,20 @@ export type TypeFieldChoice = {
   /** Opaque identity retained by the worker while the model chooses. */
   token: string
   window: string
+  /** What UIA reports. Classic Win32 forms report every control as a Pane. */
   type: string
+  /** The control's own window class (Edit, RichEdit…), empty when it has none. */
+  native?: string
+  /** For classic edit boxes UIA puts the typed text here, so it is not a caption. */
   name: string
   value: string
+  /** False when the text could not be read; unknown is not the same as empty. */
+  valueKnown?: boolean
+  /** The caption on this field's row, if any. */
+  label?: string
   clicked: boolean
+  /** The caption the previous click landed on belongs to this field. */
+  related?: boolean
 }
 
 export type TypeResult = {
