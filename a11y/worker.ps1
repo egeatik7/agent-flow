@@ -23,6 +23,21 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class XpWin {
+  [StructLayout(LayoutKind.Sequential)] public struct GUIINFO {
+    public int cbSize, flags;
+    public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+    public int left, top, right, bottom;
+  }
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUIINFO info);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int index);
+  public static IntPtr FocusHandle() {
+    var foreground = GetForegroundWindow();
+    if (foreground == IntPtr.Zero) return IntPtr.Zero;
+    var info = new GUIINFO(); info.cbSize = Marshal.SizeOf(typeof(GUIINFO));
+    return GetGUIThreadInfo(GetWindowThreadProcessId(foreground, IntPtr.Zero), ref info) ? info.hwndFocus : IntPtr.Zero;
+  }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetClassName(IntPtr hWnd, StringBuilder lp, int nMax);
   public static string ClassOf(IntPtr h) {
@@ -37,10 +52,34 @@ public static class XpWin {
 
 function Test-TextLike($el) {
   if ($null -eq $el) { return $false }
-  if (@('Edit', 'Document', 'ComboBox') -contains (Get-CT $el)) { return $true }
+  try { if (-not $el.Current.IsEnabled -or $el.Current.IsOffscreen) { return $false } } catch { return $false }
   $vp = $null
-  try { return $el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) } catch { return $false }
+  try {
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return (-not $vp.Current.IsReadOnly) }
+    if (@('Edit', 'ComboBox') -contains (Get-CT $el)) { return [bool]$el.Current.IsKeyboardFocusable }
+    # Some native edit providers expose a Pane instead of an Edit. Use the
+    # exact child's HWND, not the class of an arbitrary ancestor window.
+    $h = [IntPtr]$el.Current.NativeWindowHandle
+    if ($h -ne [IntPtr]::Zero -and [XpWin]::ClassOf($h) -match '^(Edit|RichEdit.*)$') {
+      return (([XpWin]::GetWindowLong($h, -16) -band 0x800) -eq 0)
+    }
+  } catch {}
+  return $false
 }
+
+function Get-InputFocus {
+  # UIA can report the dialog Pane while its native child owns keyboard focus.
+  try {
+    $h = [XpWin]::FocusHandle()
+    if ($h -ne [IntPtr]::Zero) {
+      $native = $script:AE::FromHandle($h)
+      if (Test-TextLike $native) { return $native }
+    }
+  } catch {}
+  try { return $script:AE::FocusedElement } catch { return $null }
+}
+
+$script:TypeChoiceCache = @{}
 
 function Get-TextCandidates($root, [int]$maxDepth) {
   $out = New-Object System.Collections.ArrayList
@@ -78,7 +117,7 @@ function Get-WinClass($el) {
 
 # An edit inside a combo box is the same field, not a second one.
 function Get-OwnInputs($win) {
-  $all = @(Get-TextCandidates $win 12 | Where-Object { @('Edit', 'Document', 'ComboBox') -contains (Get-CT $_) })
+  $all = @(Get-TextCandidates $win 12)
   $own = @()
   foreach ($el in $all) {
     $inside = $false
@@ -134,12 +173,22 @@ function Test-PointInside($el, [int]$x, [int]$y) {
   } catch { return $false }
 }
 
-# Every real text field in other apps' windows, in a stable order.
+# Writable fields in the foreground window, with retained selection identities.
 function Get-TypeChoices([int]$ownPid, [int]$x, [int]$y) {
   $out = New-Object System.Collections.ArrayList
   $id = 0
-  foreach ($w in @(Get-TopWindows $ownPid)) {
+  $root = $null
+  try { $root = $script:AE::FromHandle([XpWin]::GetForegroundWindow()) } catch {}
+  # A type step stays in the active dialog. It must not overwrite an unrelated
+  # app because that app happened to have the only discoverable input.
+  if ($null -eq $root) { return @() }
+  $point = $null
+  if ($x -ne 0 -or $y -ne 0) {
+    try { $point = $script:AE::FromPoint((New-Object System.Windows.Point($x, $y))) } catch {}
+  }
+  foreach ($w in @($root)) {
     if (-not (Test-UsableWindow $w)) { continue }
+    try { if ([int]$w.Current.ProcessId -eq $ownPid) { continue } } catch { continue }
     $title = ''
     try { $title = [string]$w.Current.Name } catch {}
     if (-not $title) { continue }
@@ -147,18 +196,58 @@ function Get-TypeChoices([int]$ownPid, [int]$x, [int]$y) {
       $id++
       $name = ''
       try { $name = [string]$el.Current.Name } catch {}
+      $related = $false
+      if ($null -ne $point) {
+        try { $related = Test-Same $el.Current.LabeledBy $point } catch {}
+        # A small label on the same row can name the immediately adjacent box.
+        try {
+          $lr = $point.Current.BoundingRectangle
+          $er = $el.Current.BoundingRectangle
+          if ((Get-CT $point) -eq 'Text' -and $lr.Width -lt 400 -and $lr.Height -lt 80 -and
+              $er.X -ge ($lr.X + $lr.Width - 4) -and $er.X - ($lr.X + $lr.Width) -lt 120 -and
+              [Math]::Abs(($er.Y + $er.Height / 2) - ($lr.Y + $lr.Height / 2)) -lt 16) { $related = $true }
+        } catch {}
+      }
+      $token = [Guid]::NewGuid().ToString('N')
+      $script:TypeChoiceCache[$token] = $el
       [void]$out.Add([pscustomobject]@{
         id = $id
+        token = $token
         window = $title
         type = (Get-CT $el)
         name = $name
         value = (Get-FieldValue $el)
         clicked = (Test-PointInside $el $x $y)
+        related = $related
         el = $el
       })
     }
   }
   return @($out)
+}
+
+function Test-InputFocus($focus, $field) {
+  $p = $focus
+  for ($i = 0; $i -lt 8 -and $null -ne $p; $i++) {
+    if (Test-Same $p $field) { return $true }
+    try { $p = $script:Walker.GetParent($p) } catch { break }
+  }
+  return $false
+}
+
+function Focus-Input($el) {
+  try { $el.SetFocus() } catch {}
+  Start-Sleep -Milliseconds 150
+  if (Test-InputFocus (Get-InputFocus) $el) { return $true }
+  # A provider can omit SetFocus while its visible edit still accepts clicks.
+  try {
+    $r = $el.Current.BoundingRectangle
+    if (-not $r.IsEmpty -and $r.Width -gt 0 -and $r.Height -gt 0) {
+      Invoke-MouseAt ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) 'left'
+      Start-Sleep -Milliseconds 150
+    }
+  } catch {}
+  return (Test-InputFocus (Get-InputFocus) $el)
 }
 
 function Set-TextValue($el, [string]$text) {
@@ -174,9 +263,11 @@ function Set-TextValue($el, [string]$text) {
     if (-not $holder.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
   }
   try { if ($vp.Current.IsReadOnly) { return $false } } catch {}
+  if (-not (Focus-Input $holder)) { throw 'Yazı alanı odağı alamadı; yazı gönderilmedi.' }
   try { $vp.SetValue($text) } catch { return $false }
-  try { $holder.SetFocus() } catch {}
-  return $true
+  $value = $null
+  try { $value = [string]$vp.Current.Value } catch {}
+  return [pscustomobject]@{ value = $value }
 }
 
 function Invoke-Op([string]$op, $P) {
@@ -241,9 +332,8 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
-      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @() }
-      $focus = $null
-      try { $focus = $script:AE::FocusedElement } catch {}
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @(); value = $null }
+      $focus = Get-InputFocus
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
       $atX = 0
       $atY = 0
@@ -251,20 +341,23 @@ function Invoke-Op([string]$op, $P) {
       if ($P.y) { $atY = [int]$P.y }
       $ownPid = 0
       if ($P.ownPid) { $ownPid = [int]$P.ownPid }
-      $choices = @(Get-TypeChoices $ownPid $atX $atY)
-      $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; window = $_.window; type = $_.type; name = $_.name; value = $_.value; clicked = $_.clicked } })
-      $windows = @($public | ForEach-Object { $_.window } | Select-Object -Unique)
       $picked = $null
-      if ($P.fieldId) {
-        $picked = @($choices | Where-Object { $_.id -eq [int]$P.fieldId } | Select-Object -First 1)
-        if ($picked) { $picked = $picked[0] }
-      } elseif ($P.clearFirst -and -not (Test-TextLike $focus)) {
-        $hit = @($choices | Where-Object { $_.clicked } | Select-Object -First 1)
-        if ($windows.Count -ge 2) {
-          $out.needChoice = $true
-          $out.choices = $public
-          return [pscustomobject]$out
-        } elseif ($hit.Count -gt 0) {
+      if ($P.fieldToken) {
+        $token = [string]$P.fieldToken
+        if (-not $script:TypeChoiceCache.ContainsKey($token)) { throw 'Seçilen yazı alanı artık geçerli değil; yazı gönderilmedi.' }
+        $el = $script:TypeChoiceCache[$token]
+        $script:TypeChoiceCache.Clear()
+        if (-not (Test-TextLike $el)) { throw 'Seçilen yazı alanı kapandı veya yazı kabul etmiyor; yazı gönderilmedi.' }
+        $top = Get-TopLevel $el
+        $front = $script:AE::FromHandle([XpWin]::GetForegroundWindow())
+        if (-not (Test-Same $top $front)) { throw 'Seçim sırasında öndeki pencere değişti; yazı gönderilmedi.' }
+        $picked = [pscustomobject]@{ el = $el; window = [string]$top.Current.Name; type = (Get-CT $el) }
+      } elseif ($P.clearFirst -and (($atX -ne 0 -or $atY -ne 0) -or -not (Test-TextLike $focus))) {
+        $script:TypeChoiceCache.Clear()
+        $choices = @(Get-TypeChoices $ownPid $atX $atY)
+        $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; token = $_.token; window = $_.window; type = $_.type; name = $_.name; value = $_.value; clicked = $_.clicked } })
+        $hit = @($choices | Where-Object { $_.clicked -or $_.related })
+        if ($hit.Count -eq 1) {
           $picked = $hit[0]
         } elseif ($choices.Count -eq 1) {
           $picked = $choices[0]
@@ -274,20 +367,29 @@ function Invoke-Op([string]$op, $P) {
           return [pscustomobject]$out
         }
       }
-      if ($null -ne $picked -and $P.text) {
-        if (Set-TextValue $picked.el ([string]$P.text)) {
+      if ($null -ne $picked) {
+        $out.where = [string]$picked.window
+        $result = if ($P.clearFirst) { Set-TextValue $picked.el ([string]$P.text) } else { $false }
+        if ($result) {
           $out.rescued = $true
           $out.where = [string]$picked.window
           $out.via = 'value'
           $out.focusType = [string]$picked.type
           $out.cleared = $true
+          $out.value = $result.value
           if ($P.pressEnter) {
             Start-Sleep -Milliseconds 200
             [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
           }
           return [pscustomobject]$out
         }
+        # A writable field without ValuePattern still supports normal typing.
+        if (-not (Focus-Input $picked.el)) { throw 'Seçilen yazı alanı odaklanamadı; yazı gönderilmedi.' }
+        $focus = Get-InputFocus
+        if (-not (Test-InputFocus $focus $picked.el)) { throw 'Seçilen yazı alanı odağı alamadı; yazı gönderilmedi.' }
+        $out.focusType = Get-CT $focus
       }
+      try { $out.where = [string](Get-TopLevel $focus).Current.Name } catch {}
       if ($P.clearFirst) {
         # Ctrl+A / Delete only inside a text field; elsewhere it would select and delete the app's content.
         if (Test-TextLike $focus) {
@@ -315,6 +417,10 @@ function Invoke-Op([string]$op, $P) {
           $out.pasted = $true
         }
       }
+      $vp = $null
+      try {
+        if ($null -ne $focus -and $focus.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $out.value = [string]$vp.Current.Value }
+      } catch {}
       if ($P.pressEnter) {
         Start-Sleep -Milliseconds 240
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -351,13 +457,20 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId; proc = $procName }
     }
     'focusedValue' {
-      $el = $script:AE::FocusedElement
+      $el = Get-InputFocus
       if ($null -eq $el) { return $null }
       $vp = $null
       if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
         return [pscustomobject]@{ value = [string]$vp.Current.Value; type = (Get-CT $el) }
       }
       return $null
+    }
+    'inputState' {
+      $el = Get-InputFocus
+      if ($null -eq $el) { return $null }
+      $name = ''; $title = ''
+      try { $name = [string]$el.Current.Name; $title = [string](Get-TopLevel $el).Current.Name } catch {}
+      return [pscustomobject]@{ type = (Get-CT $el); writable = (Test-TextLike $el); name = $name; window = $title }
     }
     'capture' {
       $pt = Get-CursorPoint

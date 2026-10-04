@@ -361,6 +361,8 @@ export async function windowRect(windowTitle: string): Promise<{ x: number; y: n
 
 export type TypeFieldChoice = {
   id: number
+  /** Opaque identity retained by the worker while the model chooses. */
+  token: string
   window: string
   type: string
   name: string
@@ -378,6 +380,8 @@ export type TypeResult = {
   via?: string
   needChoice?: boolean
   choices?: TypeFieldChoice[]
+  /** Read from the field actually written, before a submit can move focus. */
+  value?: string | null
 }
 
 export async function typeText(
@@ -385,7 +389,7 @@ export async function typeText(
   pressEnter: boolean,
   clearFirst: boolean,
   at?: { x: number; y: number },
-  fieldId?: number
+  fieldToken?: string
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
@@ -396,8 +400,13 @@ export async function typeText(
     x: at ? Math.round(at.x) : 0,
     y: at ? Math.round(at.y) : 0,
     ownPid: process.pid,
-    fieldId: fieldId ?? 0,
+    fieldToken: fieldToken ?? '',
   })
+}
+
+export async function inputState(): Promise<{ type: string; writable: boolean; name: string; window: string } | null> {
+  if (!IS_WIN) return null
+  return worker.call('inputState', {}, 10000)
 }
 
 /** Lock screen or secure desktop is up: nothing can be seen or clicked. */

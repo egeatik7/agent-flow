@@ -473,8 +473,8 @@ export async function chooseTypeField(opts: {
     })
     .join('\n')
   const system = `You choose which text field a Windows automation step should type into.
-You receive the step kind, the node's instruction, the exact text that will be typed, the following steps, and the open windows that have a text field.
-Use the instruction and the following steps to decide. A click landing in a field is only a hint; ignore it when another window matches the instruction.
+You receive the step kind, the node's instruction, the exact text that will be typed, the following steps, and the text fields in the active window.
+The candidates belong to the active window. Use the instruction and following steps to identify the intended field. Do not pick an unrelated field just because it can accept text.
 Pick one id from the list. If none match, id is null.
 JSON only: {"id": <number or null>, "reason": "<short reason>"}`
   const text = `Step: ${opts.step}

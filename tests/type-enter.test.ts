@@ -5,7 +5,7 @@ const fake = vi.hoisted(() => {
   const state = {
     enterByWorker: 0,
     enterByAgent: 0,
-    typeCalls: [] as { pressEnter: boolean; fieldId?: number }[],
+    typeCalls: [] as { pressEnter: boolean; fieldToken?: string }[],
     secondResult: {} as Record<string, unknown>,
     fieldValue: '' as string | null,
   }
@@ -23,16 +23,16 @@ vi.mock('../electron/a11y-bridge', () => ({
   sendKeys: async (keys: string) => {
     if (keys === '{ENTER}') fake.enterByAgent++
   },
-  typeText: async (_text: string, pressEnter: boolean, _clear: boolean, _at?: unknown, fieldId?: number) => {
-    fake.typeCalls.push({ pressEnter, fieldId })
+  typeText: async (_text: string, pressEnter: boolean, _clear: boolean, _at?: unknown, fieldToken?: string) => {
+    fake.typeCalls.push({ pressEnter, fieldToken })
     if (pressEnter) fake.enterByWorker++
-    // İlk çağrı (alan seçilmeden): iki pencerede yazı kutusu var, seçim gerekiyor.
-    if (fieldId === undefined) {
+    // İlk çağrı (alan seçilmeden): öndeki pencerede iki yazı kutusu var, seçim gerekiyor.
+    if (fieldToken === undefined) {
       return {
         needChoice: true,
         choices: [
-          { id: 7, window: 'Pencere A', name: 'Kaynak klasör' },
-          { id: 8, window: 'Pencere B', name: 'Ara' },
+          { id: 7, token: 'token-a', window: 'Pencere A', type: 'Edit', name: 'Kaynak klasör' },
+          { id: 8, token: 'token-b', window: 'Pencere A', type: 'Edit', name: 'Ara' },
         ],
       }
     }
@@ -88,6 +88,8 @@ describe('Yazı Yaz: birden fazla pencerede yazı kutusu varken Enter', () => {
     fake.secondResult = {}
     await executor.type(node, 1, conditionAhead())
     expect(fake.typeCalls.length).toBe(2)
+    // Seçilen alan, numarayla değil worker'ın verdiği anahtarla (token) çağrılır; worker Enter basmaz.
+    expect(fake.typeCalls[1]).toEqual({ pressEnter: false, fieldToken: 'token-a' })
     expect(fake.enterByWorker + fake.enterByAgent).toBe(1)
   })
 
