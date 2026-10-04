@@ -257,4 +257,14 @@ Hedef, yalnızca derlenen kod veya etkileyici bir demo değildir. Gerçek kabul 
 
 Ölçüm için tamamlanan/başarısız/atlanan öğe sayısı, insan müdahalesi sayısı, yanlış veya tekrarlanan yan etkili eylemler, model çağrıları, işlem dışı bekleme süresi ve uzun çalıştırmadaki kaynak tüketimi kullanılabilir. Eşikler gerçek görevlerle belirlenmelidir; ölçülmeden “robust” denmemelidir.
 
+## 17. Bilinçli kararlar
+
+Bu bölüm, sahibinin denemeler sonunda verdiği kararları kaydeder. Burada yazan, bu belgenin başka yerlerindeki (özellikle §4 ve §16) “doğrulamayı geliştir, eşikleri ölç” yönündeki cümlelerle çelişirse **bu bölüm geçerlidir**. Aşağıdakileri “iyileştirmeye” çalışma.
+
+- Sistem başarıyı yargılamaz; şüphede durmaz, tahmin etmez, açıkça raporlar.
+- Ekran doğrulaması varsayılan olarak yalnızca-günlük modda çalışır. Eşik ayarı denendi ve sürekli sorun çıkardı, tekrar denenmesin.
+- Hafızaya yalnızca gerçekten doğrulanmış hedefler yazılır; şüpheli hedefler yazılmaz.
+
+**Kodun durumu (1.7.85 sonrası, dürüst not):** 1. ve 3. madde kodda uygulandı: akış hatalı öğe/tur içeriyorsa sonuç `ok: false` döner, kaldırılmış node türleri sessizce geçilmez, hafızaya yalnızca `confirm.ts` içindeki `proven` kanıtı olan hedefler yazılır. 2. madde **henüz uygulanmadı**: `ensureActed` (`electron/agent.ts`) hâlâ her eylemde iki ekran taraması yapıyor. Sonucu adımı başarısız saymıyor ve eylemi tekrar etmiyor, ama bekleme süresini, model çağrılarını ve hafıza yazımını etkiliyor. “Kapalı / yalnızca-günlük / açık” seçeneği ve “bakman gereken” sonuç kategorisi yapılacak işler olarak bekliyor.
+
 **Nubbo’nun ana fikri: kullanıcı mevcut node’lara basit komutlar verir; program, bu komutları gerçek bilgisayarın değişken koşullarında tekrar tekrar güvenilir biçimde uygular. Node sayısından ve hızdan önce robust çalışma gelir.**
