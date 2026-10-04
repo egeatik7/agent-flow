@@ -36,6 +36,21 @@ class Worker {
   private pending = new Map<string, Pending>()
   private seq = 0
   private buf = ''
+  /** Settles when the request before this one has been answered. */
+  private tail: Promise<void> = Promise.resolve()
+
+  /** Kills `proc` and forgets it, but only if it is still the current worker: a newer, healthy one stays. */
+  private drop(proc: ChildProcessWithoutNullStreams) {
+    if (this.proc === proc) {
+      this.proc = null
+      this.ready = null
+    }
+    try {
+      proc.kill()
+    } catch {
+      /* already gone */
+    }
+  }
 
   private start(): Promise<void> {
     const script = path.join(scriptDir(), 'worker.ps1')
@@ -45,9 +60,15 @@ class Worker {
     this.buf = ''
     proc.stdout.setEncoding('utf8')
     proc.stderr.setEncoding('utf8')
+    // Writing to a worker that just died raises EPIPE on stdin; the exit handler below already fails the pending requests.
+    proc.stdin.on('error', () => {})
 
     const ready = new Promise<void>((resolve, reject) => {
-      const boot = setTimeout(() => reject(new Error('PowerShell otomasyon işçisi başlamadı (60 sn).')), 60000)
+      const boot = setTimeout(() => {
+        reject(new Error('PowerShell otomasyon işçisi başlamadı (60 sn).'))
+        // A worker that never said READY must not stay as the current one, or every later call waits on it for good.
+        this.drop(proc)
+      }, 60000)
       const onLine = (line: string) => {
         if (line === 'READY') {
           clearTimeout(boot)
@@ -86,6 +107,7 @@ class Worker {
       proc.on('error', (e) => {
         clearTimeout(boot)
         reject(new Error(`PowerShell başlatılamadı: ${e.message}`))
+        this.drop(proc)
       })
       proc.on('exit', () => {
         clearTimeout(boot)
@@ -105,7 +127,23 @@ class Worker {
     return ready
   }
 
+  /**
+   * One request at a time. The worker answers in order, so a request's time limit has to count from when it is
+   * written, not from when it queued behind a long scan; otherwise a short call times out and kills a healthy worker.
+   */
   async call<T>(op: string, payload: object = {}, timeoutMs = 60000): Promise<T> {
+    const turn = this.tail
+    let release!: () => void
+    this.tail = new Promise<void>((resolve) => (release = resolve))
+    await turn
+    try {
+      return await this.send<T>(op, payload, timeoutMs)
+    } finally {
+      release()
+    }
+  }
+
+  private async send<T>(op: string, payload: object, timeoutMs: number): Promise<T> {
     if (!this.proc || !this.ready) this.ready = this.start()
     await this.ready
     const proc = this.proc
@@ -116,7 +154,8 @@ class Worker {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`Otomasyon zaman aşımı (${op}).`))
-        this.kill()
+        // Only the worker this request was sent to; a newer one that started since is left alone.
+        this.drop(proc)
       }, timeoutMs)
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
