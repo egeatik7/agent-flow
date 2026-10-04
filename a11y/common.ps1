@@ -113,7 +113,7 @@ public static class XpInput {
     return "";
   }
 
-  /// One shortcut. Modifiers go down, vk is tapped `times` times, then modifiers come back up.
+  /// One shortcut. Modifiers go down, vk is tapped the given number of times, then modifiers come back up.
   /// vk 0 presses only the modifiers. They are released even when a tap throws.
   public static void Chord(int[] mods, int vk, int times) {
     var down = new List<int>();

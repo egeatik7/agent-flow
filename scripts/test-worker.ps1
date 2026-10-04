@@ -324,6 +324,9 @@ Check-Sent '+(ec)' 'A grouped shortcut with no Windows key stays on SendKeys'
 KeyOp ''
 Check-Sent '' 'An empty shortcut still goes to SendKeys'
 
+$only = @(Invoke-Op 'keys' ([pscustomobject]@{ keys = '#r' }))
+Check ($only.Count -eq 1 -and $only[0] -eq $true) 'A Windows shortcut returns only true, with no extra output'
+
 KeyOp '#r'
 Check-NoSend 'Win+R must not go through SendKeys'
 Check (@([XpInput]::Chords).Count -eq 1) 'Win+R is one shortcut'
