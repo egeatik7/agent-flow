@@ -15,8 +15,8 @@
     "build:electron": "npm run build:renderer && npm run build:main",
     "test": "vitest run",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
-    "pack:win": "python3 scripts/make-splash-bmp.py && npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
-    "pack:dir": "npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
+    "pack:win": "py scripts/make-splash-bmp.py && npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
+    "pack:dir": "npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
   },
   "build": {
     "appId": "com.xpagentsudio.app",
@@ -84,6 +84,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "pe-library": "^1.0.1",
