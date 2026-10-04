@@ -62,6 +62,9 @@ type Budget = { used: number }
 /** Counts shared by a whole run, including the packages it climbs out of. `failed` is loop items or laps that ended on an error. */
 type Tally = { n: number; failed: number }
 
+/** What a run reports when it ends without being stopped: steps taken, and loop items or laps that ended on an error. */
+export type RunSummary = { steps: number; failed: number }
+
 /** At most this many item names are listed in the end-of-loop summary. */
 const FAILED_NAMES_SHOWN = 5
 
@@ -121,7 +124,7 @@ export async function runGraph(
     /** Variables the run starts with. A package gets those of the loop lap it runs in. */
     vars?: Record<string, string>
   }
-): Promise<void> {
+): Promise<RunSummary> {
   if (opts.packagePath?.length) {
     const layers: { parent: AgentGraph; pkg: AgentNode }[] = []
     let cursor = graph
@@ -143,7 +146,7 @@ export async function runGraph(
       const { parent, pkg } = layers[i]
       await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id })
     }
-    return
+    return { steps: shared.tally.n, failed: shared.tally.failed }
   }
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = opts.afterNodeId ? undefined : findEntry(graph, opts.startId)
@@ -524,8 +527,9 @@ export async function runGraph(
       }
     }
   } catch (e) {
-    if (e instanceof EndFlow) return
+    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed }
     throw e
   }
   if (!opts.nested) ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
+  return { steps: tally.n, failed: tally.failed }
 }

@@ -497,14 +497,15 @@ export async function startApp(report: (pct: number, line: string) => void, clos
         hidden = await hideSelf()
         revealHud()
       }
-      await runGraph(graph, agent.executor, {
+      const summary = await runGraph(graph, agent.executor, {
         maxSteps: Math.max(1, s.maxSteps),
         stepDelayMs: Math.max(0, s.stepDelayMs),
         startId,
         resume: !!startId,
         packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
       })
-      return { ok: true }
+      // A run that went through every step but had loop items end on an error is not a success.
+      return { ok: summary.failed === 0, failed: summary.failed }
     } catch (e) {
       if (e instanceof StoppedError) {
         log('warn', 'Ajan durduruldu.')

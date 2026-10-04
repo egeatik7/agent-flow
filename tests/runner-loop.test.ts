@@ -89,6 +89,17 @@ describe('Döngü sonucu doğru raporlanır', () => {
     expect(final[0].message).toMatch(/1 öğe\/tur hatayla bitti/)
   })
 
+  it('akışın sonucu hatalı sayısını döndürür: hepsi başarılıysa 0, hata varsa o kadar (main.ts bunu ok:false yapar)', async () => {
+    const clean = fakeExecutor([])
+    const ok = await runGraph(listGraph(['a.png', 'b.png', 'c.png']), clean.ex, opts)
+    expect(ok.failed).toBe(0)
+    expect(ok.steps).toBeGreaterThan(0)
+
+    const bad = fakeExecutor(['b.png', 'c.png'])
+    const failed = await runGraph(listGraph(['a.png', 'b.png', 'c.png']), bad.ex, opts)
+    expect(failed.failed).toBe(2)
+  })
+
   it('iç içe döngülerde hatalar toplanır', async () => {
     // İç döngünün 2. turu ({{öğe}} = "2") her dış öğede hata verir: toplam 2 hata, 6 turdan.
     const { ex, logs } = fakeExecutor(['2'])

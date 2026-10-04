@@ -872,8 +872,11 @@ export default function App() {
     setStepStatus({})
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
-      if (api) await api.runAgent(full, startId, path)
-      else
+      if (api) {
+        const result = await api.runAgent(full, startId, path)
+        // The agent log already explains each error; this one line says the run did not end clean.
+        if (!result.ok && !result.stopped) pushLog('error', `“${name}” ${result.failed ?? 0} öğe/tur hatayla bitti, başarılı sayılmaz. Hatalar yukarıdaki kayıtlarda.`)
+      } else
         await runDemo(full, settingsRef.current, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode, path)
     } catch (e) {
       pushLog('error', errText(e))
