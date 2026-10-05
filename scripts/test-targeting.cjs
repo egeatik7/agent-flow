@@ -89,3 +89,16 @@ test('trace files can reproduce selection; retention and overlay respect screens
 test('incomplete recordings are reported, rather than inventing OS observations',async()=>{
   const b=bundle(['windows'],[]); b.events.pop(); await assert.rejects(replayTrace(b),/incomplete/);
 });
+test('recorded picture was searched and not found: the recorded position is not clicked',async()=>{
+  const b=bundle(['icon','offset'],[],{node:{locator:{icon:'fixture-png',windowTitle:'Fixture',offsetX:10,offsetY:20}},events:[
+    {kind:'observation',source:'icon',value:{hit:null,again:null}},
+    {kind:'observation',source:'offset',value:{x:100,y:100,w:800,h:600}},
+  ]});
+  await assert.rejects(replayTrace(b),/bulunamadı/);
+});
+test('no recorded picture to check: the recorded position stays the last hint',async()=>{
+  const b=bundle(['offset'],[],{node:{locator:{windowTitle:'Fixture',offsetX:10,offsetY:20}},events:[
+    {kind:'observation',source:'offset',value:{x:100,y:100,w:800,h:600}},
+  ]});
+  const r=await replayTrace(b); assert.deepEqual({x:r.result.x,y:r.result.y},{x:110,y:120}); assert.equal(r.inputCalls,0);
+});

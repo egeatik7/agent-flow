@@ -482,12 +482,20 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if (stage === 'offset' && loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
+          // The icon stage above already searched the screen for the recorded picture. If the
+          // locator has a picture and it was not found, the window-relative point is no longer
+          // evidence of anything: clicking it would be the "click somewhere and hope" the
+          // product forbids. A locator without a picture leaves the spot as the last hint.
+          if (loc.icon) {
+            log('warn', 'Kayıtlı konuma tıklanmadı: kayıtlı resim ekranda bulunamadı, tıklamayı destekleyen kanıt yok.')
+            continue
+          }
           ctx.setMethod?.('Kayıtlı konum')
           try {
             const r = await bridge.windowRect(win)
             trace(node, { kind: 'observation', source: 'offset', value: r })
             if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('offset')
-            log('warn', 'Yazı bulunamadı, kayıttaki konuma tıklanıyor.')
+            log('warn', 'Kayıt resmi yok, kayıttaki konuma tıklanıyor.')
             return resolved({ x: r.x + loc.offsetX, y: r.y + loc.offsetY, label: 'kayıtlı konum' }, 'offset')
           } catch {
             /* window gone */
@@ -1391,6 +1399,15 @@ export function createAgent(ctx: AgentContext) {
     const goal = node.prompt!.trim()
     const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
     const history: GuiTurn[] = []
+
+    // A lap can run dozens of actions, and the model only ever receives the newest few
+    // frames, so older screenshots are released instead of being held for the whole lap.
+    const GUI_IMAGES_KEPT = 4
+    const keepRecentImages = () => {
+      for (let i = 0; i < history.length - GUI_IMAGES_KEPT; i++) {
+        if (history[i].image) delete history[i].image
+      }
+    }
     let path: PathStep[] = []
     ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
     log('info', `İnisiyatif (${model.join(' → ')}${tars ? ', UI-TARS sırada' : ''}): ${goal}`)
@@ -1427,6 +1444,7 @@ export function createAgent(ctx: AgentContext) {
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
       ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
+      keepRecentImages()
       await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)
       const unchanged = !!prev && sigDiff(prev.sig, shot.sig) < STILL_DIFF
