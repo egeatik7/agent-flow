@@ -9,9 +9,10 @@ function ConvertTo-SendKeysText([string]$t) {
   return ($t -replace '([\+\^%~\(\)\{\}\[\]])', '{$1}')
 }
 
-function Send-TextPaced([string]$t, [int]$gapMs) {
+function Send-TextPaced([string]$t, [int]$gapMs, [scriptblock]$checkFocus = $null) {
   if ([string]::IsNullOrEmpty($t)) { return }
   foreach ($ch in $t.ToCharArray()) {
+    if ($null -ne $checkFocus) { & $checkFocus }
     [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText ([string]$ch)))
     if ($gapMs -gt 0) { Start-Sleep -Milliseconds $gapMs }
   }
@@ -340,6 +341,38 @@ public static class XpWin {
     var info = new GUIINFO(); info.cbSize = Marshal.SizeOf(typeof(GUIINFO));
     return GetGUIThreadInfo(GetWindowThreadProcessId(foreground, IntPtr.Zero), ref info) ? info.hwndFocus : IntPtr.Zero;
   }
+  [StructLayout(LayoutKind.Sequential)] public class RECT { public int left, top, right, bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x, y; }
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint command);
+  public static bool IsOwnedBy(IntPtr h, IntPtr owner) {
+    for (int i = 0; i < 16 && h != IntPtr.Zero; i++) {
+      h = GetWindow(h, 4);
+      if (h == owner) return true;
+    }
+    return false;
+  }
+  [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] static extern uint ThreadAndPid(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, [Out] RECT r);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  public static int ProcessOf(IntPtr h) { uint pid; ThreadAndPid(h, out pid); return (int)pid; }
+  public static IntPtr RootOf(IntPtr h) { return h == IntPtr.Zero ? h : GetAncestor(h, 2); }
+  public static IntPtr RootAt(int x, int y) { return RootOf(WindowFromPoint(new POINT { x = x, y = y })); }
+  public static GUIINFO FocusData() {
+    var info = new GUIINFO(); info.cbSize = Marshal.SizeOf(typeof(GUIINFO));
+    var fg = GetForegroundWindow();
+    if (fg == IntPtr.Zero || !GetGUIThreadInfo(GetWindowThreadProcessId(fg, IntPtr.Zero), ref info)) throw new InvalidOperationException("No keyboard focus information");
+    return info;
+  }
+  public static RECT BoundsOf(IntPtr h) { var r = new RECT(); return GetWindowRect(h, r) ? r : null; }
+  public static RECT CaretBounds(GUIINFO info) {
+    var p = new POINT { x = info.left, y = info.top };
+    if (info.hwndCaret == IntPtr.Zero || !ClientToScreen(info.hwndCaret, ref p)) return null;
+    return new RECT { left = p.x, top = p.y, right = p.x + info.right - info.left, bottom = p.y + info.bottom - info.top };
+  }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetClassName(IntPtr hWnd, StringBuilder lp, int nMax);
   public static string ClassOf(IntPtr h) {
@@ -392,7 +425,7 @@ function Test-TextLike($el) {
 }
 
 function Get-InputFocus {
-  # UIA can report the dialog Pane while its native child owns keyboard focus.
+  $native = $null
   try {
     $h = [XpWin]::FocusHandle()
     if ($h -ne [IntPtr]::Zero) {
@@ -400,7 +433,13 @@ function Get-InputFocus {
       if (Test-TextLike $native) { return $native }
     }
   } catch {}
-  try { return $script:AE::FocusedElement } catch { return $null }
+  $uia = $null
+  try { $uia = $script:AE::FocusedElement } catch {}
+  if (Test-TextLike $uia) { return $uia }
+  # Keep the native child even if its provider cannot report editability.
+  # This is evidence for diagnostics/recovery, NOT permission to type.
+  if ($null -ne $native) { return $native }
+  return $uia
 }
 
 $script:TypeChoiceCache = @{}
@@ -654,7 +693,8 @@ function Test-InputFocus($focus, $field) {
   return $false
 }
 
-function Focus-Input($el) {
+function Focus-Input($el, $guard = $null) {
+  if ($guard) { [void](Get-BoundWindow $guard.window $false) }
   try { $el.SetFocus() } catch {}
   Start-Sleep -Milliseconds 150
   if (Test-InputFocus (Get-InputFocus) $el) { return $true }
@@ -662,14 +702,19 @@ function Focus-Input($el) {
   try {
     $r = $el.Current.BoundingRectangle
     if (-not $r.IsEmpty -and $r.Width -gt 0 -and $r.Height -gt 0) {
-      Invoke-MouseAt ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) 'left'
+      $x = [int]($r.X + $r.Width / 2); $y = [int]($r.Y + $r.Height / 2)
+      if ($guard) {
+        [void](Get-BoundWindow $guard.window $false)
+        if ([XpWin]::RootAt($x, $y) -ne [IntPtr]([long]$guard.window.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Field is covered' }
+      }
+      Invoke-MouseAt $x $y 'left'
       Start-Sleep -Milliseconds 150
     }
   } catch {}
   return (Test-InputFocus (Get-InputFocus) $el)
 }
 
-function Set-TextValue($el, [string]$text) {
+function Set-TextValue($el, [string]$text, $guard = $null) {
   $target = $el
   if ((Get-CT $el) -eq 'ComboBox') {
     $edit = @(Get-TextCandidates $el 4 | Where-Object { (Get-CT $_) -eq 'Edit' } | Select-Object -First 1)
@@ -682,11 +727,174 @@ function Set-TextValue($el, [string]$text) {
     if (-not $holder.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
   }
   try { if ($vp.Current.IsReadOnly) { return $false } } catch {}
-  if (-not (Focus-Input $holder)) { throw 'Yazı alanı odağı alamadı; yazı gönderilmedi.' }
-  try { $vp.SetValue($text) } catch { return $false }
+  if (-not (Focus-Input $holder $guard)) { throw 'Yazı alanı odağı alamadı; yazı gönderilmedi.' }
+  if ($guard) { [void](Get-BoundWindow $guard.window $false); Assert-TypeFocus $holder $guard ([string][XpWin]::FocusHandle()) }
+  try { $vp.SetValue($text) } catch {
+    if ($guard) { throw 'INPUT_WRITE_UNCERTAIN: ValuePattern write failed; no automatic input replay' }
+    return $false
+  }
   $value = $null
   try { $value = [string]$vp.Current.Value } catch {}
   return [pscustomobject]@{ value = $value }
+}
+
+# Identity guards use an exact live HWND/PID, never a title-only exception.
+function Get-BoundWindow($target, [bool]$activate = $false) {
+  if (-not $target -or -not $target.hwnd -or -not $target.pid) { throw 'INPUT_TARGET_INVALID: Missing window identity' }
+  $h = [IntPtr]([long]$target.hwnd)
+  if (-not [XpWin]::IsWindow($h) -or [XpWin]::ProcessOf($h) -ne [int]$target.pid) { throw 'INPUT_WINDOW_CLOSED: Target window identity changed' }
+  $el = $script:AE::FromHandle($h)
+  if ($null -eq $el) { throw 'INPUT_TARGET_INVALID: Target window cannot be inspected' }
+  if ($activate) { Enter-Window $el }
+  if ([XpWin]::GetForegroundWindow() -ne $h) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus' }
+  if (-not $activate -and $target.rect) {
+    $r = $el.Current.BoundingRectangle
+    if ([int]$r.X -ne $target.rect.x -or [int]$r.Y -ne $target.rect.y -or [int]$r.Width -ne $target.rect.w -or [int]$r.Height -ne $target.rect.h) {
+      throw 'INPUT_LAYOUT_CHANGED: Window bounds changed; stale coordinates were not used'
+    }
+  }
+  return $el
+}
+
+function Get-InputTarget($P) {
+  $el = $null
+  if ($P.target) {
+    $original = [IntPtr]([long]$P.target.hwnd)
+    if (-not [XpWin]::IsWindow($original) -or [XpWin]::ProcessOf($original) -ne [int]$P.target.pid) { throw 'INPUT_WINDOW_CLOSED: Target window identity changed' }
+    $fg = [XpWin]::GetForegroundWindow()
+    if ($P.followOwnedDialog -and [XpWin]::ProcessOf($fg) -eq [int]$P.target.pid -and [XpWin]::IsOwnedBy($fg, $original)) {
+      $el = $script:AE::FromHandle($fg)
+    } else { $el = Get-BoundWindow $P.target $true }
+  } elseif ($P.windowTitle) {
+    $el = Find-Window ([string]$P.windowTitle)
+    Enter-Window $el
+  } elseif ($P.at) {
+    $h = [XpWin]::RootAt([int]$P.at.x, [int]$P.at.y)
+    if ($h -ne [IntPtr]::Zero) { $el = $script:AE::FromHandle($h) }
+    if ($null -ne $el) { Enter-Window $el }
+  } else {
+    $el = $script:AE::FromHandle([XpWin]::GetForegroundWindow())
+  }
+  if ($null -eq $el) { throw 'INPUT_TARGET_INVALID: No target window' }
+  $h = [IntPtr]$el.Current.NativeWindowHandle
+  $targetPid = [int]$el.Current.ProcessId
+  if ($P.ownPid -and $targetPid -eq [int]$P.ownPid) { throw 'INPUT_TARGET_INVALID: Nubbo cannot be its own input target' }
+  if ($h -eq [IntPtr]::Zero -or [XpWin]::GetForegroundWindow() -ne $h) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus' }
+  $r = $el.Current.BoundingRectangle
+  if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { throw 'INPUT_TARGET_INVALID: Target window has no visible bounds' }
+  return [pscustomobject]@{ hwnd = [string]$h; pid = $targetPid; title = [string]$el.Current.Name; rect = [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height } }
+}
+
+function Get-InputDiagnostics {
+  $el = Get-InputFocus
+  $out = [ordered]@{ type = ''; writable = $false; name = ''; window = ''; native = ''; focusHwnd = ''; hwnd = ''; pid = 0; rect = $null; caret = $null; readOnly = $null }
+  if ($null -ne $el) {
+    try {
+      $out.type = Get-CT $el
+      $out.writable = Test-TextLike $el
+      $out.name = [string]$el.Current.Name
+      $top = Get-TopLevel $el
+      $out.window = [string]$top.Current.Name
+      $vp = $null
+      if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $out.readOnly = [bool]$vp.Current.IsReadOnly }
+    } catch {}
+  }
+  try {
+    $fg = [XpWin]::GetForegroundWindow()
+    $out.hwnd = [string]$fg
+    $out.pid = [XpWin]::ProcessOf($fg)
+    $info = [XpWin]::FocusData()
+    $fh = $info.hwndFocus
+    $out.focusHwnd = [string]$fh
+    $out.native = [XpWin]::ClassOf($fh)
+    $fr = [XpWin]::BoundsOf($fh)
+    if ($fr -ne $null) { $out.rect = [pscustomobject]@{ x = $fr.left; y = $fr.top; w = ($fr.right - $fr.left); h = ($fr.bottom - $fr.top) } }
+    if ($info.hwndCaret -ne [IntPtr]::Zero) {
+      $cr = [XpWin]::CaretBounds($info)
+      if ($cr -ne $null) { $out.caret = [pscustomobject]@{ hwnd = [string]$info.hwndCaret; x = $cr.left; y = $cr.top; w = ($cr.right - $cr.left); h = ($cr.bottom - $cr.top) } }
+    }
+  } catch {}
+  return [pscustomobject]$out
+}
+
+function Test-RectPoint($rect, [double]$x, [double]$y) {
+  return ($null -ne $rect -and $rect.w -gt 0 -and $rect.h -gt 0 -and $x -ge $rect.x -and $x -lt ($rect.x + $rect.w) -and $y -ge $rect.y -and $y -lt ($rect.y + $rect.h))
+}
+
+# Custom fields require a fresh visual focus request AND independent native
+# evidence. A Pane, a window title or TextPattern alone never authorizes input.
+function Test-VisualInput($guard) {
+  if (-not $guard -or -not $guard.visual -or -not $guard.at) { return $false }
+  try {
+    [void](Get-BoundWindow $guard.window $false)
+    $d = Get-InputDiagnostics
+    if ($d.readOnly -eq $true -or -not $d.focusHwnd -or -not $d.caret -or $d.caret.h -le 0) { return $false }
+    $fh = [IntPtr]([long]$d.focusHwnd)
+    $ch = [IntPtr]([long]$d.caret.hwnd)
+    $wh = [IntPtr]([long]$guard.window.hwnd)
+    if ([XpWin]::RootOf($fh) -ne $wh -or [XpWin]::RootOf($ch) -ne $wh -or -not [XpWin]::IsWindowEnabled($fh)) { return $false }
+    if ($d.rect.w -gt $guard.window.rect.w -or $d.rect.h -gt 180) { return $false }
+    if (-not (Test-RectPoint $d.rect $guard.at.x $guard.at.y)) { return $false }
+    if (-not (Test-RectPoint $d.rect ($d.caret.x + $d.caret.w / 2) ($d.caret.y + $d.caret.h / 2))) { return $false }
+    if (@('Button','CheckBox','RadioButton','MenuItem','Hyperlink','Text') -contains $d.type) { return $false }
+    return $true
+  } catch { return $false }
+}
+
+function Assert-TypeFocus($field, $guard, [string]$nativeFocus) {
+  if ($guard) { [void](Get-BoundWindow $guard.window $false) }
+  if ($nativeFocus) {
+    if ([string][XpWin]::FocusHandle() -ne $nativeFocus) { throw 'INPUT_FOCUS_CHANGED: Keyboard focus changed; input stopped' }
+    if ($guard -and [XpWin]::RootOf([IntPtr]([long]$nativeFocus)) -ne [IntPtr]([long]$guard.window.hwnd)) { throw 'INPUT_FOCUS_CHANGED: Keyboard focus belongs to another window' }
+  }
+  if ($null -ne $field -and (Test-TextLike $field) -and -not (Test-InputFocus (Get-InputFocus) $field)) {
+    throw 'INPUT_FOCUS_CHANGED: Selected field lost focus; input stopped'
+  }
+}
+
+function Assert-LastTypeFocus($target, [string]$nativeFocus) {
+  [void](Get-BoundWindow $target $false)
+  if (-not $nativeFocus) { throw 'INPUT_FOCUS_CHANGED: Missing post-write focus identity' }
+  if (-not $script:LastTypeFocus -or $script:LastTypeFocus.window -ne $target.hwnd) { throw 'INPUT_FOCUS_CHANGED: No matching completed write' }
+  Assert-TypeFocus $script:LastTypeFocus.field @{ window = $target } $nativeFocus
+}
+
+# Copy only from an already-authorized custom field. Snapshot all available
+# clipboard formats before placing a unique sentinel; failed copies cannot
+# accidentally verify stale clipboard content. Clipboard errors are fatal.
+function Get-ClipboardSnapshot {
+  $backup = New-Object System.Windows.Forms.DataObject
+  $old = [System.Windows.Forms.Clipboard]::GetDataObject()
+  if ($null -ne $old) {
+    foreach ($format in $old.GetFormats($false)) { $backup.SetData($format, $false, $old.GetData($format, $false)) }
+  }
+  return $backup
+}
+
+function Read-VisualInput($field, $guard, [string]$nativeFocus) {
+  Assert-TypeFocus $field $guard $nativeFocus
+  $backup = Get-ClipboardSnapshot
+  $marker = 'NUBBO_COPY_' + [Guid]::NewGuid().ToString('N')
+  $value = $null
+  try {
+    [System.Windows.Forms.Clipboard]::SetText($marker)
+    Assert-TypeFocus $field $guard $nativeFocus
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    Assert-TypeFocus $field $guard $nativeFocus
+    [System.Windows.Forms.SendKeys]::SendWait('^c')
+    for ($i = 0; $i -lt 5; $i++) {
+      Start-Sleep -Milliseconds 80
+      Assert-TypeFocus $field $guard $nativeFocus
+      if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+        $text = [System.Windows.Forms.Clipboard]::GetText()
+        if ($text -ne $marker) { $value = $text; break }
+      }
+    }
+  } finally {
+    [System.Windows.Forms.Clipboard]::SetDataObject($backup, $true)
+  }
+  if ($null -eq $value) { throw 'INPUT_READBACK_UNAVAILABLE: Custom field text could not be verified; no Enter sent' }
+  return $value
 }
 
 function Invoke-Op([string]$op, $P) {
@@ -711,7 +919,17 @@ function Invoke-Op([string]$op, $P) {
     'scan' {
       return (Invoke-Scan $P)
     }
+    'inputTarget' { return (Get-InputTarget $P) }
+    'assertInputTarget' {
+      if ($P.focusHwnd) { Assert-LastTypeFocus $P.target ([string]$P.focusHwnd) }
+      else { [void](Get-BoundWindow $P.target $false) }
+      return $true
+    }
     'clickAt' {
+      if ($P.target) {
+        [void](Get-BoundWindow $P.target $false)
+        if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Target point is covered by another window' }
+      }
       Invoke-MouseAt ([int]$P.x) ([int]$P.y) ([string]$P.button)
       return $true
     }
@@ -733,14 +951,17 @@ function Invoke-Op([string]$op, $P) {
       $v = Get-VirtualScreen
       $x = [Math]::Max($v.x, [int]$P.x)
       $y = [Math]::Max($v.y, [int]$P.y)
-      $w = [Math]::Max(20, [Math]::Min([int]$P.w, $v.x + $v.w - $x))
-      $h = [Math]::Max(20, [Math]::Min([int]$P.h, $v.y + $v.h - $y))
+      $right = [Math]::Min($v.x + $v.w, [int]$P.x + [int]$P.w)
+      $bottom = [Math]::Min($v.y + $v.h, [int]$P.y + [int]$P.h)
+      if ($right -le $x -or $bottom -le $y) { throw 'INPUT_CAPTURE_OUTSIDE: Requested region is outside the desktop' }
+      $w = $right - $x
+      $h = $bottom - $y
       $rect = [pscustomobject]@{ x = $x; y = $y; w = $w; h = $h }
       $bmp = Get-ScreenBitmap $rect
       $maxW = 800
       if ($P.maxW) { $maxW = [int]$P.maxW }
-      $img = ConvertTo-JpegBase64 $bmp (New-Object System.Collections.ArrayList) $rect $false $maxW
-      $bmp.Dispose()
+      try { $img = ConvertTo-JpegBase64 $bmp (New-Object System.Collections.ArrayList) $rect $false $maxW ([int]$P.snap) ($P.fit -eq $true) }
+      finally { $bmp.Dispose() }
       return [pscustomobject]@{ area = $rect; image = $img }
     }
     'windowRect' {
@@ -751,7 +972,9 @@ function Invoke-Op([string]$op, $P) {
     }
     'typeText' {
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
-      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @(); value = $null }
+      $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; focusHwnd = ''; writeSent = $false; code = ''; diagnostics = $null; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @(); value = $null }
+      $script:LastTypeFocus = $null
+      if ($P.guard) { [void](Get-BoundWindow $P.guard.window $false) }
       $focus = Get-InputFocus
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
       $atX = 0
@@ -778,9 +1001,9 @@ function Invoke-Op([string]$op, $P) {
         $hit = @($choices | Where-Object { $_.clicked -or $_.related })
         if ($hit.Count -eq 1) {
           $picked = $hit[0]
-        } elseif ($choices.Count -eq 1) {
+        } elseif ($choices.Count -eq 1 -and -not $P.guard) {
           $picked = $choices[0]
-        } elseif ($choices.Count -gt 1) {
+        } elseif ($choices.Count -gt 0) {
           $out.needChoice = $true
           $out.choices = $public
           return [pscustomobject]$out
@@ -788,33 +1011,71 @@ function Invoke-Op([string]$op, $P) {
       }
       if ($null -ne $picked) {
         $out.where = [string]$picked.window
-        $result = if ($P.clearFirst) { Set-TextValue $picked.el ([string]$P.text) } else { $false }
+        $result = if ($P.clearFirst) { Set-TextValue $picked.el ([string]$P.text) $P.guard } else { $false }
         if ($result) {
+          $out.writeSent = $true
           $out.rescued = $true
           $out.where = [string]$picked.window
           $out.via = 'value'
           $out.focusType = [string]$picked.type
           $out.cleared = $true
           $out.value = $result.value
+          if ($P.guard) {
+            $out.focusHwnd = [string][XpWin]::FocusHandle()
+            Assert-TypeFocus $picked.el $P.guard $out.focusHwnd
+            $script:LastTypeFocus = @{ window = $P.guard.window.hwnd; field = $picked.el }
+          }
           if ($P.pressEnter) {
             Start-Sleep -Milliseconds 200
+            if ($P.guard) { Assert-LastTypeFocus $P.guard.window $out.focusHwnd }
             [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
           }
           return [pscustomobject]$out
         }
         # A writable field without ValuePattern still supports normal typing.
-        if (-not (Focus-Input $picked.el)) { throw 'Seçilen yazı alanı odaklanamadı; yazı gönderilmedi.' }
+        if (-not (Focus-Input $picked.el $P.guard)) { throw 'Seçilen yazı alanı odaklanamadı; yazı gönderilmedi.' }
         $focus = Get-InputFocus
         if (-not (Test-InputFocus $focus $picked.el)) { throw 'Seçilen yazı alanı odağı alamadı; yazı gönderilmedi.' }
         $out.focusType = Get-CT $focus
       }
       try { $out.where = [string](Get-TopLevel $focus).Current.Name } catch {}
+      $visual = (-not (Test-TextLike $focus)) -and (Test-VisualInput $P.guard)
+      if (-not (Test-TextLike $focus) -and -not $visual) {
+        $out.skippedClear = $true
+        $out.code = 'INPUT_FOCUS_UNRESOLVED'
+        $out.diagnostics = Get-InputDiagnostics
+        return [pscustomobject]$out
+      }
+      if ($P.guard -and $P.guard.at -and -not $visual -and $null -eq $picked -and -not (Test-PointInside $focus $atX $atY)) {
+        $out.skippedClear = $true
+        $out.code = 'INPUT_TARGET_UNRESOLVED'
+        $out.diagnostics = Get-InputDiagnostics
+        return [pscustomobject]$out
+      }
+      $nativeFocus = ''
+      if ($P.guard) { try { $nativeFocus = [string][XpWin]::FocusHandle() } catch {} }
+      if ($P.guard -and (-not $nativeFocus -or $nativeFocus -eq '0')) { throw 'INPUT_FOCUS_CHANGED: No native keyboard focus identity' }
+      $out.focusHwnd = $nativeFocus
+      if ($visual) {
+        # Copying selects text; an unknown custom field cannot safely preserve
+        # an append caret. Only explicit replacement is supported here.
+        if (-not $P.clearFirst) { throw 'INPUT_CUSTOM_APPEND_UNSUPPORTED: Use explicit replacement for a custom field' }
+        # Check clipboard access before input. Do not require copying the old
+        # text: an empty editable field legitimately has nothing to copy.
+        [void](Get-ClipboardSnapshot)
+        $out.via = 'visual-caret'
+      }
+      $check = { Assert-TypeFocus $focus $P.guard $nativeFocus }
+      if ($P.guard) { & $check }
       if ($P.clearFirst) {
         # Ctrl+A / Delete only inside a text field; elsewhere it would select and delete the app's content.
-        if (Test-TextLike $focus) {
+        if ((Test-TextLike $focus) -or $visual) {
           Start-Sleep -Milliseconds 120
+          if ($P.guard) { & $check }
           [System.Windows.Forms.SendKeys]::SendWait('^a')
           Start-Sleep -Milliseconds 280
+          if ($P.guard) { & $check }
+          $out.writeSent = $true
           [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
           Start-Sleep -Milliseconds 200
           # Some classic edit boxes ignore Ctrl+A. If the box still holds text, select it with EM_SETSEL and delete again.
@@ -823,8 +1084,10 @@ function Invoke-Op([string]$op, $P) {
           if ($null -ne $left -and $left.Length -gt 0) {
             $hwnd = [IntPtr]0
             try { $hwnd = [IntPtr]$focus.Current.NativeWindowHandle } catch {}
+            if ($P.guard) { & $check }
             if ([XpWin]::SelectAll($hwnd)) {
               Start-Sleep -Milliseconds 120
+              if ($P.guard) { & $check }
               [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
               Start-Sleep -Milliseconds 200
             }
@@ -837,14 +1100,22 @@ function Invoke-Op([string]$op, $P) {
       }
       $text = [string]$P.text
       if ($text.Length -gt 0) {
+        if ($P.guard) { & $check }
+        $out.writeSent = $true
         if ([XpText]::CanType($text)) {
-          Send-TextPaced $text 20
+          if ($P.guard) { Send-TextPaced $text 20 $check } else { Send-TextPaced $text 20 }
         } else {
-          $old = [XpText]::SetClipboard($text)
-          Start-Sleep -Milliseconds 80
-          [System.Windows.Forms.SendKeys]::SendWait('^v')
-          Start-Sleep -Milliseconds 250
-          [XpText]::RestoreClipboard($old)
+          $old = if ($visual) { Get-ClipboardSnapshot } else { [XpText]::SetClipboard($text) }
+          try {
+            if ($visual) { [System.Windows.Forms.Clipboard]::SetText($text) }
+            Start-Sleep -Milliseconds 80
+            if ($P.guard) { & $check }
+            [System.Windows.Forms.SendKeys]::SendWait('^v')
+            Start-Sleep -Milliseconds 250
+          } finally {
+            if ($visual) { [System.Windows.Forms.Clipboard]::SetDataObject($old, $true) }
+            else { [XpText]::RestoreClipboard($old) }
+          }
           $out.pasted = $true
         }
       }
@@ -857,8 +1128,14 @@ function Invoke-Op([string]$op, $P) {
         $native = Get-NativeEditText $focus
         if ($null -ne $native) { $out.value = $native }
       }
+      if ($visual) { $out.value = Read-VisualInput $focus $P.guard $nativeFocus }
+      if ($P.guard) {
+        & $check
+        $script:LastTypeFocus = @{ window = $P.guard.window.hwnd; field = $focus }
+      }
       if ($P.pressEnter) {
         Start-Sleep -Milliseconds 240
+        if ($P.guard) { & $check }
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
       }
       return [pscustomobject]$out
@@ -876,6 +1153,10 @@ function Invoke-Op([string]$op, $P) {
       return (Get-PatchAt ([int]$P.x) ([int]$P.y) $size)
     }
     'keys' {
+      if ($P.target) {
+        if ($P.focusHwnd) { Assert-LastTypeFocus $P.target ([string]$P.focusHwnd) }
+        else { [void](Get-BoundWindow $P.target $false) }
+      }
       if ($P.windowTitle) {
         $win = Find-Window ([string]$P.windowTitle)
         Enter-Window $win
@@ -890,7 +1171,7 @@ function Invoke-Op([string]$op, $P) {
       if ($null -eq $el) { return $null }
       $procName = ''
       try { $procName = (Get-Process -Id ([int]$el.Current.ProcessId) -ErrorAction Stop).ProcessName } catch {}
-      return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId; proc = $procName }
+      return [pscustomobject]@{ title = [string]$el.Current.Name; pid = [int]$el.Current.ProcessId; proc = $procName; hwnd = [string]$h }
     }
     'focusedValue' {
       $el = Get-InputFocus
@@ -903,13 +1184,7 @@ function Invoke-Op([string]$op, $P) {
       if ($null -ne $native) { return [pscustomobject]@{ value = $native; type = (Get-CT $el) } }
       return $null
     }
-    'inputState' {
-      $el = Get-InputFocus
-      if ($null -eq $el) { return $null }
-      $name = ''; $title = ''
-      try { $name = [string]$el.Current.Name; $title = [string](Get-TopLevel $el).Current.Name } catch {}
-      return [pscustomobject]@{ type = (Get-CT $el); writable = (Test-TextLike $el); name = $name; window = $title }
-    }
+    'inputState' { return (Get-InputDiagnostics) }
     'capture' {
       $pt = Get-CursorPoint
       $el = $script:AE::FromPoint((New-Object System.Windows.Point($pt.X, $pt.Y)))

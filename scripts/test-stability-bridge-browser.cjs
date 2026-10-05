@@ -146,3 +146,25 @@ test('matching Chrome title and unspecified window retain their supported paths'
     assert.deepEqual((await browser.userChromeItems()).items.map(x => x.text), ['Generate']);
   });
 });
+
+test('input identity, geometry, focus and crop options survive the real worker bridge', async () => {
+  await fakeBridge(async ({ bridge, spawned }) => {
+    const target = { hwnd: '100', pid: 10, title: 'Renamer', rect: { x: -1000, y: 0, w: 1000, h: 700 } };
+    const guard = { window: target, at: { x: -500, y: 415 }, visual: true };
+    async function checkRequest(call, expected) {
+      const pending = call(); await flush();
+      const proc = spawned[0]; if (!proc.requests().length) { proc.say('READY'); await flush(); }
+      const line = proc.input.trim().split('\n').at(-1).split('\t');
+      assert.equal(line[1], expected.op);
+      const payload = JSON.parse(Buffer.from(line[2], 'base64').toString('utf8'));
+      for (const [key, value] of Object.entries(expected.payload)) assert.deepEqual(payload[key], value, key);
+      proc.answer(line[0], expected.result ?? true); await pending;
+    }
+    await checkRequest(() => bridge.inputTarget({ target, followOwnedDialog: true }), { op: 'inputTarget', payload: { target, followOwnedDialog: true, ownPid: process.pid }, result: target });
+    await checkRequest(() => bridge.clickAt(-500, 415, 'left', target), { op: 'clickAt', payload: { target, x: -500, y: 415 } });
+    await checkRequest(() => bridge.typeText('hello', false, true, guard.at, undefined, guard), { op: 'typeText', payload: { guard, x: -500, y: 415, pressEnter: false, clearFirst: true } });
+    await checkRequest(() => bridge.assertInputTarget(target, '110'), { op: 'assertInputTarget', payload: { target, focusHwnd: '110' } });
+    await checkRequest(() => bridge.sendKeys('{ENTER}', undefined, target, '110'), { op: 'keys', payload: { target, focusHwnd: '110', keys: '{ENTER}' } });
+    await checkRequest(() => bridge.crop(target.rect, 1008, true, 28), { op: 'crop', payload: { ...target.rect, maxW: 1008, fit: true, snap: 28 }, result: { area: target.rect, image: { data: 'mock', w: 1008, h: 700 } } });
+  });
+});

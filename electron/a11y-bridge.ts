@@ -4,6 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
+import type { InputGuard, InputWindow, InputState, Point } from './input-policy'
 import { mergeOnnxLines, onnxError, readRawShot, recognizeBgra, recognizeSideways, warmOnnx, type OcrEngine } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
@@ -377,19 +378,19 @@ export function discardShot(shot?: string) {
   if (shot) fs.unlink(shot, () => {})
 }
 
-export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{
+export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800, fit = false, snap = 0): Promise<{
   area: { x: number; y: number; w: number; h: number }
   image: { data: string; w: number; h: number; mime?: string }
 }> {
   if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
-  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', withHud({ ...rect, maxW }))
+  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', withHud({ ...rect, maxW, fit, snap }))
   if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h, got.image.mime) ?? got.image
   return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
 
-export async function clickAt(x: number, y: number, button: ClickMode = 'left'): Promise<void> {
+export async function clickAt(x: number, y: number, button: ClickMode = 'left', target?: InputWindow): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button })
+  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target })
 }
 
 export async function locate(
@@ -429,6 +430,10 @@ export type TypeFieldChoice = {
 export type TypeResult = {
   cleared: boolean
   skippedClear: boolean
+  focusHwnd?: string
+  writeSent?: boolean
+  code?: string
+  diagnostics?: InputState
   pasted: boolean
   focusType: string
   rescued?: boolean
@@ -445,7 +450,8 @@ export async function typeText(
   pressEnter: boolean,
   clearFirst: boolean,
   at?: { x: number; y: number },
-  fieldToken?: string
+  fieldToken?: string,
+  guard?: InputGuard
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
@@ -457,12 +463,23 @@ export async function typeText(
     y: at ? Math.round(at.y) : 0,
     ownPid: process.pid,
     fieldToken: fieldToken ?? '',
+    guard,
   })
 }
 
-export async function inputState(): Promise<{ type: string; writable: boolean; name: string; window: string } | null> {
+export async function inputState(): Promise<InputState | null> {
   if (!IS_WIN) return null
   return worker.call('inputState', {}, 10000)
+}
+
+export async function inputTarget(opts: { target?: InputWindow; windowTitle?: string; at?: Point; followOwnedDialog?: boolean } = {}): Promise<InputWindow | null> {
+  if (!IS_WIN) return null
+  return worker.call('inputTarget', { ...opts, ownPid: process.pid }, 10000)
+}
+
+export async function assertInputTarget(target: InputWindow, focusHwnd?: string): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('assertInputTarget', { target, focusHwnd }, 10000)
 }
 
 /** Lock screen or secure desktop is up: nothing can be seen or clicked. */
@@ -494,9 +511,9 @@ export async function patchAt(x: number, y: number, size = 64): Promise<{ data: 
   }
 }
 
-export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
+export async function sendKeys(keys: string, windowTitle?: string, target?: InputWindow, focusHwnd?: string): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('keys', { keys, windowTitle: windowTitle || '' })
+  await worker.call('keys', { keys, windowTitle: windowTitle || '', target, focusHwnd })
 }
 
 /** The element under a scanner box, with a picture of the box. */
@@ -531,7 +548,7 @@ export async function hotkey(keys: string[]): Promise<void> {
   await worker.call('hotkey', { keys })
 }
 
-export async function foreground(): Promise<{ title: string; pid: number; proc?: string } | null> {
+export async function foreground(): Promise<{ title: string; pid: number; proc?: string; hwnd?: string } | null> {
   if (!IS_WIN) return null
   try {
     return await worker.call('foreground', {}, 10000)

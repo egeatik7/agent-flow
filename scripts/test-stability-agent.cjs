@@ -21,6 +21,8 @@ function agent(overrides = {}, settings = {}) {
     discardShot: () => {},
     clickAt: async (...args) => calls.push(['click', ...args]),
     typeText: async (...args) => { calls.push(['write', ...args]); return { value: 'hello' }; },
+    inputTarget: async () => ({ hwnd: '1', pid: 10, title: 'Blender', rect: { x: 0, y: 0, w: 1920, h: 1080 } }),
+    assertInputTarget: async () => {},
     focusedValue: async () => null,
     inputState: async () => ({ type: 'Edit', window: 'Blender' }),
     foreground: async () => ({ title: 'Blender', pid: 10, hwnd: '1', proc: 'blender' }),
