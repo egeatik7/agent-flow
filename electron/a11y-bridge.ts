@@ -263,6 +263,8 @@ export async function scan(opts: {
   tilt?: boolean
   /** Stop after Windows OCR and keep the raw frame so ONNX can run later, only if this pass missed. */
   deferOnnx?: boolean
+  /** Developer preview: inspect the selected window without bringing it forward. */
+  readOnly?: boolean
 }): Promise<ScanResult & { shot?: string }> {
   if (!IS_WIN) {
     return {
@@ -292,6 +294,7 @@ export async function scan(opts: {
       tilt: opts.tilt === true,
       valueLo,
       valueHi,
+      readOnly: opts.readOnly === true,
     }),
     180000
   )
@@ -395,10 +398,11 @@ export async function clickAt(x: number, y: number, button: ClickMode = 'left', 
 
 export async function locate(
   locator: Locator,
-  windowTitle: string
+  windowTitle: string,
+  readOnly = false
 ): Promise<{ x: number; y: number; w: number; h: number; name: string; enabled?: boolean } | null> {
   if (!IS_WIN) return null
-  return worker.call('locate', { locator, windowTitle }, 30000)
+  return worker.call('locate', { locator, windowTitle, readOnly }, 30000)
 }
 
 export async function windowRect(windowTitle: string): Promise<{ x: number; y: number; w: number; h: number }> {

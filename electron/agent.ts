@@ -38,6 +38,8 @@ import {
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, type InputGuard, type InputWindow, type Point } from './input-policy'
 import { rememberShot } from './shots'
+import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
+import type { FindStageId } from './llm-flow'
 
 export type AgentContext = {
   log: (level: LogLevel, message: string) => void
@@ -46,6 +48,9 @@ export type AgentContext = {
   shouldStop: () => boolean
   setLoop?: (text: string) => void
   setMethod?: (text: string) => void
+  /** Opt-in developer evidence; never changes success/failure or the node schema. */
+  onTargetTrace?: (event: TargetTrace) => void
+  captureTargetImages?: boolean
 }
 
 type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
@@ -117,6 +122,16 @@ export function createAgent(ctx: AgentContext) {
   const stopped = ctx.shouldStop
   const pause = (ms: number) => interruptibleSleep(ms, stopped)
 
+  function trace(node: AgentNode, data: TargetTraceData) {
+    if (!ctx.onTargetTrace) return
+    try {
+      // An observer must not mutate the live candidates, node or chosen point.
+      ctx.onTargetTrace(structuredClone({ version: 1, at: new Date().toISOString(), nodeId: node.id, ...data }) as TargetTrace)
+    } catch (e) {
+      log('warn', `Hedef tanılama kaydı yazılamadı: ${(e as Error).message}`)
+    }
+  }
+
   const runMemo = new Map<string, TargetMemo[]>()
   const runTrace = new Map<string, string[]>()
   const runPath = new Map<string, PathStep[]>()
@@ -168,15 +183,16 @@ export function createAgent(ctx: AgentContext) {
     log('warn', `Hedef pencere “${res.missingWindow}” açık değil, tüm ekran okunuyor. Kalıcı çözüm: Ayarlar > Hedef pencere > “Tüm ekran” > Kaydet.`)
   }
 
-  async function scanFor(withImage: boolean, wide = false, deferOnnx = false): Promise<ScanResult & { shot?: string }> {
+  async function scanFor(withImage: boolean, wide = false, deferOnnx = false, readOnly = false, targetTrace = false): Promise<ScanResult & { shot?: string }> {
     const s = getSettings()
     const res = await bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
-      image: withImage ? 'marked' : 'none',
+      image: withImage ? 'marked' : targetTrace && ctx.onTargetTrace && ctx.captureTargetImages ? 'plain' : 'none',
       fresh: wide,
       tilt: true,
       ocrEngine: deferOnnx ? 'windows' : undefined,
       deferOnnx,
+      readOnly,
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
@@ -237,6 +253,7 @@ export function createAgent(ctx: AgentContext) {
         hint: describeMemory(mem) || undefined,
         system: promptOf(s.llmPrompts, 'list'),
       })
+      trace(node, { kind: 'model', source: win === 'chrome' ? 'chrome' : 'list', value: choice })
       const item = choice.id !== null ? items.find((i) => i.id === choice.id) : undefined
       if (item) {
         log('info', `Seçilen hedef #${item.id}: ${item.src}/${item.type} “${item.text.slice(0, 120)}” @${item.x},${item.y} ${item.w}x${item.h}${scan.window ? ` / ${scan.window}` : ''}`)
@@ -275,6 +292,7 @@ export function createAgent(ctx: AgentContext) {
             hint: `${describeMemory(mem)}. Bu tur yazı eşleşmesi #${hit.item.id} “${hit.item.text}” öğesini buldu ama ${why}. Talimata göre doğru öğe hangisi?`,
             system: promptOf(s.llmPrompts, 'list'),
           })
+          trace(node, { kind: 'model', source: win === 'chrome' ? 'chrome' : 'list', value: second })
           const item = second.id !== null ? items.find((i) => i.id === second.id) : undefined
           if (item && item.id !== hit.item.id) {
             log('info', `İkinci bakış başka öğe seçti: #${item.id} “${item.text}”${second.reason ? ` — ${second.reason}` : ''}`)
@@ -304,7 +322,7 @@ export function createAgent(ctx: AgentContext) {
     window,
   })
 
-  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false): Promise<Resolved> {
+  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
     const prompt = node.prompt?.trim() ?? ''
     const loc = node.locator
@@ -313,6 +331,20 @@ export function createAgent(ctx: AgentContext) {
     const marked = extractTarget(prompt)
     const quoted = marked?.quoted ? marked.text : ''
     const order = activeFindOrder(s.findOrder, s.findOff)
+    trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey, memory: memoFor(node) })
+    const resolved = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved => {
+      trace(node, { kind: 'resolved', source, target: { x: target.x, y: target.y, label: target.label }, rect, item })
+      return target
+    }
+    const frame = async (source: FindStageId) => {
+      if (!ctx.onTargetTrace || !ctx.captureTargetImages) return
+      try {
+        const scan = await bridge.scan({ windowTitle: win || undefined, image: 'plain', uia: false, ocr: false, readOnly: true })
+        trace(node, { kind: 'observation', source, scan })
+      } catch (e) {
+        log('warn', `Tanılama görüntüsü alınamadı: ${(e as Error).message}`)
+      }
+    }
     let winScan: (ScanResult & { shot?: string }) | null = null
     let shotFile = ''
     let onnxScan: ScanResult | null = null
@@ -320,7 +352,12 @@ export function createAgent(ctx: AgentContext) {
 
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(false, wide, true)
+        winScan = await scanFor(false, wide, true, readOnly, true)
+        const { shot: _temporary, ...snapshot } = winScan
+        trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
+        // A diagnostic screenshot must not become a new model input. This path
+        // normally scans with image:none; keep the live resolver's inputs identical.
+        winScan = { ...winScan, image: null }
         shotFile = winScan.shot || ''
         seenItems = winScan.items
       }
@@ -336,6 +373,7 @@ export function createAgent(ctx: AgentContext) {
         onnxScan = base
       }
       seenItems = onnxScan.items
+      trace(node, { kind: 'observation', source: 'onnx', scan: onnxScan })
       return onnxScan
     }
 
@@ -353,19 +391,24 @@ export function createAgent(ctx: AgentContext) {
         if (stopped()) throw new StoppedError()
         if (stage === 'chrome') {
           const userChrome = await browser.userChromeItems(win || undefined)
+          trace(node, { kind: 'observation', source: 'chrome', scan: userChrome ? pseudoScan(userChrome.items, userChrome.area, userChrome.host) : null })
           if (!userChrome) continue
           ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
           const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true)
-          if (pick) return { ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }
+          if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
           log('info', '[chrome] Sayfada bulunamadı.')
         }
         if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)
           && (!quoted || locatorFitsText(node, quoted))) {
           ctx.setMethod?.('Kayıtlı öğe')
           try {
-            const r = await bridge.locate(loc, win)
-            if (r && r.enabled !== false && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
+            const r = await bridge.locate(loc, win, readOnly)
+            trace(node, { kind: 'observation', source: 'uia', value: r })
+            if (r && r.enabled !== false && r.w * r.h < 600 * 400) {
+              if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('uia')
+              return resolved({ ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }, 'uia', r)
+            }
           } catch {
             /* next stage */
           }
@@ -376,15 +419,17 @@ export function createAgent(ctx: AgentContext) {
             const hit = (await bridge.findImage(loc.icon, loc.windowTitle)) ?? null
             const again = hit && hit.score < ICON_MIN && loc.windowTitle ? await bridge.findImage(loc.icon) : null
             const best = again && hit && again.score > hit.score ? again : hit
+            trace(node, { kind: 'observation', source: 'icon', value: { hit, again } })
             if (best && best.score >= ICON_MIN) {
+              if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('icon')
               log('info', `[simge] Kayıtlı resim ekranda bulundu (%${Math.round(best.score * 100)} benzer).`)
               const sa = screenArea()
-              return {
+              return resolved({
                 x: best.x,
                 y: best.y,
                 label: '[simge] kayıtlı resim',
                 memo: { win: best.window || win, type: 'Simge', src: 'ocr', rx: (best.x - sa.x) / sa.w, ry: (best.y - sa.y) / sa.h, text: loc.text || 'simge', at: Date.now() },
-              }
+              }, 'icon')
             }
             if (best) log('info', `[simge] Kayıtlı resim ekranda net değil (en iyi %${Math.round(best.score * 100)}).`)
           } catch (e) {
@@ -402,7 +447,7 @@ export function createAgent(ctx: AgentContext) {
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
             const reader = pick.item.src === 'ocr' ? 'Windows OCR' : 'uygulama öğesi'
-            return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }
+            return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'windows', pick.target, pick.item)
           }
           log('info', `“${quoted}” Windows OCR’da yok.`)
         }
@@ -415,7 +460,7 @@ export function createAgent(ctx: AgentContext) {
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
             const reader = pick.item.src === 'ocr' ? 'ONNX' : 'uygulama öğesi'
-            return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }
+            return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'onnx', pick.target, pick.item)
           }
           log('info', `“${quoted}” ONNX’te yok.`)
         }
@@ -424,13 +469,13 @@ export function createAgent(ctx: AgentContext) {
           const scan = onnxScan ?? (await windowsScan())
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
           const pick = await pickFrom(node, scan, scan.window || win, true, true)
-          if (pick) return { ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }
+          if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
         }
         if (stage === 'tars' && s.apiKey && (hasText || loc?.icon)) {
           ctx.setMethod?.('UI-TARS')
           try {
             log('info', 'UI-TARS ekran görüntüsüne bakıyor.')
-            return await locateWithTars(node, wide)
+            return await locateWithTars(node, wide, readOnly)
           } catch (e) {
             if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `UI-TARS atlandı: ${(e as Error).message}`)
@@ -440,24 +485,29 @@ export function createAgent(ctx: AgentContext) {
           ctx.setMethod?.('Kayıtlı konum')
           try {
             const r = await bridge.windowRect(win)
+            trace(node, { kind: 'observation', source: 'offset', value: r })
+            if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('offset')
             log('warn', 'Yazı bulunamadı, kayıttaki konuma tıklanıyor.')
-            return { x: r.x + loc.offsetX, y: r.y + loc.offsetY, label: 'kayıtlı konum' }
+            return resolved({ x: r.x + loc.offsetX, y: r.y + loc.offsetY, label: 'kayıtlı konum' }, 'offset')
           } catch {
             /* window gone */
           }
         }
       }
+    } catch (e) {
+      trace(node, { kind: 'failure', message: (e as Error).message })
+      throw e
     } finally {
       bridge.discardShot(shotFile)
     }
 
     const explicit = extractTarget(prompt)
     const seen = sampleTexts(seenItems)
-    throw new NotFoundError(
-      `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey ? '' : ' (API anahtarı yok, sadece yazı eşleşmesi denendi.)'}${
+    const message = `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey ? '' : ' (API anahtarı yok, sadece yazı eşleşmesi denendi.)'}${
         seen ? ` Ekranda görülenlerden bazıları: ${seen}` : ''
       }`
-    )
+    trace(node, { kind: 'failure', message })
+    throw new NotFoundError(message)
   }
 
   function visionPrompt(node: AgentNode): string {
@@ -470,7 +520,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
-  async function locateWithTars(node: AgentNode, wide = false): Promise<Resolved> {
+  async function locateWithTars(node: AgentNode, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
     if (!s.apiKey) throw new NotFoundError('UI-TARS için API anahtarı yok.')
     const model = agentModels(s)
@@ -484,7 +534,9 @@ export function createAgent(ctx: AgentContext) {
       maxImageW: isTarsModel(model[0] || '') ? 1288 : 1400,
       snap: isTarsModel(model[0] || '') ? 28 : 0,
       fit: true,
+      readOnly,
     })
+    trace(node, { kind: 'observation', source: 'tars', scan: res })
     warnMissingWindow(res)
     if (!res.image) throw new NotFoundError('UI-TARS için ekran görüntüsü alınamadı.')
     const action = await guiStep({
@@ -496,11 +548,13 @@ export function createAgent(ctx: AgentContext) {
       tarsPrompt: promptOf(s.llmPrompts, 'tars'),
       jsonPrompt: promptOf(s.llmPrompts, 'screen'),
     })
+    trace(node, { kind: 'model', source: 'tars', value: action })
     const pointed = (action.kind === 'click' || action.kind === 'double' || action.kind === 'right') && typeof action.x === 'number' && typeof action.y === 'number'
     if (!pointed) throw new NotFoundError(`UI-TARS hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
     const a = res.area
     const x = a.x + action.x! * a.w
     const y = a.y + action.y! * a.h
+    trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[UI-TARS] ekran görüntüsü' } })
     log('info', `[UI-TARS] ${action.thought || action.raw}`)
     return {
       x,
@@ -850,6 +904,7 @@ export function createAgent(ctx: AgentContext) {
     const p = binding?.at || point
     if (binding && !inside(binding.window.rect, p)) throw new Error('INPUT_TARGET_INVALID: Alan noktası hedef pencerenin dışında.')
     await bridge.clickAt(p.x, p.y, mode, binding?.window)
+    if (node) trace(node, { kind: 'input', point: { x: Math.round(p.x), y: Math.round(p.y) }, mode, phase: 'sent' })
     lastClickPoint = mode === 'right' ? undefined : p
     lastInput = mode === 'right' ? undefined : binding ? { ...binding, instruction } : undefined
   }
@@ -1509,7 +1564,12 @@ export function createAgent(ctx: AgentContext) {
       const confirmed = await ensureActed(node, ahead, async () => {
         checkStopped()
         if (mode === 'left' && ahead?.next?.kind === 'type') await clickInput(t, node.prompt || t.label, node)
-        else { lastInput = undefined; await bridge.clickAt(t.x, t.y, mode); lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined }
+        else {
+          lastInput = undefined
+          await bridge.clickAt(t.x, t.y, mode)
+          lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
+          trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
+        }
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
         log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       })
@@ -1607,5 +1667,7 @@ export function createAgent(ctx: AgentContext) {
       node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),
   }
 
-  return { executor, beginRun }
+  /** Same resolver, one read-only pass. No click, typing, recovery actions or memory write. */
+  const previewTarget = (node: AgentNode) => resolveTarget(node, 0, false, true)
+  return { executor, beginRun, previewTarget }
 }
