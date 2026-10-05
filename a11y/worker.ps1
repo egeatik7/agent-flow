@@ -739,6 +739,38 @@ function Set-TextValue($el, [string]$text, $guard = $null) {
 }
 
 # Identity guards use an exact live HWND/PID, never a title-only exception.
+# A shortcut that presses the Windows key acts on the system, not on the target
+# application: win+d shows the desktop, win+tab opens Task View, win+r opens Run. Those
+# must still be sent when the target window is no longer in front. Anything unparseable is
+# also left alone, so Send-KeyString can report the real error.
+function Test-SystemShortcut([string]$keys) {
+  if ([string]::IsNullOrWhiteSpace($keys)) { return $true }
+  $plain = $null
+  try { $plain = Get-PlainChord $keys } catch { return $true }
+  if ($null -ne $plain) {
+    foreach ($p in @($plain)) {
+      if (@('win', 'lwin', 'rwin', 'meta', 'cmd', 'super') -contains $p) { return $true }
+    }
+    return $false
+  }
+  try { return [bool](Test-SendKeysHasWin $keys) } catch { return $false }
+}
+
+# Keys land in whatever window is in front, so a shortcut meant for the target application
+# must not be sent while another program holds the foreground. A window of the same process
+# counts as the same application: Blender's save window is still Blender, and a shortcut
+# meant for Blender belongs there.
+function Assert-KeyWindowActive($win) {
+  $fg = [XpWin]::GetForegroundWindow()
+  if ($fg -eq [IntPtr]::Zero) { throw 'INPUT_WINDOW_NOT_ACTIVE: No window is in front; the shortcut was not sent' }
+  $h = [IntPtr]$win.Current.NativeWindowHandle
+  if ($fg -eq $h) { return }
+  $targetPid = 0
+  try { $targetPid = [int]$win.Current.ProcessId } catch { $targetPid = 0 }
+  if ($targetPid -gt 0 -and [XpWin]::ProcessOf($fg) -eq $targetPid) { return }
+  throw 'INPUT_WINDOW_NOT_ACTIVE: Another program is in front; the shortcut was not sent'
+}
+
 function Get-BoundWindow($target, [bool]$activate = $false) {
   if (-not $target -or -not $target.hwnd -or -not $target.pid) { throw 'INPUT_TARGET_INVALID: Missing window identity' }
   $h = [IntPtr]([long]$target.hwnd)
@@ -1165,6 +1197,9 @@ function Invoke-Op([string]$op, $P) {
       if ($P.windowTitle) {
         $win = Find-Window ([string]$P.windowTitle)
         Enter-Window $win
+        # The window is in front now unless something else took the foreground. Windows
+        # shortcuts are exempt: they are meant to leave the target application.
+        if (-not (Test-SystemShortcut ([string]$P.keys))) { Assert-KeyWindowActive $win }
       }
       Send-KeyString ([string]$P.keys)
       return $true

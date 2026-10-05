@@ -21,11 +21,27 @@ public class TestAE {
 }
 '@
 $script:AE = [TestAE]
+if (-not ('XpWin' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+public static class XpWin {
+  public static IntPtr Foreground = IntPtr.Zero;
+  public static int ForegroundPid = 0;
+  public static IntPtr GetForegroundWindow() { return Foreground; }
+  public static int ProcessOf(IntPtr h) { return ForegroundPid; }
+  public static bool IsWindow(IntPtr h) { return true; }
+  public static bool IsOwnedBy(IntPtr a, IntPtr b) { return false; }
+  public static IntPtr RootAt(int x, int y) { return IntPtr.Zero; }
+}
+'@
+}
 $common = Join-Path $root 'a11y/common.ps1'
 foreach ($name in @('Test-LocatorIdentity', 'Find-ByLocator', 'Find-Window')) {
   Import-TestFunction $common $name
 }
-Import-TestFunction (Join-Path $root 'a11y/worker.ps1') 'Invoke-Op'
+foreach ($name in @('Invoke-Op', 'Test-SystemShortcut', 'Assert-KeyWindowActive', 'Get-PlainChord', 'Test-PlainKey', 'Test-PlainModifier', 'Test-SendKeysHasWin')) {
+  Import-TestFunction (Join-Path $root 'a11y/worker.ps1') $name
+}
 function Get-CT($e) { return [string]$e.Current.ControlType }
 function Resolve-RelPath($top, $path) { return $script:PathHit }
 function Find-WindowOrNull($title) { return $script:Window }
@@ -69,7 +85,30 @@ Check $threw 'Missing specified window must produce WINDOW_NOT_FOUND'
 Check ($script:Keys.Count -eq 0) 'No key is sent to an unrelated foreground window'
 Invoke-Op 'keys' @{ keys = '^s'; windowTitle = '' } | Out-Null
 Check ($script:Keys.Count -eq 1 -and $script:Keys[0] -eq '^s') 'Unspecified window preserves legacy SendKeys text'
-$script:Window = [pscustomobject]@{ Current = [pscustomobject]@{ Name = 'Blender' } }
+$script:Window = [pscustomobject]@{ Current = [pscustomobject]@{ Name = 'Blender'; NativeWindowHandle = [IntPtr]([long]99); ProcessId = 4242 } }
 Invoke-Op 'keys' @{ keys = 'win+r'; windowTitle = 'Blender' } | Out-Null
 Check ($script:Entered -eq 1 -and $script:Keys[1] -eq 'win+r') 'Found target window preserves shortcut dispatch'
+
+# A Windows shortcut is meant to leave the target application, so another program in front is fine.
+[XpWin]::Foreground = [IntPtr]([long]77); [XpWin]::ForegroundPid = 5151
+$before = $script:Keys.Count
+Invoke-Op 'keys' @{ keys = 'win+d'; windowTitle = 'Blender' } | Out-Null
+Check ($script:Keys.Count -eq ($before + 1) -and $script:Keys[$before] -eq 'win+d') 'A Windows shortcut is sent while another program is in front'
+
+# A shortcut for the target application must not land in another program.
+$threw = $false
+try { Invoke-Op 'keys' @{ keys = '^s'; windowTitle = 'Blender' } | Out-Null } catch { $threw = $_.Exception.Message -like '*INPUT_WINDOW_NOT_ACTIVE*' }
+Check $threw 'An application shortcut is refused while another program is in front'
+Check ($script:Keys.Count -eq ($before + 1)) 'The refused shortcut sent nothing'
+
+# A window of the same process counts as the same application: Blender's save window.
+[XpWin]::Foreground = [IntPtr]([long]78); [XpWin]::ForegroundPid = 4242
+Invoke-Op 'keys' @{ keys = '^s'; windowTitle = 'Blender' } | Out-Null
+Check ($script:Keys.Count -eq ($before + 2)) 'A shortcut is sent while a window of the same application is in front'
+
+# The target window itself in front is the everyday case.
+[XpWin]::Foreground = [IntPtr]([long]99); [XpWin]::ForegroundPid = 4242
+Invoke-Op 'keys' @{ keys = '^s'; windowTitle = 'Blender' } | Out-Null
+Check ($script:Keys.Count -eq ($before + 3)) 'A shortcut is sent while the target window itself is in front'
+
 Write-Host "PASS: $script:Checks stability worker checks; no desktop keys sent."
