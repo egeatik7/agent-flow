@@ -5,7 +5,7 @@ import { runGraph, type Executor } from '../electron/runner'
 type Line = { level: LogLevel; message: string }
 
 /** Sahte yürütücü: gerçek ekran yok. `failOn` içindeki tıklama metinleri hata verir. */
-function fakeExecutor(failOn: string[]) {
+function fakeExecutor(failOn: string[], sameMessage?: string) {
   const logs: Line[] = []
   const clicked: string[] = []
   const ex: Executor = {
@@ -15,7 +15,7 @@ function fakeExecutor(failOn: string[]) {
     click: async (node: AgentNode) => {
       const what = node.prompt ?? ''
       clicked.push(what)
-      if (failOn.includes(what)) throw new Error(`hedef yok: ${what}`)
+      if (failOn.includes(what)) throw new Error(sameMessage ?? `hedef yok: ${what}`)
     },
     type: async () => {},
     key: async () => {},
@@ -124,5 +124,21 @@ describe('Döngü sonucu doğru raporlanır', () => {
     expect(final).toBeDefined()
     expect(final!.level).toBe('warn')
     expect(final!.message).toMatch(/2 öğe\/tur hatayla bitti/)
+  })
+
+  it('başarılı bir tur “aynı hata” zincirini kırar: aralıklı aynı hata döngüyü durdurmaz', async () => {
+    // b.png ve d.png aynı hatayı verir; aralarında c.png başarıyla geçer.
+    const { ex, clicked } = fakeExecutor(['b.png', 'd.png'], 'hedef yok: aynı hata')
+    const res = await runGraph(listGraph(['a.png', 'b.png', 'c.png', 'd.png', 'e.png']), ex, opts)
+
+    expect(clicked).toEqual(['a.png', 'b.png', 'c.png', 'd.png', 'e.png'])
+    expect(res.failed).toBe(2)
+  })
+
+  it('üst üste gelen aynı hata döngüyü durdurur', async () => {
+    const { ex, clicked } = fakeExecutor(['b.png', 'c.png'], 'hedef yok: aynı hata')
+
+    await expect(runGraph(listGraph(['a.png', 'b.png', 'c.png', 'd.png']), ex, opts)).rejects.toThrow('hedef yok: aynı hata')
+    expect(clicked).toEqual(['a.png', 'b.png', 'c.png'])
   })
 })

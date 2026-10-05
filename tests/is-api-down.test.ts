@@ -7,6 +7,9 @@ describe('isApiDown', () => {
     expect(isApiDown('Yazı alana gitmedi: alanda “C:\\Resimler\\402.png” var.')).toBe(false)
     expect(isApiDown('“Her Öğe İçin 1”: klasör yok: C:\\Fotolar\\429')).toBe(false)
     expect(isApiDown('Tıklandı: Kaydet @1401,429')).toBe(false)
+    expect(isApiDown('Yazı alana gitmedi: alanda “video(429).glb” var.')).toBe(false)
+    expect(isApiDown('Kayıt başarısız (401)')).toBe(false)
+    expect(isApiDown('indirilen dosya (402).glb bulunamadı')).toBe(false)
   })
 
   it('gerçek API mesajları hâlâ yakalanır', () => {
@@ -16,6 +19,7 @@ describe('isApiDown', () => {
     expect(isApiDown('OpenRouter 503: upstream error')).toBe(true)
     expect(isApiDown('RESOURCE_EXHAUSTED'.replace('_', ''))).toBe(true)
     expect(isApiDown('Too many requests, slow down')).toBe(true)
+    expect(isApiDown('OpenRouter API hatası: (429) çok istek')).toBe(true)
   })
 
   it('ilgisiz hata yakalanmaz', () => {

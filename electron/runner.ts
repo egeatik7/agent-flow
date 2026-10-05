@@ -70,11 +70,12 @@ const FAILED_NAMES_SHOWN = 5
 
 /**
  * The error text says the model service is down or refusing, so the rest of the list would fail the same way.
- * A bare 401, 402 or 429 does not count: it can be part of a file name or a coordinate. The codes that matter come as
- * "OpenRouter 429: …" or in parentheses, "(401)", from openrouter.ts.
+ * A bare 401, 402 or 429 does not count: it can be part of a file name or a coordinate. A code in parentheses counts
+ * only when an API word sits right before it, because these messages carry user text too: "(401)" on its own matches
+ * a file name like "video(429).glb" and would stop the whole list.
  */
 export function isApiDown(message: string): boolean {
-  return /resourceexhausted|rate limit|quota|too many requests|\((?:401|402|429)\)|bakiye|upstream error|openrouter \d{3}/i.test(message)
+  return /(?:api|openrouter|anahtar|bakiye|kota|model|sunucu)[^()]{0,24}\((?:401|402|429)\)|resourceexhausted|rate limit|too many requests|quota|bakiye|upstream error|openrouter \d{3}/i.test(message)
 }
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
@@ -421,7 +422,11 @@ export async function runGraph(
     const from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'
-    if (from > 0) {
+    if (!keys.length) {
+      ex.log('warn', `“${loop.title}”: liste boş; bu kutu hiç çalışmayacak.`)
+    } else if (from >= keys.length) {
+      ex.log('info', `“${loop.title}”: işaret son öğede; kalan ${noun} yok.`)
+    } else if (from > 0) {
       const name = isList ? baseName(keys[from]) : `${from + 1}. tur`
       ex.log('info', `“${loop.title}”: ${from + 1}. ${fromWord} devam (${name}). ${keys.length - from} ${noun} kaldı.`)
     } else {
@@ -446,6 +451,9 @@ export async function runGraph(
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 })
           succeeded++
+          // A lap that finished cleanly breaks the chain: only two failures in a row
+          // mean the loop should stand still, not two failures far apart.
+          lastFail = ''
         } catch (e) {
           if (isFatal(e)) throw e
           const msg = (e as Error).message || String(e)
