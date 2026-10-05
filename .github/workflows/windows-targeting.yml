@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, cursor/windows-key-sendkeys-99ad, codex/windows-click-tests]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
     inputs:
       live_models:
