@@ -38,7 +38,25 @@ Cases cover fresh matching, duplicate captions, movement, resizing, larger contr
 
 The 125/150% cases enlarge the fixture's controls and fonts. They **do not change Windows display DPI**. Actual DPI and monitor bounds are saved in `summary.json`. Negative origins and image-size transforms are also covered by offline coordinate tests; that is not a physical multi-monitor test.
 
-The fixture does not prove Blender addon correctness, Tkinter custom widget behavior, browser-profile switching, hours-long processing, or Win+R/D/E/Tab/Shift+S shell effects. Those require additional real application/environment cases. The test fixture's standard controls do not substitute for Blender's rendered UI.
+The fixture does not prove Blender addon correctness, Tkinter custom widget behavior, browser-profile switching, or hours-long processing. The 17-case targeting suite alone does not test Windows shell shortcuts; the separate finish checks below cover native key events and supported shell effects. The test fixture's standard controls do not substitute for Blender's rendered UI.
+
+### Native shortcuts and the portable EXE
+
+`scripts/test-windows-finish.ps1` closes two separate validation gaps without changing production sources. Run only on a disposable, unlocked Windows test desktop: it sends real shortcuts and changes the foreground window.
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-finish.ps1 -Mode Keys
+# First build the EXE with npm run pack:win, then:
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-finish.ps1 -Mode Package -Output out/portable-smoke
+```
+
+- Keys starts the actual production PowerShell worker and sends `keys` protocol requests. An independent low-level keyboard hook observes actual injected key-down/up order for win+r, win+d, win+e, win+tab, win+shift+s, and legacy #r. It also checks that modifiers are released. This is native input, not the mocked parser test, but it does not claim to exercise the graph runner's key node.
+- Separate shell cases observe the Run dialog, minimized/restored fixture, new Explorer window, and new Task View window. Screenshots and native window identities are saved independently of the worker's return value. English shell names reflect the CI images; localized Windows needs matching oracle names.
+- Clipping UI is explicitly `not-covered` if ScreenSketch/Snipping Tool is absent on a Windows Server runner. Native win+shift+s input can pass independently; absence never counts as successful screen clipping. Other failures cause a nonzero exit.
+- Package launches the actual portable Nubbo.exe with normal startup arguments. It requires the real studio's Ajanı Çalıştır and Node Ekle buttons in UIA; process launch or splash alone cannot pass. The observed process path, screenshot, and EXE SHA256 are saved. This is startup validation, not a packaged end-to-end Blender/Hunyuan run.
+- Output contains keys-summary.json or package-summary.json, screenshots, and native window snapshots. CI uploads shortcut evidence inside desktop-evidence and portable evidence as portable-startup-evidence. The tested EXE artifact is uploaded only after package startup passes.
+
+No API key, model call, production diagnostic flag, new dependency, node type, or saved-flow migration is involved. Hook/event history is bounded and its thread is stopped in cleanup. Cleanup terminates only the test-owned worker, fixture, and portable process tree.
 
 Set `NUBBO_TEST_ONNX=1` to opt into ONNX recognition tests. Without it, ONNX is reported as not covered, never passed. Production ONNX behavior is unchanged. The optional test has an explicit standalone scan using `ocrEngine: onnx` with UIA disabled. That scan must contain accepted ONNX text and a target box inside the independently known painted button. The production `onnx` fallback stage can retain valid Windows OCR rows by design; its combined scan alone would not prove the ONNX engine recognized the text.
 
