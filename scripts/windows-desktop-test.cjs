@@ -221,12 +221,13 @@ app.whenReady().then(async () => {
     });
     await runCase('Bundled ONNX recognizes painted text and the production fallback clicks it',async()=>{
       const onnx=await bridge.scan({windowTitle:'Nubbo Click Test Host',image:'plain',uia:false,ocr:true,ocrEngine:'onnx'});
+      // Keep the actual recognized rows even when the recognition assertion fails.
+      fs.writeFileSync(path.join(output,'onnx-observation.json'),JSON.stringify({...onnx,image:onnx.image?{w:onnx.image.w,h:onnx.image.h,mime:onnx.image.mime}:null},null,2));
       assert.equal(onnx.onnx,true,'the actual bundled ONNX engine must produce accepted text');
       assert.equal(onnx.ocrEngine,'onnx');
       const {matchText}=require('../dist-electron/matcher.js');
       const read=matchText(onnx.items,'RUN REMESH',{minScore:100});
       assert(read,'the ONNX scan must read the painted caption'); assert(inside(state().controls['painted-remesh'].rect,center(read)));
-      fs.writeFileSync(path.join(output,'onnx-observation.json'),JSON.stringify({...onnx,image:onnx.image?{w:onnx.image.w,h:onnx.image.h,mime:onnx.image.mime}:null},null,2));
       const a=makeAgent('painted-onnx',['onnx']); await command('reset');
       await a.executor.click(node('onnx-painted','“RUN REMESH”'),1,independentObserver);
       const s=await until(()=>{const s=state();return mouse(s).length && s;},'ONNX target mouse event');
