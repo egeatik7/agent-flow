@@ -105,7 +105,7 @@ jobs:
       - name: PowerShell 5.1 and PowerShell 7 worker tests (mock input)
         run: |
           foreach ($engine in @('powershell.exe', 'pwsh.exe')) {
-            foreach ($script in @('test-worker.ps1', 'test-key-input.ps1', 'test-stability-worker.ps1', 'test-input-recovery.ps1')) {
+            foreach ($script in @('test-worker.ps1', 'test-key-input.ps1', 'test-stability-worker.ps1', 'test-input-recovery.ps1', 'test-window-list.ps1')) {
               & $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "scripts/$script"
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             }
