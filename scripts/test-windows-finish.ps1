@@ -69,7 +69,8 @@ public static class FinishOracle {
 }
 '@
 $results = New-Object 'System.Collections.Generic.List[object]'
-$worker = $null; $hostProcess = $null; $pack = $null; $sequence = 0
+$worker = $null; $hostProcess = $null; $pack = $null
+$protocol = New-Object 'System.Collections.Generic.List[object]'
 function Await-Value([scriptblock]$check, [string]$label, [int]$seconds = 12) {
   $limit = [DateTime]::UtcNow.AddSeconds($seconds)
   do { $value = & $check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ([DateTime]::UtcNow -lt $limit)
@@ -96,11 +97,21 @@ function Read-Worker([int]$seconds) {
   $line = $task.Result; if ($null -eq $line) { throw 'Worker exited before responding' }; return $line
 }
 function Keys([string]$value) {
-  $script:sequence++
+  $requestId=[guid]::NewGuid().ToString('N')
   $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{keys=$value} | ConvertTo-Json -Compress)))
-  $worker.StandardInput.WriteLine("$sequence`tkeys`t$payload"); $worker.StandardInput.Flush()
-  $line = Read-Worker 15; $parts = $line.Split("`t")
-  if ($parts[0] -ne [string]$sequence) { throw 'Wrong worker response identity' }
+  $worker.StandardInput.WriteLine("$requestId`tkeys`t$payload"); $worker.StandardInput.Flush()
+  $deadline=[DateTime]::UtcNow.AddSeconds(15)
+  do {
+    $remaining=[Math]::Max(1,[Math]::Ceiling(($deadline-[DateTime]::UtcNow).TotalSeconds))
+    $line=Read-Worker ([int]$remaining)
+    if($protocol.Count -ge 50) { $protocol.RemoveAt(0) }
+    $protocol.Add(@{keys=$value;sentId=$requestId;received=$line})
+    $tab=$line.IndexOf([char]9)
+    # The production bridge also ignores stdout lines without protocol framing.
+  } while($tab -lt 0 -and [DateTime]::UtcNow -lt $deadline)
+  if($tab -lt 0) { throw 'Worker did not return a framed response' }
+  $parts=$line.Split([char]9)
+  if ($parts[0] -ne $requestId) { throw ('Wrong worker response identity: expected '+$requestId+', received '+$parts[0]) }
   $response = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1])) | ConvertFrom-Json
   if (-not $response.ok) { throw $response.error }
 }
@@ -137,6 +148,7 @@ try {
       @{text='win+tab';down=@(91,9)},@{text='win+shift+s';down=@(91,16,83)},@{text='#r';down=@(91,82)}
     )) {
       Record ('native chord '+$case.text) {
+        try {
         Focus-Host; [FinishOracle]::Clear(); Keys $case.text; Start-Sleep -Milliseconds 300
         $events=@([FinishOracle]::Keys() | Where-Object injected)
         $events | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out ('events-'+($case.text -replace '[^a-zA-Z0-9]','-')+'.json')) -Encoding UTF8
@@ -146,8 +158,10 @@ try {
         $expectedUp=@($case.down); [array]::Reverse($expectedUp)
         if (($up -join ',') -ne ($expectedUp -join ',')) { throw ('Wrong native key-up order: '+($up -join ',')) }
         Assert-Released; Capture ('chord-'+($case.text -replace '[^a-zA-Z0-9]','-'))
-        if ($case.text -eq 'win+e') { Keys 'alt+f4' } else { Keys 'esc' }
         return @{events=$events;modifiersReleased=$true}
+        } finally {
+          try { if($case.text -eq 'win+d') {Keys 'win+d'} elseif($case.text -eq 'win+e') {Keys 'alt+f4'} else {Keys 'esc'} } catch {}
+        }
       }
     }
     Record 'win+r opens Run dialog' {
@@ -205,6 +219,7 @@ try {
 } catch { $fatal=$_.Exception.Message; Write-Output $fatal }
 finally {
   [FinishOracle]::Stop()
+  $protocol.ToArray() | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'worker-protocol.json') -Encoding UTF8
   if ($worker) { try {$worker.StandardInput.Close(); if(-not $worker.WaitForExit(3000)) {$worker.Kill()}} catch {}; $worker.Dispose() }
   if ($hostProcess) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
   if ($pack) {
