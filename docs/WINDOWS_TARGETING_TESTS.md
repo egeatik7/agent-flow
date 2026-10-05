@@ -23,16 +23,16 @@ The initial feature-branch push runs only the small Windows desktop probe. Full 
 
 - Windows Server 2022 and 2025 jobs run typechecks, existing regression tests, and new targeting tests.
 - Worker mock tests run under both Windows PowerShell 5.1 and PowerShell 7. Running those scripts on Windows does not turn their mocked input into native input.
-- Desktop tests compile `scripts/windows/ClickTestHost.cs` into a temporary visible WinForms application, then launch the real Electron test entry at `desktop-test.cjs`.
+- Desktop tests compile `scripts/windows/ClickTestHost.cs` into a temporary visible WPF application with standard Button/Edit providers, then launch the real Electron test entry at `desktop-test.cjs`.
 - The desktop probe checks input-desktop access, a nonblank real capture, and reception of one actual native mouse click. This probe uses a known fixture point only to establish environment capability; it is not counted as target-selection accuracy.
 - Exit 0 = all required cases passed. Exit 1 = test failure. Exit 2 = required environment/capability unavailable. A blocked case makes the desktop job unsuccessful; it is never counted as a passed test.
 - Evidence uploads use `if: always()` so failed runs can be diagnosed. The GitHub job summary lists individual passed/failed/blocked cases and coverage limits.
 - A portable `release/Nubbo.exe` is built on Windows 2022 only after the preceding checks pass. The artifact `Nubbo-tested-windows-x64` contains the EXE and SHA256. A failed desktop run does not yield a "tested EXE" artifact.
 - The CI job has a finite cleanup limit. This does not change production timers or addon-waiting behavior.
 
-The test application is independent of Electron. It has two identical `Kaydet` buttons, a unique `Devam` button, a disabled button, separate source/search fields, a competing window, an occluding window, and painted `RUN REMESH` text that is not exposed as a UIA caption. The latter tests real OCR against a custom-rendered interface.
+The test application is independent of Electron. A read-only preflight verifies actual Button/Edit/ValuePattern providers and the disabled control; a broken fixture cannot make rejection cases pass trivially. The previous Add-Type WinForms fixture exposed Buttons and Edits as generic Panes on the runners, so it was replaced rather than weakening production Pane guards. It has two identical `Kaydet` buttons, a unique `Devam` button, a disabled button, separate source/search fields, a competing window, an occluding window, and painted `RUN REMESH` text that is not exposed as a UIA caption. The latter tests real OCR against a custom-rendered interface.
 
-Cases cover fresh matching, duplicate captions, movement, resizing, larger controls, inactive-window selection, read-only preview, disabled UIA controls, label-to-field typing, one Enter, the real bound-window guard, 12 repeat executions, actual Windows OCR, bundled ONNX recognition, and an ordinary production graph.
+Cases cover fresh matching, duplicate captions, movement, resizing, larger controls, inactive-window selection, read-only preview, disabled UIA controls, label-to-field typing, one Enter, the real bound-window guard, 12 repeat executions, actual Windows OCR, and an ordinary production graph. Standalone bundled ONNX recognition is optional and excluded from the required suite.
 
 ### Explicit coverage limits
 
@@ -40,7 +40,7 @@ The 125/150% cases enlarge the fixture's controls and fonts. They **do not chang
 
 The fixture does not prove Blender addon correctness, Tkinter custom widget behavior, browser-profile switching, hours-long processing, or Win+R/D/E/Tab/Shift+S shell effects. Those require additional real application/environment cases. The test fixture's standard controls do not substitute for Blender's rendered UI.
 
-ONNX has an explicit standalone scan using `ocrEngine: onnx` with UIA disabled. That scan must contain accepted ONNX text and a target box inside the independently known painted button. The production `onnx` fallback stage can retain valid Windows OCR rows by design; its combined scan alone would not prove the ONNX engine recognized the text.
+Set `NUBBO_TEST_ONNX=1` to opt into ONNX recognition tests. Without it, ONNX is reported as not covered, never passed. Production ONNX behavior is unchanged. The optional test has an explicit standalone scan using `ocrEngine: onnx` with UIA disabled. That scan must contain accepted ONNX text and a target box inside the independently known painted button. The production `onnx` fallback stage can retain valid Windows OCR rows by design; its combined scan alone would not prove the ONNX engine recognized the text.
 
 ## Run locally on Windows
 
@@ -95,3 +95,7 @@ Locally, set the same environment variables using your normal secret handling, p
 ## Baseline and compatibility
 
 Started from PR #2 commit `cf2e237d668307ce01b1f112cf8bc21cae09cadd`. Existing flow JSON, node names, key strings, UI design, target-stage ordering, and recovery limits stay unchanged. The old Enter Vitest fixture gained the missing window-identity bridge methods so the Windows branch can be exercised.
+
+## Merge verification
+
+After PR #2 is merged and PR #3 is retargeted to main, `main-verification` checks out **main separately**, records its exact SHA, installs its own locked dependencies, and runs its own tests/build. Only the visible fixture and the standalone `windows-main-smoke.cjs` test are copied to that checkout; no production files from the test branch are overlaid. It verifies actual UIA clicks, fresh Windows matching, inactive-window selection, intended-field typing with one Enter, and painted-text Windows OCR. The full diagnostic suite still runs on the PR candidate independently. After PR #3 is merged, the main push repeats both the full matrix and the separate main smoke job. A branch pass is never reported as a main pass.
