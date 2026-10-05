@@ -23,8 +23,6 @@ import { normalizeFind, normalizePrompts } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 
-// boot.ts sets this before the app is ready. Repeating it afterwards throws.
-
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
 const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook }>({
