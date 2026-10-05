@@ -98,6 +98,31 @@ function openRunLog() {
   for (const old of shots.slice(0, Math.max(0, shots.length - 100))) fs.rmSync(path.join(dir, old), { force: true })
 }
 
+/**
+ * Screenshots the worker writes into the temp folder are deleted on the normal path. A run
+ * that was killed leaves them behind, and nothing will ever read them again. An hour is
+ * long enough that a live run cannot own them.
+ */
+function sweepStaleTempShots() {
+  const dir = app.getPath('temp')
+  let names: string[] = []
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return
+  }
+  const cutoff = Date.now() - 60 * 60 * 1000
+  for (const name of names) {
+    if (!/^xpas-(ocr|onnx|preview)-/i.test(name)) continue
+    const file = path.join(dir, name)
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true })
+    } catch {
+      /* another instance may own it now */
+    }
+  }
+}
+
 let voiceHoldUntil = 0
 
 function log(level: LogLevel, message: string, forceHud = false) {
@@ -359,6 +384,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   } catch {
     /* the run path creates it again before writing a log or an error shot */
   }
+  sweepStaleTempShots()
   report(68, 'Erişilebilirlik köprüsü…')
   await Promise.race([bridge.warmUp(), sleep(8000)])
 
