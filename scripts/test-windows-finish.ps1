@@ -102,6 +102,39 @@ function Capture([string]$name) {
   finally { $g.Dispose(); $image.Dispose() }
   [FinishOracle]::Windows() | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out ($name+'-windows.json')) -Encoding UTF8
 }
+# A separate OS OCR observation of our saved pixels; no Nubbo resolver or
+# worker response is used to decide whether Task View is visible.
+function Read-CapturedText([string]$name) {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $null=[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+  $null=[Windows.Media.Ocr.OcrResult,Windows.Foundation,ContentType=WindowsRuntime]
+  $null=[Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
+  $null=[Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics,ContentType=WindowsRuntime]
+  $null=[Windows.Graphics.Imaging.SoftwareBitmap,Windows.Graphics,ContentType=WindowsRuntime]
+  $null=[Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
+  $null=[Windows.Storage.Streams.IRandomAccessStream,Windows.Storage.Streams,ContentType=WindowsRuntime]
+  $script:FinishAsTask=([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  })[0]
+  function Wait-FinishRt($op,[type]$type) {
+    $task=$script:FinishAsTask.MakeGenericMethod($type).Invoke($null,@($op))
+    if(-not $task.Wait(20000)) { throw 'Independent Windows OCR observation timeout' }
+    return $task.Result
+  }
+  $engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('en-US'))
+  if(-not $engine) { throw 'Independent English Windows OCR engine unavailable' }
+  $stream=$null; $bitmap=$null
+  try {
+    $file=Wait-FinishRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync((Join-Path $out ($name+'.png')))) ([Windows.Storage.StorageFile])
+    $stream=Wait-FinishRt ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder=Wait-FinishRt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap=Wait-FinishRt ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result=Wait-FinishRt ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+    $text=[string]$result.Text
+    $text | Set-Content (Join-Path $out ($name+'-ocr.txt')) -Encoding UTF8
+    return $text
+  } finally { if($bitmap) {$bitmap.Dispose()}; if($stream) {$stream.Dispose()} }
+}
 function Read-Worker([int]$seconds) {
   $task = $worker.StandardOutput.ReadLineAsync()
   if (-not $task.Wait($seconds*1000)) { throw 'Worker response timeout' }
@@ -181,7 +214,9 @@ try {
     )) {
       Record ('native chord '+$case.text) {
         try {
-        Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd})
+        # Global shell chords require no application-specific focus. Observe the
+        # actual injected key sequence regardless of which shell window owns focus.
+        $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd})
         [FinishOracle]::Clear(); Keys $case.text; Start-Sleep -Milliseconds 300
         $events=@([FinishOracle]::Keys() | Where-Object injected)
         $events | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out ('events-'+($case.text -replace '[^a-zA-Z0-9]','-')+'.json')) -Encoding UTF8
@@ -216,22 +251,17 @@ try {
       Capture 'file-explorer'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+tab opens Task View' {
-      Focus-Host; Keys 'win+tab'
+      Focus-Host; Capture 'task-view-before'
+      $before=Read-CapturedText 'task-view-before'
+      if($before -match '\bnew\s+desktop\b') { throw 'Task View was already visible before the shortcut' }
+      Keys 'win+tab'
       try {
-        # Task View is rendered inside Explorer helper windows on these images;
-        # it has no top-level window named Task View. Verify its actual accessible
-        # New desktop action, owned by Explorer, rather than a guessed HWND class.
-        $name=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'New desktop')
-        $control=Await-Value {
-          $items=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,$name)
-          foreach($item in $items) {
-            $owner=Get-Process -Id $item.Current.ProcessId -ErrorAction SilentlyContinue
-            if($owner -and $owner.ProcessName -eq 'explorer' -and -not $item.Current.IsOffscreen) {
-              return @{name=$item.Current.Name;pid=$owner.Id;controlType=$item.Current.ControlType.ProgrammaticName;offscreen=$item.Current.IsOffscreen}
-            }
-          }
-        } 'visible Explorer Task View New desktop action'
-        Capture 'task-view'; return $control
+        $text=Await-Value {
+          Capture 'task-view'
+          $visible=Read-CapturedText 'task-view'
+          if($visible -match '\bnew\s+desktop\b') { $visible }
+        } 'Task View New desktop text in independently captured pixels'
+        return @{method='independent Windows OCR of screenshot';text=$text;absentBefore=$true}
       } finally { Keys 'esc' }
     }
     Record 'win+shift+s opens screen clipping overlay' {
