@@ -1109,6 +1109,11 @@ function Invoke-Op([string]$op, $P) {
           try {
             if ($visual) { [System.Windows.Forms.Clipboard]::SetText($text) }
             Start-Sleep -Milliseconds 80
+            # Paste sends whatever is on the clipboard, so make sure it is our text.
+            # Pasting the previous content would type the wrong thing into the field.
+            if (-not [XpText]::ClipboardHas($text)) {
+              throw 'CLIPBOARD_SET_FAILED: Pano ayarlanamadi; yanlis metin yapistirilmamasi icin yapistirma yapilmadi.'
+            }
             if ($P.guard) { & $check }
             [System.Windows.Forms.SendKeys]::SendWait('^v')
             Start-Sleep -Milliseconds 250

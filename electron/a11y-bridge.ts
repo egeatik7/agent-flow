@@ -459,6 +459,9 @@ export async function typeText(
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
+  // Text is sent character by character with a gap, so a long text needs more room than
+  // the bridge default; otherwise a healthy worker is killed halfway through a write.
+  const budgetMs = Math.min(300000, 15000 + text.length * 60)
   return worker.call<TypeResult>('typeText', {
     text,
     pressEnter,
@@ -468,7 +471,7 @@ export async function typeText(
     ownPid: process.pid,
     fieldToken: fieldToken ?? '',
     guard,
-  })
+  }, budgetMs)
 }
 
 export async function inputState(): Promise<InputState | null> {

@@ -288,10 +288,11 @@ function Get-OcrPhrases($bmp, [int]$originX, [int]$originY, [bool]$exact = $fals
   if ([Math]::Abs($scale - 1.0) -gt 0.01) {
     $src = New-Object System.Drawing.Bitmap ([int]($bmp.Width * $scale)), ([int]($bmp.Height * $scale))
     $g = [System.Drawing.Graphics]::FromImage($src)
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-    $g.DrawImage($bmp, 0, 0, $src.Width, $src.Height)
-    $g.Dispose()
+    try {
+      $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $g.DrawImage($bmp, 0, 0, $src.Width, $src.Height)
+    } finally { $g.Dispose() }
   }
   # Never save the caller's bitmap: a second pass used to overwrite the same file and blank the shot.
   $toSave = $src
@@ -878,8 +879,7 @@ function Get-TextNear([int]$px, [int]$py) {
   $y = [Math]::Max($v.y, $py - 40)
   $rect = [pscustomobject]@{ x = $x; y = $y; w = [Math]::Min(360, $v.x + $v.w - $x); h = [Math]::Min(80, $v.y + $v.h - $y) }
   $bmp = Get-ScreenBitmap $rect
-  $phrases = Get-OcrPhrases $bmp $rect.x $rect.y
-  $bmp.Dispose()
+  try { $phrases = Get-OcrPhrases $bmp $rect.x $rect.y } finally { $bmp.Dispose() }
   $best = ''
   $bestD = [double]::MaxValue
   foreach ($p in $phrases) {

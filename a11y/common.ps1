@@ -207,6 +207,19 @@ public static class XpText {
     return old;
   }
 
+  /// True only when the clipboard really holds this text. Guards the paste path:
+  /// pasting the previous clipboard content is worse than failing loudly.
+  public static bool ClipboardHas(string text) {
+    bool ok = false;
+    var t = new Thread(() => {
+      try { ok = System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == text; } catch { ok = false; }
+    });
+    t.SetApartmentState(ApartmentState.STA);
+    t.Start();
+    t.Join(2000);
+    return ok;
+  }
+
   public static void RestoreClipboard(string text) {
     if (text == null) return;
     var t = new Thread(() => { try { System.Windows.Forms.Clipboard.SetText(text); } catch { } });

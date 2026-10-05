@@ -1047,7 +1047,7 @@ export function createAgent(ctx: AgentContext) {
       else if (v !== null) {
         verified = true
         log('success', 'Alan doğrulandı: yazı yerinde.')
-      } else log('info', 'Yazı gönderildi; alan değeri okunamadığı için yazı doğrulanmış sayılmadı.')
+      } else log('warn', 'Yazı gönderildi ama alanın değeri okunamadı; bu adım doğrulanmış sayılmıyor, hafızaya da yazılmıyor. Sonraki adım kendi hedefini kontrol edecek.')
     }
     if (enter) {
       await sleep(240)
@@ -1661,6 +1661,14 @@ export function createAgent(ctx: AgentContext) {
       const safe = label.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 60)
       const file = path.join(failDir, `hata-${new Date().toISOString().replace(/[:.]/g, '-')}-${safe}.jpg`)
       fs.writeFileSync(file, Buffer.from(res.image.data, 'base64'))
+      // A long run with many failing items must not grow this folder without bound; the
+      // pruning that happens when a run starts cannot help while the run is still going.
+      try {
+        const shots = fs.readdirSync(failDir).filter((f) => f.startsWith('hata-')).sort()
+        for (const old of shots.slice(0, Math.max(0, shots.length - 100))) fs.rmSync(path.join(failDir, old), { force: true })
+      } catch {
+        /* a screenshot folder that cannot be pruned is not worth failing the lap for */
+      }
       log('info', `Hata anının ekran görüntüsü kaydedildi: ${file}`)
     },
     initiative: (node, stepNo, ahead, vars) =>
