@@ -5,7 +5,7 @@ $directory = Split-Path -Parent $Output
 [void][IO.Directory]::CreateDirectory($directory)
 if (Test-Path -LiteralPath $Output) { Remove-Item -LiteralPath $Output -Force }
 $framework = [Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
-$references = @('System.Windows.Forms','System.Drawing','System.Web.Extensions',
+$references = @('System.Windows.Forms','System.Drawing','System.Web.Extensions','System.Xaml',
   (Join-Path $framework 'WPF\PresentationFramework.dll'),
   (Join-Path $framework 'WPF\PresentationCore.dll'),
   (Join-Path $framework 'WPF\WindowsBase.dll'))
