@@ -23,6 +23,10 @@ public static class FixtureNativeInfo {
   }
 }
 '@
+function Finite-Number([double]$value) {
+  if ([double]::IsNaN($value) -or [double]::IsInfinity($value)) { return $null }
+  return $value
+}
 $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$WindowHandle)
 if ($root.Current.ProcessId -ne $TargetProcess) { throw 'Fixture process identity changed' }
 $queue = New-Object 'System.Collections.Generic.Queue[object]'
@@ -43,7 +47,7 @@ while ($queue.Count -gt 0 -and $rows.Count -lt 300) {
       focusable=$c.IsKeyboardFocusable;focused=$c.HasKeyboardFocus
       framework=$c.FrameworkId;provider=$c.ProviderDescription
       patterns=@($el.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
-      rect=@{x=$r.X;y=$r.Y;w=$r.Width;h=$r.Height}
+      rect=@{x=(Finite-Number $r.X);y=(Finite-Number $r.Y);w=(Finite-Number $r.Width);h=(Finite-Number $r.Height)}
     })
     if ($next.depth -ge 12) { continue }
     $child = $walker.GetFirstChild($el)
