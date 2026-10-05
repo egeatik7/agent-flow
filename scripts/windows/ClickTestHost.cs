@@ -185,7 +185,7 @@ public sealed class PaintedCanvas : FrameworkElement {
     if (!ShowText) return;
     dc.DrawRectangle(Brushes.White, null, Target);
     var text = new FormattedText("RUN REMESH", CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-      new Typeface(new FontFamily("Arial"),FontStyles.Normal,FontWeights.Bold,FontStretches.Normal), 26.67, Brushes.Black);
+      new Typeface(new FontFamily("Arial"),FontStyles.Normal,FontWeights.Bold,FontStretches.Normal), 26.67, Brushes.Black, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     dc.DrawText(text, new Point(Target.X+12,Target.Y+17));
   }
 }
