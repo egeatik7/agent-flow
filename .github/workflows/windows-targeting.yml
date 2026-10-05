@@ -189,3 +189,60 @@ jobs:
           path: out/windows-live-models/
           if-no-files-found: warn
           retention-days: 14
+
+  main-verification:
+    name: Exact main after merge / native smoke
+    if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: main-under-test
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: main
+          path: main-under-test
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+      - name: Record exact main revision
+        run: |
+          $revision = git rev-parse HEAD
+          "NUBBO_MAIN_SHA=$revision" >> $env:GITHUB_ENV
+          "Main under test: $revision (production sources not overlaid)" >> $env:GITHUB_STEP_SUMMARY
+      - name: Main's own dependency install and tests
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($task in @('typecheck','test','test:keys','test:input','test:recovery','test:stability','build:electron')) {
+            npm run $task
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Copy test fixture only and test actual main native input
+        run: |
+          Copy-Item '../harness/scripts/windows-main-smoke.cjs' 'main-desktop-test.cjs'
+          New-Item -ItemType Directory -Force 'scripts/windows' | Out-Null
+          Copy-Item '../harness/scripts/windows/ClickTestHost.cs' 'scripts/windows/ClickTestHost.cs'
+          Copy-Item '../harness/scripts/windows/build-host.ps1' 'scripts/windows/build-host.ps1'
+          Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+          & './node_modules/.bin/electron.cmd' './main-desktop-test.cjs'
+          exit $LASTEXITCODE
+      - name: Actual main report
+        if: always()
+        run: |
+          if (Test-Path 'out/main-desktop/summary.json') { Get-Content 'out/main-desktop/summary.json' -Raw >> $env:GITHUB_STEP_SUMMARY }
+          else { 'Main native tests did not execute; do not count as passed.' >> $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: exact-main-desktop-evidence
+          path: main-under-test/out/main-desktop/
+          if-no-files-found: warn
+          retention-days: 14
