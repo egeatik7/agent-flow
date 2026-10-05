@@ -734,7 +734,7 @@ function Invoke-Scan($P) {
     $win = Find-WindowOrNull ([string]$P.windowTitle)
     if ($null -eq $win) {
       $missing = [string]$P.windowTitle
-    } else {
+    } elseif ($P.readOnly -ne $true) {
       Enter-Window $win
       Start-Sleep -Milliseconds 150
     }
