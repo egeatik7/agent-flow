@@ -877,8 +877,8 @@ function Invoke-Op([string]$op, $P) {
     }
     'keys' {
       if ($P.windowTitle) {
-        $win = Find-WindowOrNull ([string]$P.windowTitle)
-        if ($null -ne $win) { Enter-Window $win }
+        $win = Find-Window ([string]$P.windowTitle)
+        Enter-Window $win
       }
       Send-KeyString ([string]$P.keys)
       return $true

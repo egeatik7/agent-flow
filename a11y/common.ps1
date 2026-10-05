@@ -487,6 +487,14 @@ function Resolve-RelPath($top, [string]$path) {
   return $el
 }
 
+function Test-LocatorIdentity($e, $loc) {
+  if ($null -eq $e) { return $false }
+  if ($loc.name -and $e.Current.Name -ne [string]$loc.name) { return $false }
+  if ($loc.automationId -and $e.Current.AutomationId -ne [string]$loc.automationId) { return $false }
+  if ($loc.controlType -and (Get-CT $e) -ne [string]$loc.controlType) { return $false }
+  return $true
+}
+
 function Find-ByLocator($top, $loc) {
   $name = [string]$loc.name
   $aid = [string]$loc.automationId
@@ -495,21 +503,18 @@ function Find-ByLocator($top, $loc) {
 
   if ($path) {
     $e = Resolve-RelPath $top $path
-    if ($null -ne $e -and (-not $name -or $e.Current.Name -eq $name)) { return $e }
+    if (Test-LocatorIdentity $e $loc) { return $e }
   }
   if ($aid) {
     $cond = New-Object System.Windows.Automation.PropertyCondition($script:AE::AutomationIdProperty, $aid)
     $all = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
-    foreach ($e in $all) { if (-not $name -or $e.Current.Name -eq $name) { return $e } }
-    if ($all.Count -gt 0) { return $all.Item(0) }
+    foreach ($e in $all) { if (Test-LocatorIdentity $e $loc) { return $e } }
   }
   if ($name) {
     $cond = New-Object System.Windows.Automation.PropertyCondition($script:AE::NameProperty, $name)
     $all = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
-    foreach ($e in $all) { if (-not $ct -or (Get-CT $e) -eq $ct) { return $e } }
-    if ($all.Count -gt 0) { return $all.Item(0) }
+    foreach ($e in $all) { if (Test-LocatorIdentity $e $loc) { return $e } }
   }
-  if ($path) { return (Resolve-RelPath $top $path) }
   return $null
 }
 

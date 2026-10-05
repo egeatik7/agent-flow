@@ -401,7 +401,10 @@ export default function App() {
   const packSelection = () => {
     const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedRef.current ? [selectedRef.current] : []
     const r = packageSelection(graphRef.current, ids)
-    if (!r) return
+    if (!r) {
+      if (ids.length) pushLog('warn', 'Bu seçim tek girişli ve tek çıkışlı bir pakete kayıpsız alınamıyor. Dallanmanın devamını da seç veya adımları ayrı bırak; akış değiştirilmedi.')
+      return
+    }
     setGraph(r.graph)
     selectNode(r.id)
     pushLog(
@@ -715,7 +718,7 @@ export default function App() {
     const trimmed = folder.trim()
     if (!trimmed) {
       templateSeen.current.delete(nodeId)
-      patchAnywhere(nodeId, { folder, items: [], startIndex: 0, loopIndex: undefined, results: undefined })
+      patchAnywhere(nodeId, { folder, items: [], startIndex: 0, loopIndex: undefined })
       return
     }
     if (hasTemplate(folder)) {
@@ -729,7 +732,7 @@ export default function App() {
       try {
         const files = await api.listDir(trimmed)
         if (gen !== loopFolderGen.current) return
-        patchAnywhere(nodeId, { folder, items: files ?? [], startIndex: 0, loopIndex: undefined, results: undefined })
+        patchAnywhere(nodeId, { folder, items: files ?? [], startIndex: 0, loopIndex: undefined })
         if (!immediate) return
         pushLog(
           files && files.length ? 'success' : 'warn',
@@ -787,7 +790,7 @@ export default function App() {
           input.click()
         })
         if (!r) return
-        patchAnywhere(nodeId, { items: r.files, folder: r.folder, loopIndex: undefined, startIndex: 0, results: undefined })
+        patchAnywhere(nodeId, { items: r.files, folder: r.folder, loopIndex: undefined, startIndex: 0 })
         return
       }
       const dir = await api.pickDir()

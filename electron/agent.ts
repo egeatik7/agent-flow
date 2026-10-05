@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
-import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
+import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
@@ -126,6 +126,16 @@ export function createAgent(ctx: AgentContext) {
     return { x: Math.round(d.bounds.x * f), y: Math.round(d.bounds.y * f), w: Math.max(1, Math.round(d.bounds.width * f)), h: Math.max(1, Math.round(d.bounds.height * f)) }
   }
   const warnedMissing = new Set<string>()
+
+  function checkStopped() {
+    if (stopped()) throw new StoppedError()
+  }
+
+  /** An edited literal target must not keep using the previously picked label. */
+  function locatorFitsText(node: AgentNode, text: string): boolean {
+    const selected = (node.locator?.text || node.locator?.name || '').trim()
+    return !text.trim() || (!!selected && norm(conditionNeedle(text)) === norm(selected))
+  }
 
   const memoFor = (node: AgentNode) => runMemo.get(node.id) ?? node.memory
   const saveMemo = (node: AgentNode, m?: TargetMemo) => {
@@ -347,11 +357,12 @@ export function createAgent(ctx: AgentContext) {
           if (pick) return { ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }
           log('info', '[chrome] Sayfada bulunamadı.')
         }
-        if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)) {
+        if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)
+          && (!quoted || locatorFitsText(node, quoted))) {
           ctx.setMethod?.('Kayıtlı öğe')
           try {
             const r = await bridge.locate(loc, win)
-            if (r && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
+            if (r && r.enabled !== false && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
           } catch {
             /* next stage */
           }
@@ -814,7 +825,9 @@ export function createAgent(ctx: AgentContext) {
   ) {
     const write = async (clearField = clear) => {
       // Enter belongs to this function, after readback, never to the worker.
+      checkStopped()
       let typed = await bridge.typeText(text, false, clearField, at)
+      checkStopped()
       if (typed?.needChoice && typed.choices?.length) {
         const s = getSettings()
         const model = textModels(s)
@@ -839,6 +852,7 @@ export function createAgent(ctx: AgentContext) {
         log('info', `Yazı kutusu #${chosen.id}: “${chosen.window}” / ${chosen.type}${chosen.name ? ` / ${chosen.name}` : ''}. ${pick.reason}`)
         if (stopped()) throw new StoppedError()
         typed = await bridge.typeText(text, false, clearField, at, chosen.token)
+        checkStopped()
       }
       if (typed?.skippedClear) {
         throw new Error(`Odak bir yazı alanı değil (${typed.focusType || 'bilinmiyor'})${typed.where ? ` — ${typed.where}` : ''}. Yazı gönderilmedi.`)
@@ -852,6 +866,9 @@ export function createAgent(ctx: AgentContext) {
       let v = typed?.value !== undefined ? typed.value : await bridge.focusedValue()
       let state = v === null ? 'ok' : fieldState(v, text, clear)
       if (state === 'empty' || state === 'wrong') {
+        if (!clear) {
+          throw new Error(`Ekleme yazımı doğrulanamadı; mevcut alan silinmedi ve belirsiz yazı tekrar gönderilmedi. Alanda “${(v ?? '').slice(0, 60)}” var.`)
+        }
         log('warn', `Alanda “${(v ?? '').slice(0, 60)}” yazıyor, beklenen bu değil. Bir kez daha yazılıyor.`)
         typed = await write(true)
         v = typed?.value !== undefined ? typed.value : await bridge.focusedValue()
@@ -866,6 +883,7 @@ export function createAgent(ctx: AgentContext) {
     }
     if (enter) {
       await sleep(240)
+      checkStopped()
       await bridge.sendKeys('{ENTER}')
     }
     return verified
@@ -947,6 +965,7 @@ export function createAgent(ctx: AgentContext) {
         image,
         next,
       })
+      checkStopped()
       const item = a.id !== null ? items.find((x) => x.id === a.id) : undefined
       log(
         'info',
@@ -979,11 +998,13 @@ export function createAgent(ctx: AgentContext) {
           history.push(`${a.seconds} sn beklendi`)
         } else if (a.action === 'key') {
           if (!a.keys) throw new Error('tuş boş')
+          checkStopped()
           await bridge.sendKeys(a.keys)
           history.push(`tuş ${a.keys}`)
           trace.push(`tuş ${a.keys}`)
         } else if (a.action === 'type') {
           if (item) {
+            checkStopped()
             await bridge.clickAt(center(item).x, center(item).y, 'left')
             await sleep(FOCUS_MS)
             await typeVerified(a.text, a.enter, true)
@@ -999,6 +1020,7 @@ export function createAgent(ctx: AgentContext) {
             continue
           }
           const mode = a.action === 'double' ? 'double' : a.action === 'right' ? 'right' : 'left'
+          checkStopped()
           await bridge.clickAt(center(item).x, center(item).y, mode)
           const line = `${mode === 'double' ? 'çift tıkla' : mode === 'right' ? 'sağ tıkla' : 'tıkla'} “${item.text}”`
           history.push(line)
@@ -1063,6 +1085,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function doGui(a: Doable, area: Shot['area']) {
+    checkStopped()
     const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
     switch (a.kind) {
       case 'click':
@@ -1101,6 +1124,7 @@ export function createAgent(ctx: AgentContext) {
 
   /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
   async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string }> {
+    checkStopped()
     const s = getSettings()
     const model = modelChain(s.visionModel, s.visionBackups)
     if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok' }
@@ -1115,6 +1139,7 @@ export function createAgent(ctx: AgentContext) {
       })
       return { ok: r.answer, reason: r.reason }
     } catch (e) {
+      if (e instanceof StoppedError) throw e
       log('warn', `Bitti kontrolü yapılamadı, modelin sözüne güveniliyor: ${(e as Error).message}`)
       return { ok: true, reason: '' }
     }
@@ -1242,6 +1267,7 @@ export function createAgent(ctx: AgentContext) {
         tarsPrompt: promptOf(s.llmPrompts, 'tars'),
         jsonPrompt: promptOf(s.llmPrompts, 'screen'),
       })
+      checkStopped()
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
       if (a.kind === 'finished') {
@@ -1330,6 +1356,7 @@ export function createAgent(ctx: AgentContext) {
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
       const confirmed = await ensureActed(node, ahead, async () => {
+        checkStopped()
         await bridge.clickAt(t.x, t.y, mode)
         lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
@@ -1351,6 +1378,7 @@ export function createAgent(ctx: AgentContext) {
       }
       let valueVerified = false
       const write = async () => {
+        checkStopped()
         if (t) {
           await bridge.clickAt(t.x, t.y, 'left')
           await sleep(FOCUS_MS)
@@ -1372,6 +1400,7 @@ export function createAgent(ctx: AgentContext) {
       if (!getSettings().targetWindow) await guardFocus(node)
       lastClickPoint = undefined
       await ensureActed(node, ahead, async () => {
+        checkStopped()
         await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       })
       await noteForeground()
@@ -1382,7 +1411,7 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      if (node.locator) {
+      if (node.locator && locatorFitsText(node, text)) {
         const how = await savedTargetVisible(node)
         if (how) return found(how)
       }

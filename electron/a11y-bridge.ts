@@ -28,14 +28,13 @@ function friendly(msg: string): string {
   return msg
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; proc: ChildProcessWithoutNullStreams }
 
 class Worker {
   private proc: ChildProcessWithoutNullStreams | null = null
   private ready: Promise<void> | null = null
   private pending = new Map<string, Pending>()
   private seq = 0
-  private buf = ''
   /** Settles when the request before this one has been answered. */
   private tail: Promise<void> = Promise.resolve()
 
@@ -57,7 +56,9 @@ class Worker {
     if (!fs.existsSync(script)) return Promise.reject(new Error(`Otomasyon script’i bulunamadı: ${script}`))
     const proc = spawn('powershell.exe', psArgs(script), { windowsHide: true })
     this.proc = proc
-    this.buf = ''
+    // A dying worker may still emit data after its replacement has started.
+    // Each process owns its partial response buffer and pending requests.
+    let buf = ''
     proc.stdout.setEncoding('utf8')
     proc.stderr.setEncoding('utf8')
     // Writing to a worker that just died raises EPIPE on stdin; the exit handler below already fails the pending requests.
@@ -79,7 +80,7 @@ class Worker {
         if (tab < 0) return
         const id = line.slice(0, tab)
         const p = this.pending.get(id)
-        if (!p) return
+        if (!p || p.proc !== proc) return
         this.pending.delete(id)
         clearTimeout(p.timer)
         try {
@@ -95,9 +96,9 @@ class Worker {
         }
       }
       proc.stdout.on('data', (d: string) => {
-        this.buf += d
-        const lines = this.buf.split(/\r?\n/)
-        this.buf = lines.pop() ?? ''
+        buf += d
+        const lines = buf.split(/\r?\n/)
+        buf = lines.pop() ?? ''
         for (const l of lines) if (l.trim()) onLine(l.trim())
       })
       let errText = ''
@@ -116,11 +117,12 @@ class Worker {
           this.ready = null
         }
         const err = new Error(`Otomasyon işçisi kapandı. ${errText.trim().split(/\r?\n/).slice(-3).join(' ')}`.trim())
-        for (const p of this.pending.values()) {
+        for (const [id, p] of this.pending) {
+          if (p.proc !== proc) continue
+          this.pending.delete(id)
           clearTimeout(p.timer)
           p.reject(err)
         }
-        this.pending.clear()
         reject(err)
       })
     })
@@ -157,7 +159,7 @@ class Worker {
         // Only the worker this request was sent to; a newer one that started since is left alone.
         this.drop(proc)
       }, timeoutMs)
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, proc })
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
     })
   }
@@ -348,7 +350,9 @@ export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<Sc
     const originX = res.area?.x ?? 0
     const originY = res.area?.y ?? 0
     const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, originX, originY)
-    const merged = mergeOnnxLines(res.items, lines, 'onnx')
+    // This is a fallback reader: keep unrelated, valid Windows OCR lines.
+    // Explicit ONNX-only scans still use their selected engine above.
+    const merged = mergeOnnxLines(res.items, lines, 'windows')
     const items = merged.items.slice()
     let sideCount = 0
     const side = await recognizeSideways(raw.bgra, raw.w, raw.h, originX, originY, items)

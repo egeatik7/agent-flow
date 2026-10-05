@@ -736,21 +736,30 @@ export function parseTars(content: string, imgW: number, imgH: number, absolute:
 function parseJsonAction(content: string): GuiAction {
   const p = parseJson(content)
   const n = (v: unknown) => {
-    const x = num(v)
-    return x === null ? undefined : Math.min(1, Math.max(0, x > 1 ? x / 1000 : x))
+    if (v === undefined || v === null) return undefined
+    const x = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN
+    if (!Number.isFinite(x) || x < 0 || x > 1000) throw new ModelRejected('Geçersiz GUI koordinatı')
+    return x > 1 ? x / 1000 : x
   }
   const a = String(p.action ?? '').toLowerCase()
   const kinds = ['click', 'double', 'right', 'drag', 'hotkey', 'type', 'scroll', 'wait', 'finished', 'call_user'] as const
   const kind = ((kinds as readonly string[]).includes(a) ? a : a === 'done' ? 'finished' : a === 'fail' ? 'call_user' : 'wait') as GuiAction['kind']
   const keys = Array.isArray(p.keys) ? p.keys.map((k) => String(k).toLowerCase()) : typeof p.keys === 'string' ? p.keys.toLowerCase().split(/[\s+]+/) : []
   const d = String(p.direction ?? '').toLowerCase()
+  const x = n(p.x), y = n(p.y), x2 = n(p.x2), y2 = n(p.y2)
+  if (['click', 'double', 'right', 'drag'].includes(kind) && (x === undefined || y === undefined)) {
+    throw new ModelRejected('GUI tıklama/sürükleme yanıtında başlangıç koordinatları eksik')
+  }
+  if (kind === 'drag' && (x2 === undefined || y2 === undefined)) {
+    throw new ModelRejected('GUI sürükleme yanıtında bitiş koordinatları eksik')
+  }
   return {
     thought: String(p.thought ?? p.reason ?? '').trim(),
     kind,
-    x: n(p.x),
-    y: n(p.y),
-    x2: n(p.x2),
-    y2: n(p.y2),
+    x,
+    y,
+    x2,
+    y2,
     keys: keys.filter(Boolean),
     text: String(p.text ?? p.content ?? ''),
     direction: (['up', 'down', 'left', 'right'].includes(d) ? d : 'down') as GuiAction['direction'],
