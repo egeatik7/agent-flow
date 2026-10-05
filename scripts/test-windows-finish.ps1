@@ -80,7 +80,7 @@ public static class FinishOracle {
 }
 '@
 $results = New-Object 'System.Collections.Generic.List[object]'
-$worker = $null; $hostProcess = $null; $pack = $null
+$worker = $null; $workerInput = $null; $hostProcess = $null; $pack = $null
 $protocol = New-Object 'System.Collections.Generic.List[object]'
 function Await-Value([scriptblock]$check, [string]$label, [int]$seconds = 12) {
   $limit = [DateTime]::UtcNow.AddSeconds($seconds)
@@ -111,7 +111,7 @@ function Read-Worker([int]$seconds) {
 function Keys([string]$value) {
   $requestId=[guid]::NewGuid().ToString('N')
   $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{keys=$value} | ConvertTo-Json -Compress)))
-  $worker.StandardInput.WriteLine("$requestId`tkeys`t$payload"); $worker.StandardInput.Flush()
+  $workerInput.WriteLine("$requestId`tkeys`t$payload"); $workerInput.Flush()
   $deadline=[DateTime]::UtcNow.AddSeconds(15)
   do {
     $remaining=[Math]::Max(1,[Math]::Ceiling(($deadline-[DateTime]::UtcNow).TotalSeconds))
@@ -134,6 +134,12 @@ function Focus-Host {
   if($hostProcess.HasExited) { throw 'Test fixture exited during shell preparation' }
   if(-not $state -or $state.pid -ne $hostProcess.Id) { throw 'Fixture window identity changed' }
   [FinishOracle]::FocusFixture([IntPtr][long]$state.hwnd)
+  # Independent preparation only: restore keyboard focus to a real fixture Edit.
+  # This is not used to judge whether Nubbo selected the correct target.
+  $element=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$state.hwnd)
+  $editable=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Edit)
+  $field=$element.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$editable)
+  if($field) { $field.SetFocus() }
   $script:commandSeq++
   @{seq=$commandSeq;kind='focus-main'} | ConvertTo-Json -Compress | Set-Content (Join-Path $out 'host/command.json') -Encoding UTF8
   [void](Await-Value { $s=Host-State; if($s -and $s.commandSeq -eq $commandSeq -and $s.foreground -eq $s.hwnd) { $s } } 'fixture focus')
@@ -156,6 +162,10 @@ try {
     $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
     $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
     $worker=New-Object Diagnostics.Process; $worker.StartInfo=$start; [void]$worker.Start()
+    # Match Node stdin: UTF-8 bytes with no preamble. The default .NET writer
+    # emits a BOM which Console.In on Windows PS 5.1 reads as request-ID text.
+    $workerInput=[IO.StreamWriter]::new($worker.StandardInput.BaseStream,[Text.UTF8Encoding]::new($false))
+    $workerInput.AutoFlush=$true
     $stderr=$worker.StandardError.ReadToEndAsync()
     if ((Read-Worker 60) -ne 'READY') { throw 'Worker did not signal readiness' }
     [FinishOracle]::Start()
@@ -242,7 +252,7 @@ try {
 finally {
   [FinishOracle]::Stop()
   $protocol.ToArray() | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'worker-protocol.json') -Encoding UTF8
-  if ($worker) { try {$worker.StandardInput.Close(); if(-not $worker.WaitForExit(3000)) {$worker.Kill()}} catch {}; $worker.Dispose() }
+  if ($worker) { try {$workerInput.Close(); if(-not $worker.WaitForExit(3000)) {$worker.Kill()}} catch {}; $worker.Dispose() }
   if ($hostProcess) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
   if ($pack) {
     # Only test-launched portable processes: never terminate unrelated apps.
