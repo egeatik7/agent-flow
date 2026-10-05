@@ -936,7 +936,7 @@ function Invoke-Op([string]$op, $P) {
     'locate' {
       $win = Find-WindowOrNull ([string]$P.windowTitle)
       if ($null -eq $win) { return $null }
-      Enter-Window $win
+      if ($P.readOnly -ne $true) { Enter-Window $win }
       $el = Find-ByLocator $win $P.locator
       if ($null -eq $el) { return $null }
       $off = $false
