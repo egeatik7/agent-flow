@@ -102,16 +102,16 @@ export function removeNode(graph: AgentGraph, id: string): AgentGraph {
 export function duplicateNode(graph: AgentGraph, id: string): { graph: AgentGraph; id: string } | null {
   const n = graph.nodes.find((x) => x.id === id)
   if (!n || n.kind === 'start') return null
+  const map = new Map<string, string>()
+  assignFreshIds([n], map)
   const copy: AgentNode = {
-    ...n,
-    id: newId(),
+    ...rewriteNode(cloneData(n), map, 30, 30, true),
     title: `${n.title} (kopya)`,
     x: n.x + 30,
     y: n.y + 30,
     memory: undefined,
     trace: undefined,
-    ...(n.kind === 'loop' ? { members: [], results: undefined, loopIndex: 0 } : {}),
-    ...(n.kind === 'package' && n.inner ? { inner: JSON.parse(JSON.stringify(n.inner)) as AgentGraph } : {}),
+    ...(n.kind === 'loop' ? { members: [], loopIndex: 0 } : {}),
   }
   const next = withMember({ ...graph, nodes: [...graph.nodes, copy] }, ownerOf(graph, id)?.id, copy.id)
   return { graph: next, id: copy.id }
@@ -277,6 +277,9 @@ export function packageSelection(graph: AgentGraph, ids: string[]): { graph: Age
   const innerEdges = graph.edges.filter((e) => sel.has(e.from) && sel.has(e.to)).map((e) => ({ ...e }))
   const incoming = graph.edges.filter((e) => !sel.has(e.from) && sel.has(e.to))
   const leaving = graph.edges.filter((e) => sel.has(e.from) && !sel.has(e.to))
+  // A one-exit package cannot preserve multiple external branches/entries.
+  // Reject the selection rather than silently changing its meaning.
+  if (leaving.length > 1 || new Set(incoming.map((e) => e.to)).size > 1) return null
 
   if (!innerNodes.some((n) => n.kind === 'start')) {
     const fromOutside = [...new Set(incoming.map((e) => e.to))]
@@ -480,6 +483,7 @@ function rewriteNode(n: AgentNode, map: Map<string, string>, dx: number, dy: num
     x: shift ? Math.round(n.x + dx) : n.x,
     y: shift ? Math.round(n.y + dy) : n.y,
     members: n.members?.map((id) => map.get(id)).filter((id): id is string => !!id),
+    packageExit: n.packageExit ? { ...n.packageExit, from: map.get(n.packageExit.from) ?? n.packageExit.from } : undefined,
     loopIndex: undefined,
   }
   if (n.inner) {

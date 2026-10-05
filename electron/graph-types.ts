@@ -666,7 +666,10 @@ export function normalizeGraph(raw: unknown): AgentGraph {
         waitIds.add(n.id!)
         n = { ...n, kind: 'condition', timeoutMs: n.timeoutMs ?? 15000 }
       }
-      const kind: NodeKind = n.kind && n.kind in NODE_SPECS ? (n.kind as NodeKind) : 'click'
+      if (n.kind && !Object.prototype.hasOwnProperty.call(NODE_SPECS, n.kind)) {
+        throw new Error(`Desteklenmeyen node türü: ${String(n.kind)} (${n.id}). Akış değiştirilmedi.`)
+      }
+      const kind: NodeKind = n.kind ? (n.kind as NodeKind) : 'click'
       const fallback = createNode(kind, n.x ?? 60, n.y ?? 60)
       const { recorded, ...rest } = n
       const node = {

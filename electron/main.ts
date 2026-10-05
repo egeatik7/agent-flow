@@ -474,24 +474,25 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     if (running) throw new Error('Ajan zaten çalışıyor.')
     running = true
     stopRequested = false
-    const graph = normalizeGraph(raw)
-    store.set('graph', graph)
-    const s = getSettings()
-    let shotDir = ''
-    try {
-      shotDir = ensureLogsDir()
-      openRunLog()
-    } catch {
-      runLog = ''
-    }
-    agent.beginRun(shotDir)
-    globalShortcut.register(STOP_HOTKEY, () => {
-      stopRequested = true
-    })
-    const awake = powerSaveBlocker.start('prevent-display-sleep')
-    if (runLog) log('info', `Günlük dosyası: ${runLog}`)
+    let awake: number | undefined
     let hidden = false
     try {
+      const graph = normalizeGraph(raw)
+      store.set('graph', graph)
+      const s = getSettings()
+      let shotDir = ''
+      try {
+        shotDir = ensureLogsDir()
+        openRunLog()
+      } catch {
+        runLog = ''
+      }
+      agent.beginRun(shotDir)
+      globalShortcut.register(STOP_HOTKEY, () => {
+        stopRequested = true
+      })
+      awake = powerSaveBlocker.start('prevent-display-sleep')
+      if (runLog) log('info', `Günlük dosyası: ${runLog}`)
       if (s.hideWhileRunning) {
         log('info', 'Uygulama küçültülüyor; durdurmak için Ctrl+Shift+Q.')
         hidden = await hideSelf()
@@ -514,11 +515,13 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       log('error', (e as Error).message)
       throw e
     } finally {
-      globalShortcut.unregister(STOP_HOTKEY)
-      if (powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
-      hideHudSoon()
+      // Reset the run state even when preparation failed before a resource
+      // was created, or a later OS cleanup call throws.
       running = false
       runLog = ''
+      globalShortcut.unregister(STOP_HOTKEY)
+      if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
+      hideHudSoon()
       if (hidden) showSelf()
     }
   })

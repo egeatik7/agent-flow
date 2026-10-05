@@ -2,6 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import ProbeMark from './ProbeMark'
+import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
 import {
   NODE_SPECS,
   TEMPLATE_VARS,
@@ -48,21 +49,6 @@ type Props = {
   onPickDir: () => Promise<string | null>
   capturing: number
 }
-
-const KEY_PRESETS: { label: string; keys: string }[] = [
-  { label: 'Enter', keys: '{ENTER}' },
-  { label: 'Tab', keys: '{TAB}' },
-  { label: 'Esc', keys: '{ESC}' },
-  { label: 'Ctrl+A', keys: '^a' },
-  { label: 'Ctrl+C', keys: '^c' },
-  { label: 'Ctrl+V', keys: '^v' },
-  { label: 'Ctrl+S', keys: '^s' },
-  { label: 'Alt+F4', keys: '%{F4}' },
-  { label: 'Win', keys: '^{ESC}' },
-  { label: 'F5', keys: '{F5}' },
-  { label: '↓', keys: '{DOWN}' },
-  { label: '↑', keys: '{UP}' },
-]
 
 const VISION_PRESETS = [
   'google/gemini-3.8-flash',
@@ -587,17 +573,22 @@ function NodeFields(p: Props & { n: AgentNode }) {
 
       {n.kind === 'key' && (
         <div className="field">
-          <label>Tuş (SendKeys biçimi)</label>
-          <input className="xp-input mono" value={n.keys ?? ''} onChange={(e) => upd({ keys: e.target.value })} />
+          <label>Tuş / Kısayol</label>
+          <input className="xp-input mono" value={n.keys ?? ''} placeholder="win+r" onChange={(e) => upd({ keys: e.target.value })} />
           <VarChips onInsert={(v) => upd({ keys: append(n.keys, v) })} />
           <div className="chips">
             {KEY_PRESETS.map((k) => (
-              <button type="button" key={k.keys} className="chip" onClick={() => upd({ keys: k.keys })}>
+              <button
+                type="button"
+                key={k.label}
+                className="chip"
+                onClick={() => upd({ keys: k.append ? winPrefix(n.keys) : k.keys })}
+              >
                 {k.label}
               </button>
             ))}
           </div>
-          <p className="hint">^ = Ctrl, % = Alt, + = Shift. Örn: ^s kaydet, %{'{'}TAB{'}'} pencere değiştir.</p>
+          <p className="hint">ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{'{F4}'}, #r) de desteklenir.</p>
         </div>
       )}
 

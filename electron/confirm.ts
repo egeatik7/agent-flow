@@ -76,19 +76,19 @@ export function judgeScreen(before: string[], after: string[], expected: string)
     return { kind: 'ready', reason: `sıradaki “${expected}” ekrana geldi`, expected, fresh, changed }
   }
   if (expected && now && had && changed) {
-    return { kind: 'ready', reason: `ekran değişti ve “${expected}” duruyor`, expected, fresh, changed }
+    return { kind: 'unknown', reason: `“${expected}” zaten ekrandaydı; başka yazıların değişmesi bu eylemi doğrulamıyor`, expected, fresh, changed }
   }
   if (expected && now && had && !changed) {
     return { kind: 'missed', reason: `“${expected}” zaten ekrandaydı, tıklama ekranı değiştirmedi`, expected, fresh, changed }
-  }
-  if (!expected && changed) {
-    return { kind: 'ready', reason: 'ekran değişti', expected, fresh, changed }
   }
   if (!changed) {
     return { kind: 'missed', reason: 'ekran değişmedi, tuş tepki vermemiş olabilir', expected, fresh, changed }
   }
   if (loading) {
     return { kind: 'loading', reason: 'yüklenme yazısı var, sıradaki hedef henüz yok', expected, fresh, changed }
+  }
+  if (!expected && changed) {
+    return { kind: 'unknown', reason: 'ekran değişti; beklenen sonuç belirtilmediği için eylem doğrulanamadı', expected, fresh, changed }
   }
   if (fresh.length === 0) {
     return { kind: 'loading', reason: 'eski yazılar kalktı, yenisi henüz gelmedi', expected, fresh, changed }

@@ -54,7 +54,7 @@ export class LoopHalted extends Error {}
 
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
-/** A single lap went over the step budget. The lap stops; the next item still runs. */
+/** A single lap went over the step budget. Keep this item; do not start the next job. */
 class LapLimitError extends Error {}
 
 type Budget = { used: number }
@@ -108,7 +108,7 @@ function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
 const FAIL_PORTS = new Set(['timeout', 'fail'])
 
 function isFatal(e: unknown) {
-  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LoopHalted
+  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
 }
 
 export async function runGraph(

@@ -131,7 +131,8 @@ async function chromeBoxes(win?: string): Promise<DomBox[] | null> {
       const title = await p.title().catch(() => '')
       if (pageMatches(title, win)) scored.push(p)
     }
-    if (scored.length) chosen = scored
+    if (!scored.length) return null
+    chosen = scored
   }
   const all: DomBox[] = []
   for (const p of chosen) {

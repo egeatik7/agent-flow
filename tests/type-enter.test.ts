@@ -19,6 +19,8 @@ vi.mock('electron', () => ({
 vi.mock('../electron/a11y-bridge', () => ({
   isLocked: async () => false,
   foreground: async () => null,
+  inputTarget: async () => ({ hwnd: '100', pid: 10, title: 'Pencere A', rect: { x: 0, y: 0, w: 1000, h: 700 } }),
+  assertInputTarget: async () => {},
   focusedValue: async () => fake.fieldValue,
   sendKeys: async (keys: string) => {
     if (keys === '{ENTER}') fake.enterByAgent++

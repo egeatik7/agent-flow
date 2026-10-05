@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
-import { describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
+import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import {
   containsText,
@@ -36,6 +36,7 @@ import {
   type ReactionVerdict,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
+import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, type InputGuard, type InputWindow, type Point } from './input-policy'
 import { rememberShot } from './shots'
 
 export type AgentContext = {
@@ -127,6 +128,16 @@ export function createAgent(ctx: AgentContext) {
   }
   const warnedMissing = new Set<string>()
 
+  function checkStopped() {
+    if (stopped()) throw new StoppedError()
+  }
+
+  /** An edited literal target must not keep using the previously picked label. */
+  function locatorFitsText(node: AgentNode, text: string): boolean {
+    const selected = (node.locator?.text || node.locator?.name || '').trim()
+    return !text.trim() || (!!selected && norm(conditionNeedle(text)) === norm(selected))
+  }
+
   const memoFor = (node: AgentNode) => runMemo.get(node.id) ?? node.memory
   const saveMemo = (node: AgentNode, m?: TargetMemo) => {
     if (!m) return
@@ -146,6 +157,8 @@ export function createAgent(ctx: AgentContext) {
     noted.clear()
     lastFg = null
     lastClickPoint = undefined
+    lastInput = undefined
+    guiReplace = false
     warnedMissing.clear()
   }
 
@@ -347,11 +360,12 @@ export function createAgent(ctx: AgentContext) {
           if (pick) return { ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }
           log('info', '[chrome] Sayfada bulunamadı.')
         }
-        if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)) {
+        if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)
+          && (!quoted || locatorFitsText(node, quoted))) {
           ctx.setMethod?.('Kayıtlı öğe')
           try {
             const r = await bridge.locate(loc, win)
-            if (r && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
+            if (r && r.enabled !== false && r.w * r.h < 600 * 400) return { ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }
           } catch {
             /* next stage */
           }
@@ -803,6 +817,88 @@ export function createAgent(ctx: AgentContext) {
     return 'wrong'
   }
 
+  type InputBinding = { window: InputWindow; at?: Point; instruction: string; mustRetarget?: boolean }
+  let lastInput: InputBinding | undefined
+  let guiReplace = false
+
+  async function inputBinding(at?: Point, node?: AgentNode, fresh = false): Promise<InputBinding | undefined> {
+    if (process.platform !== 'win32') return undefined
+    const previous = !fresh && lastInput && at && lastInput.at && Math.hypot(at.x - lastInput.at.x, at.y - lastInput.at.y) < 1 ? lastInput : undefined
+    const windowTitle = getSettings().targetWindow || node?.locator?.windowTitle || undefined
+    checkStopped()
+    const win = await bridge.inputTarget(previous ? { target: previous.window, followOwnedDialog: true } : { windowTitle, at })
+    checkStopped()
+    if (!win) throw new Error('INPUT_TARGET_INVALID: Yazılacak pencere bulunamadı.')
+    const point = previous ? movedPoint(previous.window.rect, win.rect, at) : at
+    const changedWindow = previous && previous.window.hwnd !== win.hwnd
+    const binding = { window: win, at: changedWindow ? undefined : point, instruction: node?.prompt?.trim() || previous?.instruction || '', mustRetarget: !!previous && (!!changedWindow || !point) }
+    if (previous && at && !binding.at) log('info', 'Pencere/diyalog veya yerleşim değişti; eski yazı alanı noktası kullanılmıyor.')
+    return binding
+  }
+
+  async function activateInputWindow(node: AgentNode) {
+    const title = getSettings().targetWindow || node.locator?.windowTitle
+    if (process.platform !== 'win32' || !title) return
+    checkStopped()
+    await bridge.inputTarget({ windowTitle: title })
+    checkStopped()
+  }
+
+  async function clickInput(point: Point, instruction: string, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
+    const binding = await inputBinding(point, node, true)
+    checkStopped()
+    const p = binding?.at || point
+    if (binding && !inside(binding.window.rect, p)) throw new Error('INPUT_TARGET_INVALID: Alan noktası hedef pencerenin dışında.')
+    await bridge.clickAt(p.x, p.y, mode, binding?.window)
+    lastClickPoint = mode === 'right' ? undefined : p
+    lastInput = mode === 'right' ? undefined : binding ? { ...binding, instruction } : undefined
+  }
+
+  async function recoverInput(binding: InputBinding, error: bridge.TypeResult, turns: GuiTurn[]): Promise<InputBinding | null> {
+    const settings = getSettings()
+    const models = agentModels(settings)
+    if (!settings.apiKey || !models.length || !binding.instruction.trim()) return null
+    checkStopped()
+    const win = await bridge.inputTarget({ target: binding.window })
+    checkStopped()
+    if (!win) return null
+    const point = movedPoint(binding.window.rect, win.rect, binding.at)
+    binding = { ...binding, window: win, at: point, mustRetarget: !point }
+    const view = await bridge.crop(win.rect, 1008, true, models.some(isTarsModel) ? 28 : 0)
+    checkStopped()
+    rememberShot(view.image.data, 'yazı alanı kurtarma')
+    const d = error.diagnostics
+    const goal = 'ONLY restore keyboard focus to the editable input described below. Do not type any text,'
+      + ' send keys, submit, save, close a window or perform the full workflow.'
+      + ' Return one click on that input, a short wait if it is loading, or call_user if it cannot be identified.'
+      + ' finished means ONLY that the described input already has keyboard focus; the executor will verify this.'
+      + '\nInput instruction: ' + binding.instruction
+      + '\nTarget window: ' + win.title
+      + '\nInput was NOT sent. Error: ' + (error.code || 'INPUT_FOCUS_UNRESOLVED')
+      + '\nCurrent focus: ' + (d?.type || error.focusType || 'unknown') + ', native=' + (d?.native || 'unknown')
+      + '\nPrevious point: ' + (binding.at ? Math.round(binding.at.x) + ',' + Math.round(binding.at.y) : 'not valid on current layout')
+      + '\nThe attached image is ONLY this window. Use its coordinates. Re-evaluate the field, not merely its text label.'
+    const a = await guiStep({ apiKey: settings.apiKey, model: models, goal, history: turns, screen: view.image })
+    checkStopped()
+    await bridge.assertInputTarget(win)
+    checkStopped()
+    log('info', 'Yazı alanı kurtarma: ' + describeGui(a) + (a.thought ? ' — ' + a.thought : ''))
+    turns.push({ thought: a.thought, raw: a.raw, image: view.image })
+    if (a.kind === 'wait') { await pause(500); return { ...binding, window: win } }
+    if (a.kind === 'finished') return binding.at ? { ...binding, window: win } : null
+    if (a.kind !== 'click' || a.x === undefined || a.y === undefined) return null
+    const p = { x: view.area.x + a.x * view.area.w, y: view.area.y + a.y * view.area.h }
+    if (!inside(win.rect, p) || !inside(view.area, p)) throw new Error('INPUT_TARGET_INVALID: Kurtarma noktası hedef pencerenin dışında.')
+    if (turns.slice(0, -1).some(t => t.note === 'click@' + Math.round(p.x) + ',' + Math.round(p.y))) {
+      log('warn', 'Kurtarma aynı başarısız alan noktasını tekrar seçti; tıklama gönderilmedi.')
+      return null
+    }
+    turns[turns.length - 1].note = 'click@' + Math.round(p.x) + ',' + Math.round(p.y)
+    await bridge.clickAt(p.x, p.y, 'left', win)
+    await pause(FOCUS_MS)
+    return { ...binding, window: win, at: p, mustRetarget: false }
+  }
+
   /** Types into the focused field, reads it back. Empty or unrelated content is typed once more; a formatted/shortened value only warns. */
   async function typeVerified(
     text: string,
@@ -812,9 +908,19 @@ export function createAgent(ctx: AgentContext) {
     node?: AgentNode,
     ahead?: StepAhead
   ) {
-    const write = async (clearField = clear) => {
+    let binding = await inputBinding(at, node)
+    const recoveryTurns: GuiTurn[] = []
+    let recoveryCount = 0
+    let inputWasSent = false
+    let visual = false
+    const write = async (clearField = clear): Promise<bridge.TypeResult | null> => {
       // Enter belongs to this function, after readback, never to the worker.
-      let typed = await bridge.typeText(text, false, clearField, at)
+      checkStopped()
+      const guard: InputGuard | undefined = binding ? { window: binding.window, at: binding.at, visual } : undefined
+      let typed: bridge.TypeResult | null = binding?.mustRetarget
+        ? { cleared: false, pasted: false, focusType: '', skippedClear: true, writeSent: false, code: 'INPUT_LAYOUT_CHANGED', diagnostics: await bridge.inputState() || undefined }
+        : await bridge.typeText(text, false, clearField, binding ? binding.at : at, undefined, guard)
+      checkStopped()
       if (typed?.needChoice && typed.choices?.length) {
         const s = getSettings()
         const model = textModels(s)
@@ -823,12 +929,12 @@ export function createAgent(ctx: AgentContext) {
         }
         const windows = [...new Set(typed.choices.map((c) => c.window))]
         log('info', `${windows.join(', ')} içinde ${typed.choices.length} yazı kutusu var. Hangi alana yazılacağı soruluyor.`)
-        const body = node.prompt?.trim() || ''
+        const body = node.prompt?.trim() || binding?.instruction || ''
         const pick = await chooseTypeField({
           apiKey: s.apiKey,
           model,
           step: body ? `${NODE_SPECS[node.kind].label}: ${body}` : NODE_SPECS[node.kind].label,
-          instruction: node.prompt?.trim() || '',
+          instruction: body,
           text,
           ahead: describeAhead(ahead),
           choices: typed.choices,
@@ -838,10 +944,31 @@ export function createAgent(ctx: AgentContext) {
         if (!chosen.token) throw new Error('Yazı alanının kalıcı seçim anahtarı yok; yazı gönderilmedi.')
         log('info', `Yazı kutusu #${chosen.id}: “${chosen.window}” / ${chosen.type}${chosen.name ? ` / ${chosen.name}` : ''}. ${pick.reason}`)
         if (stopped()) throw new StoppedError()
-        typed = await bridge.typeText(text, false, clearField, at, chosen.token)
+        typed = await bridge.typeText(text, false, clearField, binding ? binding.at : at, chosen.token, guard)
+        checkStopped()
       }
       if (typed?.skippedClear) {
-        throw new Error(`Odak bir yazı alanı değil (${typed.focusType || 'bilinmiyor'})${typed.where ? ` — ${typed.where}` : ''}. Yazı gönderilmedi.`)
+        const d = typed.diagnostics
+        log('warn', 'Yazı gönderilmedi: ' + (typed.code || 'INPUT_FOCUS_UNRESOLVED')
+          + '; UIA=' + (d?.type || typed.focusType || '?') + ', native=' + (d?.native || '?')
+          + ', pencere=' + (d?.window || typed.where || '?') + ', HWND=' + (d?.hwnd || '?')
+          + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + (d?.caret ? 'var' : 'yok') + '.')
+        if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
+          recoveryCount++
+          ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')
+          const recovered = await recoverInput(binding, typed, recoveryTurns)
+          if (recovered) {
+            binding = recovered
+            visual = true
+            return write(clearField)
+          }
+        }
+        throw new Error('Odak bir yazı alanı değil (' + (typed.focusType || 'bilinmiyor')
+          + ')' + (typed.where ? ' — ' + typed.where : '') + '. Yazı gönderilmedi; alan kurtarılamadı.')
+      }
+      inputWasSent = inputWasSent || (!typed?.needChoice && (typed?.writeSent !== false || clearField))
+      if (binding && typed?.via === 'visual-caret' && typed.value == null) {
+        throw new Error('INPUT_READBACK_UNAVAILABLE: Görsel alanın değeri doğrulanamadı; Enter gönderilmedi.')
       }
       reportTyping(typed)
       return typed
@@ -852,6 +979,9 @@ export function createAgent(ctx: AgentContext) {
       let v = typed?.value !== undefined ? typed.value : await bridge.focusedValue()
       let state = v === null ? 'ok' : fieldState(v, text, clear)
       if (state === 'empty' || state === 'wrong') {
+        if (!clear) {
+          throw new Error(`Ekleme yazımı doğrulanamadı; mevcut alan silinmedi ve belirsiz yazı tekrar gönderilmedi. Alanda “${(v ?? '').slice(0, 60)}” var.`)
+        }
         log('warn', `Alanda “${(v ?? '').slice(0, 60)}” yazıyor, beklenen bu değil. Bir kez daha yazılıyor.`)
         typed = await write(true)
         v = typed?.value !== undefined ? typed.value : await bridge.focusedValue()
@@ -866,8 +996,12 @@ export function createAgent(ctx: AgentContext) {
     }
     if (enter) {
       await sleep(240)
-      await bridge.sendKeys('{ENTER}')
+      checkStopped()
+      if (binding) await bridge.assertInputTarget(binding.window, typed?.focusHwnd)
+      checkStopped()
+      await bridge.sendKeys('{ENTER}', undefined, binding?.window, typed?.focusHwnd)
     }
+    if (binding) { lastInput = binding; lastClickPoint = enter ? undefined : binding.at }
     return verified
   }
 
@@ -947,6 +1081,7 @@ export function createAgent(ctx: AgentContext) {
         image,
         next,
       })
+      checkStopped()
       const item = a.id !== null ? items.find((x) => x.id === a.id) : undefined
       log(
         'info',
@@ -979,16 +1114,19 @@ export function createAgent(ctx: AgentContext) {
           history.push(`${a.seconds} sn beklendi`)
         } else if (a.action === 'key') {
           if (!a.keys) throw new Error('tuş boş')
+          checkStopped()
+          lastInput = undefined; lastClickPoint = undefined
           await bridge.sendKeys(a.keys)
           history.push(`tuş ${a.keys}`)
           trace.push(`tuş ${a.keys}`)
         } else if (a.action === 'type') {
           if (item) {
-            await bridge.clickAt(center(item).x, center(item).y, 'left')
+            checkStopped()
+            await clickInput(center(item), item.text, node)
             await sleep(FOCUS_MS)
-            await typeVerified(a.text, a.enter, true)
+            await typeVerified(a.text, a.enter, true, lastClickPoint, node)
           } else {
-            await typeVerified(a.text, a.enter, false)
+            await typeVerified(a.text, a.enter, false, lastClickPoint, node)
           }
           const line = `yaz “${a.text}”${item ? ` → “${item.text}”` : ''}${a.enter ? ' + Enter' : ''}`
           history.push(line)
@@ -999,7 +1137,8 @@ export function createAgent(ctx: AgentContext) {
             continue
           }
           const mode = a.action === 'double' ? 'double' : a.action === 'right' ? 'right' : 'left'
-          await bridge.clickAt(center(item).x, center(item).y, mode)
+          checkStopped()
+          await clickInput(center(item), item.text, node, mode)
           const line = `${mode === 'double' ? 'çift tıkla' : mode === 'right' ? 'sağ tıkla' : 'tıkla'} “${item.text}”`
           history.push(line)
           trace.push(line)
@@ -1062,33 +1201,44 @@ export function createAgent(ctx: AgentContext) {
     }
   }
 
-  async function doGui(a: Doable, area: Shot['area']) {
+  async function doGui(a: Doable, area: Shot['area'], node?: AgentNode) {
+    checkStopped()
     const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
     switch (a.kind) {
       case 'click':
       case 'double':
       case 'right': {
+        guiReplace = false
         const p = at(a.x, a.y)
-        await bridge.clickAt(p.x, p.y, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left')
+        await clickInput(p, node?.prompt || 'The input clicked in the current GUI task', node, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left')
         return
       }
       case 'drag': {
+        guiReplace = false
+        lastInput = undefined; lastClickPoint = undefined
         const p = at(a.x, a.y)
         const q = at(a.x2, a.y2)
         await bridge.drag(p.x, p.y, q.x, q.y)
         return
       }
       case 'hotkey':
-        if (a.keys?.length) await bridge.hotkey(a.keys)
+        if (a.keys?.length) {
+          guiReplace = a.keys.join('+') === 'ctrl+a'
+          if (a.keys.join('+') !== 'ctrl+a') { lastInput = undefined; lastClickPoint = undefined }
+          await bridge.hotkey(a.keys)
+        }
         return
       case 'type': {
         const raw = a.text ?? ''
         const enter = /\n$/.test(raw)
         const body = raw.replace(/\n+$/, '')
-        await bridge.typeText(body, enter, false)
+        try { await typeVerified(body, enter, guiReplace, lastClickPoint, node) }
+        finally { guiReplace = false }
         return
       }
       case 'scroll': {
+        guiReplace = false
+        lastInput = undefined; lastClickPoint = undefined
         const p = at(a.x, a.y)
         await bridge.scroll(p.x, p.y, a.direction ?? 'down', 5)
         return
@@ -1101,6 +1251,7 @@ export function createAgent(ctx: AgentContext) {
 
   /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
   async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string }> {
+    checkStopped()
     const s = getSettings()
     const model = modelChain(s.visionModel, s.visionBackups)
     if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok' }
@@ -1115,6 +1266,7 @@ export function createAgent(ctx: AgentContext) {
       })
       return { ok: r.answer, reason: r.reason }
     } catch (e) {
+      if (e instanceof StoppedError) throw e
       log('warn', `Bitti kontrolü yapılamadı, modelin sözüne güveniliyor: ${(e as Error).message}`)
       return { ok: true, reason: '' }
     }
@@ -1216,6 +1368,7 @@ export function createAgent(ctx: AgentContext) {
     let still = 0
     let quietWaits = 0
     let rejected = 0
+    let previousClick: (Point & { kind: string }) | undefined
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
       ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
@@ -1228,12 +1381,18 @@ export function createAgent(ctx: AgentContext) {
         log('warn', 'Ekran 6 eylemdir değişmiyor. İnisiyatif burada duruyor.')
         return false
       }
-      if (still === 3 && history.length) {
-        history[history.length - 1].note = 'Ekran son 3 eylemde hiç değişmedi. Aynı şeyi tekrar etme, başka bir yol dene (kısayol, başka menü, kaydırma).'
-        log('info', 'Ekran 3 eylemdir değişmedi; modele başka yol denemesi söylendi.')
+      let unresolvedClick: (Point & { kind: string }) | undefined
+      if (unchanged && previousClick && history.length) {
+        const state = await bridge.inputState()
+        checkStopped()
+        if (!focusAt(state, previousClick)) {
+          unresolvedClick = previousClick
+          history[history.length - 1].note = clickFeedback(goal, previousClick, shot.area, state)
+          log('info', 'Son tıklama görünür ilerleme üretmedi; koordinat ve odak bilgisiyle hedef yeniden değerlendiriliyor.')
+        }
       }
 
-      const a = await guiStep({
+      let a = await guiStep({
         apiKey: s.apiKey,
         model,
         goal,
@@ -1242,6 +1401,21 @@ export function createAgent(ctx: AgentContext) {
         tarsPrompt: promptOf(s.llmPrompts, 'tars'),
         jsonPrompt: promptOf(s.llmPrompts, 'screen'),
       })
+      checkStopped()
+      if (unresolvedClick && repeatedClick(a, shot.area, unresolvedClick)) {
+        log('warn', 'Model aynı sonuçsuz tıklama noktasını tekrar seçti; ikinci tıklama gönderilmedi.')
+        history.push({ thought: a.thought, raw: a.raw, note: 'Bu tekrar yürütülmedi. ' + clickFeedback(goal, unresolvedClick, shot.area, null) })
+        a = await guiStep({
+          apiKey: s.apiKey, model, goal, history, screen: shot.img,
+          tarsPrompt: promptOf(s.llmPrompts, 'tars'), jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+        })
+        checkStopped()
+        if (repeatedClick(a, shot.area, unresolvedClick)) {
+          log('warn', 'Model hedefi yeniden bulamadı; aynı noktaya körlemesine tıklanmadan İnisiyatif duruyor.')
+          return false
+        }
+      }
+      checkStopped()
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
       if (a.kind === 'finished') {
@@ -1271,7 +1445,7 @@ export function createAgent(ctx: AgentContext) {
             thought: a.thought,
             raw: a.raw,
             image: shot.img,
-            note: 'The screen did not change while you waited. The last click did not take effect. Do not wait again. Try another way, or use a different control.',
+            note: 'No visible change was observed during repeated waits. This alone does not prove the click failed. Check the goal and current screen; if loading is actually visible, wait briefly. Otherwise re-locate the target. Do not open unrelated menus or close the application merely to change the screen.',
           })
           prev = shot
           if (quietWaits >= 4) {
@@ -1290,7 +1464,9 @@ export function createAgent(ctx: AgentContext) {
           const py = shot.area.y + a.y * shot.area.h
           patch = (await bridge.patchAt(px, py, 64))?.data
         }
-        await doGui(a, shot.area)
+        await doGui(a, shot.area, node)
+        previousClick = ['click', 'double', 'right'].includes(a.kind) && a.x !== undefined && a.y !== undefined
+          ? { x: shot.area.x + a.x * shot.area.w, y: shot.area.y + a.y * shot.area.h, kind: a.kind } : undefined
         path.push({
           patch,
           action: a.kind as PathStep['action'],
@@ -1327,11 +1503,13 @@ export function createAgent(ctx: AgentContext) {
     setLoop: (text) => ctx.setLoop?.(text),
     click: async (node, stepNo, ahead) => {
       await waitUnlocked()
+      if (ahead?.next?.kind === 'type') await activateInputWindow(node)
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
       const confirmed = await ensureActed(node, ahead, async () => {
-        await bridge.clickAt(t.x, t.y, mode)
-        lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
+        checkStopped()
+        if (mode === 'left' && ahead?.next?.kind === 'type') await clickInput(t, node.prompt || t.label, node)
+        else { lastInput = undefined; await bridge.clickAt(t.x, t.y, mode); lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined }
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
         log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       })
@@ -1345,18 +1523,20 @@ export function createAgent(ctx: AgentContext) {
       const clear = node.clearFirst !== false
       let t: Resolved | null = null
       if (node.prompt?.trim() || node.locator) {
+        await activateInputWindow(node)
         t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       } else {
         await guardFocus(node)
       }
       let valueVerified = false
       const write = async () => {
+        checkStopped()
         if (t) {
-          await bridge.clickAt(t.x, t.y, 'left')
+          await clickInput(t, node.prompt || t.label, node)
           await sleep(FOCUS_MS)
           log('info', `Alan seçildi: ${t.label}`)
         }
-        valueVerified = await typeVerified(text, enter, clear, t ? { x: t.x, y: t.y } : lastClickPoint, node, ahead)
+        valueVerified = await typeVerified(text, enter, clear, lastClickPoint, node, ahead)
         if (enter) lastClickPoint = undefined
       }
       // A value readback is the postcondition for typing, not another label on
@@ -1371,7 +1551,10 @@ export function createAgent(ctx: AgentContext) {
       if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
       if (!getSettings().targetWindow) await guardFocus(node)
       lastClickPoint = undefined
+      lastInput = undefined
+      guiReplace = false
       await ensureActed(node, ahead, async () => {
+        checkStopped()
         await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       })
       await noteForeground()
@@ -1382,7 +1565,7 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      if (node.locator) {
+      if (node.locator && locatorFitsText(node, text)) {
         const how = await savedTargetVisible(node)
         if (how) return found(how)
       }

@@ -603,6 +603,8 @@ function acceptedText(line: OnnxLine): string | null {
   if (!text) return null
   const cjk = CJK.test(text)
   const latin = /[A-Za-z]/.test(text)
+  const numeric = /^(?:[+-]?\d+(?:[.,]\d+)?\s*%?|\d+\s*\/\s*\d+)$/.test(text)
+  if (numeric) return line.conf >= 0.95 ? text : null
   if (!cjk && !latin) return null
   if (!cjk && (line.conf < 0.85 || text.length < 2)) return null
   if (cjk && line.conf < 0.5) return null

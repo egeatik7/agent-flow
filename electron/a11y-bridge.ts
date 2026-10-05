@@ -4,6 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import type { ClickMode, Locator } from './graph-types'
 import type { ScanResult, ScreenItem } from './matcher'
+import type { InputGuard, InputWindow, InputState, Point } from './input-policy'
 import { mergeOnnxLines, onnxError, readRawShot, recognizeBgra, recognizeSideways, warmOnnx, type OcrEngine } from './ocr-onnx'
 
 const IS_WIN = process.platform === 'win32'
@@ -28,14 +29,13 @@ function friendly(msg: string): string {
   return msg
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; proc: ChildProcessWithoutNullStreams }
 
 class Worker {
   private proc: ChildProcessWithoutNullStreams | null = null
   private ready: Promise<void> | null = null
   private pending = new Map<string, Pending>()
   private seq = 0
-  private buf = ''
   /** Settles when the request before this one has been answered. */
   private tail: Promise<void> = Promise.resolve()
 
@@ -57,7 +57,9 @@ class Worker {
     if (!fs.existsSync(script)) return Promise.reject(new Error(`Otomasyon script’i bulunamadı: ${script}`))
     const proc = spawn('powershell.exe', psArgs(script), { windowsHide: true })
     this.proc = proc
-    this.buf = ''
+    // A dying worker may still emit data after its replacement has started.
+    // Each process owns its partial response buffer and pending requests.
+    let buf = ''
     proc.stdout.setEncoding('utf8')
     proc.stderr.setEncoding('utf8')
     // Writing to a worker that just died raises EPIPE on stdin; the exit handler below already fails the pending requests.
@@ -79,7 +81,7 @@ class Worker {
         if (tab < 0) return
         const id = line.slice(0, tab)
         const p = this.pending.get(id)
-        if (!p) return
+        if (!p || p.proc !== proc) return
         this.pending.delete(id)
         clearTimeout(p.timer)
         try {
@@ -95,9 +97,9 @@ class Worker {
         }
       }
       proc.stdout.on('data', (d: string) => {
-        this.buf += d
-        const lines = this.buf.split(/\r?\n/)
-        this.buf = lines.pop() ?? ''
+        buf += d
+        const lines = buf.split(/\r?\n/)
+        buf = lines.pop() ?? ''
         for (const l of lines) if (l.trim()) onLine(l.trim())
       })
       let errText = ''
@@ -116,11 +118,12 @@ class Worker {
           this.ready = null
         }
         const err = new Error(`Otomasyon işçisi kapandı. ${errText.trim().split(/\r?\n/).slice(-3).join(' ')}`.trim())
-        for (const p of this.pending.values()) {
+        for (const [id, p] of this.pending) {
+          if (p.proc !== proc) continue
+          this.pending.delete(id)
           clearTimeout(p.timer)
           p.reject(err)
         }
-        this.pending.clear()
         reject(err)
       })
     })
@@ -157,7 +160,7 @@ class Worker {
         // Only the worker this request was sent to; a newer one that started since is left alone.
         this.drop(proc)
       }, timeoutMs)
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, proc })
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
     })
   }
@@ -348,7 +351,9 @@ export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<Sc
     const originX = res.area?.x ?? 0
     const originY = res.area?.y ?? 0
     const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, originX, originY)
-    const merged = mergeOnnxLines(res.items, lines, 'onnx')
+    // This is a fallback reader: keep unrelated, valid Windows OCR lines.
+    // Explicit ONNX-only scans still use their selected engine above.
+    const merged = mergeOnnxLines(res.items, lines, 'windows')
     const items = merged.items.slice()
     let sideCount = 0
     const side = await recognizeSideways(raw.bgra, raw.w, raw.h, originX, originY, items)
@@ -373,19 +378,19 @@ export function discardShot(shot?: string) {
   if (shot) fs.unlink(shot, () => {})
 }
 
-export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800): Promise<{
+export async function crop(rect: { x: number; y: number; w: number; h: number }, maxW = 800, fit = false, snap = 0): Promise<{
   area: { x: number; y: number; w: number; h: number }
   image: { data: string; w: number; h: number; mime?: string }
 }> {
   if (!IS_WIN) return { area: rect, image: { data: PLACEHOLDER_PNG, w: 1, h: 1, mime: 'image/png' } }
-  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', withHud({ ...rect, maxW }))
+  const got = await worker.call<{ area: { x: number; y: number; w: number; h: number }; image: { path?: string; data?: string; w: number; h: number; mime?: string } }>('crop', withHud({ ...rect, maxW, fit, snap }))
   if (got.image?.path && fs.existsSync(got.image.path)) got.image = readPreview(got.image.path, got.image.w, got.image.h, got.image.mime) ?? got.image
   return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
 
-export async function clickAt(x: number, y: number, button: ClickMode = 'left'): Promise<void> {
+export async function clickAt(x: number, y: number, button: ClickMode = 'left', target?: InputWindow): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button })
+  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target })
 }
 
 export async function locate(
@@ -425,6 +430,10 @@ export type TypeFieldChoice = {
 export type TypeResult = {
   cleared: boolean
   skippedClear: boolean
+  focusHwnd?: string
+  writeSent?: boolean
+  code?: string
+  diagnostics?: InputState
   pasted: boolean
   focusType: string
   rescued?: boolean
@@ -441,7 +450,8 @@ export async function typeText(
   pressEnter: boolean,
   clearFirst: boolean,
   at?: { x: number; y: number },
-  fieldToken?: string
+  fieldToken?: string,
+  guard?: InputGuard
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
@@ -453,12 +463,23 @@ export async function typeText(
     y: at ? Math.round(at.y) : 0,
     ownPid: process.pid,
     fieldToken: fieldToken ?? '',
+    guard,
   })
 }
 
-export async function inputState(): Promise<{ type: string; writable: boolean; name: string; window: string } | null> {
+export async function inputState(): Promise<InputState | null> {
   if (!IS_WIN) return null
   return worker.call('inputState', {}, 10000)
+}
+
+export async function inputTarget(opts: { target?: InputWindow; windowTitle?: string; at?: Point; followOwnedDialog?: boolean } = {}): Promise<InputWindow | null> {
+  if (!IS_WIN) return null
+  return worker.call('inputTarget', { ...opts, ownPid: process.pid }, 10000)
+}
+
+export async function assertInputTarget(target: InputWindow, focusHwnd?: string): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('assertInputTarget', { target, focusHwnd }, 10000)
 }
 
 /** Lock screen or secure desktop is up: nothing can be seen or clicked. */
@@ -490,9 +511,9 @@ export async function patchAt(x: number, y: number, size = 64): Promise<{ data: 
   }
 }
 
-export async function sendKeys(keys: string, windowTitle?: string): Promise<void> {
+export async function sendKeys(keys: string, windowTitle?: string, target?: InputWindow, focusHwnd?: string): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('keys', { keys, windowTitle: windowTitle || '' })
+  await worker.call('keys', { keys, windowTitle: windowTitle || '', target, focusHwnd })
 }
 
 /** The element under a scanner box, with a picture of the box. */
@@ -527,7 +548,7 @@ export async function hotkey(keys: string[]): Promise<void> {
   await worker.call('hotkey', { keys })
 }
 
-export async function foreground(): Promise<{ title: string; pid: number; proc?: string } | null> {
+export async function foreground(): Promise<{ title: string; pid: number; proc?: string; hwnd?: string } | null> {
   if (!IS_WIN) return null
   try {
     return await worker.call('foreground', {}, 10000)

@@ -16,6 +16,8 @@ const bridge = {
     calls.push(['typeText', ...args])
     return writeResults.shift() ?? { focusType: 'Edit', cleared: true, value: readValue }
   },
+  inputTarget: async () => ({ hwnd: '100', pid: 10, title: 'Test app', rect: { x: 0, y: 0, w: 1920, h: 1080 } }),
+  assertInputTarget: async () => {},
   focusedValue: async () => readValue,
   sendKeys: async keys => calls.push(['key', keys]),
   foreground: async () => ({ title: 'Test app', pid: 10, hwnd: '100' }),

@@ -46,6 +46,7 @@ public static class XpInput {
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] static extern short VkKeyScanW(char ch);
 
   public static void Wheel(int x, int y, int clicks, bool horizontal) {
     SetCursorPos(x, y);
@@ -72,7 +73,7 @@ public static class XpInput {
   }
 
   static readonly Dictionary<string, int> Named = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) {
-    {"ctrl",0x11},{"control",0x11},{"shift",0x10},{"alt",0x12},{"win",0x5B},{"meta",0x5B},{"cmd",0x5B},{"super",0x5B},
+    {"ctrl",0x11},{"control",0x11},{"shift",0x10},{"alt",0x12},{"win",0x5B},{"lwin",0x5B},{"rwin",0x5C},{"meta",0x5B},{"cmd",0x5B},{"super",0x5B},
     {"enter",0x0D},{"return",0x0D},{"esc",0x1B},{"escape",0x1B},{"tab",0x09},{"space",0x20},{"backspace",0x08},
     {"delete",0x2E},{"del",0x2E},{"insert",0x2D},{"home",0x24},{"end",0x23},{"pageup",0x21},{"pagedown",0x22},
     {"left",0x25},{"up",0x26},{"right",0x27},{"down",0x28},{"arrowleft",0x25},{"arrowup",0x26},{"arrowright",0x27},{"arrowdown",0x28},
@@ -80,7 +81,7 @@ public static class XpInput {
     {"capslock",0x14},{"printscreen",0x2C},{"numpad0",0x60},{"numpad1",0x61},{"numpad2",0x62},{"numpad3",0x63},{"numpad4",0x64},
     {"numpad5",0x65},{"numpad6",0x66},{"numpad7",0x67},{"numpad8",0x68},{"numpad9",0x69}
   };
-  static readonly HashSet<int> Extended = new HashSet<int> { 0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B };
+  static readonly HashSet<int> Extended = new HashSet<int> { 0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B,0x5C };
 
   static int Vk(string name) {
     int v;
@@ -96,20 +97,78 @@ public static class XpInput {
     return -1;
   }
 
-  /// Presses a combination like ["ctrl","shift","a"]: modifiers down, key tap, modifiers up.
+  // Do not sleep during cleanup: a second interrupted sleep must not skip the remaining keys.
+  // Attempt every release even if one native call throws, then report that error.
+  static void ReleaseKeys(List<int> down) {
+    Exception first = null;
+    for (int i = down.Count - 1; i >= 0; i--) {
+      int key = down[i];
+      try { keybd_event((byte)key, 0, (Extended.Contains(key) ? 1u : 0u) | 2u, UIntPtr.Zero); }
+      catch (Exception e) { if (first == null) first = e; }
+    }
+    if (first != null) throw new InvalidOperationException("KEY_RELEASE_FAILED", first);
+  }
+
+  /// Validate the whole shortcut first. Every pressed key is released, including on an exception.
   public static string Combo(string[] names) {
+    if (names == null || names.Length == 0) return "EMPTY";
     var codes = new List<int>();
     foreach (var raw in names) {
+      if (raw == null) return "UNKNOWN_KEY: null";
       var n = raw.Trim();
       if (n.Length == 0) continue;
       int v = Vk(n);
       if (v < 0) return "UNKNOWN_KEY: " + n;
-      codes.Add(v);
+      if (!codes.Contains(v)) codes.Add(v);
     }
     if (codes.Count == 0) return "EMPTY";
-    foreach (var c in codes) { keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero); Thread.Sleep(25); }
-    for (int i = codes.Count - 1; i >= 0; i--) { keybd_event((byte)codes[i], 0, (Extended.Contains(codes[i]) ? 1u : 0u) | 2u, UIntPtr.Zero); Thread.Sleep(20); }
+    var down = new List<int>();
+    try {
+      foreach (var c in codes) {
+        down.Add(c);
+        keybd_event((byte)c, 0, Extended.Contains(c) ? 1u : 0u, UIntPtr.Zero);
+        Thread.Sleep(25);
+      }
+    } finally { ReleaseKeys(down); }
     return "";
+  }
+
+  /// One shortcut. Modifiers go down, vk is tapped the given number of times, then modifiers come back up.
+  /// vk 0 presses only the modifiers. They are released even when a tap throws.
+  public static void Chord(int[] mods, int vk, int times) {
+    var down = new List<int>();
+    try {
+      if (mods != null) {
+        foreach (var m in mods) {
+          if (m == 0 || down.Contains(m)) continue;
+          down.Add(m);
+          keybd_event((byte)m, 0, Extended.Contains(m) ? 1u : 0u, UIntPtr.Zero);
+          Thread.Sleep(25);
+        }
+      }
+      if (vk != 0) {
+        if (times < 1) times = 1;
+        uint ext = Extended.Contains(vk) ? 1u : 0u;
+        for (int n = 0; n < times; n++) {
+          try {
+            keybd_event((byte)vk, 0, ext, UIntPtr.Zero);
+            Thread.Sleep(20);
+          } finally {
+            keybd_event((byte)vk, 0, ext | 2u, UIntPtr.Zero);
+          }
+          if (n + 1 < times) Thread.Sleep(20);
+        }
+      }
+    } finally {
+      ReleaseKeys(down);
+    }
+  }
+
+  /// Low byte is the virtual key, high byte is the shift state (1 shift, 2 ctrl, 4 alt). -1 if this layout cannot type it.
+  public static int ScanChar(char ch) {
+    short scan = VkKeyScanW(ch);
+    if (scan == -1) return -1;
+    return scan & 0xFFFF;
   }
 }
 "@
@@ -327,7 +386,9 @@ function Get-TopWindows([int]$ownPid = 0) {
     } catch {}
     $c = $script:Walker.GetNextSibling($c)
   }
-  return , $list
+  # Callers consume individual windows, including through Where-Object. A unary
+  # comma would send one ArrayList and make multi-window native-handle checks fail.
+  return $list
 }
 
 function Test-UsableWindow($w) {
@@ -428,6 +489,14 @@ function Resolve-RelPath($top, [string]$path) {
   return $el
 }
 
+function Test-LocatorIdentity($e, $loc) {
+  if ($null -eq $e) { return $false }
+  if ($loc.name -and $e.Current.Name -ne [string]$loc.name) { return $false }
+  if ($loc.automationId -and $e.Current.AutomationId -ne [string]$loc.automationId) { return $false }
+  if ($loc.controlType -and (Get-CT $e) -ne [string]$loc.controlType) { return $false }
+  return $true
+}
+
 function Find-ByLocator($top, $loc) {
   $name = [string]$loc.name
   $aid = [string]$loc.automationId
@@ -436,21 +505,18 @@ function Find-ByLocator($top, $loc) {
 
   if ($path) {
     $e = Resolve-RelPath $top $path
-    if ($null -ne $e -and (-not $name -or $e.Current.Name -eq $name)) { return $e }
+    if (Test-LocatorIdentity $e $loc) { return $e }
   }
   if ($aid) {
     $cond = New-Object System.Windows.Automation.PropertyCondition($script:AE::AutomationIdProperty, $aid)
     $all = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
-    foreach ($e in $all) { if (-not $name -or $e.Current.Name -eq $name) { return $e } }
-    if ($all.Count -gt 0) { return $all.Item(0) }
+    foreach ($e in $all) { if (Test-LocatorIdentity $e $loc) { return $e } }
   }
   if ($name) {
     $cond = New-Object System.Windows.Automation.PropertyCondition($script:AE::NameProperty, $name)
     $all = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
-    foreach ($e in $all) { if (-not $ct -or (Get-CT $e) -eq $ct) { return $e } }
-    if ($all.Count -gt 0) { return $all.Item(0) }
+    foreach ($e in $all) { if (Test-LocatorIdentity $e $loc) { return $e } }
   }
-  if ($path) { return (Resolve-RelPath $top $path) }
   return $null
 }
 
