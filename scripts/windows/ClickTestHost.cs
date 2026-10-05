@@ -8,6 +8,10 @@ using System.Runtime.InteropServices;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+// Add-Type does not emit the target-framework assembly metadata that a normal
+// WinForms project supplies. Declare it explicitly alongside the app.config.
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
+
 public sealed class ClickTestHost : Form {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
