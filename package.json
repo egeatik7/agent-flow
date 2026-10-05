@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.7.85",
+  "version": "1.8.0",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/boot.js",
   "author": "Nubbo Agent Studio",
@@ -24,7 +24,7 @@
     "build:electron": "npm run build:renderer && npm run build:main",
     "test": "vitest run",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
-    "pack:win": "py scripts/make-splash-bmp.py && npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
+    "pack:win": "npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
     "pack:dir": "npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
   },
   "build": {
@@ -77,8 +77,7 @@
       "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "Nubbo.exe",
-      "splashImage": "resources/boot/splash.bmp"
+      "artifactName": "Nubbo.exe"
     },
     "asar": true,
     "afterPack": "scripts/after-pack.cjs"
