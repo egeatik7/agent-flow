@@ -386,7 +386,9 @@ function Get-TopWindows([int]$ownPid = 0) {
     } catch {}
     $c = $script:Walker.GetNextSibling($c)
   }
-  return , $list
+  # Callers consume individual windows, including through Where-Object. A unary
+  # comma would send one ArrayList and make multi-window native-handle checks fail.
+  return $list
 }
 
 function Test-UsableWindow($w) {
