@@ -480,12 +480,6 @@ export async function recognizeBgra(bgra: Uint8Array, w: number, h: number, orig
   return lines
 }
 
-export async function recognizeShot(file: string, originX: number, originY: number): Promise<OnnxLine[]> {
-  const buf = fs.readFileSync(file)
-  const shot = readRawShot(buf)
-  return recognizeBgra(shot.bgra, shot.w, shot.h, originX, originY)
-}
-
 /** Turn a packed BGRA frame 90° counter-clockwise. New size is h × w. */
 export function rotateBgraCcw(bgra: Uint8Array, w: number, h: number): { bgra: Uint8Array; w: number; h: number } {
   const nw = h

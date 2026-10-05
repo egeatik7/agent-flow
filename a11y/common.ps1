@@ -563,10 +563,3 @@ function Get-CursorPoint {
   [void][XpNative]::GetCursorPos([ref]$p)
   return $p
 }
-
-function Get-CursorElement {
-  $p = New-Object XpNative+POINT
-  [void][XpNative]::GetCursorPos([ref]$p)
-  $pt = New-Object System.Windows.Point($p.X, $p.Y)
-  return $script:AE::FromPoint($pt)
-}

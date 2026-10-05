@@ -79,8 +79,6 @@ export type AgentNode = {
   pressEnter?: boolean
   clearFirst?: boolean
   clickMode?: ClickMode
-  /** Execute this node by showing a screenshot to the vision model instead of text matching. */
-  useVision?: boolean
   /** Loop: one value per lap, exposed as {{öğe}} while the members run. */
   items?: string[]
   /** Loop: item on screen during a run. Cleared when the loop finishes. */
