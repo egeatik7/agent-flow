@@ -28,6 +28,10 @@ public static class FinishOracle {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a,uint b,bool attach);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h,uint message,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id,HookProc cb,IntPtr module,uint thread);
   [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr h);
@@ -51,6 +55,13 @@ public static class FinishOracle {
       } return true;
     },IntPtr.Zero); return rows.ToArray();
   }
+  public static void FocusFixture(IntPtr h) {
+    Application.DoEvents(); uint pid; uint front=GetWindowThreadProcessId(GetForegroundWindow(),out pid);
+    uint current=GetCurrentThreadId(); bool joined=front!=0 && front!=current && AttachThreadInput(current,front,true);
+    try { ShowWindow(h,9); SetForegroundWindow(h); }
+    finally { if(joined) AttachThreadInput(current,front,false); }
+  }
+  public static void CloseWindow(long h) { PostMessage(new IntPtr(h),0x10,IntPtr.Zero,IntPtr.Zero); }
   public static void Start() {
     thread = new Thread(delegate() {
       threadId=GetCurrentThreadId(); callback=delegate(int code,IntPtr msg,IntPtr data) {
@@ -94,7 +105,8 @@ function Capture([string]$name) {
 function Read-Worker([int]$seconds) {
   $task = $worker.StandardOutput.ReadLineAsync()
   if (-not $task.Wait($seconds*1000)) { throw 'Worker response timeout' }
-  $line = $task.Result; if ($null -eq $line) { throw 'Worker exited before responding' }; return $line
+  $line = $task.Result; if ($null -eq $line) { throw 'Worker exited before responding' }
+  return $line.TrimStart([char]0xFEFF)
 }
 function Keys([string]$value) {
   $requestId=[guid]::NewGuid().ToString('N')
@@ -118,7 +130,10 @@ function Keys([string]$value) {
 function Host-State { try { return Get-Content (Join-Path $out 'host/state.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null } }
 function Focus-Host {
   $state=Host-State
-  if($state) { [void][FinishOracle]::ShowWindow([IntPtr][long]$state.hwnd,9) }
+  $hostProcess.Refresh()
+  if($hostProcess.HasExited) { throw 'Test fixture exited during shell preparation' }
+  if(-not $state -or $state.pid -ne $hostProcess.Id) { throw 'Fixture window identity changed' }
+  [FinishOracle]::FocusFixture([IntPtr][long]$state.hwnd)
   $script:commandSeq++
   @{seq=$commandSeq;kind='focus-main'} | ConvertTo-Json -Compress | Set-Content (Join-Path $out 'host/command.json') -Encoding UTF8
   [void](Await-Value { $s=Host-State; if($s -and $s.commandSeq -eq $commandSeq -and $s.foreground -eq $s.hwnd) { $s } } 'fixture focus')
@@ -133,11 +148,13 @@ try {
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows/build-host.ps1') -Output (Join-Path $out 'Host.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Fixture compilation failed' }
     $hostProcess=Start-Process (Join-Path $out 'Host.exe') -ArgumentList ('"'+(Join-Path $out 'host')+'"') -PassThru
-    $s=Await-Value { Host-State } 'visible fixture'
+    $s=Await-Value { Host-State } 'visible fixture' 30
     if (-not $s.interactive) { throw 'No interactive input desktop' }
     $start=New-Object Diagnostics.ProcessStartInfo
     $start.FileName='powershell.exe'; $start.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+(Join-Path $root 'a11y/worker.ps1')+'"'
     $start.UseShellExecute=$false; $start.RedirectStandardInput=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true; $start.CreateNoWindow=$true
+    $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
+    $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
     $worker=New-Object Diagnostics.Process; $worker.StartInfo=$start; [void]$worker.Start()
     $stderr=$worker.StandardError.ReadToEndAsync()
     if ((Read-Worker 60) -ne 'READY') { throw 'Worker did not signal readiness' }
@@ -149,7 +166,8 @@ try {
     )) {
       Record ('native chord '+$case.text) {
         try {
-        Focus-Host; [FinishOracle]::Clear(); Keys $case.text; Start-Sleep -Milliseconds 300
+        Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd})
+        [FinishOracle]::Clear(); Keys $case.text; Start-Sleep -Milliseconds 300
         $events=@([FinishOracle]::Keys() | Where-Object injected)
         $events | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out ('events-'+($case.text -replace '[^a-zA-Z0-9]','-')+'.json')) -Encoding UTF8
         $down=@($events | Where-Object {-not $_.up} | ForEach-Object { if($_.vk -in @(160,161)) {16} else {[int]$_.vk} })
@@ -160,14 +178,18 @@ try {
         Assert-Released; Capture ('chord-'+($case.text -replace '[^a-zA-Z0-9]','-'))
         return @{events=$events;modifiersReleased=$true}
         } finally {
-          try { if($case.text -eq 'win+d') {Keys 'win+d'} elseif($case.text -eq 'win+e') {Keys 'alt+f4'} else {Keys 'esc'} } catch {}
+          if($case.text -eq 'win+d') { Keys 'win+d' }
+          elseif($case.text -eq 'win+e') {
+            $opened=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -eq 'CabinetWClass' -and $_.hwnd -notin $before} } 'test-created Explorer window'
+            foreach($w in $opened) { [FinishOracle]::CloseWindow($w.hwnd) }
+          } else { Keys 'esc' }
         }
       }
     }
     Record 'win+r opens Run dialog' {
       Focus-Host; Keys 'win+r'
       $w=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -eq '#32770' -and $_.title -eq 'Run'} } 'Run dialog'
-      Capture 'run-dialog'; Keys 'esc'; return $w
+      Capture 'run-dialog'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+d shows desktop and restores fixture' {
       Focus-Host; Keys 'win+d'; [void](Await-Value { (Host-State).minimized } 'fixture minimized')
@@ -176,7 +198,7 @@ try {
     Record 'win+e opens File Explorer window' {
       Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd}); Keys 'win+e'
       $w=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -eq 'CabinetWClass' -and $_.hwnd -notin $before} } 'new Explorer window'
-      Capture 'file-explorer'; Keys 'alt+f4'; return $w
+      Capture 'file-explorer'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+tab opens Task View' {
       Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd}); Keys 'win+tab'
