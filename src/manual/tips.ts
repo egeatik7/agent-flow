@@ -109,11 +109,11 @@ const PORT: Record<string, Tip> = {
   },
   geldi: {
     title: 'Geldi',
-    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O adım artık atlanır ve akış buradan devam eder.',
+    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O node türü artık desteklenmiyor: çalıştırılınca hata verir, akış orada durur. Node’u silip akışa devam et.',
   },
   'zaman aşımı': {
     title: 'Zaman aşımı',
-    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O adım artık atlanır; bu çıkış kullanılmaz.',
+    text: 'Bu çıkış eski bir Dosyayı Bekle node’una ait. O node türü artık desteklenmiyor: çalıştırılınca hata verir. Node’u silip akışa devam et.',
   },
   tamam: {
     title: 'Tamam',
@@ -184,7 +184,7 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['İçe Aktar', { title: 'İçe Aktar', text: 'Bir JSON akışını açık tuvale yükler. Bu tuvalin eski akışının yerini alır. Diğer tuvaller durur.' }],
     ['Ekrandan Seç', { title: 'Ekrandan Seç', text: 'Ekranın görüntüsünü açar. Bir yazının veya öğenin üzerine tıklayınca o hedef bu node’a bağlanır.' }],
     ['Ekranı Tara', { title: 'Ekranı Tara', text: 'Ekranı yeniden okur. Penceredeki yazılar ve uygulama öğeleri kutularla işaretlenir.' }],
-    ['Günlük klasörü', { title: 'Günlük klasörü', text: 'Bu sürümün günlük klasörünü açar. Klasör, sürüm açılınca kendiliğinden oluşur: logs altında 1.7.38 gibi ayrı bir ad. Hata anının ekran görüntüsü de oraya yazılır.' }],
+    ['Günlük klasörü', { title: 'Günlük klasörü', text: 'Bu sürümün günlük klasörünü açar. Klasör, program açılınca sürüm numarasıyla kendi adında oluşur (logs altında). Hata anının ekran görüntüsü de oraya yazılır.' }],
     ['Bağlantıyı Sil (Del)', { title: 'Bağlantıyı Sil', text: 'Seçili oku kaldırır. İki node durur, sadece aralarındaki bağ gider. Del tuşu da aynısını yapar.' }],
     ['Node’u Sil (Del)', { title: 'Node’u Sil', text: 'Seçili node’u akıştan çıkarır. Del tuşu da aynısını yapar.' }],
     ['Kutuyu Sil (içindekiler kalır)', { title: 'Kutuyu Sil', text: 'Her Öğe İçin çerçevesini kaldırır. İçindeki node’lar tuvalde kalır, sadece kutu dağılır.' }],

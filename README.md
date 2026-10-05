@@ -29,7 +29,7 @@ Sırayla, ilk bulunan yerde durur:
 1. **Sayfanın kendisi.** Programın açtığı tarayıcı öndeyse, düğmeler, bağlantılar ve alanlar gerçek adlarıyla okunur.
 2. **Yakalanan öğe.** Node Ekran Tarayıcı ya da İmleçle Yakala ile oluşturulduysa önce uygulamanın kendi öğesi, sonra öğenin
    kayıtlı resminin ekrandaki aynısı aranır (modelsiz, hızlı).
-3. **Ekran.** Node’da tırnak içi yazı varsa önce Windows OCR, bulamazsa ONNX. İkisi de value ramp ve 90° turunu kullanır. Tırnak yoksa ya da ikisi de bulamazsa kelime listesi ve UI-TARS devreye girer.
+3. **Ekran.** Node’da tırnak içi yazı varsa önce Windows OCR, bulamazsa ONNX. İkisi de value ramp ve 90° turunu kullanır. Tırnak yoksa ya da ikisi de bulamazsa UI-TARS (görsel model) devreye girer; **kelime listesi** aşaması varsayılan olarak kapalıdır ve LLM panelinden açılır.
 
 Hedef bulunamazsa ajan 3 saniye bekleyip tüm ekranı yeniden okur. Yine yoksa durup modele plan sorar (bekle, şu yazıyı ara, dur) ve bir kez daha bakar.
 
@@ -99,8 +99,8 @@ Güvenceler:
 ## Uzun çalıştırmalarda güvenceler
 
 - **Sağ alt rapor.** Çalışırken ekranın sağ altında, diğer pencerelerin üstünde, o anki adım yazar. Tıklamalar içinden geçer. Node bir döngünün içindeyse kutunun altında, görev çubuğuna binmeden, kaçıncı öğe olduğu ve öğenin adı durur. Cevap veren model kendi kod adıyla konuşur (`deepseek-v4: …`). Bu pencere ekran görüntüsüne girmez, öğe listesine düşmez ve tıklamalar içinden geçer; Nubbo kendi raporunu okuyamaz.
-- **Durdurma her an çalışır.** Model istekleri 90 sn’de kesilir; Ctrl+Shift+Q bekleyen isteği de hemen iptal eder. Geçici hatalarda
-  (429, 5xx, bağlantı kopması) istek 3 sn sonra bir kez daha denenir.
+- **Durdurma her an çalışır.** Model istekleri 90 sn’de kesilir; Ctrl+Shift+Q bekleyen isteği de hemen iptal eder. Geçici hatada
+  (429, 5xx, bağlantı kopması) sıradaki model hemen denenir; bütün modeller susarsa 4 sn sonra ilk modelden baştan başlanır.
 - **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı
   döngüsü) orada kalır ve sıradaki öğeye geçilir.
 - **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar ve bekler. Hafızaya yalnızca
@@ -112,7 +112,7 @@ Güvenceler:
 - **Kayıtlı İnisiyatif yolu** her tıklamadan önce tıklanacak yerin görüntüsünü kayıttakiyle karşılaştırır; tutmazsa modele devreder.
 - **OCR seçimi:** Araç çubuğunun sağındaki seçim Ekran Tarayıcı’da hangi okuyucunun listeyi dolduracağını belirler. Node hedefinde Windows OCR ve ONNX yalnızca tırnak içindeki yazıda çalışır. Tırnak yoksa, ya da ikisi de bulamazsa, LLM panelinde açık olan model aşamasına geçilir. İki okuyucu da value ramp uygulanmış kareye bakar; yan yazı için o kare 90° çevrilir. UI-TARS rampasız, düz kareyi görür.
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
-- **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30). 1.7.38 ilk kez açılınca `logs/1.7.38` yoksa oluşur. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
+- **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30 çalıştırma). Klasör adı sürüm numarasıdır. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
 ## Node türleri
 
@@ -126,9 +126,11 @@ Güvenceler:
 | Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
+| Paket | İçine bir alt akış alır; çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır | sonra |
+| Kontrol | Akışa dokunmaz; döngü değişkenlerinin o anki değerini günlüğe yazar | sonra |
 | Bitir | Akışı sonlandırır | — |
 
-“olmadı” çıkışı ve bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı duruyorsa o adım atlanır.
+“olmadı” çıkışı ve bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı kalmışsa o adım **hata verir**; sessizce atlanmaz. Kutu dışındaysa akış o noktada durur, kutunun içindeyse o tur hatalı sayılır ve sıradaki öğeye geçilir. Node’u silip akışa devam et.
 
 ## Örnek: klasördeki her resimden 3D model
 
@@ -171,7 +173,7 @@ görsel mod anahtar ister.
 
 ## Exe
 
-Repoda hazır portable paket: **`Nubbo.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Chrome sayfasının yazısını okumak için Chrome’u `--remote-debugging-port=9222` ile aç.
+Portable paket `npm run pack:win` ile üretilir: **`release/Nubbo.exe`** (Windows 10/11 x64). Çift tıkla, kurulum yok. Exe repoda tutulmaz (`.gitignore` dışlar), bu yüzden yeni bir klonda hazır gelmez. Chrome sayfasının yazısını okumak için Chrome’u `--remote-debugging-port=9222` ile aç.
 
 ## Geliştirme
 
