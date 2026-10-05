@@ -161,7 +161,12 @@ try {
     $start.UseShellExecute=$false; $start.RedirectStandardInput=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true; $start.CreateNoWindow=$true
     $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
     $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
+    # .NET Framework constructs StandardInput at Start() using the parent's
+    # Console.InputEncoding and AutoFlush; an eager BOM is already sent by the
+    # time BaseStream is exposed. Configure the encoding before starting.
+    [Console]::InputEncoding=[Text.UTF8Encoding]::new($false)
     $worker=New-Object Diagnostics.Process; $worker.StartInfo=$start; [void]$worker.Start()
+    if($worker.StandardInput.Encoding.GetPreamble().Length -ne 0) { throw 'Test input writer is not BOM-free' }
     # Match Node stdin: UTF-8 bytes with no preamble. The default .NET writer
     # emits a BOM which Console.In on Windows PS 5.1 reads as request-ID text.
     $workerInput=[IO.StreamWriter]::new($worker.StandardInput.BaseStream,[Text.UTF8Encoding]::new($false))
@@ -211,9 +216,23 @@ try {
       Capture 'file-explorer'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+tab opens Task View' {
-      Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd}); Keys 'win+tab'
-      $w=Await-Value { [FinishOracle]::Windows() | Where-Object {($_.cls -match 'MultitaskingViewFrame|XamlExplorerHostIslandWindow' -or $_.title -eq 'Task View') -and $_.hwnd -notin $before} } 'new Task View window'
-      Capture 'task-view'; Keys 'esc'; return $w
+      Focus-Host; Keys 'win+tab'
+      try {
+        # Task View is rendered inside Explorer helper windows on these images;
+        # it has no top-level window named Task View. Verify its actual accessible
+        # New desktop action, owned by Explorer, rather than a guessed HWND class.
+        $name=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'New desktop')
+        $control=Await-Value {
+          $items=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,$name)
+          foreach($item in $items) {
+            $owner=Get-Process -Id $item.Current.ProcessId -ErrorAction SilentlyContinue
+            if($owner -and $owner.ProcessName -eq 'explorer' -and -not $item.Current.IsOffscreen) {
+              return @{name=$item.Current.Name;pid=$owner.Id;controlType=$item.Current.ControlType.ProgrammaticName;offscreen=$item.Current.IsOffscreen}
+            }
+          }
+        } 'visible Explorer Task View New desktop action'
+        Capture 'task-view'; return $control
+      } finally { Keys 'esc' }
     }
     Record 'win+shift+s opens screen clipping overlay' {
       if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) { throw 'NOT_COVERED: Appx/Snipping Tool capability is unavailable; native chord is tested separately.' }
