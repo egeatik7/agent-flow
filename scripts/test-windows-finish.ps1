@@ -28,9 +28,6 @@ public static class FinishOracle {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
-  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a,uint b,bool attach);
   [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h,uint message,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id,HookProc cb,IntPtr module,uint thread);
@@ -54,12 +51,6 @@ public static class FinishOracle {
         rows.Add(new WindowInfo {hwnd=h.ToInt64(),pid=pid,title=title.ToString(),cls=cls.ToString(),minimized=IsIconic(h)});
       } return true;
     },IntPtr.Zero); return rows.ToArray();
-  }
-  public static void FocusFixture(IntPtr h) {
-    Application.DoEvents(); uint pid; uint front=GetWindowThreadProcessId(GetForegroundWindow(),out pid);
-    uint current=GetCurrentThreadId(); bool joined=front!=0 && front!=current && AttachThreadInput(current,front,true);
-    try { ShowWindow(h,9); SetForegroundWindow(h); }
-    finally { if(joined) AttachThreadInput(current,front,false); }
   }
   public static void CloseWindow(long h) { PostMessage(new IntPtr(h),0x10,IntPtr.Zero,IntPtr.Zero); }
   public static void Start() {
@@ -161,26 +152,10 @@ function Keys([string]$value) {
   if (-not $response.ok) { throw $response.error }
 }
 function Host-State { try { return Get-Content (Join-Path $out 'host/state.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null } }
-function Focus-Host {
-  $state=Host-State
-  $hostProcess.Refresh()
-  if($hostProcess.HasExited) { throw 'Test fixture exited during shell preparation' }
-  if(-not $state -or $state.pid -ne $hostProcess.Id) { throw 'Fixture window identity changed' }
-  [FinishOracle]::FocusFixture([IntPtr][long]$state.hwnd)
-  # Independent preparation only: restore keyboard focus to a real fixture Edit.
-  # This is not used to judge whether Nubbo selected the correct target.
-  $element=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$state.hwnd)
-  $editable=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Edit)
-  $field=$element.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$editable)
-  if($field) { $field.SetFocus() }
-  $script:commandSeq++
-  @{seq=$commandSeq;kind='focus-main'} | ConvertTo-Json -Compress | Set-Content (Join-Path $out 'host/command.json') -Encoding UTF8
-  [void](Await-Value { $s=Host-State; if($s -and $s.commandSeq -eq $commandSeq -and $s.foreground -eq $s.hwnd) { $s } } 'fixture focus')
-}
 function Assert-Released {
   foreach ($key in @(0x10,0x11,0x12,0x5B,0x5C)) { if (([FinishOracle]::GetAsyncKeyState($key) -band 0x8000) -ne 0) { throw "Modifier still pressed: $key" } }
 }
-$commandSeq=0; $fatal=$null
+$fatal=$null
 try {
   if ($env:OS -ne 'Windows_NT') { throw 'Windows desktop required' }
   if ($Mode -eq 'Keys') {
@@ -237,21 +212,23 @@ try {
       }
     }
     Record 'win+r opens Run dialog' {
-      Focus-Host; Keys 'win+r'
+      Keys 'win+r'
       $w=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -eq '#32770' -and $_.title -eq 'Run'} } 'Run dialog'
       Capture 'run-dialog'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+d shows desktop and restores fixture' {
-      Focus-Host; Keys 'win+d'; [void](Await-Value { (Host-State).minimized } 'fixture minimized')
+      $state=Host-State; [void][FinishOracle]::ShowWindow([IntPtr][long]$state.hwnd,9)
+      [void](Await-Value { $s=Host-State; $s -and -not $s.minimized } 'visible fixture before Win+D')
+      Keys 'win+d'; [void](Await-Value { (Host-State).minimized } 'fixture minimized')
       Capture 'desktop'; Keys 'win+d'; [void](Await-Value { $s=Host-State; $s -and -not $s.minimized } 'fixture restored'); return 'Fixture minimized then restored'
     }
     Record 'win+e opens File Explorer window' {
-      Focus-Host; $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd}); Keys 'win+e'
+      $before=@([FinishOracle]::Windows() | ForEach-Object {$_.hwnd}); Keys 'win+e'
       $w=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -eq 'CabinetWClass' -and $_.hwnd -notin $before} } 'new Explorer window'
       Capture 'file-explorer'; foreach($window in $w) { [FinishOracle]::CloseWindow($window.hwnd) }; return $w
     }
     Record 'win+tab opens Task View' {
-      Focus-Host; Capture 'task-view-before'
+      Capture 'task-view-before'
       $before=Read-CapturedText 'task-view-before'
       if($before -match '\bnew\s+desktop\b') { throw 'Task View was already visible before the shortcut' }
       Keys 'win+tab'
@@ -268,7 +245,7 @@ try {
       if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) { throw 'NOT_COVERED: Appx/Snipping Tool capability is unavailable; native chord is tested separately.' }
       $tool=Get-AppxPackage -Name '*ScreenSketch*' -ErrorAction SilentlyContinue
       if (-not $tool) { throw 'NOT_COVERED: ScreenSketch/Snipping Tool package is absent on this Windows Server runner; native chord is tested separately.' }
-      Focus-Host; Keys 'win+shift+s'
+      Keys 'win+shift+s'
       $w=Await-Value { [FinishOracle]::Windows() | Where-Object {$_.cls -match 'ScreenClipping' -or $_.title -match 'Snipping|Screen snip'} } 'screen clipping overlay'
       Capture 'screen-clipping'; Keys 'esc'; return $w
     }
