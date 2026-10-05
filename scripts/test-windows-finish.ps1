@@ -78,7 +78,8 @@ function Await-Value([scriptblock]$check, [string]$label, [int]$seconds = 12) {
 function Record([string]$name,[scriptblock]$body) {
   try { $detail = & $body; $results.Add(@{name=$name;status='passed';detail=$detail}) }
   catch { $status='failed'; if ($_.Exception.Message.StartsWith('NOT_COVERED:')) { $status='not-covered' }
-    $results.Add(@{name=$name;status=$status;message=$_.Exception.Message}) }
+    $results.Add(@{name=$name;status=$status;message=$_.Exception.Message})
+    try { Capture ('failure-'+($name -replace '[^a-zA-Z0-9]','-')) } catch {} }
   Write-Output ($results[$results.Count-1] | ConvertTo-Json -Compress -Depth 8)
 }
 function Capture([string]$name) {
@@ -138,6 +139,7 @@ try {
       Record ('native chord '+$case.text) {
         Focus-Host; [FinishOracle]::Clear(); Keys $case.text; Start-Sleep -Milliseconds 300
         $events=@([FinishOracle]::Keys() | Where-Object injected)
+        $events | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out ('events-'+($case.text -replace '[^a-zA-Z0-9]','-')+'.json')) -Encoding UTF8
         $down=@($events | Where-Object {-not $_.up} | ForEach-Object { if($_.vk -in @(160,161)) {16} else {[int]$_.vk} })
         $up=@($events | Where-Object up | ForEach-Object { if($_.vk -in @(160,161)) {16} else {[int]$_.vk} })
         if (($down -join ',') -ne ($case.down -join ',')) { throw ('Wrong native key-down order: '+($down -join ',')) }
@@ -168,6 +170,7 @@ try {
       Capture 'task-view'; Keys 'esc'; return $w
     }
     Record 'win+shift+s opens screen clipping overlay' {
+      if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) { throw 'NOT_COVERED: Appx/Snipping Tool capability is unavailable; native chord is tested separately.' }
       $tool=Get-AppxPackage -Name '*ScreenSketch*' -ErrorAction SilentlyContinue
       if (-not $tool) { throw 'NOT_COVERED: ScreenSketch/Snipping Tool package is absent on this Windows Server runner; native chord is tested separately.' }
       Focus-Host; Keys 'win+shift+s'
@@ -178,6 +181,8 @@ try {
     $exe=[IO.Path]::GetFullPath((Join-Path $root $Executable))
     if (-not (Test-Path $exe)) { throw "Portable EXE missing: $exe" }
     $reportHash=(Get-FileHash $exe -Algorithm SHA256).Hash
+    # Keep the PS 5.1 source ASCII; it can load UTF-8 without BOM as ANSI.
+    $runCaption='Ajan'+([char]0x0131)+' '+([char]0x00C7)+'al'+([char]0x0131)+([char]0x015F)+'t'+([char]0x0131)+'r'
     $pack=Start-Process $exe -PassThru
     Record 'portable EXE loads the real studio renderer' {
       $window=Await-Value {
@@ -189,7 +194,7 @@ try {
           $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button)
           $buttons=$element.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
           $names=@($buttons | ForEach-Object {$_.Current.Name})
-          if (@($names | Where-Object {$_ -match 'Ajanı Çalıştır'}).Count -gt 0 -and @($names | Where-Object {$_ -match 'Node Ekle'}).Count -gt 0) {
+          if (@($names | Where-Object {$_.Contains($runCaption)}).Count -gt 0 -and @($names | Where-Object {$_ -match 'Node Ekle'}).Count -gt 0) {
             return @{window=$w;buttons=$names;processPath=$p.Path}
           }
         }
