@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Output)
 $ErrorActionPreference = 'Stop'
-$source = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ClickTestHost.cs') -Raw
+$source = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ClickTestHost.cs') -Raw -Encoding UTF8
 $directory = Split-Path -Parent $Output
 [void][IO.Directory]::CreateDirectory($directory)
 if (Test-Path -LiteralPath $Output) { Remove-Item -LiteralPath $Output -Force }
