@@ -17,8 +17,19 @@ class EnvironmentBlocked extends Error {}
 const summary = { status: 'running', scope: 'Real Windows input; live models only if explicitly enabled', results, platform: process.platform };
 
 function state() {
-  try { return JSON.parse(fs.readFileSync(path.join(fixtureDir, 'state.json'), 'utf8')); }
-  catch (e) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return null; throw e; }
+  // File.Replace can briefly lock the destination on Windows. Always read a
+  // fresh snapshot; never return a cached state that could falsely pass a case.
+  for (let attempt = 0; ; attempt++) {
+    try { return JSON.parse(fs.readFileSync(path.join(fixtureDir, 'state.json'), 'utf8')); }
+    catch (e) {
+      if (e.code === 'EBUSY' && attempt < 5) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        continue;
+      }
+      if (e.code === 'ENOENT' || e instanceof SyntaxError) return null;
+      throw e;
+    }
+  }
 }
 async function until(check, label, timeout = 6000) {
   const end = Date.now() + timeout;
