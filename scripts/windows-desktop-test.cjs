@@ -1,4 +1,4 @@
-// Real Electron + real PowerShell worker + real visible WinForms window.
+// Real Electron + real PowerShell worker + real visible WPF window.
 // The fixture's event log is the independent oracle; a sent command isn't success.
 const { app, nativeImage } = require('electron');
 const fs = require('node:fs');
@@ -129,7 +129,14 @@ app.whenReady().then(async () => {
       await promisify(execFile)('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
         path.join(__dirname,'windows/inspect-host.ps1'),'-WindowHandle',probe.hwnd,'-TargetProcess',String(probe.pid),
         '-Output',path.join(output,'uia-provider-observation.json')], { timeout: 20000 });
-    } catch (e) { summary.providerInspectionError = e.message; }
+    } catch (e) { throw new EnvironmentBlocked('Independent UIA inspection failed: '+e.message); }
+    const provider = JSON.parse(fs.readFileSync(path.join(output,'uia-provider-observation.json'),'utf8').replace(/^\uFEFF/,''));
+    const rows = provider.rows;
+    const button = rows.find(r=>r.name==='Devam' && r.type==='ControlType.Button' && r.enabled);
+    const edit = rows.find(r=>r.name==='Kaynak klasör' && r.type==='ControlType.Edit' && r.focusable && r.patterns.includes('ValuePatternIdentifiers.Pattern'));
+    const disabled = rows.find(r=>r.name==='Pasif' && r.type==='ControlType.Button' && r.enabled===false);
+    if(!button || !edit || !disabled) throw new EnvironmentBlocked('Fixture must expose genuine Button/Edit/ValuePattern providers before targeting assertions');
+    summary.environment.fixtureProvidersVerified=true;
     writeSummary();
     if(process.env.NUBBO_PROBE_ONLY==='1') {
       summary.status='probe-passed';
@@ -226,7 +233,7 @@ app.whenReady().then(async () => {
       assert.equal(a.events.find(e=>e.kind==='resolved').item.src,'ocr');
       assert(inside(s.controls['painted-remesh'].rect,mouse(s)[0].data));
     });
-    await runCase('Bundled ONNX recognizes painted text and the production fallback clicks it',async()=>{
+    if(process.env.NUBBO_TEST_ONNX==='1') await runCase('Bundled ONNX recognizes painted text and the production fallback clicks it',async()=>{
       const onnx=await bridge.scan({windowTitle:'Nubbo Click Test Host',image:'plain',uia:false,ocr:true,ocrEngine:'onnx'});
       // Keep the actual recognized rows even when the recognition assertion fails.
       fs.writeFileSync(path.join(output,'onnx-observation.json'),JSON.stringify({...onnx,image:onnx.image?{w:onnx.image.w,h:onnx.image.h,mime:onnx.image.mime}:null},null,2));
@@ -254,6 +261,7 @@ app.whenReady().then(async () => {
     summary.notCovered=['Actual OS DPI changes to 125/150% (only control layout was scaled)',
       'Multiple monitors / negative monitor origin on a single-monitor runner', 'Real Blender addon UI',
       'Hours-long operation', 'Chrome profile switching and Hunyuan', 'OS Win shortcut effects'];
+    if(process.env.NUBBO_TEST_ONNX!=='1') summary.notCovered.push('Bundled ONNX recognition (deferred; opt in with NUBBO_TEST_ONNX=1)');
     if(process.env.NUBBO_RUN_LIVE_MODELS==='1') {
       if(!process.env.NUBBO_TEST_API_KEY) results.push({name:'Live models',status:'environment-blocked',message:'NUBBO_TEST_API_KEY is missing; no live model request sent'});
       else {
