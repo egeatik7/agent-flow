@@ -123,6 +123,13 @@ app.whenReady().then(async () => {
     assert.deepEqual(clicks(probe).map(e=>e.id),['continue']);
     summary.environment = { electron: process.versions.electron, windows: process.getSystemVersion?.(),
       dpi: probe.dpi, monitors: probe.monitors, hwnd: probe.hwnd, pid: probe.pid, appPath: app.getAppPath(), nativeInputProbePassed: true };
+    // Independent provider evidence separates fixture accessibility problems
+    // from production locator/focus bugs. Inspection never sends UI input.
+    try {
+      await promisify(execFile)('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
+        path.join(__dirname,'windows/inspect-host.ps1'),'-WindowHandle',probe.hwnd,'-TargetProcess',String(probe.pid),
+        '-Output',path.join(output,'uia-provider-observation.json')], { timeout: 20000 });
+    } catch (e) { summary.providerInspectionError = e.message; }
     writeSummary();
     if(process.env.NUBBO_PROBE_ONLY==='1') {
       summary.status='probe-passed';
