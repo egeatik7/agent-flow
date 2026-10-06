@@ -124,11 +124,17 @@ if (mode === 'ui') {
   bad.id = 'pilot-bad-click'
   bad.title = 'Pilot · bulunmayan yazıya tıkla'
   bad.prompt = 'YOK-BU-YAZI-ASLA-YOK'
-  const innerEnd = createNode('end', 1520, 0)
+  // İkinci kasıtlı hata: birincisi onarıldıktan SONRA ortaya çıkar. Böylece ikinci onarımın
+  // birinciyi kaybetmediği ölçülebilir.
+  const bad2 = createNode('click', 1520, 0, 1)
+  bad2.id = 'pilot-bad-click2'
+  bad2.title = 'Pilot · ikinci bulunmayan yazıya tıkla'
+  bad2.prompt = 'YOK-BU-YAZI-2-DE-YOK'
+  const innerEnd = createNode('end', 1740, 0)
   innerEnd.id = 'pilot-inner-end'
-  box.members = [key.id, wait1.id, write.id, wait2.id, bad.id]
+  box.members = [key.id, wait1.id, write.id, wait2.id, bad.id, bad2.id]
   pkg.inner = {
-    nodes: [innerStart, box, key, wait1, write, wait2, bad, innerEnd],
+    nodes: [innerStart, box, key, wait1, write, wait2, bad, bad2, innerEnd],
     edges: [
       { id: 'pilot-e1', from: innerStart.id, fromPort: 'next', to: box.id },
       { id: 'pilot-e2', from: box.id, fromPort: 'next', to: key.id },
@@ -136,7 +142,8 @@ if (mode === 'ui') {
       { id: 'pilot-e4', from: wait1.id, fromPort: 'next', to: write.id },
       { id: 'pilot-e5', from: write.id, fromPort: 'next', to: wait2.id },
       { id: 'pilot-e6', from: wait2.id, fromPort: 'next', to: bad.id },
-      { id: 'pilot-e7', from: bad.id, fromPort: 'next', to: innerEnd.id },
+      { id: 'pilot-e7', from: bad.id, fromPort: 'next', to: bad2.id },
+      { id: 'pilot-e8', from: bad2.id, fromPort: 'next', to: innerEnd.id },
     ],
   }
   const end = createNode('end', 620, 0)
