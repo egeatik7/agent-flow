@@ -69,6 +69,9 @@ if (mode === 'ui') {
   const write = createNode('type', 560, 0, 1)
   write.id = 'ui-write'
   write.title = 'UI · alana yaz ve Enter'
+  // The same labelled field the click above is aiming at: a person clicks a field and types into
+  // it, and the two nodes should agree about where that field is.
+  write.prompt = 'Kaynak klasör'
   write.text = 'nubbo-ui-test'
   write.pressEnter = true
   write.clearFirst = true
