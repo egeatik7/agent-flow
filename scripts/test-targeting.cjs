@@ -96,9 +96,9 @@ test('recorded picture was searched and not found: the recorded position is not 
   ]});
   await assert.rejects(replayTrace(b),/bulunamadı/);
 });
-test('no recorded picture to check: the recorded position stays the last hint',async()=>{
+test('no recorded picture either: the recorded position is still not clicked',async()=>{
   const b=bundle(['offset'],[],{node:{locator:{windowTitle:'Fixture',offsetX:10,offsetY:20}},events:[
     {kind:'observation',source:'offset',value:{x:100,y:100,w:800,h:600}},
   ]});
-  const r=await replayTrace(b); assert.deepEqual({x:r.result.x,y:r.result.y},{x:110,y:120}); assert.equal(r.inputCalls,0);
+  await assert.rejects(replayTrace(b),/bulunamadı/);
 });

@@ -483,24 +483,20 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if (stage === 'offset' && loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
-          // The icon stage above already searched the screen for the recorded picture. If the
-          // locator has a picture and it was not found, the window-relative point is no longer
-          // evidence of anything: clicking it would be the "click somewhere and hope" the
-          // product forbids. A locator without a picture leaves the spot as the last hint.
-          if (loc.icon) {
-            log('warn', 'Kayıtlı konuma tıklanmadı: kayıtlı resim ekranda bulunamadı, tıklamayı destekleyen kanıt yok.')
-            continue
-          }
-          ctx.setMethod?.('Kayıtlı konum')
+          // A recorded point is never evidence on its own. When the locator carries a picture,
+          // the icon stage above already searched for it and did not find it; when it carries
+          // none, there is nothing to check at all. Either way, clicking the old point would be
+          // the "click somewhere and hope" the product forbids, so the step stops with a reason
+          // instead. Every target captured on screen stores a picture, so a locator without one
+          // is a legacy or hand-made entry.
           try {
             const r = await bridge.windowRect(win)
             trace(node, { kind: 'observation', source: 'offset', value: r })
-            if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('offset')
-            log('warn', 'Kayıt resmi yok, kayıttaki konuma tıklanıyor.')
-            return resolved({ x: r.x + loc.offsetX, y: r.y + loc.offsetY, label: 'kayıtlı konum' }, 'offset')
           } catch {
             /* window gone */
           }
+          log('warn', `Kayıtlı konuma tıklanmadı: ${loc.icon ? 'kayıtlı resim ekranda bulunamadı' : 'kayıtlı resim yok'} — tıklamayı destekleyen ekran kanıtı yok.`)
+          continue
         }
       }
     } catch (e) {

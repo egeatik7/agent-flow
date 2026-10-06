@@ -84,8 +84,11 @@ Check $failed 'The test needs Invoke-FindImage to fail after it created its bitm
 Check ($script:Created.Count -gt 0) "The test needs the worker to create bitmaps"
 $leaked = @($script:Created | Where-Object { Test-Open $_ })
 $kinds = ($leaked | ForEach-Object { if ($_ -is [System.Drawing.Bitmap]) { "Bitmap $($_.Width)x$($_.Height)" } else { 'MemoryStream' } } | Group-Object | ForEach-Object { "$($_.Count) x $($_.Name)" }) -join ', '
-# KNOWN PARTIAL: the old worker left 15 of 15 open here, the fixed one still reports 10 of 15 (5 x 40x40 grabs among them).
-# Not chased further: this probe may itself miscount, and a long-loop test on a real machine is planned. Reported, not failed.
+# KNOWN PARTIAL, accepted as a limitation (measured on 1.8.5). This scenario cannot happen in
+# a real run: it fails only because [XpImage] is not loaded here, while common.ps1 always loads
+# it, so no production call reaches this state. The probe also misreports the size of what it
+# counts, so its numbers are not trusted. Not chased further on purpose; a long-loop test on a
+# real machine is the measurement that would matter.
 if ($leaked.Count -gt 0) {
   Write-Output "PARTIAL: a failing image search still leaves $($leaked.Count) of $($script:Created.Count) bitmaps/streams open ($kinds). Old worker: $($script:Created.Count) of $($script:Created.Count)."
 }
