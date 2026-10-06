@@ -55,26 +55,36 @@ let seq = 0
 /** The last steps in order, the engine's log lines and what a broken debug run looked like. */
 let steps: { id: string; status: string; at: number }[] = []
 let lines: { level: string; text: string; at: number }[] = []
-let lastShot = ''
 let debugRun = false
 let stopOnError: (() => void) | null = null
 let frozen: FrozenReport | null = null
+/** Reports of earlier runs, newest first: a new run must not erase what the last one found. */
+let archive: FrozenReport[] = []
+const ARCHIVE_MAX = 3
 const STEP_RING = 60
 const LOG_RING = 200
 
 export type StepLine = { id: string; status: string; at: number }
 
 export type FrozenReport = {
+  /** Which run this belongs to, and which failure inside it: two runs must never be mixed up. */
+  runId: string
+  failureId: string
+  /** A failed step, or a failure of the run itself that produced no step event. */
+  kind: 'step' | 'run'
   at: number
   nodeId: string
   nodeTitle: string
+  /** The engine's own message. Empty until it arrives, which the pending flag says. */
   error: string
+  errorPending: boolean
   loops: { title: string; index?: number; total?: number; item?: string }[]
   packagePath: string[]
   steps: StepLine[]
   log: { level: string; text: string }[]
-  /** The error screenshot the engine saved, if its log line named one. */
+  /** The error screenshot, handed over by whoever writes it: a path, verbatim, or empty. */
   shot: string
+  shotPending: boolean
 }
 
 function newRunId(): string {
@@ -92,7 +102,13 @@ export function beginRun(graph: AgentGraph, startId?: string): string {
   errors = 0
   lastError = undefined
   steps = []
-  frozen = null
+  // A new run starts clean: its own steps and its own log. The previous report is kept aside by
+  // its run id instead of being overwritten, and the screenshot of the old failure goes with it.
+  if (frozen) {
+    archive = [frozen, ...archive].slice(0, ARCHIVE_MAX)
+    frozen = null
+  }
+  lines = []
   return id
 }
 
@@ -154,22 +170,68 @@ export function noteStep(payload: unknown): void {
   if (steps.length > STEP_RING) steps.splice(0, steps.length - STEP_RING)
   // A debug run keeps the moment it broke: the loop item, the package path and the error are all
   // still true only right now. Within a step of this, the flow moves on to the next file.
-  if (debugRun && status === 'error' && !frozen) {
-    const snap = snapshot()
-    frozen = {
-      at: Date.now(),
-      nodeId: p.id,
-      nodeTitle: snap.nodeTitle ?? '',
-      error: snap.lastError ?? '',
-      loops: snap.loops,
-      packagePath: snap.packagePath,
-      steps: [...steps].slice(-20),
-      log: [...lines].slice(-40),
-      shot: lastShot,
-    }
-    // Stop the run at the next step boundary, so nothing after the failure happens by itself.
-    stopOnError?.()
+  if (debugRun && status === 'error') openFailure(p.id, 'step')
+}
+
+/**
+ * Opens the record of the failure a debug run is stopped for.
+ *
+ * It is opened at the step event, because that is the only moment the loop item and the package
+ * path are still true, but the engine's real message and its screenshot arrive a moment later -
+ * through the log and through the screenshot writer. So the record starts incomplete and is
+ * completed by whichever of those comes, as long as it belongs to the same run and the same
+ * failure. A user's Stop is not a failure and never opens one.
+ */
+function openFailure(nodeId: string, kind: 'step' | 'run', message?: string): void {
+  if (frozen || !run) return
+  const snap = snapshot()
+  frozen = {
+    runId: run.id,
+    failureId: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    kind,
+    at: Date.now(),
+    nodeId: nodeId || snap.nodeId || '',
+    nodeTitle: snap.nodeTitle ?? '',
+    error: message ?? '',
+    errorPending: !message,
+    loops: snap.loops,
+    packagePath: snap.packagePath,
+    steps: [...steps].slice(-20),
+    log: [...lines].slice(-40),
+    shot: '',
+    shotPending: true,
   }
+  // Either way this is a failure, and a debug run stops at the next boundary for it: the message
+  // may still be on its way, which is exactly why the record starts incomplete.
+  stopOnError?.()
+}
+
+/** The engine's own message for the failure that is open: the real one, not the previous one. */
+export function completeFailure(message: string): void {
+  if (!frozen || !frozen.errorPending) return
+  frozen.error = message
+  frozen.errorPending = false
+}
+
+/** A runner-level failure that never produced a step event (a broken output, a thrown error). */
+export function noteRunFailed(message: string): void {
+  if (!debugRun) return
+  if (frozen) {
+    completeFailure(message)
+    return
+  }
+  openFailure(current ?? '', 'run', message)
+}
+
+/**
+ * The error screenshot, handed over by the code that writes it: a path, verbatim, whether it is
+ * png or jpg, with spaces or not. An empty path means the picture could not be taken at all, and
+ * that is what the report will say instead of guessing from a log line.
+ */
+export function noteFailureShot(file: string): void {
+  if (!frozen) return
+  frozen.shot = String(file || '')
+  frozen.shotPending = false
 }
 
 export function noteError(message: string): void {
@@ -190,8 +252,6 @@ export function isDebugRun(): boolean {
 export function noteLogLine(level: string, text: string): void {
   lines.push({ level, text, at: Date.now() })
   if (lines.length > LOG_RING) lines.splice(0, lines.length - LOG_RING)
-  const shot = /([A-Za-z]:\\[^\s"']+\.png)/.exec(text)
-  if (shot) lastShot = shot[1]
 }
 
 /** Called when a debug run breaks: the app stops the run at the next boundary. */
@@ -199,9 +259,16 @@ export function setErrorStopHook(fn: (() => void) | null): void {
   stopOnError = fn
 }
 
-/** The frozen context of the moment a debug run broke, if it did. */
-export function frozenReport(): FrozenReport | null {
-  return frozen
+/** The frozen context of the moment a debug run broke: the current one, or an earlier one by run. */
+export function frozenReport(runId?: string): FrozenReport | null {
+  if (!runId) return frozen
+  if (frozen?.runId === runId) return frozen
+  return archive.find((r) => r.runId === runId) ?? null
+}
+
+/** The reports of earlier runs, newest first: a new run must not overwrite what the last one found. */
+export function recentReports(): FrozenReport[] {
+  return [...(frozen ? [frozen] : []), ...archive]
 }
 
 export function snapshot(): RunSnapshot {

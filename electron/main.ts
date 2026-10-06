@@ -9,7 +9,19 @@ import { isTestProfile, storeCwd } from './profile'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
-import { beginRun, endRun, noteError, noteLogLine, noteStep, probing, setDebugRun, setErrorStopHook } from './tool-state'
+import {
+  beginRun,
+  completeFailure,
+  endRun,
+  noteError,
+  noteFailureShot,
+  noteLogLine,
+  noteRunFailed,
+  noteStep,
+  probing,
+  setDebugRun,
+  setErrorStopHook,
+} from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
@@ -155,7 +167,11 @@ function sweepStaleTempShots() {
 let voiceHoldUntil = 0
 
 function log(level: LogLevel, message: string, forceHud = false) {
-  if (level === 'error') noteError(message)
+  if (level === 'error') {
+    noteError(message)
+    // The real message of a failure usually arrives after the step event that opened the record.
+    completeFailure(message)
+  }
   // Kept in memory too: a report of a broken run can quote the engine's own lines without the
   // caller having to find and read a log file.
   noteLogLine(level, message)
@@ -187,6 +203,8 @@ const agent = createAgent({
   shouldStop: () => stopRequested,
   setLoop: (text) => pushLoop(text),
   setMethod: (text) => pushMethod(text),
+  // The screenshot writer hands its path over as data; nothing has to be read out of a log line.
+  noteFailureShot: (file: string) => noteFailureShot(file),
 })
 
 // A debug run stops itself at the first failed step: the stop is checked between steps, so the
@@ -488,6 +506,9 @@ async function runFlow(
       outcome = { ok: false, stopped: true }
       return { ...outcome, runId }
     }
+    // A failure of the run itself, with no failed step to hang it on: a broken output, a thrown
+    // error. A debug run keeps it too, and a user's Stop never reaches this branch.
+    noteRunFailed((e as Error).message)
     log('error', (e as Error).message)
     outcome = { ok: false, error: (e as Error).message }
     throw e

@@ -49,6 +49,12 @@ export type AgentContext = {
   shouldStop: () => boolean
   setLoop?: (text: string) => void
   setMethod?: (text: string) => void
+  /**
+   * Hands the error screenshot's path to the tool layer as data, when one was written. An empty
+   * string means the picture could not be taken, which the report says plainly instead of looking
+   * for a path in a log line.
+   */
+  noteFailureShot?: (file: string) => void
   /** Opt-in developer evidence; never changes success/failure or the node schema. */
   onTargetTrace?: (event: TargetTrace) => void
   captureTargetImages?: boolean
@@ -1676,7 +1682,11 @@ export function createAgent(ctx: AgentContext) {
       if (!failDir) return
       fs.mkdirSync(failDir, { recursive: true })
       const res = await bridge.scan({ image: 'plain', uia: false, ocr: false, fresh: true, maxImageW: 1600 }).catch(() => null)
-      if (!res?.image?.data) return
+      if (!res?.image?.data) {
+        // No picture at all: say so, rather than leaving a report that looks like it is still coming.
+        ctx.noteFailureShot?.('')
+        return
+      }
       const safe = label.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 60)
       const file = path.join(failDir, `hata-${new Date().toISOString().replace(/[:.]/g, '-')}-${safe}.jpg`)
       fs.writeFileSync(file, Buffer.from(res.image.data, 'base64'))
@@ -1689,6 +1699,7 @@ export function createAgent(ctx: AgentContext) {
         /* a screenshot folder that cannot be pruned is not worth failing the lap for */
       }
       log('info', `Hata anının ekran görüntüsü kaydedildi: ${file}`)
+      ctx.noteFailureShot?.(file)
     },
     initiative: (node, stepNo, ahead, vars) =>
       node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),

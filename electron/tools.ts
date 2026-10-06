@@ -26,6 +26,7 @@ import {
   MAX_BRANCHES,
   MAX_GROUPS,
   addGroup,
+  baseTabOf,
   branchOps,
   branchesOf,
   derivePath,
@@ -42,7 +43,7 @@ import {
   type BranchRecord,
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
-import { beginProbe, endProbe, frozenReport, isDebugRun, probing, snapshot } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, probing, recentReports, snapshot } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -556,6 +557,11 @@ const flowUndo: ToolDef = {
     if (!branch) return failed(flowUndo.name, `Branch bulunamadı: ${id || '(boş)'}.`)
     const group = undoLast(branch)
     if (!group) return failed(flowUndo.name, `“${branch.name}” branch’inde geri alınacak düzenleme yok.`)
+    // The shape is recomputed after an undo: a stored path that belonged to the group just removed
+    // must not survive it, or a later merge would delete a stretch this recipe no longer describes.
+    const shaped = derivePath((baseTabOf(book, branch)?.graph ?? { nodes: [], edges: [] }) as AgentGraph, branch)
+    if (shaped) branch.path = shaped
+    else delete branch.path
     ctx.saveCanvases(book)
     const after = viewBranch(book, branch)
     const message = `“${branch.name}” branch’inde son düzenleme geri alındı (${group.id}, ${group.ops.length} işlem). Kalan: ${after.diff?.summary ?? 'değişiklik yok'} (${branch.groups.length} düzenleme).`
@@ -620,11 +626,12 @@ const branchMerge: ToolDef = {
     }
 
     if (!wanted) {
-      const preview = path && view.base ? pruneBypassed(derived, view.base.graph, path) : { removed: [], keptBack: [] }
+      const preview = path && view.base ? pruneBypassed(derived, view.base.graph, path) : { removed: [], keptBack: [], ambiguous: undefined }
       const shape = path ? ` · alternatif yol: ${path.entry.nodeId} → ${path.exit.nodeId}` : ''
       const would = preview.removed.length ? ` · yerini aldığı ${preview.removed.length} node silinecek (${preview.removed.join(', ')})` : ''
       const kept = preview.keptBack.length ? ` · ${preview.keptBack.length} node erişilemez kalacak ama silinmeyecek (paket/kutu)` : ''
-      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${shape}${would}${kept}${tail} Uygulamak için apply: true.`
+      const unclear = preview.ambiguous ? ` · eski kol belirsiz (${preview.ambiguous}): silme yapılmayacak` : ''
+      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${shape}${would}${kept}${unclear}${tail} Uygulamak için apply: true.`
       ctx.log('info', `Ajan · merge · ${message}`)
       return {
         ok: true,
@@ -653,6 +660,7 @@ const branchMerge: ToolDef = {
     const pruned = path && view.base ? pruneBypassed(derived, view.base.graph, path) : { graph: derived, removed: [], keptBack: [] }
     if (pruned.removed.length) notes.push(`alternatifin yerini aldığı ${pruned.removed.length} node silindi (${pruned.removed.join(', ')}).`)
     if (pruned.keptBack.length) notes.push(`${pruned.keptBack.length} node artık erişilemez ama silinmedi, paket/kutu içeriği taşıyor: ${pruned.keptBack.join(', ')}.`)
+    if (pruned.ambiguous) notes.push(`eski kol belirsiz olduğu için hiçbir şey silinmedi (${pruned.ambiguous}); alternatif yine de akışa yazıldı.`)
 
     const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: pruned.graph, branchId: branch.id, branchName: branch.name })
     if (!answer.ok) {
@@ -1211,19 +1219,21 @@ const runReport: ToolDef = {
   summary: 'Koşunun son hata anını bağlamıyla verir: node, paket yolu, kutu öğeleri, adım geçmişi, günlük ve hata görüntüsü.',
   sendsInput: false,
   ready: true,
-  run: async (_args, ctx) => {
-    const frozen = frozenReport()
+  run: async (args, ctx) => {
+    const asked = text(args.runId)
+    const frozen = frozenReport(asked || undefined)
     const s = snapshot()
     if (!frozen) {
+      const older = recentReports().filter((r) => r.runId !== s.runId)
       return {
         ok: true,
         tool: runReport.name,
         outcome: 'tamam',
-        message: `Donmuş hata yok${ctx.isRunning() ? ' (koşu sürüyor)' : ''}. Şu an: ${s.nodeTitle ?? '—'} · gözlenen ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`,
+        message: `Donmuş hata yok${ctx.isRunning() ? ' (koşu sürüyor)' : ''}${asked ? ` (runId ${asked} bulunamadı)` : ''}. Şu an: ${s.nodeTitle ?? '—'} · gözlenen ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.${older.length ? ` Saklanan ${older.length} eski rapor var: ${older.map((r) => r.runId).join(', ')}.` : ''}`,
         observed: {
-          note: 'Debug koşusu (run.from · debug: true) ilk hatalı adımda durur ve o anın bağlamını saklar; normal koşuda motor kendi hata politikasını uygular.',
+          note: 'Debug koşusu (run.from · debug: true) ilk hata anında durur ve o anın bağlamını saklar; normal koşuda motor kendi hata politikasını uygular. Kullanıcının Durdur eylemi hata sayılmaz.',
         },
-        data: { frozen: null, snapshot: s, debug: isDebugRun() },
+        data: { frozen: null, snapshot: s, debug: isDebugRun(), older: older.map((r) => ({ runId: r.runId, failureId: r.failureId, at: r.at, nodeTitle: r.nodeTitle })) },
       }
     }
     const loops = frozen.loops.length
@@ -1231,11 +1241,12 @@ const runReport: ToolDef = {
           .map((l) => `${l.title}${typeof l.index === 'number' ? ` ${l.index + 1}/${l.total ?? '?'}` : ''}${l.item ? ` (“${l.item}”)` : ''}`)
           .join(' · ')
       : 'kutu yok'
+    const shotText = frozen.shot ? ` · ekran görüntüsü: ${frozen.shot}` : frozen.shotPending ? ' · ekran görüntüsü: henüz yazılmadı' : ' · ekran görüntüsü alınamadı'
+    const errText = frozen.error || (frozen.errorPending ? '(motorun hata mesajı henüz gelmedi)' : '(mesaj yok)')
     const message =
-      `Hata anı: “${frozen.nodeTitle || frozen.nodeId}” · kutu: ${loops}` +
+      `Hata anı (${frozen.kind === 'run' ? 'koşu hatası' : 'adım hatası'} · ${frozen.failureId}, koşu ${frozen.runId}): “${frozen.nodeTitle || frozen.nodeId}” · kutu: ${loops}` +
       `${frozen.packagePath.length ? ` · paket: ${frozen.packagePath.join(' › ')}` : ''}` +
-      ` · ${frozen.steps.filter((x) => x.status === 'done').length} adım tamamlandı, hata: ${frozen.error || '—'}` +
-      `${frozen.shot ? ` · ekran görüntüsü: ${frozen.shot}` : ' · hata görüntüsü günlükte yok'}`
+      ` · ${frozen.steps.filter((x) => x.status === 'done').length} adım tamamlandı, hata: ${errText}${shotText}`
     ctx.log('warn', `Ajan · koşu raporu · ${message}`)
     return {
       ok: true,

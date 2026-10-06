@@ -536,6 +536,58 @@ describe('branch: kopya değil, tarif', () => {
     expect(noPath.message).toContain('bulunamadı')
   })
 
+  it('belirsiz/koşullu/çevrimli eski kolda otomatik silme yapmaz', async () => {
+    const h = harness()
+    const id = await h.openBranch('Belirsiz bölge')
+    const g = h.book.tabs[0].graph
+    // Temel akışı belirsiz hâle getir: Başlangıç → tıkla → koşul; koşulun İKİ çıkışı var.
+    const cond = createNode('condition', 700, 0, 1)
+    cond.id = 'ambiguous-cond'
+    cond.title = 'Belirsiz koşul'
+    const no = createNode('wait', 950, 160, 1)
+    no.id = 'ambiguous-no'
+    no.title = 'Öbür kol'
+    no.ms = 400
+    g.nodes.push(cond, no)
+    // tıkla → koşul (bekleme devreden çıkar), koşul.true → Bitir, koşul.false → bekleme
+    g.edges = g.edges.filter((e) => !(e.from === h.click.id && e.fromPort === 'next') && !(e.from === h.wait.id && e.fromPort === 'next'))
+    g.edges.push({ id: 'amb-e1', from: h.click.id, fromPort: 'next', to: cond.id })
+    g.edges.push({ id: 'amb-e2', from: cond.id, fromPort: 'true', to: h.end.id })
+    g.edges.push({ id: 'amb-e3', from: cond.id, fromPort: 'false', to: no.id })
+
+    // Alternatif: Başlangıç'tan ayrıl, yeni bekleme koy, Bitir'e dön.
+    // Eski kol Başlangıç → tıkla → koşul ve koşul ikiye ayrılıyor: silme hesabı belirsiz.
+    const edited = await callTool(
+      'flow.edit',
+      {
+        branchId: id,
+        ops: [
+          { op: 'disconnect', from: h.start.id },
+          { op: 'addNode', key: 'alt', kind: 'wait', fields: { ms: 300, title: 'Alternatif' }, connectFrom: h.start.id },
+          { op: 'connect', from: 'alt', to: h.end.id },
+        ],
+      },
+      h.ctx
+    )
+    expect(edited.ok).toBe(true)
+    expect(h.branchOf(id).path?.exit.nodeId).toBe(h.end.id)
+
+    // Deneme: neyin silineceğini söyler — belirsizse hiçbir şey.
+    const tried = await callTool('branch.merge', { branchId: id }, h.ctx)
+    expect(tried.ok).toBe(true)
+    expect((tried.data?.wouldRemove as string[])).toEqual([])
+    expect(String(tried.message)).toContain('belirsiz')
+
+    // Uygula: alternatif yazılır ama hiçbir node silinmez.
+    const before = h.book.tabs[0].graph.nodes.map((n) => n.id).sort().join(',')
+    const applied = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(applied.ok).toBe(true)
+    const after = h.merges.at(-1)?.graph as AgentGraph
+    expect(after.nodes.some((n) => n.id === h.wait.id)).toBe(true)
+    expect(after.nodes.some((n) => n.id === h.click.id)).toBe(true)
+    expect(after.nodes.length).toBeGreaterThanOrEqual(before.split(',').length)
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')

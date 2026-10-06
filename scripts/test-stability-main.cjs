@@ -25,6 +25,9 @@ function harness(overrides = {}) {
   const events = [];
   const context = {
     running: false, stopRequested: false, runLog: 'old', StoppedError,
+    // The code legitimately reads the environment (which profile this instance is), so the sandbox
+    // provides one instead of the run failing on a missing global.
+    process: { env: { ...process.env } },
     normalizeGraph, store: { set: () => events.push('saved') },
     getSettings: () => ({ hideWhileRunning: false, maxSteps: 2000, stepDelayMs: 0 }),
     ensureLogsDir: () => '', openRunLog: () => {},
@@ -39,6 +42,13 @@ function harness(overrides = {}) {
     setErrorStopHook: () => events.push('error-hook'),
     noteError: () => {},
     noteLogLine: () => {},
+    // The debug record's surface, as runFlow uses it: opened at a failure, completed by the message
+    // and the screenshot that arrive later.
+    completeFailure: () => {},
+    noteFailureShot: () => {},
+    noteRunFailed: () => events.push('run-failed'),
+    // The marker a test profile writes into the log at the start of a run.
+    isTestProfile: () => false,
     globalShortcut: { register: () => events.push('registered'), unregister: () => events.push('unregistered') },
     STOP_HOTKEY: 'Ctrl+Shift+Q',
     powerSaveBlocker: { start: () => { events.push('awake'); return 0; }, isStarted: () => true, stop: () => events.push('awake-stopped') },

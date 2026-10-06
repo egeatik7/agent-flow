@@ -128,23 +128,34 @@ export function baseTabOf(book: CanvasBook, branch: BranchRecord): CanvasTab | n
 /**
  * The stretch of the old flow between the alternative's entry and its exit, in base order.
  *
- * This is what the alternative is an alternative *to*: merging it means this stretch is replaced.
+ * Walking it is not enough: arithmetic on a graph is only safe where the stretch is *one line*.
+ * A node with more than one way out (a condition, a hand-made branch), a stretch that never
+ * reaches the exit, or one that loops back on itself all mean the same thing here - the tool
+ * cannot know what the alternative replaced, so it will not delete anything.
  */
-export function bypassedNodes(base: AgentGraph, path: BranchPath): string[] {
+export function bypassedWalk(base: AgentGraph, path: BranchPath): { nodes: string[]; safe: boolean; why: string } {
   const out: string[] = []
-  const seen = new Set<string>()
+  const seen = new Set<string>([path.entry.nodeId])
   let cur = path.entry.nodeId
-  const target = path.exit.nodeId
   let guard = 0
-  while (cur && guard++ < 500) {
-    if (cur === target || seen.has(cur)) break
-    seen.add(cur)
-    const edge = base.edges.find((e) => e.from === cur && (cur === path.entry.nodeId ? e.fromPort === path.entry.port : true))
-    if (!edge) break
-    out.push(edge.to)
-    cur = edge.to
+  while (guard++ < 500) {
+    const outs = base.edges.filter((e) => e.from === cur && (cur === path.entry.nodeId ? e.fromPort === path.entry.port : true))
+    if (outs.length !== 1) {
+      return { nodes: out, safe: false, why: outs.length === 0 ? 'yolun devamı bulunamadı' : `${outs.length} çıkışlı belirsiz bölge` }
+    }
+    const next = outs[0].to
+    if (next === path.exit.nodeId) return { nodes: out, safe: true, why: '' }
+    if (seen.has(next)) return { nodes: out, safe: false, why: 'çevrim' }
+    seen.add(next)
+    out.push(next)
+    cur = next
   }
-  return out
+  return { nodes: out, safe: false, why: 'yol çok uzun' }
+}
+
+/** Kept for callers that only want the node list; safety is decided by bypassedWalk. */
+export function bypassedNodes(base: AgentGraph, path: BranchPath): string[] {
+  return bypassedWalk(base, path).nodes
 }
 
 /**
@@ -159,8 +170,12 @@ export function pruneBypassed(
   derived: AgentGraph,
   base: AgentGraph,
   path: BranchPath
-): { graph: AgentGraph; removed: string[]; keptBack: string[] } {
-  const candidates = new Set(bypassedNodes(base, path))
+): { graph: AgentGraph; removed: string[]; keptBack: string[]; ambiguous?: string } {
+  const walk = bypassedWalk(base, path)
+  // An unclear stretch is not deleted, and it is said why: deleting by arithmetic in a conditional
+  // or cyclic region is how a tool quietly removes the wrong nodes from someone's flow.
+  if (!walk.safe) return { graph: derived, removed: [], keptBack: [], ambiguous: walk.why }
+  const candidates = new Set(walk.nodes)
   if (!candidates.size) return { graph: derived, removed: [], keptBack: [] }
 
   const reach = new Set<string>()
@@ -397,6 +412,7 @@ export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
     }
   }
   const { graph, applied, failed } = materialize(base.graph, branch)
+  const baseChanged = graphStamp(base.graph) !== branch.baseStamp
   return {
     branch,
     base,
@@ -405,9 +421,11 @@ export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
     lines: describeBranch(base.graph, branch),
     applied,
     failed,
-    baseChanged: graphStamp(base.graph) !== branch.baseStamp,
+    baseChanged,
     anchors: anchorsOf(base.graph, branch),
-    path: branch.path ?? derivePath(base.graph, branch),
+    // A stored shape is only trusted while the flow it was read from is unchanged; otherwise it is
+    // read again, so a stale path can never drive a deletion.
+    path: branch.path && !baseChanged ? branch.path : derivePath(base.graph, branch),
   }
 }
 
