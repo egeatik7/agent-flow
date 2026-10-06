@@ -394,67 +394,6 @@ function readPoint(p: Record<string, unknown>): { x: number; y: number } | null 
   return { x: Math.min(1000, Math.max(0, x)), y: Math.min(1000, Math.max(0, y)) }
 }
 
-export type VisionPick =
-  | { kind: 'item'; id: number; reason: string }
-  | { kind: 'point'; nx: number; ny: number; reason: string }
-  | { kind: 'none'; reason: string }
-
-const VISION_ACTION: Partial<Record<NodeKind, string>> = {
-  click: 'click',
-  type: 'type into (an input, a search box, and so on)',
-  key: 'click before the keypress, so the right place has focus',
-}
-
-export async function visionLocate(opts: {
-  apiKey: string
-  model: string | string[]
-  prompt: string
-  kind: NodeKind
-  scan: ScanResult
-  stepTitle: string
-  /** Picture of the element to find (from Ekran Tarayıcı / İmleçle Yakala). */
-  reference?: Img
-  system?: string
-}): Promise<VisionPick> {
-  if (!opts.scan.image) throw new Error('Ekran görüntüsü alınamadı.')
-  const list = opts.scan.items
-    .slice(0, 250)
-    .map((i) => `#${i.id} "${i.text.replace(/"/g, "'")}"`)
-    .join('\n')
-  const system = opts.system?.trim() || `You are an agent that looks at a Windows screenshot. Your job: find what the instruction asks you to ${VISION_ACTION[opts.kind] ?? 'locate'}.
-Some text and controls are marked with numbered boxes (blue: application control, orange: text read from the screen). The target may be unmarked (an icon, a picture, an empty area).
-- If the target is a numbered box: {"id": <number>, "reason": "..."}
-- Otherwise give the CENTER of the target as normalized 0-1000 coordinates on the image (x left to right, y top to bottom): {"x": <0-1000>, "y": <0-1000>, "reason": "..."}
-- If the target is not on screen: {"found": false, "reason": "..."}
-JSON only.`
-  const text = `Step: ${opts.stepTitle}
-Instruction: ${opts.prompt}
-${opts.reference ? '\nThe SECOND picture is the control to find (a previously captured icon or button). Find that same thing in the FIRST picture (the screen).\n' : ''}
-İşaretli öğeler:
-${list || '(yok)'}`
-  const p = await visionChat(opts.apiKey, opts.model, system, text, opts.reference ? [opts.scan.image, opts.reference] : [opts.scan.image])
-  const reason = String(p.reason ?? '')
-  if (p.found === false) return { kind: 'none', reason }
-  const id = num(p.id)
-  if (id !== null && opts.scan.items.some((i) => i.id === id)) return { kind: 'item', id, reason }
-  const pt = readPoint(p)
-  if (pt) return { kind: 'point', nx: pt.x, ny: pt.y, reason }
-  return { kind: 'none', reason: reason || 'model konum vermedi' }
-}
-
-/** Second pass on a zoomed crop around the first guess, for pixel-accurate clicks. */
-export async function visionRefine(opts: {
-  apiKey: string
-  model: string | string[]
-  prompt: string
-  image: Img
-}): Promise<{ x: number; y: number } | null> {
-  const system = `Bu, ekranın yakınlaştırılmış küçük bir parçası. Talimattaki hedefin tam ORTASINI 0-1000 normalize koordinatla ver: {"x": <0-1000>, "y": <0-1000>}. Hedef bu parçada yoksa {"found": false}. Sadece JSON.`
-  const p = await visionChat(opts.apiKey, opts.model, system, `Talimat: ${opts.prompt}`, [opts.image])
-  if (p.found === false) return null
-  return readPoint(p)
-}
-
 export type TypeChoiceInfo = {
   id: number
   window: string

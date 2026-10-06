@@ -467,17 +467,6 @@ function Get-TextCandidates($root, [int]$maxDepth) {
   return , $out
 }
 
-function Get-WinClass($el) {
-  $h = [IntPtr]::Zero
-  $p = $el
-  for ($i = 0; $i -lt 6 -and $h -eq [IntPtr]::Zero -and $null -ne $p; $i++) {
-    try { $h = [IntPtr]$p.Current.NativeWindowHandle } catch { $h = [IntPtr]::Zero }
-    if ($h -ne [IntPtr]::Zero) { break }
-    try { $p = $script:Walker.GetParent($p) } catch { break }
-  }
-  try { return [XpWin]::ClassOf($h) } catch { return '' }
-}
-
 # An edit inside a combo box is the same field, not a second one.
 function Get-OwnInputs($win) {
   $all = @(Get-TextCandidates $win 12)
@@ -498,21 +487,6 @@ function Get-OwnInputs($win) {
     if (-not $inside) { $own += $el }
   }
   return @($own)
-}
-
-function Find-InputAround($el) {
-  $p = $el
-  for ($i = 0; $i -lt 8 -and $null -ne $p; $i++) {
-    if (Test-TextLike $p) { return $p }
-    $child = $null
-    try { $child = $script:Walker.GetFirstChild($p) } catch {}
-    while ($null -ne $child) {
-      if (Test-TextLike $child) { return $child }
-      try { $child = $script:Walker.GetNextSibling($child) } catch { break }
-    }
-    try { $p = $script:Walker.GetParent($p) } catch { break }
-  }
-  return $null
 }
 
 # The window class of this very element (a classic Win32 control), not of an ancestor.

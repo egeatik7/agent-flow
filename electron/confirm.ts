@@ -101,12 +101,3 @@ export function judgeScreen(before: string[], after: string[], expected: string)
     changed,
   }
 }
-
-export function failReason(title: string, v: Verdict): string {
-  if (v.kind === 'missed') return `“${title}” tepki vermedi. ${v.reason}.`
-  if (v.kind === 'loading') {
-    return `“${title}” sonrası sayfa yüklenmesi bitmedi.${v.expected ? ` “${v.expected}” görünmedi.` : ''} ${v.reason}.`
-  }
-  if (v.kind === 'blocked') return `“${title}” sıradaki adımı açmadı. ${v.reason}.`
-  return `“${title}” sonrası emin olunamadı. Ekran değişti, sıradaki yazı yok, yüklenme de seçilemedi. ${v.reason}.`
-}
