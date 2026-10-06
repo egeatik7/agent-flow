@@ -1116,7 +1116,7 @@ export async function callTool(name: string, args: unknown, ctx: ToolContext, so
       const approved = await ctx.askApproval(`${tool.summary}${what}`, tool.approvalNote ?? 'Ekrana tıklar ya da yazar.')
       if (!approved) {
         ctx.log('warn', `Ajan · ${name} · onay verilmedi.`)
-        return { ok: false, tool: name, outcome: 'durduruldu', message: 'Bu çağrı için onay verilmedi.' }
+        return { ok: false, tool: name, outcome: 'durduruldu', message: 'Bu çağrı için onay verilmedi (izin “Sor” ayarında; 2 dakika beklenir, sonra çağrı düşer).' }
       }
     }
   }

@@ -26,6 +26,8 @@ import { listDirEntries } from './list-dir'
 import { normalizeFind, normalizePrompts } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
+/** How long an approval question waits before the caller is told "no". */
+const APPROVAL_TIMEOUT_MS = 120_000
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
@@ -541,19 +543,30 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     askApproval: async (summary: string, note: string) => {
       if (!mainWindow) return false
       if (sessionApproved) return true
-      const answer = await dialog.showMessageBox(mainWindow, {
-        type: 'question',
-        buttons: ['İzin ver', 'Bu oturumda hep izin ver', 'Reddet'],
-        defaultId: 2,
-        cancelId: 2,
-        noLink: true,
-        title: 'Ajan izni',
-        message: 'Bir ajan Nubbo’yu kullanmak istiyor',
-        detail: `${summary}\n\n${note}\n\nUygulama kapanınca bu izin sıfırlanır.`,
-      })
+      // A question nobody can see is worse than no question: if the window was minimised (its own
+      // hide-while-running, or the user), bring it back so the dialog is really in front.
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      const answer = await Promise.race([
+        dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          buttons: ['İzin ver', 'Bu oturumda hep izin ver', 'Reddet'],
+          defaultId: 2,
+          cancelId: 2,
+          noLink: true,
+          title: 'Ajan izni',
+          message: 'Bir ajan Nubbo’yu kullanmak istiyor',
+          detail: `${summary}\n\n${note}\n\nUygulama kapanınca bu izin sıfırlanır.`,
+        }),
+        // Waiting forever would hang the caller with no explanation, so the answer expires.
+        new Promise<{ response: number }>((resolve) => setTimeout(() => resolve({ response: -1 }), APPROVAL_TIMEOUT_MS)),
+      ])
       if (answer.response === 1) {
         sessionApproved = true
         return true
+      }
+      if (answer.response === -1) {
+        log('warn', `Ajan izni ${Math.round(APPROVAL_TIMEOUT_MS / 60000)} dakikada yanıtlanmadı; çağrı reddedildi sayıldı.`)
+        return false
       }
       return answer.response === 0
     },
