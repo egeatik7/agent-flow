@@ -15,6 +15,8 @@ const { spawnSync } = require('child_process')
 
 const root = path.join(__dirname, '..')
 const profile = (process.argv[2] || 'test').trim()
+// "package": a flow with a package to repair. "ui": a flow that drives the real window fixture.
+const mode = (process.argv[3] || 'package').trim()
 if (!profile) {
   console.error('Profil adı gerekli; gerçek profil bu betikle tohumlanmaz.')
   process.exit(2)
@@ -47,6 +49,48 @@ try {
 
 const start = createNode('start', 0, 0)
 start.id = 'fixture-start'
+
+let graph
+let canvasName = 'Tuval 1'
+let summary = ''
+if (mode === 'ui') {
+  // A flow that drives the real window fixture. The window is named in the target, because the
+  // engine's ladder scans the window in front by default and this flow must reach its own window
+  // even while the console or another app happens to be in front.
+  const win = 'Nubbo Click Test Host'
+  const focus = createNode('click', 280, 0, 1)
+  focus.id = 'ui-focus-field'
+  focus.title = 'UI · Kaynak klasör alanına tıkla'
+  focus.prompt = 'Kaynak klasör'
+  // No windowTitle scoping here: it is measured to find nothing for this window, while the
+  // whole-screen scan does see the field by its label. Noted as its own finding instead of being
+  // worked around silently.
+  focus.locator = undefined
+  const write = createNode('type', 560, 0, 1)
+  write.id = 'ui-write'
+  write.title = 'UI · alana yaz ve Enter'
+  write.text = 'nubbo-ui-test'
+  write.pressEnter = true
+  write.clearFirst = true
+  const press = createNode('click', 840, 0, 1)
+  press.id = 'ui-press-button'
+  press.title = 'UI · Devam düğmesine bas'
+  press.prompt = 'Devam'
+  press.locator = undefined
+  const end = createNode('end', 1120, 0)
+  end.id = 'fixture-ui-end'
+  graph = {
+    nodes: [start, focus, write, press, end],
+    edges: [
+      { id: 'ui-e1', from: start.id, fromPort: 'next', to: focus.id },
+      { id: 'ui-e2', from: focus.id, fromPort: 'next', to: write.id },
+      { id: 'ui-e3', from: write.id, fromPort: 'next', to: press.id },
+      { id: 'ui-e4', from: press.id, fromPort: 'next', to: end.id },
+    ],
+  }
+  canvasName = 'Arayüz'
+  summary = 'Başlangıç → tıkla(“source-initial” @ Nubbo Click Test Host) → yaz(“nubbo-ui-test” + Enter) → tıkla(“Devam”) → Bitir'
+} else {
 const pkg = createNode('package', 340, 0, 1)
 pkg.id = 'fixture-package'
 pkg.title = 'Fikstür · dosya üret'
@@ -79,7 +123,9 @@ pkg.inner = {
     { id: 'fixture-ie4', from: innerWait.id, fromPort: 'next', to: innerEnd.id },
   ],
 }
-const graph = { nodes: [start, pkg], edges: [{ id: 'fixture-e1', from: start.id, fromPort: 'next', to: pkg.id }] }
+graph = { nodes: [start, pkg], edges: [{ id: 'fixture-e1', from: start.id, fromPort: 'next', to: pkg.id }] }
+summary = 'Başlangıç → Paket(“Fikstür · dosya üret” içinde: start → win+r → yaz → 1,2 sn → Bitir)'
+}
 
 // 3) Write it into the test profile's store, keeping settings and branches.
 let store = { settings: {}, canvases: null }
@@ -90,10 +136,10 @@ if (fs.existsSync(storeFile)) {
     /* start from an empty one */
   }
 }
-const book = { activeId: 'fixture-canvas', tabs: [{ id: 'fixture-canvas', name: 'Tuval 1', graph }], branches: store.canvases?.branches ?? [] }
+const book = { activeId: 'fixture-canvas', tabs: [{ id: 'fixture-canvas', name: canvasName, graph }], branches: store.canvases?.branches ?? [] }
 store.canvases = book
 store.graph = graph
 fs.writeFileSync(storeFile, JSON.stringify(store, null, 2), 'utf8')
-console.log(`  fikstür yazıldı: ${storeFile}`)
-console.log('  içerik: Başlangıç → Paket(“Fikstür · dosya üret” içinde: start → win+r → yaz → 1,2 sn → Bitir)')
-console.log('  sabit id’ler: fixture-package · fixture-inner-type · fixture-inner-wait')
+console.log(`  fikstür yazıldı (${mode}): ${storeFile}`)
+console.log(`  içerik: ${summary}`)
+console.log('  sabit id’ler: fixture-package · fixture-inner-type · fixture-inner-wait · ui-focus-field · ui-write · ui-press-button')

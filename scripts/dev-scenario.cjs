@@ -49,6 +49,34 @@ function check(id, kind, ok, detail) {
   return !!ok
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The window fixture rewrites its report about ten times a second, so a read can land in the
+ * middle of a replace and fail. Reading evidence must not be the fragile part of the loop.
+ */
+async function readRetry(file, tries = 12) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      return fs.readFileSync(file, 'utf8')
+    } catch {
+      await sleep(80)
+    }
+  }
+  return ''
+}
+async function copyRetry(from, to, tries = 12) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      fs.copyFileSync(from, to)
+      return true
+    } catch {
+      await sleep(80)
+    }
+  }
+  return false
+}
+
 function profileDir() {
   return path.join(process.env.APPDATA || '', profile ? `xp-agent-studio-${profile}` : 'xp-agent-studio')
 }
@@ -92,7 +120,9 @@ function call(info, tool, args, timeoutMs) {
 }
 
 function expand(text) {
-  return String(text).replace(/\{\{temp\}\}/gi, os.tmpdir())
+  return String(text)
+    .replace(/\{\{temp\}\}/gi, os.tmpdir())
+    .replace(/\{\{host\}\}/gi, path.join(root, 'test-artifacts', 'fixture'))
 }
 function logsDir() {
   const dir = path.join(profileDir(), 'logs')
@@ -143,6 +173,15 @@ async function main() {
     if (String(b.name).startsWith(name)) await call(info, 'branch.drop', { branchId: b.branchId }, 20_000)
   }
 
+  // A scenario that drives a real window asks for the fixture first. This only puts the window
+  // there; the engine is what clicks and types, and the window reports what it received.
+  if (scenario.setup?.host === true) {
+    const started = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'dev-start-host.cjs')], { encoding: 'utf8', timeout: 180_000 })
+    for (const line of String(started.stdout || '').split('\n').filter(Boolean)) console.log(`  ${line.trim()}`)
+    check('host-ready', 'tool-answered', started.status === 0, String(started.stdout || started.stderr || '').trim().split('\n').pop() || '')
+    if (started.status !== 0) throw new Error('fıkstür penceresi hazır değil')
+  }
+
   const created = await call(info, 'branch.create', { name: `${name} · ${stamp}` }, 20_000)
   const branchId = must('branch-created', created).data?.branchId
   check('branch-created', 'tool-answered', !!branchId, `branch ${branchId}`)
@@ -154,15 +193,34 @@ async function main() {
     if (copy.fields) for (const k of Object.keys(copy.fields)) if (typeof copy.fields[k] === 'string') copy.fields[k] = expand(copy.fields[k])
     return copy
   })
-  const edited = await call(info, 'flow.edit', { branchId, ops, note: `senaryo ${name}`, ...(scenario.setup?.packagePath ? { packagePath: scenario.setup.packagePath } : {}) }, 60_000)
-  must('edits-accepted', edited)
-  evidence.warnings = edited.result.data?.warnings || []
-  if (scenario.setup?.expectNoWarnings) check('no-warnings', 'tool-answered', evidence.warnings.length === 0, evidence.warnings.join(' | '))
+  // A scenario may only run the flow it found (a seeded fixture, for instance) and edit nothing.
+  if (ops.length) {
+    const edited = await call(info, 'flow.edit', { branchId, ops, note: `senaryo ${name}`, ...(scenario.setup?.packagePath ? { packagePath: scenario.setup.packagePath } : {}) }, 60_000)
+    must('edits-accepted', edited)
+    evidence.warnings = edited.result.data?.warnings || []
+    if (scenario.setup?.expectNoWarnings) check('no-warnings', 'tool-answered', evidence.warnings.length === 0, evidence.warnings.join(' | '))
+  } else {
+    check('edits-accepted', 'tool-answered', true, 'düzenleme yok: bulunan akış olduğu gibi koşacak')
+  }
 
   const before = (scenario.expect?.files || []).map((f) => expand(f.path))
   for (const p of before) if (fs.existsSync(p)) fs.rmSync(p, { force: true })
 
   if (scenario.expect?.screenshot === true) await call(info, 'screen.read', { image: true }, 60_000)
+
+  // A window that is not in front cannot be found: the ladder scans the foreground window. The
+  // fixture has a command for exactly this, and it goes right before the run, not earlier.
+  if (scenario.setup?.host === true) {
+    const hostDir = path.join(root, 'test-artifacts', 'fixture')
+    fs.writeFileSync(path.join(hostDir, 'command.json'), JSON.stringify({ seq: Date.now() + 1, kind: 'focus-main' }), 'utf8')
+    await sleep(1200)
+    try {
+      const state = JSON.parse(await readRetry(path.join(hostDir, 'state.json')))
+      check('host-foreground', 'tool-answered', !!state.foreground && state.foreground === state.hwnd, `foreground ${state.foreground} / hwnd ${state.hwnd}`)
+    } catch {
+      check('host-foreground', 'tool-answered', false, 'state.json okunamadı')
+    }
+  }
 
   const runAt = Date.now()
   const started = await call(info, 'run.from', { branchId, fromStart: scenario.run?.fromStart !== false, ...(scenario.run?.node ? { nodeId: scenario.run.node } : {}), ...(scenario.run?.fast ? { fast: true } : {}), ...(scenario.run?.debug ? { debug: true } : {}) }, 60_000)
@@ -208,6 +266,16 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'windows.json'), JSON.stringify(titles, null, 2), 'utf8')
   for (const t of scenario.expect?.windows || []) check(`window:${t}`, 'completed', titles.some((x) => x.includes(t)), titles.join(' | '))
   for (const t of scenario.expect?.noWindows || []) check(`no-window:${t}`, 'completed', !titles.some((x) => x.includes(t)), titles.join(' | '))
+
+  // What the application itself says it received: a control's text, a click's own id. This is the
+  // only class that counts as done for a window that is not ours.
+  for (const c of scenario.expect?.contains || []) {
+    const p = expand(c.path)
+    const text = await readRetry(p)
+    const ok = text.includes(c.text)
+    check(`contains:${c.label || c.text}`, 'completed', ok, ok ? `“${c.text}” bulundu` : `“${c.text}” yok (${path.basename(p)})`)
+    if (text) await copyRetry(p, path.join(outDir, `evidence-${path.basename(p)}`))
+  }
 
   if (scenario.expect?.files?.length) evidence.note = 'dosya kontrolleri gerçek diskten okundu'
   evidence.finishedAt = new Date().toISOString()

@@ -117,6 +117,13 @@ public sealed class ClickTestHost : Window {
         var b = (Button)controls["continue"]; b.Width = 180 * scale; b.Height = 46 * scale; b.FontSize = 16 * scale;
         break;
       case "focus-main": Show(); Activate(); SetForegroundWindow(Handle); break;
+      case "topmost":
+        // Keep the fixture above everything else. Without this a maximised window on the machine
+        // covers it, and a covered control is not on screen: the ladder cannot see what it cannot
+        // read, which is exactly the difference between "the engine is broken" and "the window was
+        // behind the console".
+        Topmost = true; Show(); Activate(); break;
+      case "untopmost": Topmost = false; break;
       case "focus-other":
         if (other == null) {
           other = new Window { Title = "Nubbo Other Window", Left = 860, Top = 60, Width = 300, Height = 250 };

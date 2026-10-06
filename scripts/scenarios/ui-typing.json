@@ -1,0 +1,44 @@
+{
+  "name": "ui-typing",
+  "profile": "test",
+  "canvas": "Tuval 1",
+  "setup": {
+    "host": true,
+    "ops": [
+      { "op": "disconnect", "from": "{{start}}" },
+      {
+        "op": "addNode",
+        "key": "write",
+        "kind": "type",
+        "fields": {
+          "prompt": "Kaynak klasör",
+          "text": "nubbo-ui-test",
+          "pressEnter": true,
+          "clearFirst": true,
+          "title": "UI · Kaynak klasör alanına yaz"
+        },
+        "connectFrom": "{{start}}"
+      },
+      { "op": "addNode", "key": "settle", "kind": "wait", "fields": { "ms": 900, "title": "UI · 0,9 sn" }, "connectFrom": "write" },
+      {
+        "op": "addNode",
+        "key": "press",
+        "kind": "click",
+        "fields": { "prompt": "Devam", "title": "UI · Devam düğmesine bas" },
+        "connectFrom": "settle"
+      },
+      { "op": "addNode", "key": "son", "kind": "end", "fields": { "title": "UI · bitti" }, "connectFrom": "press" }
+    ]
+  },
+  "run": { "fromStart": true, "fast": true, "timeoutMs": 180000 },
+  "expect": {
+    "runOk": true,
+    "maxErrors": 0,
+    "minSteps": 4,
+    "windows": ["Nubbo Click Test Host"],
+    "contains": [
+      { "path": "{{host}}\\state.json", "text": "\"text\":\"nubbo-ui-test\"", "label": "alana yazılan değer" },
+      { "path": "{{host}}\\state.json", "text": "\"id\":\"continue\"", "label": "tıklama Devam düğmesine düştü" }
+    ]
+  }
+}
