@@ -4,7 +4,7 @@ import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electro
 import { callTool, toolList, actionSent, windowMismatch, withFastFind, type ToolContext } from '../electron/tools'
 import { windowEventAllowed } from '../electron/run-events'
 import { isTestProfile, profileDirName, storeCwd } from '../electron/profile'
-import { beginRun, endRun } from '../electron/tool-state'
+import { beginRun, endRun, noteStep } from '../electron/tool-state'
 
 let seq = 0
 const edge = (from: AgentNode, fromPort: string, to: AgentNode) => ({ id: `e${++seq}`, from: from.id, fromPort, to: to.id })
@@ -268,6 +268,29 @@ describe('araç katmanı', () => {
     expect(storeCwd('', 'C:\\u')).toBeUndefined()
     expect(storeCwd(undefined, 'C:\\u')).toBeUndefined()
     expect(storeCwd('test', 'C:\\u')).toBe('C:\\u')
+  })
+
+  it('hedef aramayan node için önizleme "bulamadım" demez', async () => {
+    const { graph, loop } = fixture()
+    const c = ctx(graph)
+    const r = await callTool('target.preview', { nodeId: loop.id }, c)
+    expect(r.ok).toBe(true)
+    expect(r.message).toContain('hedef aramaz')
+    expect(r.data?.targets).toBe(false)
+    expect(r.observed?.note).toContain('hedef yok')
+  })
+
+  it('run.wait koşu bitince resmî sonucu ve gözlenen adımları birlikte verir', async () => {
+    const { graph } = fixture()
+    beginRun(graph)
+    noteStep({ id: 'n1', status: 'done' })
+    endRun({ ok: true, steps: 1 })
+    const c = ctx(graph, { isRunning: () => false })
+    const r = await callTool('run.wait', { timeoutMs: 1000 }, c)
+    expect(r.ok).toBe(true)
+    expect(r.message).toContain('Beklenecek bir koşu yok')
+    expect(r.data?.running).toBe(false)
+    expect((r.data?.last as { ok?: boolean } | null)?.ok).toBe(true)
   })
 
   it('istenen pencere okunmadıysa bu açıkça söylenir', () => {

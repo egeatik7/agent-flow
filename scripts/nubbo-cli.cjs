@@ -32,7 +32,8 @@ const USAGE = `nubbo <komut> [seçenekler]
              --ops-file <plan.json>  Planı dosyadan oku
              [--json]              Tam yapı
                                  Hiçbir şey yazmaz, akış dosyası değişmez.
-  preview | step | from | state | report | stop | screen
+  read                           Uygulamadaki CANLI akışı oku (araç katmanından, flow.read)
+  preview | step | from | state | wait | report | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
              [--node <id>] [--branch <id>] [--fast] [--debug] [--start] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
@@ -330,8 +331,8 @@ async function main() {
     process.exit(0)
   }
 
-  if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'report' || cmd === 'stop' || cmd === 'screen') {
-    const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', report: 'run.report', stop: 'run.stop', screen: 'screen.read' }
+  if (cmd === 'read' || cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'report' || cmd === 'wait' || cmd === 'stop' || cmd === 'screen') {
+    const remote = { read: 'flow.read', preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', report: 'run.report', wait: 'run.wait', stop: 'run.stop', screen: 'screen.read' }
     if (cmd === 'from' && !opts.node && !opts.start) {
       // A whole flow from the first step is never an accident.
       console.error('Baştan koşu için --start gerekir (akışın tamamı ilk adımdan çalışır). Tek node için: --node <id>.')

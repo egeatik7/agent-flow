@@ -6,6 +6,7 @@ import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
 import { storeCwd } from './profile'
+import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import { beginRun, endRun, noteError, noteLogLine, noteStep, probing, setDebugRun, setErrorStopHook } from './tool-state'
@@ -76,6 +77,8 @@ const MERGE_TIMEOUT_MS = 10_000
 
 /** True while a branch is being tested: that run is not the flow on screen. */
 let derivedRun = false
+/** True while a run asked to keep to the screen stages only: no model calls during it. */
+let fastRun = false
 
 function send(channel: string, payload: unknown) {
   if (channel === 'agent:step') {
@@ -179,7 +182,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const agent = createAgent({
   log,
   send,
-  settings: getSettings,
+  // A fast run keeps to the screen stages: same engine, same checks, no model call in the ladder.
+  settings: () => (fastRun ? withFastFind(getSettings()) : getSettings()),
   shouldStop: () => stopRequested,
   setLoop: (text) => pushLoop(text),
   setMethod: (text) => pushMethod(text),
@@ -415,7 +419,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean }
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -423,6 +427,7 @@ async function runFlow(
   running = true
   stopRequested = false
   derivedRun = !!opts?.derived
+  fastRun = !!opts?.fast
   // Debug: the run stops itself at the first failed step, keeping that moment's context.
   setDebugRun(!!opts?.debug)
   let awake: number | undefined
@@ -481,6 +486,7 @@ async function runFlow(
     endRun(outcome)
     running = false
     derivedRun = false
+    fastRun = false
     runLog = ''
     globalShortcut.unregister(STOP_HOTKEY)
     if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)

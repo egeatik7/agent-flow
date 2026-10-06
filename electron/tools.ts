@@ -116,7 +116,7 @@ export type ToolContext = {
     graph: AgentGraph,
     startId?: string,
     packagePath?: string[],
-    opts?: { derived?: boolean; debug?: boolean }
+    opts?: { derived?: boolean; debug?: boolean; fast?: boolean }
   ) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
   /** The canvas book: the flows of the app plus the agent branches that sit over them. */
   getCanvases: () => CanvasBook
@@ -746,6 +746,9 @@ const flowRead: ToolDef = {
   },
 }
 
+/** Node kinds that resolve a target on screen; everything else never searches. */
+const TARGET_KINDS = new Set(['click', 'type', 'probe', 'ai'])
+
 const targetPreview: ToolDef = {
   name: 'target.preview',
   summary: 'Bir node için Nubbo’nun nereyi hedefleyeceğini gösterir. Ekrana girdi göndermez. fast: yalnız ekran aşamaları.',
@@ -769,6 +772,30 @@ const targetPreview: ToolDef = {
     const place = findPlace(graph, nodeId)
     if (!place) return failed(targetPreview.name, `Node bulunamadı: ${nodeId}${branchNote}`)
     const node = place.node
+    // A node that sends keys, waits or ends does not go looking for anything on screen. Saying
+    // "not found" for it reads like a fault when nothing was ever searched, so say what it does.
+    if (!TARGET_KINDS.has(node.kind)) {
+      const what =
+        node.kind === 'key'
+          ? 'tuş gönderir; hedef aramaz (tuş odaktaki pencereye gider)'
+          : node.kind === 'wait'
+            ? 'zamanlar; hedef aramaz'
+            : node.kind === 'end'
+              ? 'akışı bitirir; hedef aramaz'
+              : node.kind === 'condition'
+                ? 'ekranda bir yazı arar ama tıklamaz; aranan yazı prompt alanında olmalı'
+                : 'hedef aramaz'
+      const message = `“${node.title}” (${node.kind}) ${what}.${branchNote}`
+      ctx.log('info', `Ajan · hedef önizleme · ${message}`)
+      return {
+        ok: true,
+        tool: targetPreview.name,
+        outcome: 'tamam',
+        message,
+        observed: { note: 'Ekrana hiç dokunulmadı; aranacak bir hedef yok.' },
+        data: { kind: node.kind, targets: false, candidates: [] },
+      }
+    }
     const fast = args.fast === true
     // The engine is loaded only when a tool actually needs it, so the tool layer stays light
     // and testable. A separate, silent agent: a preview writes no memory, sends no patch and
@@ -1071,6 +1098,7 @@ const runFrom: ToolDef = {
       .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined, {
         ...(derived ? { derived: true } : {}),
         ...(args.debug === true ? { debug: true } : {}),
+        ...(args.fast === true ? { fast: true } : {}),
       })
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
     // The run begins synchronously, so its id is already known: this answer means the run
@@ -1192,6 +1220,41 @@ const runReport: ToolDef = {
   },
 }
 
+const runWait: ToolDef = {
+  name: 'run.wait',
+  summary: 'Koşu bitene kadar bekler (en fazla verilen süre) ve sonucu döndürür. Yoklama yapmayı gereksiz kılar.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const limit = Math.max(1_000, Math.min(30 * 60_000, num(args.timeoutMs) ?? 5 * 60_000))
+    const started = Date.now()
+    const wasRunning = ctx.isRunning()
+    while (ctx.isRunning() && Date.now() - started < limit) {
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    const s = snapshot()
+    const waited = Math.round((Date.now() - started) / 1000)
+    if (ctx.isRunning()) {
+      const message = `Koşu hâlâ sürüyor (${waited} sn beklendi, sınır ${Math.round(limit / 1000)} sn): “${s.nodeTitle ?? s.nodeId ?? '—'}” · ${s.observed.done} tamam, ${s.observed.errors} hata.`
+      ctx.log('info', `Ajan · bekle · ${message}`)
+      return { ok: true, tool: runWait.name, outcome: 'tamam', message, observed: { note: 'Süre doldu, koşu bitmedi.' }, data: { running: true, snapshot: s, waitedMs: Date.now() - started } }
+    }
+    const last = s.last
+    const message = wasRunning
+      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`
+      : 'Beklenecek bir koşu yok.'
+    ctx.log('info', `Ajan · bekle · ${message}`)
+    return {
+      ok: true,
+      tool: runWait.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Koşunun resmî sonucu ve gözlenen adımlar ayrı alanlarda.' },
+      data: { running: false, last, snapshot: s, waitedMs: Date.now() - started },
+    }
+  },
+}
+
 const runStop: ToolDef = {
   name: 'run.stop',
   summary: 'Çalışan koşuyu durdurur.',
@@ -1259,7 +1322,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runWait, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))
