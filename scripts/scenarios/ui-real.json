@@ -6,7 +6,7 @@
     "host": true,
     "ops": []
   },
-  "run": { "fromStart": true, "fast": true, "timeoutMs": 180000 },
+  "run": { "fromStart": true, "fast": false, "timeoutMs": 300000 },
   "expect": {
     "runOk": true,
     "maxErrors": 0,

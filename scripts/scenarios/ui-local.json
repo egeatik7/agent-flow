@@ -1,0 +1,31 @@
+{
+  "name": "ui-local",
+  "profile": "test",
+  "canvas": "Arayüz",
+  "setup": {
+    "host": true,
+    "ops": []
+  },
+  "run": {
+    "fromStart": true,
+    "fast": true,
+    "timeoutMs": 180000
+  },
+  "expect": {
+    "runOk": true,
+    "maxErrors": 0,
+    "minSteps": 3,
+    "contains": [
+      {
+        "path": "{{host}}\\state.json",
+        "text": "\"text\":\"nubbo-ui-test\"",
+        "label": "alana yazılan değer"
+      },
+      {
+        "path": "{{host}}\\state.json",
+        "text": "\"id\":\"continue\"",
+        "label": "tıklama Devam düğmesine düştü"
+      }
+    ]
+  }
+}

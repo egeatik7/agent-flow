@@ -7,6 +7,7 @@ release/*.blockmap
 *.log
 .DS_Store
 out
+test-artifacts
 .env
 .env.*
 release/*.exe
