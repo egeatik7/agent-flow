@@ -176,6 +176,11 @@ export type AppSettings = {
   findOff: import('./llm-flow').FindStageId[]
   /** Custom system prompts. Empty means the built-in text. */
   llmPrompts: import('./llm-flow').LlmPrompts
+  /**
+   * What an outside agent may do without asking. The Ajan panel is never gated: a person
+   * pressing a button is the approval. `ask` shows a confirmation for every acting call.
+   */
+  agentPermission: 'off' | 'ask' | 'auto'
 }
 
 export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } {
@@ -213,6 +218,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   findOrder: ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'],
   findOff: ['list'],
   llmPrompts: {},
+  agentPermission: 'ask',
 }
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'

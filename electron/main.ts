@@ -4,7 +4,8 @@ import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
-import { callTool, toolList } from './tools'
+import { callTool, toolList, type ToolSource } from './tools'
+import { beginRun, endRun, noteError, noteStep } from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
@@ -60,6 +61,8 @@ function getSettings(): AppSettings {
 }
 
 function send(channel: string, payload: unknown) {
+  // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
+  if (channel === 'agent:step') noteStep(payload)
   mainWindow?.webContents.send(channel, payload)
 }
 
@@ -127,6 +130,7 @@ function sweepStaleTempShots() {
 let voiceHoldUntil = 0
 
 function log(level: LogLevel, message: string, forceHud = false) {
+  if (level === 'error') noteError(message)
   send('agent:log', { level, message })
   const held = !forceHud && Date.now() < voiceHoldUntil && level !== 'error' && level !== 'warn'
   if (!held) pushHud(level, message)
@@ -437,8 +441,28 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     isRunning: () => running,
     userStop: () => stopRequested,
     sendStep: (payload: unknown) => send('agent:step', payload),
+    permission: () => getSettings().agentPermission,
+    askApproval: async (summary: string) => {
+      if (!mainWindow) return false
+      const answer = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons: ['İzin ver', 'Reddet'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: 'Ajan izni',
+        message: 'Bir ajan Nubbo’yu kullanmak istiyor',
+        detail: `${summary}\n\nBu işlem gerçekten tıklar/yazar. Akış ilerlemez.`,
+      })
+      return answer.response === 0
+    },
+    requestStop: () => {
+      stopRequested = true
+    },
   }
-  ipcMain.handle('tools:call', (_e, name: string, args?: unknown) => callTool(name, args, toolContext))
+  ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
+    callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
+  )
   ipcMain.handle('tools:list', () => toolList())
   ipcMain.handle('canvases:get', () => {
     const saved = store.get('canvases') as CanvasBook | undefined
@@ -524,6 +548,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     try {
       const graph = normalizeGraph(raw)
       store.set('graph', graph)
+      // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
+      beginRun(graph)
       const s = getSettings()
       let shotDir = ''
       try {
@@ -562,6 +588,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     } finally {
       // Reset the run state even when preparation failed before a resource
       // was created, or a later OS cleanup call throws.
+      endRun()
       running = false
       runLog = ''
       globalShortcut.unregister(STOP_HOTKEY)

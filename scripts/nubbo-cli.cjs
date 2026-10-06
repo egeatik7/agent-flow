@@ -23,6 +23,8 @@ const USAGE = `nubbo <komut> [seçenekler]
              [--json]              Tam yapı
   package  --file <akis.json> --node <id>
                                  Bir paketin içini göster (aç, debug et)
+  context  --file <akis.json> --node <id>
+                                 Bir node'un paket yolunu ve kutu zincirini göster
   preview | step | from | state | stop | screen
                                  Ekrana dokunan araçlar: Nubbo açık olmalı (1B)
 `
@@ -155,6 +157,26 @@ async function main() {
   if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'stop' || cmd === 'screen') {
     console.error(`${cmd}: bu araç ekrana dokunur ve Nubbo açıkken çalışır. Yerel uç nokta 1B'de geliyor.`)
     process.exit(2)
+  }
+
+  if (cmd === 'context') {
+    const graph = readGraph(opts.file)
+    const id = typeof opts.node === 'string' ? opts.node : ''
+    const r = await tools.callTool('flow.context', { graph, nodeId: id }, toolContext(graph))
+    if (!r.ok) {
+      console.error(r.message)
+      process.exit(3)
+    }
+    console.log(r.message)
+    for (const l of r.loopChain ?? []) {
+      const vars = l.vars ? Object.entries(l.vars).map(([k, v]) => `${k}=${v}`).join(' ') : ''
+      console.log(
+        `  kutu: ${l.title} [${l.id}] · öğe ${(l.index ?? 0) + 1}/${l.total}${l.item ? ` (“${l.item}”)` : ''}` +
+          (l.folder ? `\n      klasör: ${l.folder}${l.templated ? ' (şablon)' : ''}` : '')
+      )
+      if (vars) console.log(`      ${vars}`)
+    }
+    process.exit(0)
   }
 
   if (cmd === 'flow') {

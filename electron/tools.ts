@@ -21,6 +21,7 @@ import {
 } from './graph-types'
 import type { TargetTrace } from './target-trace'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
+import { beginProbe, endProbe, probing, snapshot } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu'
 
@@ -60,6 +61,8 @@ export type ToolResult = {
   action?: { kind: string; sent: boolean }
   observed?: { note?: string }
   loop?: LoopRef
+  /** Every box around the node, outermost first (run.state). */
+  loopChain?: LoopRef[]
   suggestion?: string
   data?: Record<string, unknown>
 }
@@ -77,7 +80,16 @@ export type ToolContext = {
   userStop: () => boolean
   /** Sends the transient canvas highlight. Nothing else may be written by a tool. */
   sendStep: (payload: unknown) => void
+  /** What an outside caller may do without asking. The panel is never gated. */
+  permission: () => 'off' | 'ask' | 'auto'
+  /** Asks the person in front of the app. Resolves false when refused or not answered. */
+  askApproval: (summary: string) => Promise<boolean>
+  /** The user's own stop, for `run.stop`. */
+  requestStop: () => void
 }
+
+/** `panel` is a person pressing a button in the app, which is its own approval. */
+export type ToolSource = 'panel' | 'agent'
 
 type Args = Record<string, unknown>
 
@@ -92,9 +104,6 @@ type ToolDef = {
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-
-/** One probe at a time: two of them would drive the mouse at the same moment. */
-let probing = false
 
 /** The flow the caller means: its live canvas when it sent one, otherwise the saved flow. */
 function graphOf(args: Args, ctx: ToolContext): AgentGraph {
@@ -276,6 +285,47 @@ const targetPreview: ToolDef = {
   },
 }
 
+const flowContext: ToolDef = {
+  name: 'flow.context',
+  summary: 'Bir node’un paket yolunu, içindeki kutuları ve o anki öğeyi söyler.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const graph = graphOf(args, ctx)
+    const nodeId = text(args.nodeId)
+    if (!nodeId) return failed(flowContext.name, 'nodeId gerekli.')
+    const place = findPlace(graph, nodeId)
+    if (!place) return failed(flowContext.name, `Node bulunamadı: ${nodeId}`)
+    const context = contextOf(graph, nodeId)
+    const chain = context?.loops ?? []
+    const parts = [`“${place.node.title}”`]
+    parts.push(place.packagePath.length ? `${place.packagePath.length} katman paket içinde` : 'kök seviyesinde')
+    if (chain.length) {
+      const last = chain[chain.length - 1]
+      parts.push(
+        `kutular: ${chain
+          .map((l) => `${l.title}${typeof l.index === 'number' ? ` ${l.index + 1}/${l.total}` : ''}${l.item ? ` (“${l.item}”)` : ''}`)
+          .join(' › ')}`
+      )
+      // A folder-backed box fills its list while it runs, so the saved item is a placeholder.
+      if (last.templated || last.folder) parts.push('dikkat: bu kutunun öğe listesi çalışırken klasörden doldurulur')
+    }
+    parts.push('Yazma yok.')
+    const message = parts.join(' · ')
+    ctx.log('info', `Ajan · bağlam · ${message}`)
+    return {
+      ok: true,
+      tool: flowContext.name,
+      outcome: 'tamam',
+      message,
+      node: nodeRef(place),
+      loop: chain.length ? chain[chain.length - 1] : undefined,
+      loopChain: chain,
+      data: { packagePath: place.packagePath, loops: chain },
+    }
+  },
+}
+
 const stepRun: ToolDef = {
   name: 'step.run',
   summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır, akışı ilerletmez.',
@@ -286,7 +336,7 @@ const stepRun: ToolDef = {
     const nodeId = text(args.nodeId)
     if (!nodeId) return failed(stepRun.name, 'nodeId gerekli.')
     if (ctx.isRunning()) return failed(stepRun.name, 'Bir koşu sürüyor; tek adım için önce durdur.')
-    if (probing) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
+    if (probing()) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
     const place = findPlace(graph, nodeId)
     if (!place) return failed(stepRun.name, `Node bulunamadı: ${nodeId}`)
     const node = place.node
@@ -302,7 +352,7 @@ const stepRun: ToolDef = {
     const traces: TargetTrace[] = []
     let timedOut = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    probing = true
+    beginProbe(nodeId)
     try {
       const agent = createAgent({
         log: (level, message) => {
@@ -377,7 +427,63 @@ const stepRun: ToolDef = {
       return { ok: true, tool: stepRun.name, outcome, message, node: nodeRef(place), action: { kind: node.kind, sent: false }, loop, log: logs.slice(-12) }
     } finally {
       if (timer) clearTimeout(timer)
-      probing = false
+      endProbe()
+    }
+  },
+}
+
+const runStop: ToolDef = {
+  name: 'run.stop',
+  summary: 'Çalışan koşuyu durdurur.',
+  sendsInput: false,
+  ready: true,
+  run: async (_args, ctx) => {
+    ctx.requestStop()
+    const message = 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
+    ctx.log('warn', `Ajan · durdur · ${message}`)
+    return { ok: true, tool: runStop.name, outcome: 'tamam', message }
+  },
+}
+
+const runState: ToolDef = {
+  name: 'run.state',
+  summary: 'Koşunun hangi node’da, hangi kutuda, hangi öğede olduğunu söyler.',
+  sendsInput: false,
+  ready: true,
+  run: async (_args, ctx) => {
+    const s = snapshot()
+    const running = ctx.isRunning()
+    const chain = s.loops.map((l) => `${l.title}${typeof l.index === 'number' ? ` ${l.index + 1}/${l.total}` : ''}${l.item ? ` (“${l.item}”)` : ''}`)
+    const parts: string[] = []
+    if (s.probing) parts.push(`Tek adım sürüyor: “${s.nodeTitle ?? s.nodeId ?? '—'}”.`)
+    else if (running) parts.push(`Koşu sürüyor: “${s.nodeTitle ?? s.nodeId ?? '—'}”.`)
+    else parts.push('Şu an koşu yok.')
+    if (chain.length) parts.push(`Kutular: ${chain.join(' › ')}.`)
+    if (s.packagePath.length) parts.push(`Paket: ${s.packagePath.length} katman derinde.`)
+    if (s.steps.done || s.steps.errors) parts.push(`Gözlenen adımlar: ${s.steps.done} tamam, ${s.steps.errors} hata.`)
+    if (ctx.userStop()) parts.push('Durdurma isteği açık.')
+    if (s.lastError) parts.push(`Son hata: ${s.lastError}`)
+    const message = parts.join(' ')
+    if (running || s.probing) ctx.log('info', `Ajan · durum · ${message}`)
+    return {
+      ok: true,
+      tool: runState.name,
+      outcome: 'tamam',
+      message,
+      loop: s.loops.length ? s.loops[s.loops.length - 1] : undefined,
+      loopChain: s.loops,
+      data: {
+        running,
+        probing: s.probing,
+        stopRequested: ctx.userStop(),
+        nodeId: s.nodeId,
+        nodeTitle: s.nodeTitle,
+        packagePath: s.packagePath,
+        steps: s.steps,
+        lastError: s.lastError,
+        startedAt: s.startedAt,
+        ms: s.startedAt ? Date.now() - s.startedAt : undefined,
+      },
     }
   },
 }
@@ -385,22 +491,35 @@ const stepRun: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = [
   { name: 'run.from', summary: 'Belirtilen node’dan akışı sürdürür.', sendsInput: true, ready: false },
-  { name: 'run.state', summary: 'Koşunun hangi node’da, hangi öğede olduğunu söyler.', sendsInput: false, ready: false },
-  { name: 'run.stop', summary: 'Çalışan koşuyu durdurur.', sendsInput: false, ready: false },
   { name: 'screen.read', summary: 'Pencereyi ve ekrandaki yazıları okur.', sendsInput: false, ready: false },
 ]
 
-const TOOLS: ToolDef[] = [flowRead, targetPreview, stepRun, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, targetPreview, stepRun, runState, runStop, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))
 }
 
-export async function callTool(name: string, args: unknown, ctx: ToolContext): Promise<ToolResult> {
+export async function callTool(name: string, args: unknown, ctx: ToolContext, source: ToolSource = 'agent'): Promise<ToolResult> {
   const tool = TOOLS.find((t) => t.name === name)
   if (!tool) return failed(name, `Bilinmeyen araç: ${name}`)
   if (!tool.ready || !tool.run) return failed(name, `“${tool.name}” henüz hazır değil: ${tool.summary}`)
   const input: Args = args && typeof args === 'object' ? (args as Args) : {}
+
+  // An outside caller has to earn the right to touch the desktop; the panel already has it.
+  if (source === 'agent' && tool.sendsInput) {
+    const mode = ctx.permission()
+    if (mode === 'off') return failed(name, `“${tool.name}” için ajan izni kapalı. Ajan sekmesinden açabilirsin.`)
+    if (mode === 'ask') {
+      const what = typeof input.nodeId === 'string' ? ` (node ${input.nodeId})` : ''
+      const approved = await ctx.askApproval(`${tool.summary}${what}`)
+      if (!approved) {
+        ctx.log('warn', `Ajan · ${name} · onay verilmedi.`)
+        return { ok: false, tool: name, outcome: 'durduruldu', message: 'Bu çağrı için onay verilmedi.' }
+      }
+    }
+  }
+
   try {
     return await tool.run(input, ctx)
   } catch (e) {

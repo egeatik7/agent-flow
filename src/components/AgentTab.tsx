@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AgentGraph, AgentNode, ToolResult, ToolSpec } from '../types'
+import type { AgentGraph, AgentNode, AppSettings, ToolResult, ToolSpec } from '../types'
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
 
@@ -14,7 +14,17 @@ function errText(e: unknown): string {
  * is exactly what the agent gets. Built for debugging: the answer is the engine's own words,
  * and nothing on this tab can change the flow.
  */
-export default function AgentTab({ selected, graph }: { selected: AgentNode | null; graph: AgentGraph }) {
+export default function AgentTab({
+  selected,
+  graph,
+  settings,
+  onSaveSettings,
+}: {
+  selected: AgentNode | null
+  graph: AgentGraph
+  settings: AppSettings
+  onSaveSettings: (partial: Partial<AppSettings>) => void
+}) {
   const [busy, setBusy] = useState('')
   const [result, setResult] = useState<ToolResult | null>(null)
   const [error, setError] = useState('')
@@ -52,12 +62,28 @@ export default function AgentTab({ selected, graph }: { selected: AgentNode | nu
     }
   }
 
+  const steps = result?.data?.steps as { done?: number; errors?: number } | undefined
+
   return (
     <div>
       <p className="hint">
         Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Şu an <b>akışı okuma</b>,
         <b>hedefi önizleme</b> ve <b>tek adım çalıştırma</b> hazır; önizleme ekrana hiç dokunmaz, tek adım dokunur ama akışı ilerletmez.
       </p>
+
+      <div className="field">
+        <label>Ajan izni</label>
+        <select
+          className="xp-input"
+          value={settings.agentPermission ?? 'ask'}
+          onChange={(e) => onSaveSettings({ agentPermission: e.target.value as 'off' | 'ask' | 'auto' })}
+        >
+          <option value="off">Kapalı — dışarıdan eyleyen araç çalışmaz</option>
+          <option value="ask">Sor — her eyleyen çağrı onay ister</option>
+          <option value="auto">Otomatik — onay sormaz</option>
+        </select>
+        <p className="hint">Bu sekmedeki düğmeler sorulmaz: düğmeye basman zaten onayın. Okuma araçları hiç sorulmaz.</p>
+      </div>
 
       <div className="field">
         <label>Hedef denemesi (girdi göndermez)</label>
@@ -96,6 +122,17 @@ export default function AgentTab({ selected, graph }: { selected: AgentNode | nu
         <p className="hint">Node’ları, paketleri ve döngüleri listeler; kutuların içi dahil. Kaydedilmemiş tuval de okunur.</p>
       </div>
 
+      <div className="field">
+        <label>Koşu</label>
+        <button type="button" className="xp-btn" disabled={busy === 'run.state'} onClick={() => void call('run.state', {})}>
+          {busy === 'run.state' ? 'Bakılıyor…' : 'Durumu oku'}
+        </button>
+        <button type="button" className="xp-btn" style={{ marginLeft: 6 }} disabled={busy === 'run.stop'} onClick={() => void call('run.stop', {})}>
+          Durdur
+        </button>
+        <p className="hint">Durum: hangi node, hangi kutu, hangi öğe, kaç adım gözlendi, son hata ne.</p>
+      </div>
+
       {error && <p className="hint">Hata: {error}</p>}
 
       {result && (
@@ -128,6 +165,22 @@ export default function AgentTab({ selected, graph }: { selected: AgentNode | nu
                 {typeof result.loop.index === 'number' ? `${result.loop.index + 1}/${result.loop.total}` : '—'}
                 {result.loop.item ? ` · ${result.loop.item}` : ''}
               </li>
+            )}
+            {result.tool === 'run.state' && (
+              <>
+                <li>
+                  koşu: {result.data?.running ? 'sürüyor' : 'yok'}
+                  {result.data?.probing ? ' · tek adım sürüyor' : ''}
+                  {result.data?.stopRequested ? ' · durdurma istendi' : ''}
+                </li>
+                {result.data?.nodeTitle ? <li>node: {String(result.data.nodeTitle)}</li> : null}
+                {steps ? (
+                  <li>
+                    gözlenen adımlar: {steps.done ?? 0} tamam · {steps.errors ?? 0} hata
+                  </li>
+                ) : null}
+                {result.data?.lastError ? <li>son hata: {String(result.data.lastError)}</li> : null}
+              </>
             )}
             {result.suggestion && <li>öneri: {result.suggestion}</li>}
           </ul>

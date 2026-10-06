@@ -24,11 +24,16 @@ export type LoopContext = {
   total?: number
   /** {{öğe}}, {{sıra}}, {{toplam}} resolved as the runner would, outer boxes included. */
   vars?: Record<string, string>
+  /** Where the items come from. A folder-backed box only fills its list while it runs. */
+  folder?: string
+  templated?: boolean
 }
 
 export type NodeContext = {
   packagePath: string[]
   loop?: LoopContext
+  /** Every box around the node, outermost first, so a caller can see the whole chain. */
+  loops?: LoopContext[]
 }
 
 /** The box a node is a direct member of. A node belongs to at most one box. */
@@ -50,8 +55,16 @@ export function walkGraph(
 ): void {
   const owner = boxOwner(graph)
   for (const node of graph.nodes) {
-    const box = owner.get(node.id)
-    const chain = box ? [...loops, box] : loops
+    // A box can itself be a member of another box, so the chain is built upwards: a node deep
+    // in a nested box must see every box around it, outermost first.
+    const chain = [...loops]
+    const own: AgentNode[] = []
+    let box = owner.get(node.id)
+    while (box) {
+      own.unshift(box)
+      box = owner.get(box.id)
+    }
+    chain.push(...own)
     visit({ node, packagePath, loops: chain })
     if (node.kind === 'package' && node.inner) walkGraph(node.inner, visit, [...packagePath, node.id], chain)
   }
@@ -74,18 +87,33 @@ export function countEdges(graph: AgentGraph): number {
   return total
 }
 
-/** Where the run would be if this node were reached now: the box, the item, and the values. */
-export function contextOf(graph: AgentGraph, id: string): NodeContext | null {
+/** Every box around a node, outermost first, each with the item it is on and the values. */
+export function chainOf(graph: AgentGraph, id: string): LoopContext[] {
   const place = findPlace(graph, id)
-  if (!place) return null
+  if (!place) return []
   let vars: Record<string, string> = {}
-  let loop: LoopContext | undefined
-  for (const box of place.loops) {
+  return place.loops.map((box) => {
     const keys = loopKeys(box)
     const index = loopStartIndex(box, keys.length, true)
     const item = keys[index]
     vars = { ...vars, ...itemVars(item ?? '', index, keys.length) }
-    loop = { id: box.id, title: box.title, item, index, total: keys.length, vars: { ...vars } }
-  }
-  return { packagePath: place.packagePath, loop }
+    return {
+      id: box.id,
+      title: box.title,
+      item,
+      index,
+      total: keys.length,
+      vars: { ...vars },
+      folder: typeof box.folder === 'string' && box.folder ? box.folder : undefined,
+      templated: box.templated ? true : undefined,
+    }
+  })
+}
+
+/** Where the run would be if this node were reached now: the box, the item, and the values. */
+export function contextOf(graph: AgentGraph, id: string): NodeContext | null {
+  const place = findPlace(graph, id)
+  if (!place) return null
+  const loops = chainOf(graph, id)
+  return { packagePath: place.packagePath, loop: loops.length ? loops[loops.length - 1] : undefined, loops }
 }

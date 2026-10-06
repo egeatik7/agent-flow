@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings } from '../electron/graph-types'
-import { contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
+import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { callTool, toolList, type ToolContext } from '../electron/tools'
 
 let seq = 0
@@ -23,12 +23,18 @@ function fixture() {
   return { graph, loop, pkg, click }
 }
 
-function ctx(graph: AgentGraph): ToolContext {
+function ctx(graph: AgentGraph, over: Partial<ToolContext> = {}): ToolContext {
   return {
     getGraph: () => graph,
-    getSettings: () => ({}) as AppSettings,
+    getSettings: () => ({ agentPermission: 'auto' }) as AppSettings,
     log: () => {},
     isRunning: () => false,
+    userStop: () => false,
+    sendStep: () => {},
+    permission: () => 'auto',
+    askApproval: async () => true,
+    requestStop: () => {},
+    ...over,
   }
 }
 
@@ -106,7 +112,9 @@ describe('araç katmanı', () => {
     expect(names).toContain('run.state')
     expect(list.find((t) => t.name === 'step.run')?.ready).toBe(true)
     expect(list.find((t) => t.name === 'step.run')?.sendsInput).toBe(true)
-    expect(list.find((t) => t.name === 'run.state')?.ready).toBe(false)
+    expect(list.find((t) => t.name === 'run.state')?.ready).toBe(true)
+    expect(list.find((t) => t.name === 'run.stop')?.ready).toBe(true)
+    expect(list.find((t) => t.name === 'run.from')?.ready).toBe(false)
   })
 
   it('tek adım: eksik node, bilinmeyen node, başlangıç/bitir ve koşu sürerken reddedilir', async () => {
@@ -147,5 +155,84 @@ describe('araç katmanı', () => {
     const { graph } = fixture()
     // Kökte Başlangıç → kutu; paketin içinde Başlangıç → Tıkla.
     expect(countEdges(graph)).toBe(2)
+  })
+
+  it('döngü zincirini dıştan içe verir', () => {
+    const root = createNode('start', 0, 0)
+    const outer = createNode('loop', 100, 0)
+    outer.title = 'Gruplar'
+    outer.items = ['g1', 'g2']
+    const inner = createNode('loop', 200, 0)
+    inner.title = 'Dosyalar'
+    inner.items = ['a.png', 'b.png']
+    const c = createNode('click', 300, 0)
+    outer.members = [inner.id]
+    inner.members = [c.id]
+    const graph: AgentGraph = { nodes: [root, outer, inner, c], edges: [edge(root, 'next', outer)] }
+
+    const chain = chainOf(graph, c.id)
+
+    expect(chain.map((l) => l.title)).toEqual(['Gruplar', 'Dosyalar'])
+    expect(chain[0].item).toBe('g1')
+    expect(chain[1].item).toBe('a.png')
+    // Değişkenler dıştan içe birleşir: iç kutunun {{sıra}}'sı kendi listesinden gelir.
+    expect(chain[1].vars?.['sira']).toBe('1')
+    expect(chain[1].vars?.['oge']).toBe('a.png')
+
+    // Şablon döngü bilgisi zincirde taşınır: öğe listesi çalışırken doldurulur.
+    inner.templated = true
+    inner.folder = '{{öğe}}'
+    const flagged = chainOf(graph, c.id)
+    expect(flagged[1].templated).toBe(true)
+    expect(flagged[1].folder).toBe('{{öğe}}')
+  })
+
+  it('koşu durumunu ve durdurmayı bildirir', async () => {
+    const { graph } = fixture()
+    const idle = await callTool('run.state', {}, ctx(graph))
+    expect(idle.ok).toBe(true)
+    expect(idle.message).toContain('koşu yok')
+
+    let stopped = false
+    const stop = await callTool('run.stop', {}, ctx(graph, { requestStop: () => { stopped = true } }))
+    expect(stop.ok).toBe(true)
+    expect(stopped).toBe(true)
+  })
+
+  it('ajan izni: kapalı reddeder, sor onay ister, panel ve okuma sorulmaz', async () => {
+    const { graph, click } = fixture()
+    const busy = { isRunning: () => true }
+
+    const off = await callTool('step.run', { nodeId: click.id }, ctx(graph, { ...busy, permission: () => 'off' }), 'agent')
+    expect(off.ok).toBe(false)
+    expect(off.message).toContain('izni kapalı')
+
+    let asked = ''
+    const denied = await callTool(
+      'step.run',
+      { nodeId: click.id },
+      ctx(graph, {
+        ...busy,
+        permission: () => 'ask',
+        askApproval: async (s: string) => {
+          asked = s
+          return false
+        },
+      }),
+      'agent'
+    )
+    expect(asked).toContain('Tek adım')
+    expect(denied.outcome).toBe('durduruldu')
+    expect(denied.message).toContain('onay')
+
+    // Kapı geçirir; araç kendi kuralıyla reddeder (koşu sürüyor) — yani izin engellemedi.
+    const auto = await callTool('step.run', { nodeId: click.id }, ctx(graph, { ...busy, permission: () => 'auto' }), 'agent')
+    expect(auto.message).toContain('koşu')
+    // Panelde düğmeye basmak onayın kendisidir.
+    const panel = await callTool('step.run', { nodeId: click.id }, ctx(graph, { ...busy, permission: () => 'off' }), 'panel')
+    expect(panel.message).toContain('koşu')
+    // Okuma araçları hiç sorulmaz.
+    const reading = await callTool('flow.read', { graph }, ctx(graph, { permission: () => 'off' }), 'agent')
+    expect(reading.ok).toBe(true)
   })
 })
