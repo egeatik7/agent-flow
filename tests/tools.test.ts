@@ -3,6 +3,7 @@ import { createNode, type AgentGraph, type AgentNode, type AppSettings, type Can
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { callTool, toolList, actionSent, windowMismatch, withFastFind, type ToolContext } from '../electron/tools'
 import { windowEventAllowed } from '../electron/run-events'
+import { isTestProfile, profileDirName, storeCwd } from '../electron/profile'
 import { beginRun, endRun } from '../electron/tool-state'
 
 let seq = 0
@@ -252,6 +253,21 @@ describe('araç katmanı', () => {
     expect(windowEventAllowed('agent:log', true)).toBe(true)
     expect(windowEventAllowed('agent:step', false)).toBe(true)
     expect(windowEventAllowed('agent:patch', false)).toBe(true)
+  })
+
+  it('profil adı test örneğini ayrı klasöre koyar', () => {
+    // Gerçek profil adını korur; test profili kendi klasörünü alır (akışlar, günlükler, jeton).
+    expect(profileDirName(undefined)).toBe('xp-agent-studio')
+    expect(profileDirName('')).toBe('xp-agent-studio')
+    expect(profileDirName('  ')).toBe('xp-agent-studio')
+    expect(profileDirName('test')).toBe('xp-agent-studio-test')
+    expect(profileDirName('Test 2!')).toBe('xp-agent-studio-test2')
+    expect(isTestProfile('test')).toBe(true)
+    expect(isTestProfile('')).toBe(false)
+    // Gerçek profil deposunu oynatmıyoruz: yeri değişirse akışlar kaybolmuş gibi görünür.
+    expect(storeCwd('', 'C:\\u')).toBeUndefined()
+    expect(storeCwd(undefined, 'C:\\u')).toBeUndefined()
+    expect(storeCwd('test', 'C:\\u')).toBe('C:\\u')
   })
 
   it('istenen pencere okunmadıysa bu açıkça söylenir', () => {

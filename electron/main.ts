@@ -5,6 +5,7 @@ import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
+import { storeCwd } from './profile'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import { beginRun, endRun, noteError, noteLogLine, noteStep, probing, setDebugRun, setErrorStopHook } from './tool-state'
@@ -35,6 +36,9 @@ const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore 
 const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
+  // The real profile keeps the file exactly where it has always lived. A test profile
+  // (NUBBO_PROFILE) gets its own, so developing with Nubbo cannot reach the real flows.
+  ...(storeCwd(process.env.NUBBO_PROFILE, app.getPath('userData')) ? { cwd: app.getPath('userData') } : {}),
 })
 
 let mainWindow: BrowserWindow | null = null
@@ -633,7 +637,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const live = endpointInfo()
     if (want && !live) {
       try {
-        const started = await startEndpoint(toolContext, endpointFile)
+        const started = await startEndpoint(toolContext, endpointFile, {
+          app: app.getVersion(),
+          profile: String(process.env.NUBBO_PROFILE ?? ''),
+        })
         log('info', `Ajan uç noktası açık: http://127.0.0.1:${started.port} · jeton dosyası: ${started.file}`)
       } catch (e) {
         log('error', `Ajan uç noktası açılamadı: ${(e as Error).message}`)

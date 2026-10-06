@@ -16,6 +16,8 @@ const dist = path.resolve(__dirname, '../dist-electron')
 const USAGE = `nubbo <komut> [seçenekler]
 
   tools                          Araç kataloğu (hazır / sırada)
+  where                          Hangi örneğe bağlıyım: profil, jeton, sürüm, süreç, sağlık
+                                 (NUBBO_PROFILE=test ile test örneğini seçer)
   flow     --file <akis.json>    Akışı oku: paket ağacı, döngüler, sayılar
              [--nodes]             Node listesini de yaz (id, tür, başlık, paket)
              [--kind <tur>]        Yalnız bu türdeki node'lar
@@ -105,17 +107,32 @@ function toolContext(graph) {
   }
 }
 
+/**
+ * Which instance this client talks to.
+ *
+ * `NUBBO_PROFILE=test` puts the client on the same separate folder the app uses for that profile,
+ * so a test instance and the person's own one can never be confused: the token files live in
+ * different folders and each carries its own version and profile stamp.
+ */
+function profileName() {
+  return String(process.env.NUBBO_PROFILE || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+}
+
 /** Where the running app leaves its address and token. */
 function endpointFile() {
   const base = process.env.APPDATA || ''
-  const candidates = [
-    path.join(base, 'xp-agent-studio', 'tool-endpoint.json'),
-    path.join(base, 'Nubbo Agent Studio', 'tool-endpoint.json'),
-  ]
+  const profile = profileName()
+  const names = profile ? [`xp-agent-studio-${profile}`] : ['xp-agent-studio', 'Nubbo Agent Studio']
+  const candidates = names.map((name) => path.join(base, name, 'tool-endpoint.json'))
   for (const file of candidates) {
     try {
       const info = JSON.parse(fs.readFileSync(file, 'utf8'))
-      if (info && info.port && info.token) return { port: info.port, token: info.token, pid: info.pid, file }
+      if (info && info.port && info.token) {
+        return { port: info.port, token: info.token, pid: info.pid, app: info.app, profile: info.profile, file }
+      }
     } catch {
       /* try the next one */
     }
@@ -276,6 +293,34 @@ async function main() {
   } catch (e) {
     console.error(`Araç katmanı yüklenemedi (önce "npm run build:main"): ${e.message}`)
     process.exit(3)
+  }
+
+  if (cmd === 'where') {
+    // Answers "which instance am I about to touch?" before anything is touched: profile, folder,
+    // token file, version behind it and whether that process is still alive.
+    const profile = profileName()
+    const info = endpointFile()
+    console.log(`profil: ${profile || '(gerçek profil)'}`)
+    if (!info) {
+      const base = process.env.APPDATA || ''
+      const guess = path.join(base, profile ? `xp-agent-studio-${profile}` : 'xp-agent-studio', 'tool-endpoint.json')
+      console.log(`uç nokta: yok (${guess})`)
+      console.log('durum: bu profil için açık bir Nubbo yok')
+      process.exit(3)
+    }
+    const alive = pidAlive(info.pid)
+    console.log(`uç nokta: ${info.file}`)
+    console.log(`port: ${info.port} · süreç: ${info.pid} (${alive ? 'yaşıyor' : 'ÖLÜ — eski jeton'})`)
+    console.log(`uygulama sürümü: ${info.app || '(bilinmiyor)'} · jetonun profili: ${info.profile || '(gerçek)'}`)
+    let health = 'ulaşılamadı'
+    try {
+      const r = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(4000) })
+      health = r.ok ? 'yanıt veriyor' : `HTTP ${r.status}`
+    } catch (e) {
+      health = `hata: ${e.message}`
+    }
+    console.log(`sağlık: ${health}`)
+    process.exit(alive && health === 'yanıt veriyor' ? 0 : 3)
   }
 
   if (cmd === 'tools') {

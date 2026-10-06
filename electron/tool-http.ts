@@ -85,7 +85,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, ctx: 
   reply(res, 404, { ok: false, message: 'Bilinmeyen yol.' })
 }
 
-export async function startEndpoint(ctx: ToolContext, file: string): Promise<EndpointPublic> {
+export async function startEndpoint(
+  ctx: ToolContext,
+  file: string,
+  stamp?: { app?: string; profile?: string }
+): Promise<EndpointPublic> {
   if (server && info) return { port: info.port, file: info.file, startedAt: info.startedAt }
   const token = crypto.randomBytes(24).toString('hex')
   const s = http.createServer((req, res) => {
@@ -104,7 +108,25 @@ export async function startEndpoint(ctx: ToolContext, file: string): Promise<End
   server = s
   info = { port, token, file, startedAt: Date.now() }
   try {
-    fs.writeFileSync(file, JSON.stringify({ port, token, pid: process.pid, at: new Date().toISOString(), version: 1 }, null, 2), 'utf8')
+    fs.writeFileSync(
+      file,
+      JSON.stringify(
+        {
+          port,
+          token,
+          pid: process.pid,
+          at: new Date().toISOString(),
+          version: 1,
+          // Which build is behind this door, and which profile it is: a caller can prove it is
+          // talking to the instance it means to, instead of guessing from a port number.
+          app: stamp?.app ?? '',
+          profile: stamp?.profile ?? '',
+        },
+        null,
+        2
+      ),
+      'utf8'
+    )
   } catch {
     /* the endpoint still works in-process; only the command line cannot find it */
   }

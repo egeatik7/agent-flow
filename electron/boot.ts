@@ -1,9 +1,12 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { profileDirName } from './profile'
 
-// Keep the existing profile folder before any store is opened.
-app.setPath('userData', path.join(app.getPath('appData'), 'xp-agent-studio'))
+// Keep the existing profile folder before any store is opened. NUBBO_PROFILE puts an instance on
+// its own folder (flows, logs and endpoint token included), so a test instance can never touch
+// the flows of the one the person is working in.
+app.setPath('userData', path.join(app.getPath('appData'), profileDirName(process.env.NUBBO_PROFILE)))
 
 let splash: BrowserWindow | null = null
 let pageReady = false
