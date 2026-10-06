@@ -126,7 +126,7 @@ type ToolDef = {
   ready: boolean
   /** What the approval dialog should say about this tool's effect on the flow. */
   approvalNote?: string
-  run?: (args: Args, ctx: ToolContext) => Promise<ToolResult>
+  run?: (args: Args, ctx: ToolContext, source: ToolSource) => Promise<ToolResult>
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -274,8 +274,9 @@ const flowSuggest: ToolDef = {
   },
 }
 
-/** A write needs the permission to be open; reading does not. */
-function writeGate(ctx: ToolContext): string | null {
+/** A write by an outside caller needs the permission to be open; the panel is its own approval. */
+function writeGate(ctx: ToolContext, source: ToolSource): string | null {
+  if (source === 'panel') return null
   return ctx.permission() === 'off' ? 'Ajan izni kapalı; yazma yapılmaz (Ajan sekmesinden aç).' : null
 }
 
@@ -299,8 +300,8 @@ const branchCreate: ToolDef = {
   summary: 'Kendi branch’ini açar: seçili tuvali temel alan bir düzenleme tarifi. Akışın kopyası değil.',
   sendsInput: false,
   ready: true,
-  run: async (args, ctx) => {
-    const denied = writeGate(ctx)
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
     if (denied) return failed(branchCreate.name, denied)
     const book = ctx.getCanvases()
     const open = branchesOf(book)
@@ -359,6 +360,8 @@ const branchList: ToolDef = {
           baseChanged: v.baseChanged,
           failed: v.failed,
           diff: v.diff,
+          /** The whole record, to show that a branch is a recipe and not a copy of the flow. */
+          size: JSON.stringify(v.branch).length,
         })),
       },
     }
@@ -395,8 +398,8 @@ const flowEdit: ToolDef = {
   summary: 'Kendi branch’ine düzenleme ekler. Akışına dokunmaz; uygulamak için merge gerekir.',
   sendsInput: false,
   ready: true,
-  run: async (args, ctx) => {
-    const denied = writeGate(ctx)
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
     if (denied) return failed(flowEdit.name, denied)
     const picked = pickBranch(args, ctx)
     if ('error' in picked) return failed(flowEdit.name, picked.error)
@@ -438,8 +441,8 @@ const flowUndo: ToolDef = {
   summary: 'Branch’teki son düzenlemeyi geri alır.',
   sendsInput: false,
   ready: true,
-  run: async (args, ctx) => {
-    const denied = writeGate(ctx)
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
     if (denied) return failed(flowUndo.name, denied)
     const id = text(args.branchId)
     const book = ctx.getCanvases()
@@ -467,8 +470,8 @@ const branchDrop: ToolDef = {
   summary: 'Bir branch kaydını siler. Akışa hiçbir şey olmaz (branch zaten uygulanmamıştı).',
   sendsInput: false,
   ready: true,
-  run: async (args, ctx) => {
-    const denied = writeGate(ctx)
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
     if (denied) return failed(branchDrop.name, denied)
     const id = text(args.branchId)
     const book = ctx.getCanvases()
@@ -976,7 +979,7 @@ export async function callTool(name: string, args: unknown, ctx: ToolContext, so
   }
 
   try {
-    return await tool.run(input, ctx)
+    return await tool.run(input, ctx, source)
   } catch (e) {
     const message = `Araç çalıştırılamadı: ${(e as Error).message}`
     ctx.log('error', `Ajan · ${name} · ${message}`)

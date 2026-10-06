@@ -214,11 +214,21 @@ describe('branch: kopya değil, tarif', () => {
     expect(branchesOf(h.book)).toHaveLength(0)
   })
 
-  it('izin kapalıyken yazmaz, okumaya devam eder', async () => {
+  it('izin kapalıyken ajan yazamaz, panel yazabilir, okuma sürer', async () => {
     const h = harness('off')
-    const created = await callTool('branch.create', { name: 'x' }, h.ctx)
+    const created = await callTool('branch.create', { name: 'x' }, h.ctx, 'agent')
     expect(created.ok).toBe(false)
     expect(created.message).toContain('izni kapalı')
+
+    // Panelde düğmeye basmak onayın kendisidir: izin kapalı olsa da kendi araçlarını kullanır.
+    const fromPanel = await callTool('branch.create', { name: 'panel önerisi' }, h.ctx, 'panel')
+    expect(fromPanel.ok).toBe(true)
+    const panelId = String(fromPanel.data?.branchId ?? '')
+    expect(branchesOf(h.book)).toHaveLength(1)
+    const edited = await callTool('flow.edit', { branchId: panelId, ops: [patchWait(h.wait.id, 3000)] }, h.ctx, 'panel')
+    expect(edited.ok).toBe(true)
+    const dropped = await callTool('branch.drop', { branchId: panelId }, h.ctx, 'panel')
+    expect(dropped.ok).toBe(true)
 
     const reading = await callTool('flow.suggest', {}, h.ctx)
     expect(reading.ok).toBe(true)

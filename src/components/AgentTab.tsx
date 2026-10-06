@@ -3,6 +3,21 @@ import type { AgentGraph, AgentNode, AppSettings, ToolResult, ToolSpec } from '.
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
 
+/** One line of the branch list, as `branch.list` reports it. */
+type BranchRow = {
+  branchId: string
+  name: string
+  baseName: string | null
+  groups: number
+  ops: number
+  baseChanged: boolean
+  failed: string[]
+  size: number
+}
+
+/** A node a branch adds or changes, for the single-step picker. */
+type BranchNode = { id: string; kind: string; title: string }
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -30,6 +45,10 @@ export default function AgentTab({
   const [error, setError] = useState('')
   const [specs, setSpecs] = useState<ToolSpec[]>([])
   const [endpoint, setEndpoint] = useState<{ port: number; file: string } | null>(null)
+  const [branches, setBranches] = useState<BranchRow[]>([])
+  const [branchId, setBranchId] = useState('')
+  const [branchNodes, setBranchNodes] = useState<BranchNode[]>([])
+  const [branchNode, setBranchNode] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -85,11 +104,68 @@ export default function AgentTab({
     | null
     | undefined
 
+  /** The branch list is read on its own, so it does not push the last answer off the screen. */
+  const refreshBranches = async () => {
+    if (!api?.callTool) return
+    setBusy('branch.list')
+    try {
+      const r = await api.callTool('branch.list', {})
+      if (r.ok) setBranches(((r.data?.branches as BranchRow[] | undefined) ?? []).slice())
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const inspectBranch = async (id: string) => {
+    if (!api?.callTool) return
+    setBranchId(id)
+    setBranchNodes([])
+    setBranchNode('')
+    setBusy('branch.diff')
+    setError('')
+    setResult(null)
+    try {
+      const r = await api.callTool('branch.diff', { branchId: id })
+      setResult(r)
+      const d = r.data?.diff as { addedNodes?: BranchNode[]; changedNodes?: BranchNode[] } | undefined
+      setBranchNodes([...(d?.addedNodes ?? []), ...(d?.changedNodes ?? [])])
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const dropBranch = async (id: string) => {
+    if (!api?.callTool) return
+    setBusy('branch.drop')
+    try {
+      await api.callTool('branch.drop', { branchId: id })
+      if (branchId === id) {
+        setBranchId('')
+        setBranchNodes([])
+      }
+      await refreshBranches()
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  useEffect(() => {
+    void refreshBranches()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <div>
       <p className="hint">
-        Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Şu an <b>akışı okuma</b>,
-        <b>hedefi önizleme</b> ve <b>tek adım çalıştırma</b> hazır; önizleme ekrana hiç dokunmaz, tek adım dokunur ama akışı ilerletmez.
+        Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Hazır olanlar: <b>akışı okuma</b>,
+        <b> hedefi önizleme</b>, <b>tek adım çalıştırma</b> ve <b>branch önerisi</b> (tarif olarak; akışına yazmaz). Önizleme ekrana hiç
+        dokunmaz, tek adım ve branch testi dokunur ama akışı ilerletmez.
       </p>
 
       <div className="field">
@@ -176,6 +252,72 @@ export default function AgentTab({
           Durdur
         </button>
         <p className="hint">Durum: hangi node, hangi kutu, hangi öğe, kaç adım gözlendi, son hata ne.</p>
+      </div>
+
+      <div className="field">
+        <label>Ajan branch’leri (öneri tarifi)</label>
+        <button type="button" className="xp-btn" disabled={busy === 'branch.list'} onClick={() => void refreshBranches()}>
+          {busy === 'branch.list' ? 'Bakılıyor…' : 'Branch’leri yenile'}
+        </button>
+        {branches.length === 0 ? (
+          <p className="hint">
+            Açık branch yok. Ajan <b>branch.create</b> ile kendi branch’ini açar: bu, akışının <b>kopyası değil</b>, düzenleme tarifidir.
+            Senin akışına ve açık tuvaline hiçbir şey yazılmaz; tarifi ana akışa geçirmek (merge) sonraki adımda geliyor.
+          </p>
+        ) : (
+          <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: 12, lineHeight: 1.5 }}>
+            {branches.map((b) => (
+              <li key={b.branchId} style={{ marginBottom: 6 }}>
+                <b>{b.name}</b> · {b.groups} düzenleme · {b.ops} işlem · {(b.size / 1024).toFixed(1)} KB
+                {b.baseName ? ` · temel: ${b.baseName}` : ''}
+                {b.baseChanged ? ' · temeli değişmiş' : ''}
+                {b.failed?.length ? ` · ${b.failed.length} grup uymuyor` : ''}
+                <div style={{ marginTop: 2 }}>
+                  <button type="button" className="xp-btn" disabled={!!busy} onClick={() => void inspectBranch(b.branchId)}>
+                    İncele
+                  </button>
+                  <button
+                    type="button"
+                    className="xp-btn"
+                    style={{ marginLeft: 4 }}
+                    disabled={!!busy}
+                    onClick={() => void call('run.from', { branchId: b.branchId })}
+                  >
+                    Test et
+                  </button>
+                  <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void dropBranch(b.branchId)}>
+                    Sil
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {branchNodes.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <select className="xp-input" value={branchNode} onChange={(e) => setBranchNode(e.target.value)}>
+              <option value="">— branch’te değişen bir node seç —</option>
+              {branchNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title} ({n.kind})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="xp-btn"
+              style={{ marginLeft: 4 }}
+              disabled={!branchNode || !!busy}
+              onClick={() => void call('step.run', { nodeId: branchNode, branchId })}
+            >
+              Tek adım (branch)
+            </button>
+          </div>
+        )}
+        <p className="hint">
+          <b>Test et</b> branch’i türetilmiş haliyle çalıştırır: kayıtlı akışa yazılmaz ve tuvalin döngü işaretlerini değiştirmez.
+          <b> İncele</b> yalnız farkı hesaplar. <b>Sil</b> yalnız tarifi siler; akışa hiçbir şey olmaz.
+        </p>
       </div>
 
       {error && <p className="hint">Hata: {error}</p>}
