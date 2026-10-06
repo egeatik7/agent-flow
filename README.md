@@ -125,6 +125,12 @@ koruması (başka program öndeyse uygulama tuşu gönderilmez), aynı hafıza v
 | `flow.read` | Node’ları, paketleri, döngüleri, bağlantıları listeler | Hayır |
 | `flow.context` | Bir node’un paket yolunu, içindeki kutuları ve o anki öğeyi söyler | Hayır |
 | `flow.suggest` | Bir düzenleme planını denetler ve neyi değiştireceğini yazar | Hayır |
+| `branch.create` | Kendi branch’ini açar: akışın kopyası değil, düzenleme tarifi | Hayır |
+| `branch.list` | Açık branch’leri, kaç düzenleme tuttuklarını ve neyi değiştirdiklerini listeler | Hayır |
+| `branch.diff` | Bir branch’in temel tuvaline göre farkını gösterir | Hayır |
+| `flow.edit` | Branch’e düzenleme ekler (yalnız kendi branch’ine) | Hayır |
+| `flow.undo` | Branch’teki son düzenlemeyi geri alır | Hayır |
+| `branch.drop` | Branch kaydını siler | Hayır |
 | `target.preview` | O node için nereyi hedefleyeceğini, kaç aday bulduğunu söyler | Hayır |
 | `step.run` | **Tek adım**: yalnız o node’u çalıştırır, zincir orada durur | Evet |
 | `run.from` | Belirtilen node’dan koşuyu başlatır ve hemen döner (`runId` verir) | Evet |
@@ -157,13 +163,28 @@ node scripts/nubbo-cli.cjs from --node <id>
 node scripts/nubbo-cli.cjs screen --image
 ```
 
-Ajan araçları şu an akışı **düzenleyemez**. `flow.suggest` bir düzenleme planını **denetler** ve
-ne değişeceğini yazar (eklenen/değişen node, kurulan bağlantı) ama hiçbir şey yazmaz; yazma yolu
-(branch tuvalinde düzenleme ve geri alma) sonraki adımda geliyor. Denetim şunları reddeder:
-hedef kanıtı alanları (`locator`, simge, hafıza, çapa, yol, iz), `Başlangıç`/`Paket`/`Kutu` ekleme,
-olmayan çıkış adı, dolu bir çıkışa ikinci bağlantı (motor bir çıkışta **ilk oku** izler, ikincisi
-sessizce ölü kalırdı) ve `Başlangıç`’a ok çekme. Halka oluşturan bir değişiklik engellenmez ama
-açıkça uyarılır.
+## Branch: ajanın önerisi (kopya değil, tarif)
+
+Ajan akışını **doğrudan değiştiremez**. `branch.create` ile **kendi branch’ini** açar: bu, tuvalin
+kopyası değil, **düzenleme tarifidir** (`{ad, temelTuval, temelParmakIzi, opListesi}`). Tam grafik
+yalnız gerektiğinde (bakmak, test etmek, merge etmek) **temel + tarif** olarak bellekte üretilir —
+yirmi branch birkaç kilobayt tutar, yirmi akış kopyası tutmaz. Aynı anda en fazla **3** branch açık
+olabilir; branch silinince akışa hiçbir şey olmaz.
+
+- **Düzenleme:** `flow.edit` yalnız ajanın kendi branch’ine yazar; her çağrı bir **grup** olur ve
+  `flow.undo` son grubu geri alır. Kullanıcının tuvaline ve kayıtlı akışa **hiç** yazılmaz.
+- **Denetim:** `flow.suggest` gibi aynı kurallar işler: hedef kanıtı alanları (`locator`, simge,
+  hafıza, çapa, yol, iz) yazılamaz, `Başlangıç`/`Paket`/`Kutu` eklenemez, olmayan çıkış adı ve dolu
+  çıkışa ikinci bağlantı reddedilir (motor bir çıkışta **ilk oku** izler), `Başlangıç`’a ok çekilemez.
+- **Test:** `step.run --branch <id>` ve `run.from --branch <id>` tarifi **türetilmiş grafik** üzerinde
+  çalıştırır. Branch koşusu **kayıtlı akışa yazılmaz** ve tuvali ışıklandırmaz; döngü işaretleri
+  kullanıcının tuvalinde değişmez.
+- **Temel değişirse:** tarif **güncel** tuvaline uygulanır ve `baseChanged` bildirilir; artık uymayan
+  grup **ismiyle** söylenir, kalanı yine uygulanır (sessizce yutulmaz).
+- **Merge henüz yok:** tarifi ana akışa geçirmek, çakışma raporu ve tek geri alma ile birlikte
+  sonraki adımda geliyor. Şu an ajan öneri üretir, kullanıcı `branch.diff` ile bakar.
+
+`flow.suggest` tek başına da kullanılabilir: bir planı denetler ve **hiçbir şey yazmaz**.
 
 ## Node türleri
 

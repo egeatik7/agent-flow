@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { assertModelKeysAllowed } from '../electron/key-guard'
 
 /** The model's choice, however the engine wrote it: list engine sends a string, GUI engine an array. */
-const allowed = (keys: string | string[]) => expect(() => assertModelKeysAllowed(keys)).not.toThrow()
-const blocked = (keys: string | string[]) => expect(() => assertModelKeysAllowed(keys)).toThrow(/engellendi/)
+const allowed = (keys: string | string[] | undefined) => expect(() => assertModelKeysAllowed(keys)).not.toThrow()
+const blocked = (keys: string | string[] | undefined) => expect(() => assertModelKeysAllowed(keys)).toThrow(/engellendi/)
 
 describe('İnisiyatif: kapatma ve silme tuşları', () => {
   it('kapatma kombinasyonları hangi yazımla gelirse gelsin engellenir', () => {

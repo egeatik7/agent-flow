@@ -142,6 +142,12 @@ export type CanvasTab = {
 export type CanvasBook = {
   activeId: string
   tabs: CanvasTab[]
+  /**
+   * Agent branches: recipes of edits over a canvas, kept as they are, never copies of a flow.
+   * Their shape lives in electron/tool-branch.ts; this layer only carries them so a save does
+   * not drop them. Absent (or empty) for books that never had one.
+   */
+  branches?: unknown[]
 }
 
 export type AppSettings = {
@@ -736,7 +742,7 @@ export function normalizeGraph(raw: unknown): AgentGraph {
 }
 
 export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
-  const rec = raw as { activeId?: unknown; tabs?: unknown } | null
+  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown } | null
   if (rec && Array.isArray(rec.tabs) && rec.tabs.length) {
     const tabs: CanvasTab[] = rec.tabs.map((item, i) => {
       const t = item as { id?: unknown; name?: unknown; graph?: unknown }
@@ -748,7 +754,11 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
       }
     })
     const activeId = tabs.some((t) => t.id === rec.activeId) ? String(rec.activeId) : tabs[0].id
-    return { activeId, tabs }
+    // Branches are carried through untouched; whoever uses them checks their own fields.
+    const branches = Array.isArray(rec.branches)
+      ? rec.branches.filter((b) => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string')
+      : undefined
+    return branches && branches.length ? { activeId, tabs, branches } : { activeId, tabs }
   }
   const id = rid()
   return { activeId: id, tabs: [{ id, name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }] }

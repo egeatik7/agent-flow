@@ -18,6 +18,8 @@ function ctx(graph: AgentGraph): ToolContext {
     askApproval: async () => true,
     requestStop: () => {},
     startRun: async () => ({ ok: true }),
+    getCanvases: () => ({ activeId: 'c1', tabs: [{ id: 'c1', name: 'Tuval 1', graph }] }),
+    saveCanvases: () => {},
   }
 }
 

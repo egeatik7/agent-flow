@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createNode, type AgentGraph, type AgentNode, type AppSettings } from '../electron/graph-types'
+import { createNode, type AgentGraph, type AgentNode, type AppSettings, type CanvasBook } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { callTool, toolList, actionSent, type ToolContext } from '../electron/tools'
 import { beginRun, endRun } from '../electron/tool-state'
@@ -25,7 +25,9 @@ function fixture() {
 }
 
 function ctx(graph: AgentGraph, over: Partial<ToolContext> = {}): ToolContext {
-  return {
+  // A book with that flow on its only canvas, mutated the way the app mutates it.
+  let book: CanvasBook = { activeId: 'canvas-1', tabs: [{ id: 'canvas-1', name: 'Tuval 1', graph }] }
+  const base: ToolContext = {
     getGraph: () => graph,
     getSettings: () => ({ agentPermission: 'auto' }) as AppSettings,
     log: () => {},
@@ -35,8 +37,13 @@ function ctx(graph: AgentGraph, over: Partial<ToolContext> = {}): ToolContext {
     permission: () => 'auto',
     askApproval: async () => true,
     requestStop: () => {},
-    ...over,
+    startRun: async () => ({ ok: true }),
+    getCanvases: () => structuredClone(book),
+    saveCanvases: (next) => {
+      book = structuredClone(next)
+    },
   }
+  return { ...base, ...over }
 }
 
 describe('akış okuma: paket ve döngü bağlamı', () => {

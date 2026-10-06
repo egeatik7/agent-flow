@@ -17,10 +17,24 @@ import {
   summarize,
   type AgentGraph,
   type AppSettings,
+  type CanvasBook,
   type LogLevel,
 } from './graph-types'
 import type { TargetTrace } from './target-trace'
-import { ADDABLE_KINDS, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps } from './tool-edit'
+import { ADDABLE_KINDS, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps, type EditOp } from './tool-edit'
+import {
+  MAX_BRANCHES,
+  addGroup,
+  branchOps,
+  branchesOf,
+  findBranch,
+  materialize,
+  newBranch,
+  summaryOf,
+  undoLast,
+  viewBranch,
+  type BranchRecord,
+} from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { beginProbe, endProbe, probing, snapshot } from './tool-state'
 
@@ -88,7 +102,15 @@ export type ToolContext = {
   /** The user's own stop, for `run.stop`. */
   requestStop: () => void
   /** Starts a real run on the engine. Returns when the run has finished. */
-  startRun: (graph: AgentGraph, startId?: string, packagePath?: string[]) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
+  startRun: (
+    graph: AgentGraph,
+    startId?: string,
+    packagePath?: string[],
+    opts?: { derived?: boolean }
+  ) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
+  /** The canvas book: the flows of the app plus the agent branches that sit over them. */
+  getCanvases: () => CanvasBook
+  saveCanvases: (book: CanvasBook) => void
 }
 
 /** `panel` is a person pressing a button in the app, which is its own approval. */
@@ -252,6 +274,214 @@ const flowSuggest: ToolDef = {
   },
 }
 
+/** A write needs the permission to be open; reading does not. */
+function writeGate(ctx: ToolContext): string | null {
+  return ctx.permission() === 'off' ? 'Ajan izni kapalı; yazma yapılmaz (Ajan sekmesinden aç).' : null
+}
+
+/** A branch named by the caller, with its derived graph ready, or the reason it cannot be used. */
+function pickBranch(
+  args: Args,
+  ctx: ToolContext
+): { book: CanvasBook; branch: BranchRecord; view: ReturnType<typeof viewBranch> } | { error: string } {
+  const id = text(args.branchId)
+  if (!id) return { error: 'branchId gerekli; önce branch.create ile bir branch aç.' }
+  const book = ctx.getCanvases()
+  const branch = findBranch(book, id)
+  if (!branch) return { error: `Branch bulunamadı: ${id}.` }
+  const view = viewBranch(book, branch)
+  if (!view.base || !view.derived) return { error: `“${branch.name}” branch’inin temel tuvali artık yok.` }
+  return { book, branch, view }
+}
+
+const branchCreate: ToolDef = {
+  name: 'branch.create',
+  summary: 'Kendi branch’ini açar: seçili tuvali temel alan bir düzenleme tarifi. Akışın kopyası değil.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const denied = writeGate(ctx)
+    if (denied) return failed(branchCreate.name, denied)
+    const book = ctx.getCanvases()
+    const open = branchesOf(book)
+    if (open.length >= MAX_BRANCHES) {
+      return failed(
+        branchCreate.name,
+        `Aynı anda en fazla ${MAX_BRANCHES} branch açık olabilir (şu an ${open.length}). Önce birini kapat: ${open.map((b) => `${b.id} (“${b.name}”)`).join(', ')}.`
+      )
+    }
+    const wanted = text(args.canvasId)
+    const base = wanted ? book.tabs.find((t) => t.id === wanted) ?? null : book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0] ?? null
+    if (!base) return failed(branchCreate.name, wanted ? `Tuval bulunamadı: ${wanted}.` : 'Temel alınacak tuval yok.')
+    const branch = newBranch(base, args.name)
+    book.branches = [...open, branch]
+    ctx.saveCanvases(book)
+    const message = `Branch açıldı: “${branch.name}” (${branch.id}) · temel: “${base.name}”. Akışın kopyası değil, düzenleme tarifi; akışa hiçbir şey yazılmadı. Düzenlemek için flow.edit, görmek için branch.diff.`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return {
+      ok: true,
+      tool: branchCreate.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Branch kaydı açıldı; koşan akışa ve tuvale dokunulmadı.' },
+      data: { branchId: branch.id, name: branch.name, baseTabId: base.id, baseName: base.name, baseStamp: branch.baseStamp, open: open.length + 1 },
+    }
+  },
+}
+
+const branchList: ToolDef = {
+  name: 'branch.list',
+  summary: 'Açık branch’leri, kaç düzenleme tuttuklarını ve neyi değiştirdiklerini listeler.',
+  sendsInput: false,
+  ready: true,
+  run: async (_args, ctx) => {
+    const book = ctx.getCanvases()
+    const views = branchesOf(book).map((b) => viewBranch(book, b))
+    const message = views.length
+      ? `Açık branch’ler (${views.length}/${MAX_BRANCHES}): ${views.map((v) => `“${v.branch.name}” (${v.branch.id}) — ${summaryOf(v)}`).join(' | ')}`
+      : 'Açık branch yok.'
+    return {
+      ok: true,
+      tool: branchList.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Yalnız okundu.' },
+      data: {
+        open: views.length,
+        max: MAX_BRANCHES,
+        branches: views.map((v) => ({
+          branchId: v.branch.id,
+          name: v.branch.name,
+          baseTabId: v.branch.baseTabId,
+          baseName: v.base?.name ?? null,
+          groups: v.branch.groups.length,
+          ops: branchOps(v.branch).length,
+          baseChanged: v.baseChanged,
+          failed: v.failed,
+          diff: v.diff,
+        })),
+      },
+    }
+  },
+}
+
+const branchDiff: ToolDef = {
+  name: 'branch.diff',
+  summary: 'Bir branch’in temel tuvaline göre neyi değiştirdiğini gösterir. Yazmaz.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const picked = pickBranch(args, ctx)
+    if ('error' in picked) return failed(branchDiff.name, picked.error)
+    const { branch, view } = picked
+    const notes: string[] = []
+    if (view.baseChanged) notes.push('temel tuval değişmiş; tarif güncel hâle uygulanıyor.')
+    if (view.failed.length) notes.push(`${view.failed.length} grup artık uymuyor: ${view.failed[0]}`)
+    const message = `“${branch.name}”: ${view.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${notes.length ? ` · ${notes.join(' ')}` : ''}`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return {
+      ok: true,
+      tool: branchDiff.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Yalnız hesaplandı; akışa ve tuvale yazılmadı.' },
+      data: { diff: view.diff, lines: view.lines, applied: view.applied, failed: view.failed, baseChanged: view.baseChanged, baseName: view.base?.name ?? null },
+    }
+  },
+}
+
+const flowEdit: ToolDef = {
+  name: 'flow.edit',
+  summary: 'Kendi branch’ine düzenleme ekler. Akışına dokunmaz; uygulamak için merge gerekir.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const denied = writeGate(ctx)
+    if (denied) return failed(flowEdit.name, denied)
+    const picked = pickBranch(args, ctx)
+    if ('error' in picked) return failed(flowEdit.name, picked.error)
+    const { book, branch, view } = picked
+    const check = planOps(view.derived as AgentGraph, args.ops)
+    if (!check.ok) {
+      const head = check.errors.slice(0, 3).join(' ')
+      const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
+      const message = `Düzenleme reddedildi, hiçbir şey eklenmedi. ${head}${rest}`
+      ctx.log('warn', `Ajan · branch · ${message}`)
+      return {
+        ok: true,
+        tool: flowEdit.name,
+        outcome: 'plan-gecersiz',
+        message,
+        observed: { note: 'Branch’e hiçbir şey eklenmedi.' },
+        data: { valid: false, errors: check.errors, warnings: check.warnings },
+      }
+    }
+    const lines = describePlan(view.derived as AgentGraph, check.plan)
+    const group = addGroup(branch, args.ops as EditOp[], text(args.note))
+    ctx.saveCanvases(book)
+    const after = viewBranch(book, branch)
+    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem). Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return {
+      ok: true,
+      tool: flowEdit.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Branch tarifine eklendi; çalışan akışa ve tuvale yazılmadı.' },
+      data: { valid: true, branchId: branch.id, groupId: group.id, lines, diff: after.diff, applied: after.applied, failed: after.failed, baseChanged: after.baseChanged },
+    }
+  },
+}
+
+const flowUndo: ToolDef = {
+  name: 'flow.undo',
+  summary: 'Branch’teki son düzenlemeyi geri alır.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const denied = writeGate(ctx)
+    if (denied) return failed(flowUndo.name, denied)
+    const id = text(args.branchId)
+    const book = ctx.getCanvases()
+    const branch = findBranch(book, id)
+    if (!branch) return failed(flowUndo.name, `Branch bulunamadı: ${id || '(boş)'}.`)
+    const group = undoLast(branch)
+    if (!group) return failed(flowUndo.name, `“${branch.name}” branch’inde geri alınacak düzenleme yok.`)
+    ctx.saveCanvases(book)
+    const after = viewBranch(book, branch)
+    const message = `“${branch.name}” branch’inde son düzenleme geri alındı (${group.id}, ${group.ops.length} işlem). Kalan: ${after.diff?.summary ?? 'değişiklik yok'} (${branch.groups.length} düzenleme).`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return {
+      ok: true,
+      tool: flowUndo.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Branch tarifinden çıkarıldı; akışa ve tuvale dokunulmadı.' },
+      data: { branchId: branch.id, groupId: group.id, removed: group.ops.length, groups: branch.groups.length, diff: after.diff, lines: after.lines },
+    }
+  },
+}
+
+const branchDrop: ToolDef = {
+  name: 'branch.drop',
+  summary: 'Bir branch kaydını siler. Akışa hiçbir şey olmaz (branch zaten uygulanmamıştı).',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const denied = writeGate(ctx)
+    if (denied) return failed(branchDrop.name, denied)
+    const id = text(args.branchId)
+    const book = ctx.getCanvases()
+    const branch = findBranch(book, id)
+    if (!branch) return failed(branchDrop.name, `Branch bulunamadı: ${id || '(boş)'}.`)
+    book.branches = branchesOf(book).filter((b) => b.id !== branch.id)
+    ctx.saveCanvases(book)
+    const message = `Branch silindi: “${branch.name}” (${branch.groups.length} düzenleme). Akışa hiçbir şey olmadı.`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return { ok: true, tool: branchDrop.name, outcome: 'tamam', message, observed: { note: 'Yalnız kayıt silindi.' }, data: { branchId: branch.id, open: book.branches.length } }
+  },
+}
+
 const flowRead: ToolDef = {
   name: 'flow.read',
   summary: 'Akıştaki node’ları, paketleri ve döngüleri listeler. Yazmaz.',
@@ -411,12 +641,24 @@ const stepRun: ToolDef = {
   ready: true,
   approvalNote: 'Tek adım: akış ilerlemez; döngü işareti, hafıza ve kayıtlı yol değişmez.',
   run: async (args, ctx) => {
-    const graph = graphOf(args, ctx)
+    // A branch is stepped through as its derived graph: the saved flow and the open canvas stay
+    // as they are, and the step highlight is not sent to a canvas that is not showing it.
+    let graph = graphOf(args, ctx)
+    let onBranch = false
+    let branchNote = ''
+    if (text(args.branchId)) {
+      const picked = pickBranch(args, ctx)
+      if ('error' in picked) return failed(stepRun.name, picked.error)
+      graph = picked.view.derived as AgentGraph
+      onBranch = true
+      branchNote = ` · branch “${picked.branch.name}”`
+      if (picked.view.failed.length) branchNote += ` (${picked.view.failed.length} grup uymuyor)`
+    }
     const nodeId = text(args.nodeId)
     if (!nodeId) return failed(stepRun.name, 'nodeId gerekli.')
     if (ctx.isRunning()) return failed(stepRun.name, 'Bir koşu sürüyor; tek adım için önce durdur.')
     const place = findPlace(graph, nodeId)
-    if (!place) return failed(stepRun.name, `Node bulunamadı: ${nodeId}`)
+    if (!place) return failed(stepRun.name, `Node bulunamadı: ${nodeId}${branchNote}`)
     const node = place.node
     if (node.kind === 'start' || node.kind === 'end') {
       return failed(stepRun.name, `“${NODE_SPECS[node.kind].label}” node’u tek adımda çalıştırılmaz.`)
@@ -441,7 +683,7 @@ const stepRun: ToolDef = {
         },
         send: (channel, payload) => {
           // Only the transient step highlight reaches the canvas: a probe writes nothing.
-          if (channel === 'agent:step') ctx.sendStep(payload)
+          if (channel === 'agent:step' && !onBranch) ctx.sendStep(payload)
         },
         settings: ctx.getSettings,
         shouldStop: () => timedOut || ctx.userStop(),
@@ -510,7 +752,7 @@ const stepRun: ToolDef = {
         }
       }
 
-      const parts = [`“${node.title}” çalıştırıldı.`]
+      const parts = [`“${node.title}” çalıştırıldı${branchNote}.`]
       if (t.stage) {
         parts.push(
           `Hedef: ${t.stage}${t.candidates !== undefined ? ` · ${t.candidates} aday` : ''}${t.label ? ` · “${t.label}”` : ''}${
@@ -556,22 +798,34 @@ const runFrom: ToolDef = {
   ready: true,
   approvalNote: 'Koşu başlar ve akış ilerler; run.stop ile durdurulabilir.',
   run: async (args, ctx) => {
-    const graph = graphOf(args, ctx)
+    // A branch run works on the derived graph: it is not the saved flow, so it is neither stored
+    // as the active flow nor highlighted on the canvas the user is looking at.
+    let graph = graphOf(args, ctx)
+    let derived = false
+    let branchNote = ''
+    if (text(args.branchId)) {
+      const picked = pickBranch(args, ctx)
+      if ('error' in picked) return failed(runFrom.name, picked.error)
+      graph = picked.view.derived as AgentGraph
+      derived = true
+      branchNote = ` · branch “${picked.branch.name}”`
+      if (picked.view.failed.length) branchNote += ` (${picked.view.failed.length} grup uymuyor)`
+    }
     if (ctx.isRunning()) return failed(runFrom.name, 'Bir koşu zaten sürüyor.')
     if (probing()) return failed(runFrom.name, 'Tek adım sürüyor; bitmesini bekle.')
     const nodeId = text(args.nodeId)
     const place = nodeId ? findPlace(graph, nodeId) : null
-    if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}`)
+    if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}${branchNote}`)
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
     void ctx
-      .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined)
+      .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined, derived ? { derived: true } : undefined)
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
     // The run begins synchronously, so its id is already known: this answer means the run
     // started, never that it finished.
     const runId = snapshot().runId
-    const message = `Koşu başladı (${from})${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.`
+    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}`
     ctx.log('info', `Ajan · buradan devam · ${message}`)
     return {
       ok: true,
@@ -691,7 +945,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/boot.js",
   "author": "Nubbo Agent Studio",
@@ -20,7 +20,7 @@
     "replay:target": "npm run build:main && node scripts/replay-target.cjs",
     "test:keys": "node --test scripts/test-key-presets.cjs",
     "test:stability": "npm run build:main && node --test scripts/test-stability-graph.cjs scripts/test-stability-agent.cjs scripts/test-stability-bridge-browser.cjs scripts/test-stability-main.cjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.test.json",
     "build:electron": "npm run build:renderer && npm run build:main",
     "test": "vitest run",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",

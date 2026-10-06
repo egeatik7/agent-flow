@@ -63,9 +63,17 @@ function getSettings(): AppSettings {
   return s
 }
 
+/** True while a branch is being tested: that run is not the flow on screen. */
+let derivedRun = false
+
 function send(channel: string, payload: unknown) {
-  // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
-  if (channel === 'agent:step') noteStep(payload)
+  if (channel === 'agent:step') {
+    // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
+    noteStep(payload)
+    // A branch test must not light up the user's canvas or move its loop ticks: the ids in the
+    // derived graph are the base's ids, so the canvas would happily take them for its own.
+    if (derivedRun) return
+  }
   mainWindow?.webContents.send(channel, payload)
 }
 
@@ -383,19 +391,27 @@ function revealApp() {
  * so a run an agent starts behaves exactly like a run started by hand: same target finding,
  * same stop, same resource cleanup.
  */
-async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
+async function runFlow(
+  raw: AgentGraph,
+  startId?: string,
+  packagePath?: string[],
+  opts?: { derived?: boolean }
+): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
   if (probing()) throw new Error('Tek adım sürüyor; koşu için bitmesini bekle.')
   running = true
   stopRequested = false
+  derivedRun = !!opts?.derived
   let awake: number | undefined
   let hidden = false
   let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string } | undefined
   let runId = ''
   try {
     const graph = normalizeGraph(raw)
-    store.set('graph', graph)
+    // A test of an agent branch is not the saved flow: it runs, but it is not written down as
+    // the active flow, so a branch test can never overwrite what the user has open.
+    if (!opts?.derived) store.set('graph', graph)
     // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
     runId = beginRun(graph, startId)
     const s = getSettings()
@@ -442,6 +458,7 @@ async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]
     // still ask how the run ended after it is over.
     endRun(outcome)
     running = false
+    derivedRun = false
     runLog = ''
     globalShortcut.unregister(STOP_HOTKEY)
     if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
@@ -542,7 +559,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     requestStop: () => {
       stopRequested = true
     },
-    startRun: (graph: AgentGraph, startId?: string, packagePath?: string[]) => runFlow(graph, startId, packagePath),
+    startRun: (graph: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
+      runFlow(graph, startId, packagePath, opts),
+    getCanvases: () => loadCanvases(),
+    // Branch records are the only thing the tool layer writes here. The active flow is left
+    // exactly as it was, which is why an agent can never reach the user's canvas this way.
+    saveCanvases: (book: CanvasBook) => {
+      store.set('canvases', normalizeCanvasBook(book))
+    },
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
     callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
@@ -575,11 +599,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return info ? info.file : null
   })
   void syncEndpoint()
-  ipcMain.handle('canvases:get', () => {
+  /** The canvas book as the app stores it, with a single canvas when nothing was saved yet. */
+  function loadCanvases(): CanvasBook {
     const saved = store.get('canvases') as CanvasBook | undefined
     if (saved?.tabs?.length) return normalizeCanvasBook(saved)
     return normalizeCanvasBook(undefined, normalizeGraph(store.get('graph')))
-  })
+  }
+
+  ipcMain.handle('canvases:get', () => loadCanvases())
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     const next = normalizeCanvasBook(book)
     store.set('canvases', next)
