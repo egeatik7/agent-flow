@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings } from '../electron/graph-types'
-import { contextOf, findPlace, walkGraph } from '../electron/tool-context'
+import { contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { callTool, toolList, type ToolContext } from '../electron/tools'
 
 let seq = 0
@@ -106,5 +106,24 @@ describe('araç katmanı', () => {
     expect(list.find((t) => t.name === 'target.preview')?.ready).toBe(true)
     expect(list.find((t) => t.name === 'step.run')?.ready).toBe(false)
     expect(list.find((t) => t.name === 'step.run')?.sendsInput).toBe(true)
+  })
+
+  it('döngünün tur işini (üyeleri) ve öğe kaynağını da verir', async () => {
+    const { graph, loop, pkg } = fixture()
+    loop.templated = true
+    loop.count = 2
+    const r = await callTool('flow.read', { graph }, ctx(graph))
+    type Row = { id: string; members: { id: string; kind: string }[]; templated?: boolean; count?: number }
+    const row = (r.data?.loops as Row[]).find((l) => l.id === loop.id)
+    expect(row?.members.map((m) => m.id)).toEqual([pkg.id])
+    expect(row?.members[0].kind).toBe('package')
+    expect(row?.templated).toBe(true)
+    expect(row?.count).toBe(2)
+  })
+
+  it('bağlantı sayısı paketlerin içini de sayar', () => {
+    const { graph } = fixture()
+    // Kökte Başlangıç → kutu; paketin içinde Başlangıç → Tıkla.
+    expect(countEdges(graph)).toBe(2)
   })
 })

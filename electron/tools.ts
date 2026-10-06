@@ -19,13 +19,25 @@ import {
   type LogLevel,
 } from './graph-types'
 import type { TargetTrace } from './target-trace'
-import { contextOf, findPlace, walkGraph } from './tool-context'
+import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu'
 
 export type NodeRef = { id: string; kind: string; title: string; packagePath: string[] }
 
-export type LoopRef = { id: string; title: string; item?: string; index?: number; total?: number; vars?: Record<string, string> }
+export type LoopRef = {
+  id: string
+  title: string
+  item?: string
+  index?: number
+  total?: number
+  vars?: Record<string, string>
+  /** Where the items come from, so a caller never has to guess. */
+  folder?: string
+  count?: number
+  templated?: boolean
+  startIndex?: number
+}
 
 export type ToolResult = {
   ok: boolean
@@ -141,20 +153,39 @@ const flowRead: ToolDef = {
   run: async (args, ctx) => {
     const graph = graphOf(args, ctx)
     const nodes: (NodeRef & { summary: string })[] = []
-    const loops: (LoopRef & { packagePath: string[] })[] = []
+    const loops: (LoopRef & { packagePath: string[]; memberIds: string[] })[] = []
     const packages: { id: string; title: string; packagePath: string[]; nodes: number }[] = []
     walkGraph(graph, ({ node, packagePath }) => {
       nodes.push({ ...nodeRef({ node, packagePath }), summary: summarize(node) })
       if (node.kind === 'loop') {
         const keys = loopKeys(node)
         const tick = loopStartIndex(node, keys.length, true)
-        loops.push({ id: node.id, title: node.title, total: keys.length, item: keys[tick], index: tick, packagePath })
+        loops.push({
+          id: node.id,
+          title: node.title,
+          total: keys.length,
+          item: keys[tick],
+          index: tick,
+          packagePath,
+          memberIds: [...(node.members ?? [])],
+          folder: typeof node.folder === 'string' ? node.folder : undefined,
+          count: typeof node.count === 'number' ? node.count : undefined,
+          templated: !!node.templated,
+          startIndex: typeof node.startIndex === 'number' ? node.startIndex : undefined,
+        })
       }
       if (node.kind === 'package') packages.push({ id: node.id, title: node.title, packagePath, nodes: node.inner?.nodes.length ?? 0 })
     })
-    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü (paketlerin içi dahil).`
+    // A box's members are the nodes a lap runs, so name them where the caller can see them.
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    const loopsWithMembers = loops.map(({ memberIds, ...loop }) => ({
+      ...loop,
+      members: memberIds.map((id) => ({ id, title: byId.get(id)?.title ?? id, kind: byId.get(id)?.kind ?? '?' })),
+    }))
+    const edges = countEdges(graph)
+    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü · ${edges} bağlantı (paketlerin içi dahil).`
     ctx.log('info', `Ajan · akışı oku · ${message}`)
-    return { ok: true, tool: flowRead.name, outcome: 'tamam', message, data: { nodes, loops, packages, edges: graph.edges.length } }
+    return { ok: true, tool: flowRead.name, outcome: 'tamam', message, data: { nodes, loops: loopsWithMembers, packages, edges } }
   },
 }
 

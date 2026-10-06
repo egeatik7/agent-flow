@@ -65,6 +65,15 @@ export function findPlace(graph: AgentGraph, id: string): NodePlace | null {
   return found
 }
 
+/** Every edge in the flow, packages included: the root alone can look empty. */
+export function countEdges(graph: AgentGraph): number {
+  let total = graph.edges.length
+  for (const node of graph.nodes) {
+    if (node.kind === 'package' && node.inner) total += countEdges(node.inner)
+  }
+  return total
+}
+
 /** Where the run would be if this node were reached now: the box, the item, and the values. */
 export function contextOf(graph: AgentGraph, id: string): NodeContext | null {
   const place = findPlace(graph, id)
