@@ -1,4 +1,5 @@
 import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import AgentTab from './AgentTab'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import ProbeMark from './ProbeMark'
@@ -18,7 +19,7 @@ import {
   type ModelInfo,
 } from '../types'
 
-export type SideTab = 'node' | 'llm' | 'settings'
+export type SideTab = 'node' | 'llm' | 'settings' | 'agent'
 
 type Props = {
   tab: SideTab
@@ -995,6 +996,7 @@ export default function SidePanel(p: Props) {
             ['node', p.selectedEdge ? 'Bağlantı' : 'Node'],
             ['llm', 'LLM'],
             ['settings', 'Ayarlar'],
+            ['agent', 'Ajan'],
           ] as [SideTab, string][]
         ).map(([k, label]) => (
           <button type="button" key={k} className={`tab ${p.tab === k ? 'active' : ''}`} onClick={() => p.onTab(k)}>
@@ -1006,6 +1008,7 @@ export default function SidePanel(p: Props) {
         {p.tab === 'node' && <NodeInspector {...p} />}
         {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
         {p.tab === 'settings' && <Settings {...p} />}
+        {p.tab === 'agent' && <AgentTab selected={p.selected} graph={p.graph} />}
       </div>
     </aside>
   )

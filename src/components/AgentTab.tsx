@@ -1,0 +1,137 @@
+import { useEffect, useState } from 'react'
+import type { AgentGraph, AgentNode, ToolResult, ToolSpec } from '../types'
+
+const api = typeof window !== 'undefined' ? window.xpAgent : undefined
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * The Ajan tab: the human side of the tool layer.
+ *
+ * Everything here goes through the same tools an outside agent calls, so what you try by hand
+ * is exactly what the agent gets. Built for debugging: the answer is the engine's own words,
+ * and nothing on this tab can change the flow.
+ */
+export default function AgentTab({ selected, graph }: { selected: AgentNode | null; graph: AgentGraph }) {
+  const [busy, setBusy] = useState('')
+  const [result, setResult] = useState<ToolResult | null>(null)
+  const [error, setError] = useState('')
+  const [specs, setSpecs] = useState<ToolSpec[]>([])
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const list = await api?.toolList?.()
+        if (alive && list) setSpecs(list)
+      } catch {
+        /* the catalogue is a convenience; the buttons below work without it */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const call = async (name: string, args: Record<string, unknown>) => {
+    if (!api?.callTool) {
+      setError('Araç bağlantısı yok.')
+      return
+    }
+    setBusy(name)
+    setError('')
+    setResult(null)
+    try {
+      setResult(await api.callTool(name, args))
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div>
+      <p className="hint">
+        Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Geri kalan araçlar
+        sırayla eklenir; şu an <b>okuma ve önizleme</b> hazır — ikisi de ekrana girdi göndermez, akışı değiştirmez.
+      </p>
+
+      <div className="field">
+        <label>Hedef denemesi (girdi göndermez)</label>
+        <button
+          type="button"
+          className="xp-btn"
+          disabled={!selected || busy === 'target.preview'}
+          onClick={() => selected && void call('target.preview', { nodeId: selected.id, graph })}
+        >
+          {busy === 'target.preview' ? 'Bakılıyor…' : 'Hedefi önizle'}
+        </button>
+        <p className="hint">{selected ? `Seçili: ${selected.title} (${selected.kind})` : 'Tuvalde bir node seç, sonra bas.'}</p>
+      </div>
+
+      <div className="field">
+        <label>Akış</label>
+        <button type="button" className="xp-btn" disabled={busy === 'flow.read'} onClick={() => void call('flow.read', { graph })}>
+          {busy === 'flow.read' ? 'Okunuyor…' : 'Akışı oku'}
+        </button>
+        <p className="hint">Node’ları, paketleri ve döngüleri listeler; kutuların içi dahil. Kaydedilmemiş tuval de okunur.</p>
+      </div>
+
+      {error && <p className="hint">Hata: {error}</p>}
+
+      {result && (
+        <div className="field">
+          <label>Sonuç</label>
+          <div style={{ border: '1px solid #aca899', background: '#fff', padding: '6px 8px', fontSize: 12, lineHeight: 1.45 }}>
+            {result.message}
+          </div>
+          <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: 12, lineHeight: 1.5 }}>
+            <li>
+              sonuç: <b>{result.outcome}</b>
+            </li>
+            {result.target && (
+              <li>
+                hedef:{' '}
+                {result.target.found
+                  ? `${result.target.stage ?? '—'} basamağı · ${result.target.candidates ?? '—'} aday · (${Math.round(result.target.x ?? 0)}, ${Math.round(result.target.y ?? 0)})`
+                  : 'bulunamadı'}
+              </li>
+            )}
+            {result.node && (
+              <li>
+                node: {result.node.title}
+                {result.node.packagePath.length ? ' (paket içinde)' : ''}
+              </li>
+            )}
+            {result.loop && (
+              <li>
+                döngü: {result.loop.title} ·{' '}
+                {typeof result.loop.index === 'number' ? `${result.loop.index + 1}/${result.loop.total}` : '—'}
+                {result.loop.item ? ` · ${result.loop.item}` : ''}
+              </li>
+            )}
+            {result.suggestion && <li>öneri: {result.suggestion}</li>}
+          </ul>
+        </div>
+      )}
+
+      {specs.length > 0 && (
+        <div className="field">
+          <label>Araçlar</label>
+          <ul style={{ margin: '0 0 0 16px', padding: 0, fontSize: 12, lineHeight: 1.5 }}>
+            {specs.map((s) => (
+              <li key={s.name} style={{ opacity: s.ready ? 1 : 0.55 }}>
+                <b>{s.name}</b> — {s.summary}
+                {s.ready ? '' : ' (sırada)'}
+                {s.sendsInput ? ' · ekrana dokunur' : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}

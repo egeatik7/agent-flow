@@ -9,8 +9,10 @@ export {
   type LlmPrompts,
 } from '../electron/llm-flow'
 export type { ScanResult, ScreenItem } from '../electron/matcher'
+export type { ToolResult, ToolSpec, ToolOutcome, NodeRef, LoopRef } from '../electron/tools'
 import type { AgentGraph, AppSettings, CanvasBook, Locator, LogLevel } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'
+import type { ToolResult, ToolSpec } from '../electron/tools'
 
 export type LogEntry = {
   id: string
@@ -39,6 +41,8 @@ export type XpAgentApi = {
   captureAfter: (ms: number) => Promise<Locator | null>
   runAgent: (graph: AgentGraph, startId?: string, packagePath?: string[]) => Promise<{ ok: boolean; stopped?: boolean; failed?: number }>
   stopAgent: () => Promise<boolean>
+  callTool: (name: string, args?: unknown) => Promise<ToolResult>
+  toolList: () => Promise<ToolSpec[]>
   openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>

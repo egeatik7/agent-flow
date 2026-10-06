@@ -4,6 +4,7 @@ import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
+import { callTool, toolList } from './tools'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
@@ -426,6 +427,17 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     store.set('graph', graph)
     return true
   })
+
+  // The tool layer an outside agent drives. The Ajan tab calls these same tools, so limits,
+  // permissions and logging live in one place (electron/tools.ts) instead of per caller.
+  const toolContext = {
+    getGraph: () => normalizeGraph(store.get('graph')),
+    getSettings,
+    log,
+    isRunning: () => running,
+  }
+  ipcMain.handle('tools:call', (_e, name: string, args?: unknown) => callTool(name, args, toolContext))
+  ipcMain.handle('tools:list', () => toolList())
   ipcMain.handle('canvases:get', () => {
     const saved = store.get('canvases') as CanvasBook | undefined
     if (saved?.tabs?.length) return normalizeCanvasBook(saved)
