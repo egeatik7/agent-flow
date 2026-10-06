@@ -81,4 +81,26 @@ describe('paketin içinde koptuğu yerden elle devam', () => {
     // İşaretli öğe için paket baştan: A, B, C. Sonra sıradaki öğe de baştan: A, B, C.
     expect(clicked).toEqual(['A', 'B', 'C', 'A', 'B', 'C'])
   })
+
+  it('hatırlanan öğe 2. ise: iç node seçilirse o node’dan, hatırlanan öğe için devam edilir', async () => {
+    const { graph, loop, pkg, b } = build()
+    loop.startIndex = 1 // döngü 2. öğede (g2) kalmış
+    const { ex, clicked } = recorder()
+
+    await runGraph(graph, ex, { maxSteps: 100, stepDelayMs: 0, startId: b.id, packagePath: [pkg.id], resume: true })
+
+    // Yalnız hatırlanan öğe (g2) işlenir ve B’den başlanır: A tekrar yok, g1 de tekrar yok.
+    expect(clicked).toEqual(['B', 'C'])
+  })
+
+  it('hatırlanan öğe 2. ise: paket seçilirse aynı öğe kullanılır, paket baştan başlar', async () => {
+    const { graph, loop, pkg } = build()
+    loop.startIndex = 1 // döngü 2. öğede (g2) kalmış
+    const { ex, clicked } = recorder()
+
+    await runGraph(graph, ex, { maxSteps: 100, stepDelayMs: 0, startId: pkg.id, resume: true })
+
+    // Yalnız hatırlanan öğe (g2) işlenir; paket kendi başından: A, B, C. g1 tekrar yok.
+    expect(clicked).toEqual(['A', 'B', 'C'])
+  })
 })
