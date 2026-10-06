@@ -201,7 +201,13 @@ describe('branch: kopya değil, tarif', () => {
     const id = await h.openBranch()
     await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 7000)], note: 'uzun bekleme' }, h.ctx)
 
-    const started = await callTool('run.from', { branchId: id }, h.ctx)
+    // Branch'in başından koşu da olsa, akışı baştan çalıştırmak açık onay ister.
+    const noFlag = await callTool('run.from', { branchId: id }, h.ctx)
+    expect(noFlag.ok).toBe(false)
+    expect(noFlag.message).toContain('fromStart')
+    expect(h.runs).toHaveLength(0)
+
+    const started = await callTool('run.from', { branchId: id, fromStart: true }, h.ctx)
     expect(started.ok).toBe(true)
     expect(started.message).toContain('branch koşusu')
     expect(h.runs).toHaveLength(1)

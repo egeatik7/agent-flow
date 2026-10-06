@@ -33,8 +33,9 @@ const USAGE = `nubbo <komut> [seçenekler]
   preview | step | from | state | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
-             [--node <id>] [--branch <id>] [--fast] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
+             [--node <id>] [--branch <id>] [--fast] [--start] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
                                  --fast: yalnız ekran aşamaları (model çağrısı yok, çok daha hızlı)
+                                 --start: from için şart; akışı baştan çalıştırır (açık onay)
 
   branch list                    Açık branch'leri listele (uygulama açık olmalı)
   branch create --name "<ad>"    Kendi branch'ini aç (temel: açık tuval)
@@ -285,10 +286,16 @@ async function main() {
 
   if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'stop' || cmd === 'screen') {
     const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', stop: 'run.stop', screen: 'screen.read' }
+    if (cmd === 'from' && !opts.node && !opts.start) {
+      // A whole flow from the first step is never an accident.
+      console.error('Baştan koşu için --start gerekir (akışın tamamı ilk adımdan çalışır). Tek node için: --node <id>.')
+      process.exit(2)
+    }
     const args = {}
     if (opts.node) args.nodeId = opts.node
     if (opts.branch) args.branchId = opts.branch
     if (opts.fast) args.fast = true
+    if (opts.start) args.fromStart = true
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)

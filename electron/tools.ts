@@ -153,6 +153,17 @@ type ToolDef = {
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
+/**
+ * Was a branch asked for, and which one? An empty or unreadable `branchId` is an *error*, never
+ * "no branch": reading it as absent once started the user's whole flow from the beginning.
+ */
+function branchArg(args: Args): { asked: boolean; id: string } {
+  return { asked: args.branchId !== undefined && args.branchId !== null, id: text(args.branchId) }
+}
+
+const EMPTY_BRANCH =
+  'branchId boş ya da yazı değil. Bir branch demek istiyorsan geçerli kimliğini ver; demek istemiyorsan alanı hiç gönderme. Boş kimlik, akışı baştan çalıştırmak anlamına gelmez.'
+
 /** The stages that look at the screen itself: no model call, so a look stays fast. */
 const FAST_STAGES = ['chrome', 'uia', 'icon', 'windows', 'onnx']
 
@@ -667,7 +678,9 @@ const targetPreview: ToolDef = {
     // A branch is looked at as its derived graph, exactly like a single step.
     let graph = graphOf(args, ctx)
     let branchNote = ''
-    if (text(args.branchId)) {
+    const ask = branchArg(args)
+    if (ask.asked) {
+      if (!ask.id) return failed(targetPreview.name, EMPTY_BRANCH)
       const picked = pickBranch(args, ctx)
       if ('error' in picked) return failed(targetPreview.name, picked.error)
       graph = picked.view.derived as AgentGraph
@@ -788,7 +801,9 @@ const stepRun: ToolDef = {
     let graph = graphOf(args, ctx)
     let onBranch = false
     let branchNote = ''
-    if (text(args.branchId)) {
+    const ask = branchArg(args)
+    if (ask.asked) {
+      if (!ask.id) return failed(stepRun.name, EMPTY_BRANCH)
       const picked = pickBranch(args, ctx)
       if ('error' in picked) return failed(stepRun.name, picked.error)
       graph = picked.view.derived as AgentGraph
@@ -949,7 +964,9 @@ const runFrom: ToolDef = {
     let graph = graphOf(args, ctx)
     let derived = false
     let branchNote = ''
-    if (text(args.branchId)) {
+    const ask = branchArg(args)
+    if (ask.asked) {
+      if (!ask.id) return failed(runFrom.name, EMPTY_BRANCH)
       const picked = pickBranch(args, ctx)
       if ('error' in picked) return failed(runFrom.name, picked.error)
       graph = picked.view.derived as AgentGraph
@@ -960,6 +977,14 @@ const runFrom: ToolDef = {
     if (ctx.isRunning()) return failed(runFrom.name, 'Bir koşu zaten sürüyor.')
     if (probing()) return failed(runFrom.name, 'Tek adım sürüyor; bitmesini bekle.')
     const nodeId = text(args.nodeId)
+    // Starting a whole flow from its beginning is not something to fall into: without a node the
+    // caller has to say so on purpose.
+    if (!nodeId && args.fromStart !== true) {
+      return failed(
+        runFrom.name,
+        'Baştan koşu için açık onay gerekir: { fromStart: true }. Bu, akışın tamamını ilk adımdan çalıştırır. Tek bir node’dan başlatmak için nodeId ver.'
+      )
+    }
     const place = nodeId ? findPlace(graph, nodeId) : null
     if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}${branchNote}`)
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []

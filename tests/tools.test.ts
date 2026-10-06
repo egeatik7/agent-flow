@@ -251,6 +251,42 @@ describe('araç katmanı', () => {
     expect(windowMismatch('', 'herhangi')).toBe(false)
   })
 
+  it('boş branchId ve onaysız baştan koşu asla koşu başlatmaz', async () => {
+    const { graph, click } = fixture()
+    const calls: unknown[] = []
+    const c = ctx(graph, {
+      startRun: async () => {
+        calls.push(1)
+        return { ok: true }
+      },
+    })
+
+    // Boş kimlik "branch yok" sayılamaz: bir kez sayıldı ve kullanıcının akışı baştan koştu.
+    const empty = await callTool('run.from', { branchId: '', nodeId: click.id }, c)
+    expect(empty.ok).toBe(false)
+    expect(empty.message).toContain('branchId boş')
+    expect(calls).toHaveLength(0)
+
+    const alsoEmpty = await callTool('step.run', { branchId: '', nodeId: click.id }, c)
+    expect(alsoEmpty.ok).toBe(false)
+    expect(alsoEmpty.message).toContain('branchId boş')
+
+    // Node verilmeden baştan koşu, açık onay ister.
+    const noStart = await callTool('run.from', {}, c)
+    expect(noStart.ok).toBe(false)
+    expect(noStart.message).toContain('fromStart')
+    expect(calls).toHaveLength(0)
+
+    // Node verilirse (ya da açık onay verilirse) başlar.
+    const fromNode = await callTool('run.from', { nodeId: click.id }, c)
+    expect(fromNode.ok).toBe(true)
+    expect(calls).toHaveLength(1)
+    const onPurpose = await callTool('run.from', { fromStart: true }, c)
+    expect(onPurpose.ok).toBe(true)
+    expect(calls).toHaveLength(2)
+    endRun({ ok: true })
+  })
+
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
     const { graph, pkg, click } = fixture()
     const calls: { nodeId?: string; packagePath?: string[] }[] = []
