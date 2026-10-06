@@ -55,8 +55,8 @@ export default function AgentTab({ selected, graph }: { selected: AgentNode | nu
   return (
     <div>
       <p className="hint">
-        Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Geri kalan araçlar
-        sırayla eklenir; şu an <b>okuma ve önizleme</b> hazır — ikisi de ekrana girdi göndermez, akışı değiştirmez.
+        Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Şu an <b>akışı okuma</b>,
+        <b>hedefi önizleme</b> ve <b>tek adım çalıştırma</b> hazır; önizleme ekrana hiç dokunmaz, tek adım dokunur ama akışı ilerletmez.
       </p>
 
       <div className="field">
@@ -70,6 +70,22 @@ export default function AgentTab({ selected, graph }: { selected: AgentNode | nu
           {busy === 'target.preview' ? 'Bakılıyor…' : 'Hedefi önizle'}
         </button>
         <p className="hint">{selected ? `Seçili: ${selected.title} (${selected.kind})` : 'Tuvalde bir node seç, sonra bas.'}</p>
+      </div>
+
+      <div className="field">
+        <label>Tek adım (ekrana dokunur)</label>
+        <button
+          type="button"
+          className="xp-btn"
+          disabled={!selected || busy === 'step.run'}
+          onClick={() => selected && void call('step.run', { nodeId: selected.id, graph })}
+        >
+          {busy === 'step.run' ? 'Çalışıyor…' : 'Seçili node’u tek adım çalıştır'}
+        </button>
+        <p className="hint">
+          Aynı motor, aynı hedef bulma, aynı tuş koruması. <b>Akış ilerlemez:</b> döngü işareti, hafıza ve kayıtlı yol değişmez;
+          zincir bu adımdan sonra durur.
+        </p>
       </div>
 
       <div className="field">

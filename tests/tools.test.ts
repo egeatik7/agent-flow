@@ -82,7 +82,7 @@ describe('araç katmanı', () => {
     const unknown = await callTool('yok.boyle', {}, ctx(graph))
     expect(unknown.ok).toBe(false)
     expect(unknown.message).toContain('Bilinmeyen')
-    const planned = await callTool('step.run', { nodeId: 'x' }, ctx(graph))
+    const planned = await callTool('run.from', { nodeId: 'x' }, ctx(graph))
     expect(planned.ok).toBe(false)
     expect(planned.message).toContain('hazır değil')
   })
@@ -103,9 +103,31 @@ describe('araç katmanı', () => {
     expect(names).toContain('target.preview')
     expect(names).toContain('flow.read')
     expect(names).toContain('step.run')
-    expect(list.find((t) => t.name === 'target.preview')?.ready).toBe(true)
-    expect(list.find((t) => t.name === 'step.run')?.ready).toBe(false)
+    expect(names).toContain('run.state')
+    expect(list.find((t) => t.name === 'step.run')?.ready).toBe(true)
     expect(list.find((t) => t.name === 'step.run')?.sendsInput).toBe(true)
+    expect(list.find((t) => t.name === 'run.state')?.ready).toBe(false)
+  })
+
+  it('tek adım: eksik node, bilinmeyen node, başlangıç/bitir ve koşu sürerken reddedilir', async () => {
+    const { graph, click } = fixture()
+    const noId = await callTool('step.run', {}, ctx(graph))
+    expect(noId.ok).toBe(false)
+    expect(noId.message).toContain('nodeId')
+
+    const bogus = await callTool('step.run', { nodeId: 'yok-boyle' }, ctx(graph))
+    expect(bogus.ok).toBe(false)
+    expect(bogus.message).toContain('bulunamadı')
+
+    const plain = { ...ctx(graph), isRunning: () => true }
+    const running = await callTool('step.run', { nodeId: click.id }, plain)
+    expect(running.ok).toBe(false)
+    expect(running.message).toContain('koşu')
+
+    const startNode = graph.nodes[0]
+    const start = await callTool('step.run', { nodeId: startNode.id }, ctx(graph))
+    expect(start.ok).toBe(false)
+    expect(start.message).toContain('tek adımda çalıştırılmaz')
   })
 
   it('döngünün tur işini (üyeleri) ve öğe kaynağını da verir', async () => {

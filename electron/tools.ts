@@ -10,6 +10,7 @@
  * `ok` means "the tool answered". A missing target is an answer, not an error.
  */
 import {
+  NODE_SPECS,
   loopKeys,
   loopStartIndex,
   normalizeGraph,
@@ -72,6 +73,10 @@ export type ToolContext = {
   getSettings: () => AppSettings
   log: (level: LogLevel, message: string) => void
   isRunning: () => boolean
+  /** True while the user's own stop is in effect. */
+  userStop: () => boolean
+  /** Sends the transient canvas highlight. Nothing else may be written by a tool. */
+  sendStep: (payload: unknown) => void
 }
 
 type Args = Record<string, unknown>
@@ -86,6 +91,10 @@ type ToolDef = {
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+
+/** One probe at a time: two of them would drive the mouse at the same moment. */
+let probing = false
 
 /** The flow the caller means: its live canvas when it sent one, otherwise the saved flow. */
 function graphOf(args: Args, ctx: ToolContext): AgentGraph {
@@ -119,6 +128,9 @@ type TraceSummary = {
   stage?: string
   window?: string
   candidates?: number
+  label?: string
+  x?: number
+  y?: number
   stages: { stage: string; candidates?: number }[]
 }
 
@@ -128,6 +140,9 @@ function describeTrace(traces: TargetTrace[]): TraceSummary {
   const counts = new Map<string, number>()
   let stage: string | undefined
   let window = ''
+  let label: string | undefined
+  let x: number | undefined
+  let y: number | undefined
   for (const t of traces) {
     if (t.kind === 'request') window = t.windowTitle || ''
     if (t.kind === 'observation') {
@@ -135,14 +150,19 @@ function describeTrace(traces: TargetTrace[]): TraceSummary {
       stages.push({ stage: t.source, candidates: n })
       if (typeof n === 'number') counts.set(t.source, n)
     }
-    if (t.kind === 'resolved') stage = t.source
+    if (t.kind === 'resolved') {
+      stage = t.source
+      label = t.item?.text || t.target.label
+      x = t.target.x
+      y = t.target.y
+    }
   }
   const seen = stages
     .filter((s) => s.candidates !== undefined)
     .map((s) => `${s.stage} ${s.candidates}`)
     .join(', ')
   const text = seen ? `Basamaklar: ${seen}.` : 'Hiçbir basamak aday listesi vermedi.'
-  return { text, stage, window, candidates: stage ? counts.get(stage) : undefined, stages }
+  return { text, stage, window, candidates: stage ? counts.get(stage) : undefined, label, x, y, stages }
 }
 
 const flowRead: ToolDef = {
@@ -256,16 +276,121 @@ const targetPreview: ToolDef = {
   },
 }
 
+const stepRun: ToolDef = {
+  name: 'step.run',
+  summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır, akışı ilerletmez.',
+  sendsInput: true,
+  ready: true,
+  run: async (args, ctx) => {
+    const graph = graphOf(args, ctx)
+    const nodeId = text(args.nodeId)
+    if (!nodeId) return failed(stepRun.name, 'nodeId gerekli.')
+    if (ctx.isRunning()) return failed(stepRun.name, 'Bir koşu sürüyor; tek adım için önce durdur.')
+    if (probing) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
+    const place = findPlace(graph, nodeId)
+    if (!place) return failed(stepRun.name, `Node bulunamadı: ${nodeId}`)
+    const node = place.node
+    if (node.kind === 'start' || node.kind === 'end') {
+      return failed(stepRun.name, `“${NODE_SPECS[node.kind].label}” node’u tek adımda çalıştırılmaz.`)
+    }
+    const loop = loopOf(graph, nodeId)
+    const s = ctx.getSettings()
+    const timeoutMs = Math.min(15 * 60_000, Math.max(5_000, num(args.timeoutMs) ?? 120_000))
+    const { createAgent } = await import('./agent')
+    const { probeOnce } = await import('./tool-probe')
+    const logs: string[] = []
+    const traces: TargetTrace[] = []
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    probing = true
+    try {
+      const agent = createAgent({
+        log: (level, message) => {
+          if (logs.length < 200) logs.push(`${level}: ${message}`)
+          ctx.log(level, message)
+        },
+        send: (channel, payload) => {
+          // Only the transient step highlight reaches the canvas: a probe writes nothing.
+          if (channel === 'agent:step') ctx.sendStep(payload)
+        },
+        settings: ctx.getSettings,
+        shouldStop: () => timedOut || ctx.userStop(),
+        setLoop: () => {},
+        setMethod: () => {},
+        onTargetTrace: (event) => {
+          if (traces.length < 200) traces.push(event)
+        },
+        captureTargetImages: false,
+      })
+      timer = setTimeout(() => {
+        timedOut = true
+      }, timeoutMs)
+      const started = Date.now()
+      const r = await probeOnce(graph, nodeId, agent.executor, {
+        packagePath: place.packagePath,
+        maxSteps: Math.max(1, s.maxSteps),
+        stepDelayMs: Math.max(0, s.stepDelayMs),
+        userStop: () => timedOut || ctx.userStop(),
+      })
+      const ms = Date.now() - started
+      const t = describeTrace(traces)
+      const acted = traces.some((e) => e.kind === 'input')
+
+      if (r.interrupted) {
+        const why = timedOut ? `süre doldu (${Math.round(timeoutMs / 1000)} sn)` : 'kullanıcı durdurdu'
+        const message = `“${node.title}” çalıştırılamadı: ${why}.`
+        ctx.log('warn', `Ajan · tek adım · ${message}`)
+        return { ok: true, tool: stepRun.name, outcome: 'durduruldu', message, node: nodeRef(place), action: { kind: node.kind, sent: acted }, loop, log: logs.slice(-12) }
+      }
+
+      const parts = [`“${node.title}” çalıştırıldı.`]
+      if (t.stage) {
+        parts.push(
+          `Hedef: ${t.stage}${t.candidates !== undefined ? ` · ${t.candidates} aday` : ''}${t.label ? ` · “${t.label}”` : ''}${
+            typeof t.x === 'number' ? ` (${Math.round(t.x)}, ${Math.round(t.y ?? 0)})` : ''
+          }.`
+        )
+      }
+      parts.push(acted ? 'Eylem gönderildi.' : 'Eylem gönderilmedi.')
+      if (loop) parts.push(`Döngü: ${loop.title}${typeof loop.index === 'number' ? ` · ${loop.index + 1}/${loop.total}` : ''}${loop.item ? ` (“${loop.item}”)` : ''}.`)
+      parts.push(`Zincir bu adımdan sonra durduruldu (${ms} ms); akış ilerlemedi.`)
+      const message = parts.join(' ')
+      ctx.log('info', `Ajan · tek adım · ${message}`)
+      return {
+        ok: true,
+        tool: stepRun.name,
+        outcome: 'tamam',
+        message,
+        node: nodeRef(place),
+        target: t.stage ? { found: true, stage: t.stage, label: t.label, x: t.x, y: t.y, window: t.window, candidates: t.candidates } : undefined,
+        action: { kind: node.kind, sent: acted },
+        observed: { note: 'Tek adım: kopya akış üzerinde koştu; işaret, hafıza ve kayıtlı yol değişmedi.' },
+        loop,
+        log: logs.slice(-12),
+        data: { ms, reachedNode: r.reachedNode, nodeStatus: r.nodeStatus },
+      }
+    } catch (e) {
+      const reason = (e as Error).message
+      const outcome: ToolOutcome = /bulunamadı/.test(reason) ? 'hedef-yok' : 'hata'
+      const message = `“${node.title}” çalıştırılamadı: ${reason}`
+      ctx.log(outcome === 'hedef-yok' ? 'warn' : 'error', `Ajan · tek adım · ${message}`)
+      return { ok: true, tool: stepRun.name, outcome, message, node: nodeRef(place), action: { kind: node.kind, sent: false }, loop, log: logs.slice(-12) }
+    } finally {
+      if (timer) clearTimeout(timer)
+      probing = false
+    }
+  },
+}
+
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = [
-  { name: 'step.run', summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır.', sendsInput: true, ready: false },
   { name: 'run.from', summary: 'Belirtilen node’dan akışı sürdürür.', sendsInput: true, ready: false },
   { name: 'run.state', summary: 'Koşunun hangi node’da, hangi öğede olduğunu söyler.', sendsInput: false, ready: false },
   { name: 'run.stop', summary: 'Çalışan koşuyu durdurur.', sendsInput: false, ready: false },
   { name: 'screen.read', summary: 'Pencereyi ve ekrandaki yazıları okur.', sendsInput: false, ready: false },
 ]
 
-const TOOLS: ToolDef[] = [flowRead, targetPreview, ...planned]
+const TOOLS: ToolDef[] = [flowRead, targetPreview, stepRun, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

@@ -435,6 +435,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     getSettings,
     log,
     isRunning: () => running,
+    userStop: () => stopRequested,
+    sendStep: (payload: unknown) => send('agent:step', payload),
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown) => callTool(name, args, toolContext))
   ipcMain.handle('tools:list', () => toolList())
