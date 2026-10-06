@@ -90,6 +90,60 @@ if (mode === 'ui') {
   }
   canvasName = 'Arayüz'
   summary = 'Başlangıç → tıkla(“source-initial” @ Nubbo Click Test Host) → yaz(“nubbo-ui-test” + Enter) → tıkla(“Devam”) → Bitir'
+} else if (mode === 'loop') {
+  // Kabul pilotu: paket içinde bir döngü; her öğede geçici dosya yazar, sonra kasıtlı olarak
+  // BULUNMAYAN bir yazıya tıklamaya çalışır. Birinci öğe dosyasını yazar, sonra hata verir.
+  const pkg = createNode('package', 300, 0, 1)
+  pkg.id = 'pilot-package'
+  pkg.title = 'Pilot · paket ve döngü'
+  const innerStart = createNode('start', 0, 0)
+  innerStart.id = 'pilot-inner-start'
+  const box = createNode('loop', 220, 0, 1)
+  box.id = 'pilot-loop'
+  box.title = 'Pilot · iki öğe'
+  box.items = ['bir', 'iki']
+  const key = createNode('key', 440, 0, 1)
+  key.id = 'pilot-key'
+  key.title = 'Pilot · Çalıştır'
+  key.keys = 'win+r'
+  const wait1 = createNode('wait', 640, 0, 1)
+  wait1.id = 'pilot-wait1'
+  wait1.title = 'Pilot · 0,9 sn'
+  wait1.ms = 900
+  const write = createNode('type', 860, 0, 1)
+  write.id = 'pilot-write'
+  write.title = 'Pilot · dosyayı yaz'
+  write.text = 'cmd /c md "%TEMP%\\nubbo-pilot" 2>nul & >"%TEMP%\\nubbo-pilot\\loop-{{sıra}}.txt" echo {{öğe}}'
+  write.pressEnter = true
+  write.clearFirst = true
+  const wait2 = createNode('wait', 1080, 0, 1)
+  wait2.id = 'pilot-wait2'
+  wait2.title = 'Pilot · 1,2 sn'
+  wait2.ms = 1200
+  const bad = createNode('click', 1300, 0, 1)
+  bad.id = 'pilot-bad-click'
+  bad.title = 'Pilot · bulunmayan yazıya tıkla'
+  bad.prompt = 'YOK-BU-YAZI-ASLA-YOK'
+  const innerEnd = createNode('end', 1520, 0)
+  innerEnd.id = 'pilot-inner-end'
+  box.members = [key.id, wait1.id, write.id, wait2.id, bad.id]
+  pkg.inner = {
+    nodes: [innerStart, box, key, wait1, write, wait2, bad, innerEnd],
+    edges: [
+      { id: 'pilot-e1', from: innerStart.id, fromPort: 'next', to: box.id },
+      { id: 'pilot-e2', from: box.id, fromPort: 'next', to: key.id },
+      { id: 'pilot-e3', from: key.id, fromPort: 'next', to: wait1.id },
+      { id: 'pilot-e4', from: wait1.id, fromPort: 'next', to: write.id },
+      { id: 'pilot-e5', from: write.id, fromPort: 'next', to: wait2.id },
+      { id: 'pilot-e6', from: wait2.id, fromPort: 'next', to: bad.id },
+      { id: 'pilot-e7', from: bad.id, fromPort: 'next', to: innerEnd.id },
+    ],
+  }
+  const end = createNode('end', 620, 0)
+  end.id = 'pilot-end'
+  graph = { nodes: [start, pkg, end], edges: [{ id: 'pilot-r1', from: start.id, fromPort: 'next', to: pkg.id }, { id: 'pilot-r2', from: pkg.id, fromPort: 'next', to: end.id }] }
+  canvasName = 'Pilot'
+  summary = 'Başlangıç → Paket(“Pilot · paket ve döngü”: start → kutu[bir,iki] içinde win+r → yaz({{sıra}}.txt = {{öğe}}) → BULUNMAYAN yazıya tıkla) → Bitir'
 } else {
 const pkg = createNode('package', 340, 0, 1)
 pkg.id = 'fixture-package'

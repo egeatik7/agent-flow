@@ -150,6 +150,27 @@ async function main() {
   const health = await call(info, 'run.state', {}, 10_000)
   check('gate-answers', 'tool-answered', health.result && health.result.ok === true, `run.state ${health.ms} ms`)
 
+  // Bu döngü motoru çağırdığı için gerçek fareyi ve klavyeyi kullanır. İnsan o sırada ekranda bir
+  // şey yapıyorsa koşu onun odağını ve tıklamasını çalar. Bu yüzden koşudan ÖNCE ekranın boş
+  // olduğu doğrulanır: son girdiden bu yana yeterli süre geçmemişse koşu hiç başlatılmaz.
+  {
+    const need = Number(scenario.setup?.needIdleMs ?? 60000)
+    const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'dev-idle.cjs'), '--json'], { encoding: 'utf8' })
+    let idle = -1
+    try {
+      idle = JSON.parse(r.stdout || '{}').idleMs ?? -1
+    } catch {
+      idle = -1
+    }
+    const free = idle >= need
+    check('screen-free', 'tool-answered', free, `son girdiden ${idle < 0 ? '?' : Math.round(idle / 1000)} sn · gereken ${Math.round(need / 1000)} sn`)
+    if (!free) {
+      console.error(`\n${name} BAŞLATILMADI: ekran şu an kullanılıyor. Fareyi ve klavyeyi senden çalmamak için koşu başlatılmadı.`)
+      writeReport()
+      process.exit(4)
+    }
+  }
+
   // A refused call must stop the setup: carrying on with an empty answer is how a run looks
   // mysterious later. Every gate answer is checked for ok before it is used.
   function must(id, res) {

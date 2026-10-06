@@ -40,6 +40,7 @@ const USAGE = `nubbo <komut> [seçenekler]
              [--node <id>] [--branch <id>] [--fast] [--debug] [--start] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
                                  --fast: yalnız ekran aşamaları (model çağrısı yok, çok daha hızlı)
                                  --debug: ilk hatalı adımda durur, o anın bağlamını saklar (report)
+                                 --resume: donmuş hatanın AYNI öğesinden devam eder (branch koşusunda)
                                  --start: from için şart; akışı baştan çalıştırır (açık onay)
 
   branch list                    Açık branch'leri listele (uygulama açık olmalı)
@@ -359,6 +360,7 @@ async function main() {
     if (opts.fast) args.fast = true
     if (opts.start) args.fromStart = true
     if (opts.debug) args.debug = true
+    if (opts.resume) args.resumeFromFailure = true
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
@@ -437,6 +439,9 @@ async function main() {
     }
     const args = { branchId: opts.branch }
     if (cmd === 'edit') args.ops = ops
+    // Düzenleme paketin içine de yazılabilir: --package <paket node id> (virgülle iç içe paketler).
+    if (cmd === 'edit' && typeof opts.package === 'string' && opts.package) args.packagePath = opts.package.split(',')
+    if (cmd === 'edit' && typeof opts.note === 'string') args.note = opts.note
     const r = await call(cmd === 'edit' ? 'flow.edit' : 'flow.undo', args)
     if (opts.json) {
       console.log(JSON.stringify(r, null, 2))

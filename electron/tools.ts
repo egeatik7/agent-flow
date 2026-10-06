@@ -1152,7 +1152,8 @@ const runFrom: ToolDef = {
       if (!report.loops.length) return failed(runFrom.name, 'Donmuş hatada kutu yok; devam edilecek öğe de yok.')
       const missing: string[] = []
       for (const box of report.loops) {
-        const at = box.id ? graph.nodes.find((n) => n.id === box.id) : undefined
+        // The box may be inside a package, so it is looked up through the tree, not in the root list.
+        const at = box.id ? findPlace(graph, box.id)?.node : undefined
         const idx = typeof box.index === 'number' ? box.index : 0
         if (!at) {
           missing.push(box.title)
