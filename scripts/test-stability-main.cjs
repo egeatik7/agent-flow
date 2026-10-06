@@ -30,6 +30,9 @@ function harness(overrides = {}) {
     getSettings: () => ({ hideWhileRunning: false, maxSteps: 2000, stepDelayMs: 0 }),
     ensureLogsDir: () => '', openRunLog: () => {},
     agent: { beginRun: () => {}, executor: {} },
+    // The tool layer's own run record, fed from the same handler: it must be released too.
+    beginRun: () => events.push('run-begin'),
+    endRun: () => events.push('run-end'),
     globalShortcut: { register: () => events.push('registered'), unregister: () => events.push('unregistered') },
     STOP_HOTKEY: 'Ctrl+Shift+Q',
     powerSaveBlocker: { start: () => { events.push('awake'); return 0; }, isStarted: () => true, stop: () => events.push('awake-stopped') },
@@ -47,6 +50,7 @@ test('normalization failure releases run state and a later valid run succeeds', 
   assert.equal(h.context.running, false);
   assert.equal(h.context.runLog, '');
   assert(!h.events.includes('awake'));
+  assert(h.events.includes('run-end'), 'run state released when normalization fails');
   const result = await h.run(null, { nodes: [], edges: [] });
   assert.equal(result.ok, true);
   assert.equal(h.context.running, false);
@@ -64,6 +68,7 @@ test('store or run preparation failure cannot leave the agent permanently busy',
     await assert.rejects(h.run(null, { nodes: [], edges: [] }));
     assert.equal(h.context.running, false);
     assert.equal(h.context.runLog, '');
+    assert(h.events.includes('run-end'), 'run state released even when preparation fails');
   }
 });
 
