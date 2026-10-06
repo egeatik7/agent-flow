@@ -299,9 +299,16 @@ export function noteUserStop(): void {
   stoppedBy = 'user'
 }
 
-/** The frozen context of the moment a debug run broke: the current one, or an earlier one by run. */
+/**
+ * The frozen context of the moment a debug run broke.
+ *
+ * Without a run id this is the current failure, or - if a later run has already happened - the most
+ * recent one kept aside. That is what a repair needs: run, freeze, try a bounded region, and still
+ * be able to continue from the failure that started it. The run id is always reported with it, so
+ * an answer can say which run it belongs to and two runs are never mixed up.
+ */
 export function frozenReport(runId?: string): FrozenReport | null {
-  if (!runId) return frozen
+  if (!runId) return frozen ?? archive[0] ?? null
   if (frozen?.runId === runId) return frozen
   return archive.find((r) => r.runId === runId) ?? null
 }

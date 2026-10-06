@@ -105,13 +105,14 @@ describe('koşu raporu', () => {
     expect(frozenReport(oldId)?.error).toContain('bağlı değil')
     expect(recentReports().length).toBeGreaterThanOrEqual(2)
 
-    // Kullanıcı durdurdu: hata değil, rapor açılmaz.
+    // Kullanıcı durdurdu: hata değil, YENİ bir rapor açılmaz (arşivdeki eski hata yerinde kalır).
     endRun({ ok: false, stopped: true })
+    const before = frozenReport()?.failureId
     beginRun(g)
     setDebugRun(true)
     noteError('Durduruldu')
     endRun({ ok: false, stopped: true })
-    expect(frozenReport()).toBeNull()
+    expect(frozenReport()?.failureId).toBe(before)
   })
 
   it('sınırlı bölge testi: yalnız sınır node u bitince durur; neden ayrı bildirilir', () => {
@@ -147,6 +148,25 @@ describe('koşu raporu', () => {
     noteRunFailed('koşu hatası')
     expect(stopReason()).toBe('debug-error')
     setStopAtHook(null)
+  })
+
+  it('arşivdeki donmuş hatayı da bulur: onarım akışı referansı kaybetmez', () => {
+    const g = flow()
+    beginRun(g)
+    setDebugRun(true)
+    noteStep({ id: 'a', status: 'error' })
+    completeFailure('ilk hata')
+    const first = frozenReport()?.runId as string
+    expect(first).toBeTruthy()
+    endRun({ ok: false })
+    // Aradan bir koşu geçer (sınırlı bölge testi gibi): donmuş rapor arşive alınır.
+    beginRun(g)
+    endRun({ ok: true })
+    expect(frozenReport()?.runId).toBe(first)
+    expect(frozenReport()?.error).toBe('ilk hata')
+    expect(frozenReport(first)?.error).toBe('ilk hata')
+    // Bilinmeyen bir koşu kimliği uydurulmaz.
+    expect(frozenReport('yok-boyle-kosu')).toBeNull()
   })
 
   it('yeni koşu günlük kuyruğunu temizler', () => {

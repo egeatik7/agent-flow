@@ -1165,8 +1165,8 @@ const runFrom: ToolDef = {
       if (missing.length) return failed(runFrom.name, `Bazı kutular bu branch’te yok: ${missing.join(', ')}. Devam edilemez.`)
       const inner = report.loops[report.loops.length - 1]
       const vars = inner?.vars ? Object.entries(inner.vars).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(', ') : ''
-      resumeNote = ` · hatadan devam: “${inner?.title ?? '?'}” ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}${vars ? ` · değişkenler: ${vars}` : ''}`
-      ctx.log('info', `Ajan · buradan devam · aynı öğeden devam ediliyor: ${inner?.title ?? '?'} ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}.`)
+      resumeNote = ` · hatadan devam (koşu ${report.runId}, ${report.failureId}): “${inner?.title ?? '?'}” ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}${vars ? ` · değişkenler: ${vars}` : ''}`
+      ctx.log('info', `Ajan · buradan devam · koşu ${report.runId} hatasından, aynı öğeden: ${inner?.title ?? '?'} ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}.`)
     }
     const untilId = text(args.untilNodeId)
     const untilPlace = untilId ? findPlace(graph, untilId) : null
