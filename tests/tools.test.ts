@@ -233,6 +233,16 @@ describe('araç katmanı', () => {
     expect(settings.findOrder).toHaveLength(8)
   })
 
+  it('tek adım, kendisinden önce kalan durdurma isteğini temizler', async () => {
+    const { graph } = fixture()
+    let cleared = 0
+    const busy = ctx(graph, { isRunning: () => true, clearStop: () => { cleared += 1 } })
+    // Koşu sürerken reddedilir: kilit alınmadığı için temizlik de yapılmaz.
+    const refused = await callTool('step.run', { nodeId: 'x' }, busy)
+    expect(refused.ok).toBe(false)
+    expect(cleared).toBe(0)
+  })
+
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
     const { graph, pkg, click } = fixture()
     const calls: { nodeId?: string; packagePath?: string[] }[] = []

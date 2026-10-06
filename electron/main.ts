@@ -560,6 +560,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     requestStop: () => {
       stopRequested = true
     },
+    clearStop: () => {
+      stopRequested = false
+    },
     startRun: (graph: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
       runFlow(graph, startId, packagePath, opts),
     getCanvases: () => loadCanvases(),

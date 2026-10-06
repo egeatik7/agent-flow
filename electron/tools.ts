@@ -103,6 +103,11 @@ export type ToolContext = {
   askApproval: (summary: string, note: string) => Promise<boolean>
   /** The user's own stop, for `run.stop`. */
   requestStop: () => void
+  /**
+   * Forgets a stop request that is still standing. A run clears it when it starts; a single step
+   * has to do the same, or a stop left over from before would end the next step before it begins.
+   */
+  clearStop?: () => void
   /** Starts a real run on the engine. Returns when the run has finished. */
   startRun: (
     graph: AgentGraph,
@@ -804,6 +809,9 @@ const stepRun: ToolDef = {
     // The slot is claimed before the first await, so two callers cannot both get through and a
     // run cannot start on top of a step. It is released in the finally below.
     if (!beginProbe(nodeId)) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
+    // A stop asked for earlier (or for a run that has since ended) must not end this step, while
+    // one asked for *during* the step still does: it is the panel's Durdur for a long look.
+    ctx.clearStop?.()
     const fast = args.fast === true
     const s = fast ? withFastFind(ctx.getSettings()) : ctx.getSettings()
     const timeoutMs = Math.min(15 * 60_000, Math.max(5_000, num(args.timeoutMs) ?? 120_000))
