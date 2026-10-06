@@ -31,7 +31,7 @@ public class XpWin {
  public static bool Selected = false;
  public static bool SelectAll(IntPtr h){ SelectAllCalls++; if (SelectAllResult) Selected = true; return SelectAllResult; }
 }
-public static class XpText { public static bool CanType(string t){ return true; } }
+public static class XpText { public static bool CanType(string t){ return true; } public static bool ClipboardHas(string t){ return true; } }
 namespace System.Windows.Forms {
  // Records keys instead of sending them, so the test never types into a real window.
  public static class SendKeys {

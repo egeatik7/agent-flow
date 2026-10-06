@@ -38,7 +38,7 @@ public static class XpWin {
  public static RECT BoundsOf(IntPtr h){return new RECT { left=100,top=400,right=600,bottom=430 };}
  public static RECT CaretBounds(INFO i){return new RECT { left=300,top=405,right=301,bottom=425 };}
 }
-public static class XpText { public static bool Direct=true; public static bool CanType(string t){return Direct;} }
+public static class XpText { public static bool Direct=true; public static bool CanType(string t){return Direct;} public static bool ClipboardHas(string t){ return System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText()==t; } }
 namespace System.Windows.Forms {
  public class DataObject {
   public Dictionary<string,object> Data = new Dictionary<string,object>();
@@ -49,9 +49,10 @@ namespace System.Windows.Forms {
  public static class Clipboard {
   public static DataObject Current = new DataObject();
   public static bool FailCopy=false;
+  public static bool FailSet=false;
   public static DataObject GetDataObject(){return Current;}
   public static void SetDataObject(DataObject d,bool copy){Current=d;}
-  public static void SetText(string t){Current=new DataObject();Current.SetData("Text",false,t);}
+  public static void SetText(string t){ if (FailSet) { return; } Current=new DataObject();Current.SetData("Text",false,t); }
   public static bool ContainsText(){return Current.Data.ContainsKey("Text");}
   public static string GetText(){return (string)Current.GetData("Text",false);}
  }
@@ -170,4 +171,14 @@ $r=Invoke-Op 'typeText' @{text=$unicode;clearFirst=$true;guard=$guard;x=300;y=41
 Check ($r.value -eq $unicode -and $r.pasted) 'Unicode custom replacement uses guarded paste and real readback'
 Check ([System.Windows.Forms.Clipboard]::GetText() -eq 'old clipboard') 'Clipboard text preserved across custom paste and readback'
 Check ([System.Windows.Forms.Clipboard]::Current.GetData('Binary',$false).Length -eq 3) 'Other clipboard formats preserved across custom paste and readback'
+
+# The paste may only run when the clipboard really holds our text: pasting the previous
+# content would type the wrong thing into the field.
+[System.Windows.Forms.Clipboard]::FailSet=$true
+$sentBefore = [System.Windows.Forms.SendKeys]::Sent.Count
+Throws {Invoke-Op 'typeText' @{text=$unicode;clearFirst=$true;guard=$guard;x=300;y=415;pressEnter=$false}} 'CLIPBOARD_SET_FAILED' 'A clipboard that does not hold the text is never pasted'
+[System.Windows.Forms.Clipboard]::FailSet=$false
+# Clearing the field may still have sent keys, so look only at what came after.
+$sentAfter = @([System.Windows.Forms.SendKeys]::Sent | Select-Object -Skip $sentBefore)
+Check ($sentAfter -notcontains '^v') 'No paste was sent after the clipboard check failed'
 Write-Host "PASS: $script:Checks total recovery worker checks including Unicode clipboard path."

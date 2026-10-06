@@ -39,7 +39,7 @@ $common = Join-Path $root 'a11y/common.ps1'
 foreach ($name in @('Test-LocatorIdentity', 'Find-ByLocator', 'Find-Window')) {
   Import-TestFunction $common $name
 }
-foreach ($name in @('Invoke-Op', 'Test-SystemShortcut', 'Assert-KeyWindowActive', 'Get-PlainChord', 'Test-PlainKey', 'Test-PlainModifier', 'Test-SendKeysHasWin')) {
+foreach ($name in @('Invoke-Op', 'Test-SystemShortcut', 'Test-SendKeysSystemOnly', 'Assert-KeyWindowActive', 'Get-PlainChord', 'Test-PlainKey', 'Test-PlainModifier', 'Test-SendKeysHasWin')) {
   Import-TestFunction (Join-Path $root 'a11y/worker.ps1') $name
 }
 function Get-CT($e) { return [string]$e.Current.ControlType }
@@ -110,5 +110,16 @@ Check ($script:Keys.Count -eq ($before + 2)) 'A shortcut is sent while a window 
 [XpWin]::Foreground = [IntPtr]([long]99); [XpWin]::ForegroundPid = 4242
 Invoke-Op 'keys' @{ keys = '^s'; windowTitle = 'Blender' } | Out-Null
 Check ($script:Keys.Count -eq ($before + 3)) 'A shortcut is sent while the target window itself is in front'
+
+# A string that mixes a Windows chord with an application chord must not sneak the
+# application chord past the guard.
+[XpWin]::Foreground = [IntPtr]([long]77); [XpWin]::ForegroundPid = 5151
+$end = $script:Keys.Count
+$threw = $false
+try { Invoke-Op 'keys' @{ keys = '#r^s'; windowTitle = 'Blender' } | Out-Null } catch { $threw = $_.Exception.Message -like '*INPUT_WINDOW_NOT_ACTIVE*' }
+Check $threw 'A mixed Windows/application sequence is refused while another program is in front'
+Check ($script:Keys.Count -eq $end) 'The mixed sequence sent nothing'
+Invoke-Op 'keys' @{ keys = '{WIN}d'; windowTitle = 'Blender' } | Out-Null
+Check ($script:Keys.Count -eq ($end + 1)) 'The braced Windows form is still sent while another program is in front'
 
 Write-Host "PASS: $script:Checks stability worker checks; no desktop keys sent."

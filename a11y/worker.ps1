@@ -722,12 +722,47 @@ function Test-SystemShortcut([string]$keys) {
   $plain = $null
   try { $plain = Get-PlainChord $keys } catch { return $true }
   if ($null -ne $plain) {
-    foreach ($p in @($plain)) {
-      if (@('win', 'lwin', 'rwin', 'meta', 'cmd', 'super') -contains $p) { return $true }
+    # A braced form such as {WIN}d is the SendKeys domain; that classifier reads braces and
+    # carries a Windows key over to the next chord, so it decides those.
+    if ($keys.Contains('{')) { try { return [bool](Test-SendKeysSystemOnly $keys) } catch { return $false } }
+    # A plain command may hold more than one chord. Only a command whose every chord presses
+    # a Windows key is a system shortcut, or "win+r ctrl+s" would carry the ctrl+s past the guard.
+    foreach ($chord in @([string]$keys -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+      $got = $null
+      try { $got = Get-PlainChord $chord } catch { return $true }
+      # Get-PlainChord wraps its answer, so flatten it here instead of relying on unrolling.
+      $tokens = @()
+      foreach ($item in @($got)) {
+        if ($item -is [System.Array]) { $tokens += @($item) } else { $tokens += [string]$item }
+      }
+      $isWin = $false
+      foreach ($t in $tokens) {
+        $name = ([string]$t).Trim().ToLowerInvariant()
+        if ($name.StartsWith('{') -and $name.EndsWith('}')) { $name = $name.Substring(1, $name.Length - 2) }
+        if ($name -eq '#' -or @('win', 'lwin', 'rwin', 'meta', 'cmd', 'super') -contains $name) { $isWin = $true }
+      }
+      if (-not $isWin) { return $false }
     }
-    return $false
+    return $true
   }
-  try { return [bool](Test-SendKeysHasWin $keys) } catch { return $false }
+  try { return [bool](Test-SendKeysSystemOnly $keys) } catch { return $false }
+}
+
+# A legacy SendKeys string may hold more than one chord. Only one in which every chord presses
+# a Windows key is a system shortcut: in "#r^s" the ^s must still face the window guard.
+function Test-SendKeysSystemOnly([string]$keys) {
+  if ([string]::IsNullOrEmpty($keys)) { return $false }
+  $chords = [regex]::Matches($keys, '[%^+#]*(?:\{[^}]*\}|.)')
+  if ($chords.Count -eq 0) { return $false }
+  $carry = $false
+  foreach ($m in $chords) {
+    $chord = $m.Value
+    $keyPart = $chord -replace '^[%^+#]*', ''
+    $isWinKey = $keyPart -match '^\{(WIN|LWIN|RWIN)\}$'
+    if (-not ($carry -or $chord.StartsWith('#') -or $isWinKey)) { return $false }
+    $carry = $isWinKey
+  }
+  return $true
 }
 
 # Keys land in whatever window is in front, so a shortcut meant for the target application
