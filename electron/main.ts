@@ -646,6 +646,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
         const started = await startEndpoint(toolContext, endpointFile, {
           app: app.getVersion(),
           profile: String(process.env.NUBBO_PROFILE ?? ''),
+          build: String(process.env.NUBBO_BUILD ?? ''),
         })
         log('info', `Ajan uç noktası açık: http://127.0.0.1:${started.port} · jeton dosyası: ${started.file}`)
       } catch (e) {

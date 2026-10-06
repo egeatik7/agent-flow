@@ -116,12 +116,20 @@ function newestLog() {
 
 async function main() {
   const info = gate()
-  evidence.endpoint = { file: info.file, port: info.port, pid: info.pid, app: info.app, stampedProfile: info.profile }
+  evidence.endpoint = { file: info.file, port: info.port, pid: info.pid, app: info.app, build: info.build, stampedProfile: info.profile }
   const health = await call(info, 'run.state', {}, 10_000)
   check('gate-answers', 'tool-answered', health.result && health.result.ok === true, `run.state ${health.ms} ms`)
 
-  const flow = await call(info, 'read', {}, 20_000)
-  const data = flow.result.data || {}
+  // A refused call must stop the setup: carrying on with an empty answer is how a run looks
+  // mysterious later. Every gate answer is checked for ok before it is used.
+  function must(id, res) {
+    if (res.result && res.result.ok === true) return res.result
+    check(id, 'tool-answered', false, res.result?.message || 'araç reddetti')
+    throw new Error(`${id}: ${res.result?.message || 'araç reddetti'}`)
+  }
+
+  const flow = await call(info, 'flow.read', {}, 20_000)
+  const data = must('flow-read', flow).data || {}
   const canvas = data.tabName || data.canvas || ''
   evidence.canvas = canvas
   if (scenario.canvas) check('right-canvas', 'tool-answered', canvas === scenario.canvas, `beklenen “${scenario.canvas}”, görülen “${canvas}”`)
@@ -136,8 +144,8 @@ async function main() {
   }
 
   const created = await call(info, 'branch.create', { name: `${name} · ${stamp}` }, 20_000)
-  const branchId = created.result.data?.branchId
-  check('branch-created', 'tool-answered', created.result.ok === true && !!branchId, `branch ${branchId}`)
+  const branchId = must('branch-created', created).data?.branchId
+  check('branch-created', 'tool-answered', !!branchId, `branch ${branchId}`)
   if (!branchId) throw new Error('branch açılamadı')
 
   const ops = (scenario.setup?.ops || []).map((op) => {
@@ -147,7 +155,7 @@ async function main() {
     return copy
   })
   const edited = await call(info, 'flow.edit', { branchId, ops, note: `senaryo ${name}` }, 60_000)
-  check('edits-accepted', 'tool-answered', edited.result.ok === true, edited.result.message || '')
+  must('edits-accepted', edited)
   evidence.warnings = edited.result.data?.warnings || []
   if (scenario.setup?.expectNoWarnings) check('no-warnings', 'tool-answered', evidence.warnings.length === 0, evidence.warnings.join(' | '))
 
@@ -158,7 +166,7 @@ async function main() {
 
   const runAt = Date.now()
   const started = await call(info, 'run.from', { branchId, fromStart: scenario.run?.fromStart !== false, ...(scenario.run?.node ? { nodeId: scenario.run.node } : {}), ...(scenario.run?.fast ? { fast: true } : {}), ...(scenario.run?.debug ? { debug: true } : {}) }, 60_000)
-  check('run-started', 'tool-answered', started.result.ok === true, started.result.message || '')
+  must('run-started', started)
 
   const waited = await call(info, 'run.wait', { timeoutMs: scenario.run?.timeoutMs ?? 240_000 }, 20 * 60_000)
   const state = waited.result.data?.snapshot || {}

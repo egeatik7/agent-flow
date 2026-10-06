@@ -88,7 +88,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, ctx: 
 export async function startEndpoint(
   ctx: ToolContext,
   file: string,
-  stamp?: { app?: string; profile?: string }
+  stamp?: { app?: string; profile?: string; build?: string }
 ): Promise<EndpointPublic> {
   if (server && info) return { port: info.port, file: info.file, startedAt: info.startedAt }
   const token = crypto.randomBytes(24).toString('hex')
@@ -121,6 +121,9 @@ export async function startEndpoint(
           // talking to the instance it means to, instead of guessing from a port number.
           app: stamp?.app ?? '',
           profile: stamp?.profile ?? '',
+          // Which commit this build was made from, when the launcher said so: with it, a caller can
+          // prove it is driving the build it just made instead of an older instance's leftovers.
+          build: stamp?.build ?? '',
         },
         null,
         2

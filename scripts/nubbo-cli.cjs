@@ -132,7 +132,7 @@ function endpointFile() {
     try {
       const info = JSON.parse(fs.readFileSync(file, 'utf8'))
       if (info && info.port && info.token) {
-        return { port: info.port, token: info.token, pid: info.pid, app: info.app, profile: info.profile, file }
+        return { port: info.port, token: info.token, pid: info.pid, app: info.app, profile: info.profile, build: info.build, at: info.at, file }
       }
     } catch {
       /* try the next one */
@@ -312,7 +312,9 @@ async function main() {
     const alive = pidAlive(info.pid)
     console.log(`uç nokta: ${info.file}`)
     console.log(`port: ${info.port} · süreç: ${info.pid} (${alive ? 'yaşıyor' : 'ÖLÜ — eski jeton'})`)
-    console.log(`uygulama sürümü: ${info.app || '(bilinmiyor)'} · jetonun profili: ${info.profile || '(gerçek)'}`)
+    console.log(`uygulama sürümü: ${info.app || '(bilinmiyor)'} · build: ${info.build || '(damgasız)'} · jetonun profili: ${info.profile || '(gerçek)'}`)
+    const age = info.at ? Math.round((Date.now() - Date.parse(info.at)) / 1000) : null
+    if (age !== null && Number.isFinite(age)) console.log(`jeton yaşı: ${age} sn (${age > 3600 ? 'DİKKAT: eski olabilir' : 'taze'})`)
     let health = 'ulaşılamadı'
     try {
       const r = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(4000) })
