@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings, type CanvasBook } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { callTool, toolList, actionSent, windowMismatch, withFastFind, type ToolContext } from '../electron/tools'
+import { windowEventAllowed } from '../electron/run-events'
 import { beginRun, endRun } from '../electron/tool-state'
 
 let seq = 0
@@ -241,6 +242,16 @@ describe('araç katmanı', () => {
     const refused = await callTool('step.run', { nodeId: 'x' }, busy)
     expect(refused.ok).toBe(false)
     expect(cleared).toBe(0)
+  })
+
+  it('öneri koşusunda adım ve patch olayları pencereye gitmez', () => {
+    // Adım olayları tuvali ışıklandırır, patch olayları node'un hafızasını/yolunu değiştirir;
+    // öneri koşusu temel akışın kimliklerini kullandığı için ikisi de pencereye uğramamalı.
+    expect(windowEventAllowed('agent:step', true)).toBe(false)
+    expect(windowEventAllowed('agent:patch', true)).toBe(false)
+    expect(windowEventAllowed('agent:log', true)).toBe(true)
+    expect(windowEventAllowed('agent:step', false)).toBe(true)
+    expect(windowEventAllowed('agent:patch', false)).toBe(true)
   })
 
   it('istenen pencere okunmadıysa bu açıkça söylenir', () => {

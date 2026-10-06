@@ -191,6 +191,12 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const keyToId = new Map<string, string>()
   const planned = new Map<string, AgentNode>()
+  // Ops are checked against a graph that already has the ops before them applied: "disconnect
+  // A→B, then connect A→C" is one sensible plan, and a node added after a freed output is fine
+  // too. Only the connections matter for these checks, so this list is the working copy of them.
+  const workEdges = graph.edges.map((e) => ({ from: e.from, fromPort: e.fromPort, to: e.to }))
+  const titleAt = (id: string): string => planned.get(id)?.title ?? titleOf(graph, id)
+  const portTaken = (fromId: string, port: string) => workEdges.find((e) => e.from === fromId && e.fromPort === port)
   let addedCount = 0
   const known = (ref: string): AgentNode | null => {
     const id = keyToId.get(ref) ?? ref
@@ -228,6 +234,18 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
         errors.push(`${at}: “${labelOf(anchor.kind)}” için “${port}” çıkışı yok (var: ${portsOf(anchor.kind).join(', ')}).`)
         return
       }
+      // The runner follows the first edge of an output, so a node added onto an output that is
+      // already used would sit there and never run. This check used to live only on `connect`,
+      // which is how "add a wait after A" could silently produce A→B and A→wait together.
+      if (anchor) {
+        const taken = portTaken(anchor.id, port)
+        if (taken) {
+          errors.push(
+            `${at}: “${anchor.title}” node’unun “${port}” çıkışında zaten bir bağlantı var (“${titleAt(taken.to)}”). Önce onu kaldır (disconnect), sonra ekle.`
+          )
+          return
+        }
+      }
       const sameKind = graph.nodes.filter((n) => n.kind === newKind).length + plan.adds.filter((a) => a.node.kind === newKind).length
       const node = createNode(newKind, 0, 0, sameKind + 1)
       // A recipe is applied again on every look, so an added node needs the *same* id each time:
@@ -252,6 +270,7 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
       plan.adds.push({ node, key: op.key, fromId: anchor?.id, fromPort: anchor ? port : undefined })
       planned.set(node.id, node)
       if (op.key) keyToId.set(op.key, node.id)
+      if (anchor) workEdges.push({ from: anchor.id, fromPort: port, to: node.id })
       // Seen in use: a typing step with no target writes only while the focus happens to sit in a
       // text field. That worked for the Run box and failed for Notepad, where the window in front
       // and the keyboard focus were not the same. Allowed, but said out loud.
@@ -305,19 +324,16 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
         errors.push(`${at}: “${labelOf(from.kind)}” için “${port}” çıkışı yok (var: ${portsOf(from.kind).join(', ')}).`)
         return
       }
-      const taken = graph.edges.find((e) => e.from === from.id && e.fromPort === port)
+      const taken = portTaken(from.id, port)
       if (taken) {
         // The runner follows the first edge of a port; a second one would never run.
         errors.push(
-          `${at}: “${from.title}” node’unun “${port}” çıkışında zaten bir bağlantı var (“${titleOf(graph, taken.to)}”). Önce onu kaldır.`
+          `${at}: “${from.title}” node’unun “${port}” çıkışında zaten bir bağlantı var (“${titleAt(taken.to)}”). Önce onu kaldır.`
         )
         return
       }
-      if (plan.edges.some((e) => e.from === from.id && e.fromPort === port)) {
-        errors.push(`${at}: aynı çıkışa bu listede ikinci bir bağlantı kuruluyor.`)
-        return
-      }
       plan.edges.push({ from: from.id, fromPort: port, to: to.id })
+      workEdges.push({ from: from.id, fromPort: port, to: to.id })
       return
     }
     if (kind === 'disconnect') {
@@ -332,12 +348,14 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
         return
       }
       const to = op.to ? known(op.to)?.id ?? op.to : undefined
-      const matches = graph.edges.filter((e) => e.from === from.id && e.fromPort === port && (!to || e.to === to))
+      const matches = workEdges.filter((e) => e.from === from.id && e.fromPort === port && (!to || e.to === to))
       if (!matches.length) {
         errors.push(`${at}: “${from.title}” node’unun “${port}” çıkışında kaldırılacak bağlantı bulunamadı.`)
         return
       }
       plan.cuts.push({ from: from.id, fromPort: port, to })
+      // Removing it here is what lets the very same plan connect the freed output afterwards.
+      for (const m of matches) workEdges.splice(workEdges.indexOf(m), 1)
       return
     }
     errors.push(`${at}: bilinmeyen işlem türü “${String((op as { op?: unknown }).op)}”.`)

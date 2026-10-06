@@ -88,13 +88,15 @@ function harness(permission: AppSettings['agentPermission'] = 'auto') {
       }
       return mergeAnswer
     },
-    takeMergeUndo: () => {
+    // Geri alma hakkı ancak pencere onayladıktan sonra harcanır: peek okur, commit tüketir.
+    peekMergeUndo: () => undoAvailable,
+    commitMergeUndo: () => {
       const snap = undoAvailable
       undoAvailable = null
-      if (!snap) return null
+      if (!snap) return false
       const back = dropped.pop()
       if (back) book.branches = [...branchesOf(book), back]
-      return snap
+      return true
     },
   }
   const openBranch = async (name = 'RunAgentFix 1') => {
@@ -189,7 +191,18 @@ describe('branch: kopya değil, tarif', () => {
     const h = harness()
     const id = await h.openBranch()
     await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4000)] }, h.ctx)
-    await callTool('flow.edit', { branchId: id, ops: [{ op: 'addNode', key: 'k', kind: 'key', fields: { keys: '{ESC}' }, connectFrom: h.click.id }] }, h.ctx)
+    // Dolu çıkışa düğüm eklenemez: önce eski oku kaldır, sonra ekle.
+    await callTool(
+      'flow.edit',
+      {
+        branchId: id,
+        ops: [
+          { op: 'disconnect', from: h.click.id },
+          { op: 'addNode', key: 'k', kind: 'key', fields: { keys: '{ESC}' }, connectFrom: h.click.id },
+        ],
+      },
+      h.ctx
+    )
     expect(h.branchOf(id).groups).toHaveLength(2)
     const before = JSON.stringify(h.book.tabs[0].graph)
 

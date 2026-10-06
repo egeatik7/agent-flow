@@ -132,7 +132,10 @@ export type ToolContext = {
    * Takes the flow as it was just before the last merge, and puts the branch recipe back. One
    * use only, and it lives in memory: after a restart there is nothing to go back to.
    */
-  takeMergeUndo?: () => { tabId: string; graph: AgentGraph } | null
+  /** The last merge, without consuming it: the undo right is spent only on a confirmed restore. */
+  peekMergeUndo?: () => { tabId: string; graph: AgentGraph } | null
+  /** Spends the undo right: clears the snapshot and puts the recipe back. */
+  commitMergeUndo?: () => boolean
 }
 
 /** `panel` is a person pressing a button in the app, which is its own approval. */
@@ -619,9 +622,10 @@ const mergeUndo: ToolDef = {
   ready: true,
   run: async (_args, ctx, source) => {
     if (source !== 'panel') return failed(mergeUndo.name, 'Merge geri almayı yalnız Nubbo penceresinden yapabilirsin.')
-    const take = ctx.takeMergeUndo
-    if (!take) return failed(mergeUndo.name, 'Bu sürümde merge geri alma yok.')
-    const snap = take()
+    const peek = ctx.peekMergeUndo
+    if (!peek) return failed(mergeUndo.name, 'Bu sürümde merge geri alma yok.')
+    // Reading the undo does not consume it: only a confirmed restore may do that.
+    const snap = peek()
     if (!snap) {
       return failed(mergeUndo.name, 'Geri alınacak merge yok. (Geri alma yalnız aynı oturumda ve bir kez çalışır; uygulama yeniden başladıysa unutulur.)')
     }
@@ -630,10 +634,11 @@ const mergeUndo: ToolDef = {
       { snapshot: false }
     )
     if (!answer.ok) {
-      const message = `Merge geri alınamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Tuval olduğu gibi kaldı.`
+      const message = `Merge geri alınamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Tuval olduğu gibi kaldı; geri alma hakkı duruyor, tekrar deneyebilirsin.`
       ctx.log('warn', `Ajan · merge · ${message}`)
       return failed(mergeUndo.name, message)
     }
+    ctx.commitMergeUndo?.()
     const message = 'Son merge geri alındı: tuval merge öncesi hâline döndü, tarif yeniden açıldı. (Bir kez geri alınabilir.)'
     ctx.log('info', `Ajan · merge · ${message}`)
     return {

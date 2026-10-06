@@ -4,6 +4,7 @@ import path from 'path'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
+import { windowEventAllowed } from './run-events'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import { beginRun, endRun, noteError, noteStep, probing } from './tool-state'
@@ -66,6 +67,9 @@ function getSettings(): AppSettings {
   return s
 }
 
+/** How long the window has to apply a merge and confirm it was saved. */
+const MERGE_TIMEOUT_MS = 10_000
+
 /** True while a branch is being tested: that run is not the flow on screen. */
 let derivedRun = false
 
@@ -73,10 +77,10 @@ function send(channel: string, payload: unknown) {
   if (channel === 'agent:step') {
     // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
     noteStep(payload)
-    // A branch test must not light up the user's canvas or move its loop ticks: the ids in the
-    // derived graph are the base's ids, so the canvas would happily take them for its own.
-    if (derivedRun) return
   }
+  // A branch test must change only its own copy: see electron/run-events.ts for why both steps
+  // and patches are held back while the run is derived.
+  if (!windowEventAllowed(channel, derivedRun)) return
   mainWindow?.webContents.send(channel, payload)
 }
 
@@ -588,16 +592,20 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
       opts?: { snapshot?: boolean }
     ) => applyMergeInWindow(payload, opts),
-    takeMergeUndo: () => {
+    takeMergeUndo: undefined,
+    // Reading the undo does not consume it: a window that never answers must leave the right to
+    // try again, and must not have the recipe put back while the merge is still in the flow.
+    peekMergeUndo: () => (lastMerge ? { tabId: lastMerge.tabId, graph: lastMerge.graph } : null),
+    commitMergeUndo: () => {
       const snap = lastMerge
       lastMerge = null
-      if (!snap) return null
+      if (!snap) return false
       // The recipe was dropped when it was merged; put it back with the flow it was based on.
       if (snap.branch) {
         const book = loadCanvases()
         store.set('canvases', toolLayerSave(book, [...branchesOf(book), snap.branch]))
       }
-      return { tabId: snap.tabId, graph: snap.graph }
+      return true
     },
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
@@ -647,7 +655,11 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   // A merge is handed to the window, because the window owns the canvas book and saves it on
   // every change: writing it from here could be undone by a save the window already had queued.
   // Without an answer from the window, nothing is written anywhere.
-  let mergePending: { resolve: (a: { ok: boolean; error?: string }) => void; timer: ReturnType<typeof setTimeout> } | null = null
+  let mergePending: {
+    requestId: string
+    resolve: (a: { ok: boolean; error?: string }) => void
+    timer: ReturnType<typeof setTimeout>
+  } | null = null
 
   // The flow as it was just before the last merge, so a merge can be taken back once. Kept in
   // memory on purpose: it is a safety net for a wrong click, not a version history.
@@ -656,9 +668,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('canvas:mergeAnswer', (_e, answer: unknown) => {
     const pending = mergePending
     if (!pending) return false
+    const a = answer as { ok?: unknown; error?: unknown; requestId?: unknown } | null
+    // A late answer from an earlier question must never pass for the one being asked now.
+    if (typeof a?.requestId !== 'string' || a.requestId !== pending.requestId) {
+      log('warn', 'Ajan · merge · eşleşmeyen pencere cevabı yok sayıldı.')
+      return false
+    }
     mergePending = null
     clearTimeout(pending.timer)
-    const a = answer as { ok?: unknown; error?: unknown } | null
     pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
     return true
   })
@@ -675,16 +692,25 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       const branch = (cur.branches ?? []).find((b) => (b as { id?: string }).id === payload.branchId) ?? null
       lastMerge = tab ? { tabId: payload.tabId, graph: structuredClone(tab.graph), branch, at: Date.now() } : null
     }
+    // Every question carries its own id and its own deadline: the answer must match, and a window
+    // that was busy for longer than the deadline applies nothing rather than applying it late.
+    const requestId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    const expiresAt = Date.now() + MERGE_TIMEOUT_MS
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (mergePending && mergePending.resolve === resolve) {
           mergePending = null
-          resolve({ ok: false, error: 'pencere 10 sn içinde yanıt vermedi' })
+          // Nothing confirmed: say so honestly instead of claiming the flow is untouched. The
+          // caller keeps the recipe and the undo right, so this is recoverable either way.
+          resolve({
+            ok: false,
+            error: `pencere ${Math.round(MERGE_TIMEOUT_MS / 1000)} sn içinde yanıt vermedi (uygulanmış olabilir); tarif ve geri alma hakkı korundu`,
+          })
         }
-      }, 10_000)
-      mergePending = { resolve, timer }
-      log('info', `Ajan · merge · pencereye soruldu: “${payload.branchName}”.`)
-      mainWindow?.webContents.send('canvas:merge', payload)
+      }, MERGE_TIMEOUT_MS)
+      mergePending = { requestId, resolve, timer }
+      log('info', `Ajan · merge · pencereye soruldu: “${payload.branchName}” (${requestId}).`)
+      mainWindow?.webContents.send('canvas:merge', { ...payload, requestId, expiresAt })
     })
   }
 

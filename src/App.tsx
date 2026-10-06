@@ -222,14 +222,32 @@ export default function App() {
     }
   }, [pushLog])
 
-  const rememberBook = useCallback((book: CanvasBook) => {
-    bookRef.current = book
-    activeIdRef.current = book.activeId
-    setActiveId(book.activeId)
-    setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
-    if (api) void api.saveCanvases(book).catch((e) => pushLog('error', errText(e)))
-    else localStorage.setItem(LOCAL_BOOK, JSON.stringify(book))
-  }, [pushLog])
+  const rememberBook = useCallback(
+    (book: CanvasBook): Promise<boolean> => {
+      bookRef.current = book
+      activeIdRef.current = book.activeId
+      setActiveId(book.activeId)
+      setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
+      if (api) {
+        // The answer says whether the disk really took it; merge waits for this before it says
+        // "saved" and before the recipe is thrown away.
+        return api
+          .saveCanvases(book)
+          .then(() => true)
+          .catch((e) => {
+            pushLog('error', errText(e))
+            return false
+          })
+      }
+      try {
+        localStorage.setItem(LOCAL_BOOK, JSON.stringify(book))
+        return Promise.resolve(true)
+      } catch {
+        return Promise.resolve(false)
+      }
+    },
+    [pushLog]
+  )
 
   const commitActive = useCallback((): CanvasBook => {
     const cur = bookRef.current
@@ -380,8 +398,15 @@ export default function App() {
    */
   useEffect(() => {
     if (!api?.onMergeCanvas) return
-    const off = api.onMergeCanvas((payload) => {
+    const off = api.onMergeCanvas(async (payload) => {
       try {
+        // A question the tool layer has already given up on must not be applied late: the caller
+        // was told nothing was written.
+        if (typeof payload.expiresAt === 'number' && Date.now() > payload.expiresAt) {
+          pushLog('warn', 'Merge isteğinin süresi dolmuş; uygulanmadı.')
+          await api?.mergeCanvasAnswer?.({ ok: false, error: 'istek süresi doldu', requestId: payload.requestId })
+          return
+        }
         const cur = bookRef.current
         const tabs = cur.tabs.map((t) => (t.id === payload.tabId ? { ...t, graph: payload.graph as AgentGraph } : t))
         const branches = (cur.branches ?? []).filter((b) => (b as { id?: string }).id !== payload.branchId)
@@ -396,17 +421,24 @@ export default function App() {
           selectedIdsRef.current = []
           setSelectedEdgeId(null)
         }
-        rememberBook({ ...cur, tabs, branches })
+        // Saving is awaited: "saved" may only be said once the disk took it, because the tool layer
+        // drops the recipe on that word.
+        const saved = await rememberBook({ ...cur, tabs, branches })
+        if (!saved) {
+          pushLog('error', 'Merge uygulandı ama kaydedilemedi; tarif silinmedi, tekrar denenebilir.')
+          await api?.mergeCanvasAnswer?.({ ok: false, error: 'tuval kaydedilemedi', requestId: payload.requestId })
+          return
+        }
         pushLog(
           'info',
           payload.reason === 'undo'
             ? 'Merge geri alındı: tuval merge öncesi hâline döndü. Kaydedildi.'
             : `Ajan önerisi uygulandı: “${payload.branchName}”. Kaydedildi.`
         )
-        void api?.mergeCanvasAnswer?.({ ok: true })
+        await api?.mergeCanvasAnswer?.({ ok: true, requestId: payload.requestId })
       } catch (e) {
         pushLog('error', `Merge uygulanamadı: ${errText(e)}`)
-        void api?.mergeCanvasAnswer?.({ ok: false, error: errText(e) })
+        await api?.mergeCanvasAnswer?.({ ok: false, error: errText(e), requestId: payload.requestId })
       }
     })
     return off

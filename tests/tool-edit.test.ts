@@ -72,14 +72,57 @@ describe('düzenleme planı', () => {
     expect(aimed.check.warnings).toEqual([])
   })
 
+  it('dolu çıkışa node eklemeyi de reddeder (ilk ok izlenir)', () => {
+    const { graph, start, click, cond, end } = fixture()
+    // start → click zaten var: "A'dan sonra bekleme ekle" bu yüzden reddedilmeli.
+    const occupied = run(graph, [{ op: 'addNode', key: 'y', kind: 'wait', fields: { ms: 500 }, connectFrom: start.id }])
+    expect(occupied.check.ok).toBe(false)
+    expect(occupied.check.errors.join(' ')).toContain('zaten bir bağlantı var')
+    expect(occupied.check.errors.join(' ')).toContain('disconnect')
+
+    // Boş bir çıkışa iki node eklemek de reddedilir; ilki serbest.
+    const twice = run(graph, [
+      { op: 'disconnect', from: cond.id, fromPort: 'true' },
+      { op: 'addNode', key: 'a', kind: 'wait', fields: { ms: 100 }, connectFrom: cond.id, fromPort: 'true' },
+      { op: 'addNode', key: 'b', kind: 'wait', fields: { ms: 200 }, connectFrom: cond.id, fromPort: 'true' },
+    ])
+    expect(twice.check.ok).toBe(false)
+    expect(twice.check.errors.join(' ')).toContain('zaten bir bağlantı var')
+    expect(twice.check.errors.join(' ')).toContain('işlem 3')
+    expect(end.title).toBeTruthy()
+  })
+
+  it('aynı planda kesip yeniden bağlamak çalışır (işlemler sırayla denetlenir)', () => {
+    const { graph, start, click, end } = fixture()
+    const plan = run(graph, [
+      { op: 'disconnect', from: start.id },
+      { op: 'connect', from: start.id, to: end.id },
+    ])
+    expect(plan.check.errors).toEqual([])
+    expect(plan.check.ok).toBe(true)
+    expect(plan.check.plan.cuts).toHaveLength(1)
+    expect(plan.check.plan.edges).toHaveLength(1)
+    const next = applyPlan(graph, plan.check.plan)
+    expect(next.edges.some((e) => e.from === start.id && e.to === end.id)).toBe(true)
+    expect(next.edges.some((e) => e.from === start.id && e.to === click.id)).toBe(false)
+
+    // Kesmeden aynı çıkışa ikinci bağlantı yine reddedilir.
+    const bad = run(graph, [{ op: 'connect', from: start.id, to: end.id }])
+    expect(bad.check.ok).toBe(false)
+    expect(bad.check.errors.join(' ')).toContain('zaten bir bağlantı var')
+  })
+
   it('verilen grafiği değiştirmez; yeni grafik döndürür', () => {
     const { graph, click, cond } = fixture()
     const before = JSON.stringify(graph)
-    const { check, after } = run(graph, [{ op: 'addNode', kind: 'wait', fields: { ms: 500 }, connectFrom: click.id }])
+    const { check, after } = run(graph, [
+      { op: 'disconnect', from: click.id },
+      { op: 'addNode', kind: 'wait', fields: { ms: 500 }, connectFrom: click.id },
+    ])
     expect(check.ok).toBe(true)
     expect(JSON.stringify(graph)).toBe(before)
     expect((after as AgentGraph).nodes).toHaveLength(graph.nodes.length + 1)
-    expect((after as AgentGraph).edges.some((e) => e.to === cond.id)).toBe(true)
+    expect((after as AgentGraph).edges.some((e) => e.to === cond.id)).toBe(false)
   })
 
   it('hedef kanıtına ve koşu durumuna dokunmayı reddeder', () => {
@@ -150,7 +193,11 @@ describe('düzenleme planı', () => {
 
   it('yeni node’u çakışmayacak bir yere koyar', () => {
     const { graph, click } = fixture()
-    const { check, after } = run(graph, [{ op: 'addNode', kind: 'wait', connectFrom: click.id }])
+    // Dolu çıkışa eklemek yasak: önce eski oku kaldır, sonra ekle (ajanın izlediği yol bu).
+    const { check, after } = run(graph, [
+      { op: 'disconnect', from: click.id },
+      { op: 'addNode', kind: 'wait', connectFrom: click.id },
+    ])
     expect(check.ok).toBe(true)
     const added = (after as AgentGraph).nodes.find((n) => n.kind === 'wait') as AgentNode
     expect(added.x).toBeGreaterThan(click.x)
@@ -159,12 +206,14 @@ describe('düzenleme planı', () => {
 
     // Kendi eklediği node'lar da üst üste binmez.
     const two = run(graph, [
+      { op: 'disconnect', from: click.id },
       { op: 'addNode', key: 'a', kind: 'wait', connectFrom: click.id },
-      { op: 'addNode', key: 'b', kind: 'wait', connectFrom: click.id },
+      { op: 'addNode', key: 'b', kind: 'wait', connectFrom: 'a' },
     ])
     const waits = (two.after as AgentGraph).nodes.filter((n) => n.kind === 'wait')
     expect(waits).toHaveLength(2)
-    expect(Math.abs(waits[0].y - waits[1].y) >= 100).toBe(true)
+    // Zincir hâlinde eklendiği için yan yana dururlar; önemli olan üst üste binmemeleri.
+    expect(Math.abs(waits[0].x - waits[1].x) >= 100 || Math.abs(waits[0].y - waits[1].y) >= 100).toBe(true)
   })
 
   it('halkayı engellemez ama söyler', () => {
@@ -204,9 +253,9 @@ describe('düzenleme planı', () => {
   it('farkı ve insan satırlarını yazar', () => {
     const { graph, click } = fixture()
     const { check, after } = run(graph, [
+      { op: 'disconnect', from: click.id },
       { op: 'patchNode', id: click.id, fields: { prompt: 'Remesh başlat (yeniden)' } },
       { op: 'addNode', key: 'w', kind: 'wait', fields: { ms: 800 }, connectFrom: click.id },
-      { op: 'disconnect', from: click.id },
     ])
     expect(check.ok).toBe(true)
     const diff = diffGraphs(graph, after as AgentGraph)
