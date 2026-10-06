@@ -253,7 +253,8 @@ async function main() {
     // A bounded test that stops before any typing cannot have verified a field: the check has no
     // subject, so it is skipped with a reason instead of being reported as a failure or hidden.
     const noTyping = stoppedExpected && /\.(type|yaz)/i.test(String(waited.result.data?.last?.error || '')) === false
-    check('field-verified', 'input-sent', noTyping ? false : /Alan doğrulandı/.test(text), noTyping ? 'sınırlı test yazma adımına varmadan durdu' : 'motor yazdığı alanı geri okudu', noTyping)    check('no-input-refusal', 'input-sent', !/INPUT_WINDOW_NOT_ACTIVE|INPUT_FOCUS_UNRESOLVED/.test(text), 'girdi reddi yok')
+    check('field-verified', 'input-sent', noTyping ? false : /Alan doğrulandı/.test(text), noTyping ? 'sınırlı test yazma adımına varmadan durdu' : 'motor yazdığı alanı geri okudu', noTyping)
+    check('no-input-refusal', 'input-sent', !/INPUT_WINDOW_NOT_ACTIVE|INPUT_FOCUS_UNRESOLVED/.test(text), 'girdi reddi yok')
     const shot = /([A-Za-z]:\\[^\s"']+\.png)/.exec(text)
     if (shot && fs.existsSync(shot[1])) {
       fs.copyFileSync(shot[1], path.join(outDir, 'error-shot.png'))
