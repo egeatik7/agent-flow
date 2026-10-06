@@ -55,11 +55,40 @@ Fıkstür v2: döngünün içinde **iki** bozuk adım (`pilot-bad-click`, `pilot
 - Öneri dalında **2 düzenleme** ✓ (onarım 1 + onarım 2 birlikte).
 - Kayıtlı tuvalde **iki bozuk hedef de yerinde** ✓ (`YOK-BU-YAZI-ASLA-YOK`, `YOK-BU-YAZI-2-DE-YOK`) → **asıl akış değişmedi**.
 
-**Bu yarıda ortaya çıkan dürüst ayrıntı:** 8. adımdaki koşu `--fast` (model kapalı) idi; onarılmış hedef
+## Yerel basamak açığı — kök neden (ölçüldü, iki yanlış iddia düzeltildi)
+
+**Ölçüm** (aynı ekran, aynı saniye, salt-okunur ✓):
+
+| Kim | Ne görüyor / diyor |
+|---|---|
+| Okuyucu (`screen.read`) | `'Kaynak klasör' · Text · uia (98,301)` **ve** **`'Kaynak klasör' · Edit · uia (298,301) 440x38`** ✓ |
+| Çözücü (`target.preview --fast`) | *"Hiçbir basamak aday listesi vermedi"* ✗ · iz: **yalnız `chrome`** ✗ |
+| Koşu, tıkla node'u | **buldu ve tıkladı** ✓ (fıkstür: `mouse:source`, `focused: True`) |
+| Koşu, yaz node'u | *"«Kaynak klasör» ekranda bulunamadı"* ✗ |
+| Model açıkken (tars) | alanı buluyor ✓ → `ui-real` geçiyor, `ui-local` geçmiyor |
+
+**Kök neden** (`electron/agent.ts:409`): merdivenin `uia` basamağı **yalnızca node'un kayıtlı öğesi varsa**
+(`locator.automationId` / `locator.name` ✓) çalışıyor. Yalnızca **yazılı komutu** olan bir node için
+UIA ağacına **hiç sorulmuyor** ✗; merdiven OCR yazılarıyla yetiniyor ✓. Bu, **tıklama** için yeterli
+(etiketin yerine tıklanır ✓, alan odaklanır ✓) ama **yazma** için yetmez ✗: yazmak alanın *kendisini*
+gerektirir ✓ ve alan yalnız UIA ağacında görünüyor ✓ (`Edit` ✓). Model bu boşluğu ekran görüntüsüyle
+örtüyor ✗ — yani §10'daki *"basit ve kesin iş yerelde çözülebiliyorsa modele gönderilmez"* kuralı bu
+yolda **sağlanmıyor** ✗.
+
+**Düzeltilmiş iddialar** (kanıt gelmeden söylenmişti ✗): (1) "koşunun ilk taraması 3 pencere köküne
+bakıyor, bu yüzden görmüyor" ✗ — tarama 183 öğe gördü ✓ ve etiket bazı koşularda bulundu ✓;
+(2) "tıkla/yaz ayrımı bir süzgeç yüzünden" ✗ — sorun basamağın **hiç çalışmaması** ✗.
+
+**Önerilen en küçük düzeltme** ✓: yazma (ve istenirse tıklama) node'u için, **yazılı komutu** olan ve
+kayıtlı öğesi olmayan durumda da UIA ağacından **yazılabilir** (Edit/Document) ve adı komutla eşleşen
+öğe aranmalı ✓; kabul kanıtı §8'e göre: **tam değer okunacak** ✓, salt-okunur/devre dışı kabul
+edilmeyecek ✗. Kabul ölçütü: **`ui-local` model kapalıyken geçmeli** ✓.
+
+**Ayrıca bulunan iki küçük kusur** ✗: (a) `until` sınırı başlangıç node'uyla aynıysa koşu durmuyor ✗;
+(b) koşu hatası **hangi node'da** düştüğünü söylemiyor ✗ (kutu içinde öğe adı geçiyor ✓).
+
 `Nubbo Agent Studio` **yerel basamaklarla bulunamadı** ve bu *ikinci hatayı* üretti. Aynı hedef, model
 açıkken (11. adım) bulundu. Yani yerel basamak açığı burada da görünür durumda; onarımın kendisi doğru.
-
-
 
 ## Güvenlik notu (bu döngü için)
 
