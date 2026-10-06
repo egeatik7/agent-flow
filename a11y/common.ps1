@@ -441,6 +441,9 @@ function Enter-Window($win) {
   try {
     $h = [IntPtr]$win.Current.NativeWindowHandle
     if ($h -ne [IntPtr]::Zero) {
+      # The window the run last worked on. A key sent without a window title is checked
+      # against it, so a shortcut cannot land in whatever took the foreground meanwhile.
+      $script:LastKeyWindow = $win
       if ([XpNative]::IsIconic($h)) { [void][XpNative]::ShowWindow($h, 9) }
       [void][XpNative]::SetForegroundWindow($h)
       Start-Sleep -Milliseconds 150

@@ -794,6 +794,8 @@ function Get-BoundWindow($target, [bool]$activate = $false) {
       throw 'INPUT_LAYOUT_CHANGED: Window bounds changed; stale coordinates were not used'
     }
   }
+  # This is the window the run is working on, so a later key with no window title is checked here.
+  $script:LastKeyWindow = $el
   return $el
 }
 
@@ -1209,6 +1211,16 @@ function Invoke-Op([string]$op, $P) {
         # The window is in front now unless something else took the foreground. Windows
         # shortcuts are exempt: they are meant to leave the target application.
         if (-not (Test-SystemShortcut ([string]$P.keys))) { Assert-KeyWindowActive $win }
+      } elseif ($null -ne $script:LastKeyWindow) {
+        # No window was named, so compare against the window the run last worked on. Until a
+        # window is known at all, the key goes as it always did: a lap must not stop over this.
+        if (-not (Test-SystemShortcut ([string]$P.keys))) {
+          try { Assert-KeyWindowActive $script:LastKeyWindow }
+          catch {
+            if ($_.Exception.Message -like '*INPUT_WINDOW_NOT_ACTIVE*') { throw }
+            # The remembered window can no longer be read; nothing is compared, the key goes.
+          }
+        }
       }
       Send-KeyString ([string]$P.keys)
       return $true

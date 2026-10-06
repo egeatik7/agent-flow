@@ -122,4 +122,17 @@ Check ($script:Keys.Count -eq $end) 'The mixed sequence sent nothing'
 Invoke-Op 'keys' @{ keys = '{WIN}d'; windowTitle = 'Blender' } | Out-Null
 Check ($script:Keys.Count -eq ($end + 1)) 'The braced Windows form is still sent while another program is in front'
 
+# A key sent with no window title is checked against the window the run last worked on.
+$script:LastKeyWindow = [pscustomobject]@{ Current = [pscustomobject]@{ Name = 'Blender'; NativeWindowHandle = [IntPtr]([long]99); ProcessId = 4242 } }
+[XpWin]::Foreground = [IntPtr]([long]77); [XpWin]::ForegroundPid = 5151
+$plain = $script:Keys.Count
+$threw = $false
+try { Invoke-Op 'keys' @{ keys = '^s' } | Out-Null } catch { $threw = $_.Exception.Message -like '*INPUT_WINDOW_NOT_ACTIVE*' }
+Check $threw 'A key with no window title is refused while another program is in front of the remembered window'
+Check ($script:Keys.Count -eq $plain) 'The refused key sent nothing'
+# Until a window is known the key still goes: a lap must not stop over this.
+$script:LastKeyWindow = $null
+Invoke-Op 'keys' @{ keys = '^s' } | Out-Null
+Check ($script:Keys.Count -eq ($plain + 1)) 'A key still goes while no window has been worked on yet'
+
 Write-Host "PASS: $script:Checks stability worker checks; no desktop keys sent."
