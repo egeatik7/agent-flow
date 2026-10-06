@@ -26,6 +26,23 @@ import type { AgentGraph, CanvasBook, CanvasTab } from './graph-types'
 
 export type BranchGroup = { id: string; at: number; note?: string; ops: EditOp[] }
 
+/**
+ * Where an alternative path leaves the flow and where it comes back.
+ *
+ * A branch is a recipe, so nothing forces it to be a detour: it can also just add a step or change
+ * a field. But when it *is* an alternative - "cut A→X, go through these nodes, come back at B" -
+ * that has to be legible in the record itself, not only inferable from the ops. An agent reading
+ * the file, or a person reading the JSON, should be able to see the shape at a glance.
+ */
+export type BranchPath = {
+  /** The node the alternative leaves from, on the port named. */
+  entry: { nodeId: string; port: string }
+  /** The node it comes back to. */
+  exit: { nodeId: string }
+  /** How sure the tool layer is that this is what the recipe does. */
+  source: 'declared' | 'derived'
+}
+
 export type BranchRecord = {
   id: string
   name: string
@@ -35,6 +52,8 @@ export type BranchRecord = {
   createdAt: number
   /** One entry per edit call, so undo drops exactly one call's worth. */
   groups: BranchGroup[]
+  /** The alternative's shape, when the recipe has one. Absent means "only edits, no detour". */
+  path?: BranchPath
 }
 
 export const MAX_BRANCHES = 3
@@ -96,6 +115,81 @@ export function baseTabOf(book: CanvasBook, branch: BranchRecord): CanvasTab | n
   return book.tabs.find((t) => t.id === branch.baseTabId) ?? null
 }
 
+/**
+ * The stretch of the old flow between the alternative's entry and its exit, in base order.
+ *
+ * This is what the alternative is an alternative *to*: merging it means this stretch is replaced.
+ */
+export function bypassedNodes(base: AgentGraph, path: BranchPath): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  let cur = path.entry.nodeId
+  const target = path.exit.nodeId
+  let guard = 0
+  while (cur && guard++ < 500) {
+    if (cur === target || seen.has(cur)) break
+    seen.add(cur)
+    const edge = base.edges.find((e) => e.from === cur && (cur === path.entry.nodeId ? e.fromPort === path.entry.port : true))
+    if (!edge) break
+    out.push(edge.to)
+    cur = edge.to
+  }
+  return out
+}
+
+/**
+ * What the merge should take away: the old stretch, minus anything the new flow can still reach.
+ *
+ * Reachable means safe: a node the flow can still get to (from a start, through a loop's members)
+ * is not the alternative's business. What is left unreachable was only there for the old path, so
+ * the merge removes it - except nodes that carry a package's or a box's contents: those are never
+ * deleted by an agent, they are reported and left alone.
+ */
+export function pruneBypassed(
+  derived: AgentGraph,
+  base: AgentGraph,
+  path: BranchPath
+): { graph: AgentGraph; removed: string[]; keptBack: string[] } {
+  const candidates = new Set(bypassedNodes(base, path))
+  if (!candidates.size) return { graph: derived, removed: [], keptBack: [] }
+
+  const reach = new Set<string>()
+  const queue = derived.nodes.filter((n) => n.kind === 'start').map((n) => n.id)
+  const byId = new Map(derived.nodes.map((n) => [n.id, n]))
+  while (queue.length) {
+    const id = queue.pop() as string
+    if (reach.has(id)) continue
+    reach.add(id)
+    for (const e of derived.edges) if (e.from === id) queue.push(e.to)
+    for (const m of byId.get(id)?.members ?? []) queue.push(m)
+  }
+
+  const keptBack: string[] = []
+  const removed = [...candidates].filter((id) => {
+    if (reach.has(id)) return false
+    const node = byId.get(id)
+    // A package or a box holds a whole flow inside it: report it, never delete it here.
+    if (node && (node.members?.length || node.inner)) {
+      keptBack.push(id)
+      return false
+    }
+    return true
+  })
+  if (!removed.length) return { graph: derived, removed: [], keptBack }
+
+  const drop = new Set(removed)
+  return {
+    graph: {
+      nodes: derived.nodes
+        .filter((n) => !drop.has(n.id))
+        .map((n) => (n.members?.some((m) => drop.has(m)) ? { ...n, members: n.members.filter((m) => !drop.has(m)) } : n)),
+      edges: derived.edges.filter((e) => !drop.has(e.from) && !drop.has(e.to)),
+    },
+    removed,
+    keptBack,
+  }
+}
+
 export function newBranch(base: CanvasTab, name: unknown): BranchRecord {
   return {
     id: branchId(),
@@ -121,6 +215,35 @@ export function undoLast(branch: BranchRecord): BranchGroup | null {
 
 export function branchOps(branch: BranchRecord): EditOp[] {
   return branch.groups.flatMap((g) => g.ops)
+}
+
+/**
+ * Reads the alternative's shape out of the recipe: an alternative leaves the flow where an edge is
+ * cut and returns where the added chain points back into the base. Best effort on purpose - a
+ * recipe with no cut and no return simply has no detour, and that is a valid branch too.
+ */
+export function derivePath(base: AgentGraph, branch: BranchRecord): BranchPath | null {
+  const baseIds = new Set(base.nodes.map((n) => n.id))
+  let graph = structuredClone(base)
+  const added = new Set<string>()
+  let entry: { nodeId: string; port: string } | null = null
+  let exitId = ''
+  for (const group of branch.groups) {
+    const check = planOps(graph, group.ops, groupPrefix(group.id))
+    if (!check.ok) continue
+    for (const cut of check.plan.cuts) {
+      // The first cut is where the alternative leaves the flow.
+      if (!entry) entry = { nodeId: cut.from, port: cut.fromPort }
+    }
+    for (const add of check.plan.adds) added.add(add.node.id)
+    for (const edge of check.plan.edges) {
+      // An edge from an added node back into the base flow is where the alternative returns.
+      if (added.has(edge.from) && baseIds.has(edge.to)) exitId = edge.to
+    }
+    graph = applyPlan(graph, check.plan)
+  }
+  if (!entry || !exitId) return null
+  return { entry, exit: { nodeId: exitId }, source: 'derived' }
 }
 
 export type Materialized = { graph: AgentGraph; applied: number; failed: string[] }
@@ -161,6 +284,8 @@ export type BranchView = {
    * instead, which is what a person can actually find.
    */
   anchors: BranchAnchor[]
+  /** The alternative's shape: where it leaves the flow and where it comes back. */
+  path: BranchPath | null
 }
 
 export type BranchAnchor = { id: string; title: string; packagePath: string[]; how: string[] }
@@ -209,6 +334,7 @@ export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
       failed: ['temel tuval bulunamadı'],
       baseChanged: false,
       anchors: [],
+      path: null,
     }
   }
   const { graph, applied, failed } = materialize(base.graph, branch)
@@ -222,6 +348,7 @@ export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
     failed,
     baseChanged: graphStamp(base.graph) !== branch.baseStamp,
     anchors: anchorsOf(base.graph, branch),
+    path: branch.path ?? derivePath(base.graph, branch),
   }
 }
 

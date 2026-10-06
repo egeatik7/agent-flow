@@ -428,6 +428,57 @@ describe('branch: kopya değil, tarif', () => {
     expect(again.ok).toBe(true)
   })
 
+  it('alternatif yol: giriş/çıkış tarifde görünür, merge eski kolu siler', async () => {
+    const h = harness()
+    const id = await h.openBranch('Alternatif yol')
+    // Temel: Başlangıç → Kaydet(tıkla) → bekle → Bitir.
+    // Alternatif: Başlangıç'tan ayrıl, yeni bir bekleme koy, "bekle" node'una geri dön.
+    const before = h.book.tabs[0].graph
+    const entry = h.start
+    const exit = h.wait
+    const mid = h.click
+
+    const edited = await callTool(
+      'flow.edit',
+      {
+        branchId: id,
+        ops: [
+          { op: 'disconnect', from: entry.id },
+          { op: 'addNode', key: 'alt', kind: 'wait', fields: { ms: 700, title: 'Alternatif bekleme' }, connectFrom: entry.id },
+          { op: 'connect', from: 'alt', to: exit.id },
+        ],
+        note: 'alternatif yol',
+      },
+      h.ctx
+    )
+    expect(edited.ok).toBe(true)
+
+    // Tarif, yolun şeklini kendisi söylüyor: giriş → çıkış.
+    const record = h.branchOf(id)
+    expect(record.path).toBeTruthy()
+    expect(record.path?.entry.nodeId).toBe(entry.id)
+    expect(record.path?.exit.nodeId).toBe(exit.id)
+    expect(JSON.stringify(record)).toContain('"path"')
+
+    // Merge denemesi neyin silineceğini önceden söyler, hiçbir şey yazmaz.
+    const tried = await callTool('branch.merge', { branchId: id }, h.ctx)
+    expect(tried.ok).toBe(true)
+    expect(tried.data?.applied).toBe(false)
+    expect((tried.data?.wouldRemove as string[])).toContain(mid.id)
+    expect(JSON.stringify(h.book.tabs[0].graph)).toBe(JSON.stringify(before))
+
+    // Uygula: alternatif ana yol olur, yerini aldığı eski kol gider.
+    const applied = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(applied.ok).toBe(true)
+    const after = h.merges.at(-1)?.graph as AgentGraph
+    expect(after.nodes.some((n) => n.id === mid.id)).toBe(false)
+    expect(after.nodes.some((n) => n.title === 'Alternatif bekleme')).toBe(true)
+    expect(after.nodes.some((n) => n.id === exit.id)).toBe(true)
+    expect(after.edges.some((e) => e.from === entry.id && e.to === mid.id)).toBe(false)
+    expect(after.edges.some((e) => e.to === mid.id)).toBe(false)
+    expect(applied.message).toContain('silindi')
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')

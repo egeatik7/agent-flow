@@ -28,11 +28,13 @@ import {
   addGroup,
   branchOps,
   branchesOf,
+  derivePath,
   findBranch,
   groupPrefix,
   materialize,
   newBranch,
   newGroupId,
+  pruneBypassed,
   summaryOf,
   undoLast,
   viewBranch,
@@ -450,6 +452,8 @@ const branchDiff: ToolDef = {
         tabId: branch.baseTabId,
         /** Where on the canvas this branch lives, so the window can mark and jump to it. */
         anchors: view.anchors,
+        /** The alternative's shape, so a caller (and the stored record) can see it, not guess it. */
+        path: view.path,
       },
     }
   },
@@ -478,8 +482,7 @@ const flowEdit: ToolDef = {
     // later look at the branch will show.
     const groupId = newGroupId()
     const check = planOps(view.derived as AgentGraph, args.ops, groupPrefix(groupId))
-    if (!check.ok) {
-      const head = check.errors.slice(0, 3).join(' ')
+    if (!check.ok) {      const head = check.errors.slice(0, 3).join(' ')
       const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
       const message = `Düzenleme reddedildi, hiçbir şey eklenmedi. ${head}${rest}`
       ctx.log('warn', `Ajan · branch · ${message}`)
@@ -494,9 +497,15 @@ const flowEdit: ToolDef = {
     }
     const lines = describePlan(view.derived as AgentGraph, check.plan)
     const group = addGroup(branch, args.ops as EditOp[], text(args.note), groupId)
+    // The alternative's shape goes into the record straight away, so the stored recipe says
+    // "leaves at A, comes back at B" instead of leaving that to be read out of the ops by hand.
+    const shaped = derivePath((picked.view.base?.graph ?? view.derived) as AgentGraph, branch)
+    if (shaped) branch.path = shaped
+    else delete branch.path
     ctx.saveCanvases(book)
     const after = viewBranch(book, branch)
-    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem). Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
+    const shape = after.path ? ` · alternatif yol: ${after.path.entry.nodeId} → ${after.path.exit.nodeId}` : ''
+    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${shape}. Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
     ctx.log('info', `Ajan · branch · ${message}`)
     return {
       ok: true,
@@ -504,7 +513,7 @@ const flowEdit: ToolDef = {
       outcome: 'tamam',
       message,
       observed: { note: 'Branch tarifine eklendi; çalışan akışa ve tuvale yazılmadı.' },
-      data: { valid: true, branchId: branch.id, groupId: group.id, lines, diff: after.diff, applied: after.applied, failed: after.failed, baseChanged: after.baseChanged },
+      data: { valid: true, branchId: branch.id, groupId: group.id, lines, diff: after.diff, applied: after.applied, failed: after.failed, baseChanged: after.baseChanged, path: after.path },
     }
   },
 }
@@ -579,9 +588,19 @@ const branchMerge: ToolDef = {
     if (view.baseChanged) notes.push('temel tuval, branch açıldığından beri değişmiş.')
     if (view.failed.length) notes.push(`${view.failed.length} grup artık uymuyor ve atlanacak: ${view.failed.join(' | ')}`)
     const tail = notes.length ? ` ${notes.join(' ')}` : ''
+    // The alternative's shape, if it has one: where it leaves the flow and where it comes back.
+    const path = branch.path ?? (view.base ? derivePath(view.base.graph, branch) : null)
+    if (path && !branch.path) {
+      branch.path = path
+      ctx.log('info', `Ajan · merge · “${branch.name}” alternatif yol olarak okundu: giriş ${path.entry.nodeId} · çıkış ${path.exit.nodeId}.`)
+    }
 
     if (!wanted) {
-      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${tail} Uygulamak için apply: true.`
+      const preview = path && view.base ? pruneBypassed(derived, view.base.graph, path) : { removed: [], keptBack: [] }
+      const shape = path ? ` · alternatif yol: ${path.entry.nodeId} → ${path.exit.nodeId}` : ''
+      const would = preview.removed.length ? ` · yerini aldığı ${preview.removed.length} node silinecek (${preview.removed.join(', ')})` : ''
+      const kept = preview.keptBack.length ? ` · ${preview.keptBack.length} node erişilemez kalacak ama silinmeyecek (paket/kutu)` : ''
+      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${shape}${would}${kept}${tail} Uygulamak için apply: true.`
       ctx.log('info', `Ajan · merge · ${message}`)
       return {
         ok: true,
@@ -589,11 +608,29 @@ const branchMerge: ToolDef = {
         outcome: 'tamam',
         message,
         observed: { note: 'Yalnız denendi; hiçbir şey yazılmadı.' },
-        data: { applied: false, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, lines: view.lines, failed: view.failed, baseChanged: view.baseChanged },
+        data: {
+          applied: false,
+          branchId: branch.id,
+          tabId: branch.baseTabId,
+          diff: view.diff,
+          lines: view.lines,
+          failed: view.failed,
+          baseChanged: view.baseChanged,
+          path,
+          wouldRemove: preview.removed,
+          keptBack: preview.keptBack,
+        },
       }
     }
 
-    const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: derived, branchId: branch.id, branchName: branch.name })
+    // An alternative path replaces the stretch it was written against. What the new flow can still
+    // reach stays; what was only there for the old path goes, so the alternative becomes the flow
+    // rather than sitting next to it. Nodes holding a package or a box are reported, never deleted.
+    const pruned = path && view.base ? pruneBypassed(derived, view.base.graph, path) : { graph: derived, removed: [], keptBack: [] }
+    if (pruned.removed.length) notes.push(`alternatifin yerini aldığı ${pruned.removed.length} node silindi (${pruned.removed.join(', ')}).`)
+    if (pruned.keptBack.length) notes.push(`${pruned.keptBack.length} node artık erişilemez ama silinmedi, paket/kutu içeriği taşıyor: ${pruned.keptBack.join(', ')}.`)
+
+    const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: pruned.graph, branchId: branch.id, branchName: branch.name })
     if (!answer.ok) {
       const message = `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Kullanıcının akışına hiçbir şey yazılmadı.`
       ctx.log('warn', `Ajan · merge · ${message}`)
