@@ -987,6 +987,19 @@ const runFrom: ToolDef = {
   },
 }
 
+/**
+ * True when a scan was asked for one window and read another. The engine falls back to the
+ * window in front when the asked-for title is not found, which is fine for a look but must never
+ * be reported as if the asked-for window had been read: acting on the wrong window is the first
+ * thing this project refuses to do.
+ */
+export function windowMismatch(wanted: string, got: string | undefined): boolean {
+  const want = wanted.trim().toLowerCase()
+  if (!want) return false
+  const have = (got ?? '').trim().toLowerCase()
+  return have !== want && !have.includes(want)
+}
+
 const screenRead: ToolDef = {
   name: 'screen.read',
   summary: 'Pencereleri ve ekrandaki yazıları okur; isterse ekran görüntüsünün yolunu verir.',
@@ -1011,15 +1024,21 @@ const screenRead: ToolDef = {
     })
     const items = (s.items ?? []).slice(0, 200).map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, w: i.w, h: i.h, src: i.src, type: i.type }))
     const where = windowTitle ? `“${windowTitle}”` : 'önde olan pencere'
-    const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${s.shot ? ` · görüntü: ${s.shot}` : ''}`
-    ctx.log('info', `Ajan · ekranı oku · ${message}`)
+    const wrong = windowMismatch(windowTitle ?? '', s.window)
+    const warning = wrong
+      ? ` DİKKAT: istediğin pencere bulunamadı; bunun yerine “${s.window || 'öndeki pencere'}” okundu.`
+      : ''
+    const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${s.shot ? ` · görüntü: ${s.shot}` : ''}${warning}`
+    ctx.log(wrong ? 'warn' : 'info', `Ajan · ekranı oku · ${message}`)
     return {
       ok: true,
       tool: screenRead.name,
       outcome: 'tamam',
       message,
-      observed: { note: s.shot ? `Ekran görüntüsü dosyası: ${s.shot}` : 'Görüntü istenmedi.' },
-      data: { windows: windows.slice(0, 40), window: s.window, area: s.area, ocr: s.ocr, shot: s.shot, sig: s.sig, items },
+      observed: {
+        note: `${s.shot ? `Ekran görüntüsü dosyası: ${s.shot}. ` : 'Görüntü istenmedi. '}${wrong ? 'İstenen pencere ile okunan pencere aynı değil.' : 'İstenen pencere okundu.'}`,
+      },
+      data: { windows: windows.slice(0, 40), window: s.window, requested: windowTitle ?? '', matched: !wrong, area: s.area, ocr: s.ocr, shot: s.shot, sig: s.sig, items },
     }
   },
 }

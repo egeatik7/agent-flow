@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings, type CanvasBook } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
-import { callTool, toolList, actionSent, withFastFind, type ToolContext } from '../electron/tools'
+import { callTool, toolList, actionSent, windowMismatch, withFastFind, type ToolContext } from '../electron/tools'
 import { beginRun, endRun } from '../electron/tool-state'
 
 let seq = 0
@@ -241,6 +241,14 @@ describe('araç katmanı', () => {
     const refused = await callTool('step.run', { nodeId: 'x' }, busy)
     expect(refused.ok).toBe(false)
     expect(cleared).toBe(0)
+  })
+
+  it('istenen pencere okunmadıysa bu açıkça söylenir', () => {
+    expect(windowMismatch('Notepad', 'Notepad')).toBe(false)
+    expect(windowMismatch('notepad', 'Notepad — belgesiz')).toBe(false)
+    expect(windowMismatch('Notepad', '')).toBe(true)
+    expect(windowMismatch('Notepad', 'Nubbo Agent Studio')).toBe(true)
+    expect(windowMismatch('', 'herhangi')).toBe(false)
   })
 
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
