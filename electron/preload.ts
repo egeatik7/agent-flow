@@ -47,7 +47,14 @@ contextBridge.exposeInMainWorld('xpAgent', {
     ipcRenderer.on('canvas:merge', listener)
     return () => ipcRenderer.off('canvas:merge', listener)
   },
-  mergeCanvasAnswer: (answer: { ok: boolean; error?: string }) => ipcRenderer.invoke('canvas:mergeAnswer', answer),
+  mergeCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => ipcRenderer.invoke('canvas:mergeAnswer', answer),
+  /** The agent asking the window to show a branch, or to close the one on screen. */
+  onCanvasInspect: (cb: (payload: { branchId: string; branchName: string; requestId: string }) => void) => {
+    const listener = (_e: unknown, payload: { branchId: string; branchName: string; requestId: string }) => cb(payload)
+    ipcRenderer.on('canvas:inspect', listener)
+    return () => ipcRenderer.off('canvas:inspect', listener)
+  },
+  inspectCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => ipcRenderer.invoke('canvas:inspectAnswer', answer),
   openLogs: () => ipcRenderer.invoke('logs:open'),
 
   testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),

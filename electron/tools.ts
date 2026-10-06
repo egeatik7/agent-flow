@@ -138,6 +138,8 @@ export type ToolContext = {
    */
   /** The last merge, without consuming it: the undo right is spent only on a confirmed restore. */
   peekMergeUndo?: () => { tabId: string; graph: AgentGraph } | null
+  /** Asks the window to show a branch on the canvas, or to close the view. */
+  showBranch?: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) => Promise<{ ok: boolean; error?: string }>
   /** Spends the undo right: clears the snapshot and puts the recipe back. */
   commitMergeUndo?: () => boolean
 }
@@ -1349,6 +1351,46 @@ const runWait: ToolDef = {
   },
 }
 
+/** The agent asking the window to show a branch, or to close the view. The window owns the canvas. */
+const branchShow: ToolDef = {
+  name: 'branch.show',
+  summary: 'Öneriyi tuvalde gösterir (İncele gibi) ya da açık incelemeyi kapatır. Akışa hiçbir şey yazmaz.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const show = ctx.showBranch
+    if (!show) return failed(branchShow.name, 'Bu sürümde tuvalde gösterme yok.')
+    if (args.close === true) {
+      const answer = await show({ branchId: '', branchName: '' }, { timeoutMs: 10_000 })
+      if (!answer.ok) return failed(branchShow.name, `İnceleme kapatılamadı: ${answer.error ?? 'pencere yanıt vermedi'}`)
+      const message = 'İnceleme kapatıldı; tuval kendi hâline döndü. Akışa hiçbir şey yazılmadı.'
+      ctx.log('info', `Ajan · branch · ${message}`)
+      return { ok: true, tool: branchShow.name, outcome: 'tamam', message, observed: { note: 'Yalnız görünüm değişti.' }, data: { shown: false } }
+    }
+    const id = text(args.branchId)
+    const book = ctx.getCanvases()
+    const branch = findBranch(book, id)
+    if (!branch) return failed(branchShow.name, `Branch bulunamadı: ${id || '(boş)'}.`)
+    const answer = await show({ branchId: branch.id, branchName: branch.name }, { timeoutMs: 10_000 })
+    if (!answer.ok) {
+      const message = `“${branch.name}” tuvalde gösterilemedi: ${answer.error ?? 'pencere yanıt vermedi'}. Tuval olduğu gibi kaldı.`
+      ctx.log('warn', `Ajan · branch · ${message}`)
+      return failed(branchShow.name, message)
+    }
+    const view = viewBranch(book, branch)
+    const message = `“${branch.name}” tuvalde gösterildi (İncele gibi): ${view.diff?.summary ?? '—'}${view.path ? ` · alternatif yol: ${view.path.entry.nodeId} → ${view.path.exit.nodeId}` : ''}. Kesikli işaretler öneridir; akışa hiçbir şey yazılmadı.`
+    ctx.log('info', `Ajan · branch · ${message}`)
+    return {
+      ok: true,
+      tool: branchShow.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Pencere öneriyi gösteriyor; tuvalin kendisi ve kayıtlı akış değişmedi.' },
+      data: { shown: true, branchId: branch.id, diff: view.diff, path: view.path, anchors: view.anchors },
+    }
+  },
+}
+
 const runStop: ToolDef = {
   name: 'run.stop',
   summary: 'Çalışan koşuyu durdurur.',
@@ -1418,7 +1460,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runWait, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, branchShow, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runWait, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

@@ -68,6 +68,9 @@ export type XpAgentApi = {
     }) => void
   ) => () => void
   mergeCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => Promise<boolean>
+  /** The agent asking the window to show a branch, or to close the one on screen. */
+  onCanvasInspect: (cb: (payload: { branchId: string; branchName: string; requestId: string }) => void) => () => void
+  inspectCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => Promise<boolean>
   openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>

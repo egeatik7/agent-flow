@@ -444,6 +444,21 @@ export default function App() {
     return off
   }, [pushLog, rememberBook])
 
+  /** The agent asks for a branch to be shown on the canvas, or for the view to be closed. */
+  useEffect(() => {
+    if (!api?.onCanvasInspect) return
+    const off = api.onCanvasInspect(async (payload) => {
+      try {
+        await inspectBranch(payload.branchId)
+        pushLog('info', payload.branchId ? `Ajan “${payload.branchName}” önerisini tuvalde gösterdi.` : 'Ajan incelemeyi kapattı.')
+        await api?.inspectCanvasAnswer?.({ ok: true, requestId: payload.requestId })
+      } catch (e) {
+        await api?.inspectCanvasAnswer?.({ ok: false, error: errText(e), requestId: payload.requestId })
+      }
+    })
+    return off
+  }, [inspectBranch, pushLog])
+
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
     const g = graphRef.current

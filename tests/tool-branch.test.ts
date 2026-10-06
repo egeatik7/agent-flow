@@ -638,6 +638,34 @@ describe('branch: kopya değil, tarif', () => {
     expect(baseBox.startIndex ?? 0).toBe(0)
   })
 
+  it('ajan öneriyi tuvalde gösterebilir ve kapatabilir; akışa yazmaz', async () => {
+    const h = harness()
+    const id = await h.openBranch('Gösterim sınaması')
+    const shown: { branchId: string; branchName: string }[] = []
+    h.ctx.showBranch = async (payload) => {
+      shown.push(payload)
+      return { ok: true }
+    }
+    const before = JSON.stringify(h.book.tabs[0].graph)
+
+    const shownOk = await callTool('branch.show', { branchId: id }, h.ctx)
+    expect(shownOk.ok).toBe(true)
+    expect(shown?.at(-1)?.branchId).toBe(id)
+    expect(String(shownOk.message)).toContain('gösterildi')
+    expect(JSON.stringify(h.book.tabs[0].graph)).toBe(before)
+
+    const closed = await callTool('branch.show', { close: true }, h.ctx)
+    expect(closed.ok).toBe(true)
+    expect(shown?.at(-1)?.branchId).toBe('')
+    expect(String(closed.message)).toContain('kapatıldı')
+
+    // Pencere yanıt vermezse dürüstçe söyler.
+    h.ctx.showBranch = async () => ({ ok: false, error: 'pencere yanıt vermedi' })
+    const failedShow = await callTool('branch.show', { branchId: id }, h.ctx)
+    expect(failedShow.ok).toBe(false)
+    expect(String(failedShow.message)).toContain('gösterilemedi')
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')

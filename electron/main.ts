@@ -651,6 +651,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
       opts?: { snapshot?: boolean }
     ) => applyMergeInWindow(payload, opts),
+    showBranch: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) =>
+      showBranchInWindow(payload, opts),
     takeMergeUndo: undefined,
     // Reading the undo does not consume it: a window that never answers must leave the right to
     // try again, and must not have the recipe put back while the merge is still in the flow.
@@ -742,6 +744,44 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
     return true
   })
+
+  let inspectPending: { requestId: string; resolve: (a: { ok: boolean; error?: string }) => void; timer: ReturnType<typeof setTimeout> } | null = null
+
+  ipcMain.handle('canvas:inspectAnswer', (_e, answer: unknown) => {
+    const pending = inspectPending
+    if (!pending) return false
+    const a = answer as { ok?: unknown; error?: unknown; requestId?: unknown } | null
+    if (typeof a?.requestId !== 'string' || a.requestId !== pending.requestId) return false
+    inspectPending = null
+    clearTimeout(pending.timer)
+    pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
+    return true
+  })
+
+  /**
+   * Asks the window to show a branch on the canvas, or to close the one it is showing - the same
+   * move the person makes with Incele. The window owns the canvas, so the request goes there and
+   * is answered there; nothing about the flow is written either way.
+   */
+  function showBranchInWindow(
+    payload: { branchId: string; branchName: string },
+    opts?: { timeoutMs?: number }
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ ok: false, error: 'pencere yok' })
+    if (inspectPending) return Promise.resolve({ ok: false, error: 'başka bir gösterme isteği sürüyor' })
+    const requestId = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    const lifespan = opts?.timeoutMs ?? 10_000
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (inspectPending && inspectPending.resolve === resolve) {
+          inspectPending = null
+          resolve({ ok: false, error: `pencere ${Math.round(lifespan / 1000)} sn içinde yanıt vermedi` })
+        }
+      }, lifespan)
+      inspectPending = { requestId, resolve, timer }
+      mainWindow?.webContents.send('canvas:inspect', { ...payload, requestId })
+    })
+  }
 
   function applyMergeInWindow(
     payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
