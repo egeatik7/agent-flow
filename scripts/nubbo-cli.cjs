@@ -33,6 +33,7 @@ const USAGE = `nubbo <komut> [seçenekler]
              [--json]              Tam yapı
                                  Hiçbir şey yazmaz, akış dosyası değişmez.
   read                           Uygulamadaki CANLI akışı oku (araç katmanından, flow.read)
+  show --branch <id>             Öneriyi tuvalde göster (İncele gibi) · show --close kapatır
   preview | step | from | state | wait | report | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
@@ -324,6 +325,18 @@ async function main() {
     }
     console.log(`sağlık: ${health}`)
     process.exit(alive && health === 'yanıt veriyor' ? 0 : 3)
+  }
+
+  if (cmd === 'show') {
+    // The agent pressing Incele: the window shows the branch, or closes the view.
+    if (!opts.close && !opts.branch) {
+      console.error('Kullanım: show --branch <id>   |   show --close')
+      process.exit(2)
+    }
+    const args = opts.close ? { close: true } : { branchId: opts.branch }
+    const r = await call('branch.show', args)
+    printResult(r, opts)
+    process.exit(r && r.ok === false ? 2 : 0)
   }
 
   if (cmd === 'tools') {
