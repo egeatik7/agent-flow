@@ -60,7 +60,9 @@ if (mode === 'ui') {
   const win = 'Nubbo Click Test Host'
   const focus = createNode('click', 280, 0, 1)
   focus.id = 'ui-focus-field'
-  focus.title = 'UI · Kaynak klasör alanına tıkla'
+  // The title must not contain the searched text: otherwise the app's own canvas is a candidate for
+  // the very string being looked for, and the engine rightly refuses to click its own window.
+  focus.title = 'UI · alanı odakla'
   focus.prompt = 'Kaynak klasör'
   // No windowTitle scoping here: it is measured to find nothing for this window, while the
   // whole-screen scan does see the field by its label. Noted as its own finding instead of being
