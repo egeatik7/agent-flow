@@ -48,8 +48,10 @@ function fixture() {
 function harness(permission: AppSettings['agentPermission'] = 'auto') {
   const { graph, book, start, click, wait, end } = fixture()
   const runs: { graph: AgentGraph; startId?: string; derived?: boolean }[] = []
-  const merges: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }[] = []
+  const merges: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' }[] = []
+  const dropped: BranchRecord[] = []
   let mergeAnswer: { ok: boolean; error?: string } = { ok: true }
+  let undoAvailable: { tabId: string; graph: AgentGraph } | null = null
   const ctx: ToolContext = {
     getGraph: () => book.tabs[0].graph,
     getSettings: () => ({ agentPermission: permission }) as AppSettings,
@@ -68,13 +70,30 @@ function harness(permission: AppSettings['agentPermission'] = 'auto') {
     },
     getCanvases: () => structuredClone(book),
     saveCanvases: (next) => {
+      // A recipe that disappears here is a merge eating it: the app keeps it for the undo.
+      for (const before of branchesOf(book)) {
+        if (!branchesOf(next).some((b) => b.id === before.id)) dropped.push(before)
+      }
       book.tabs = next.tabs
       book.activeId = next.activeId
       book.branches = next.branches
     },
-    applyMerge: async (payload) => {
+    applyMerge: async (payload, opts) => {
       merges.push(payload)
+      // The app keeps the flow as it was before a merge, so a wrong merge can be taken back.
+      if (opts?.snapshot !== false && payload.reason !== 'undo') {
+        const tab = book.tabs.find((t) => t.id === payload.tabId)
+        undoAvailable = tab ? { tabId: payload.tabId, graph: structuredClone(tab.graph) } : null
+      }
       return mergeAnswer
+    },
+    takeMergeUndo: () => {
+      const snap = undoAvailable
+      undoAvailable = null
+      if (!snap) return null
+      const back = dropped.pop()
+      if (back) book.branches = [...branchesOf(book), back]
+      return snap
     },
   }
   const openBranch = async (name = 'RunAgentFix 1') => {
@@ -92,6 +111,7 @@ function harness(permission: AppSettings['agentPermission'] = 'auto') {
     ctx,
     runs,
     merges,
+    undoPending: () => undoAvailable !== null,
     setMergeAnswer: (answer: { ok: boolean; error?: string }) => {
       mergeAnswer = answer
     },
@@ -318,6 +338,39 @@ describe('branch: kopya değil, tarif', () => {
     // Ve pencere kendi kaydında branşları araç katmanından alır: silinen branch geri gelmez.
     const afterDrop = windowSave(staleWindowSave, toolLayerSave(windowBook, []))
     expect(afterDrop.branches).toEqual([])
+  })
+
+  it('merge geri alınabilir: bir kez, tuval merge öncesi hâline döner ve tarif geri açılır', async () => {
+    const h = harness()
+    const id = await h.openBranch('Geri alma denemesi')
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 5000)] }, h.ctx)
+    const merged = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(merged.data?.applied).toBe(true)
+    expect(branchesOf(h.book)).toHaveLength(0)
+    expect(h.undoPending()).toBe(true)
+
+    const undone = await callTool('merge.undo', {}, h.ctx, 'panel')
+    expect(undone.ok).toBe(true)
+    expect(undone.message).toContain('merge öncesi hâline döndü')
+    // Pencereye giden grafik merge öncesi hâl: 2000 ms.
+    const last = h.merges[h.merges.length - 1]
+    expect((last.graph.nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(2000)
+    // Tarif geri açıldı ve bir kez geri alındı: ikinci kez yok.
+    expect(branchesOf(h.book)).toHaveLength(1)
+    const again = await callTool('merge.undo', {}, h.ctx, 'panel')
+    expect(again.ok).toBe(false)
+    expect(again.message).toContain('Geri alınacak merge yok')
+  })
+
+  it('merge geri almayı ajan çağıramaz', async () => {
+    const h = harness()
+    const id = await h.openBranch()
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 5000)] }, h.ctx)
+    await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    const byAgent = await callTool('merge.undo', {}, h.ctx, 'agent')
+    expect(byAgent.ok).toBe(false)
+    expect(byAgent.message).toContain('yalnız Nubbo penceresinden')
+    expect(branchesOf(h.book)).toHaveLength(0)
   })
 
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {

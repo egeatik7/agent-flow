@@ -36,8 +36,11 @@ contextBridge.exposeInMainWorld('xpAgent', {
   toolList: () => ipcRenderer.invoke('tools:list'),
   toolEndpoint: () => ipcRenderer.invoke('tools:endpoint'),
   toolEndpointOpen: () => ipcRenderer.invoke('tools:endpointOpen'),
-  onMergeCanvas: (cb: (payload: { tabId: string; graph: unknown; branchId: string; branchName: string }) => void) => {
-    const listener = (_e: unknown, payload: { tabId: string; graph: unknown; branchId: string; branchName: string }) => cb(payload)
+  onMergeCanvas: (cb: (payload: { tabId: string; graph: unknown; branchId: string; branchName: string; reason?: 'merge' | 'undo' }) => void) => {
+    const listener = (
+      _e: unknown,
+      payload: { tabId: string; graph: unknown; branchId: string; branchName: string; reason?: 'merge' | 'undo' }
+    ) => cb(payload)
     ipcRenderer.on('canvas:merge', listener)
     return () => ipcRenderer.off('canvas:merge', listener)
   },

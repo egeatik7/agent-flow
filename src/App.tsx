@@ -308,7 +308,12 @@ export default function App() {
           setSelectedEdgeId(null)
         }
         rememberBook({ ...cur, tabs, branches })
-        pushLog('info', `Ajan önerisi uygulandı: “${payload.branchName}”. Kaydedildi.`)
+        pushLog(
+          'info',
+          payload.reason === 'undo'
+            ? 'Merge geri alındı: tuval merge öncesi hâline döndü. Kaydedildi.'
+            : `Ajan önerisi uygulandı: “${payload.branchName}”. Kaydedildi.`
+        )
         void api?.mergeCanvasAnswer?.({ ok: true })
       } catch (e) {
         pushLog('error', `Merge uygulanamadı: ${errText(e)}`)

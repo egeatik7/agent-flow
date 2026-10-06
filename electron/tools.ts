@@ -118,7 +118,15 @@ export type ToolContext = {
    * change — so the merge is handed to it and this resolves with its answer instead of writing
    * the book from here, where a pending save from the window could undo it.
    */
-  applyMerge: (payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }) => Promise<{ ok: boolean; error?: string }>
+  applyMerge: (
+    payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
+    opts?: { snapshot?: boolean }
+  ) => Promise<{ ok: boolean; error?: string }>
+  /**
+   * Takes the flow as it was just before the last merge, and puts the branch recipe back. One
+   * use only, and it lives in memory: after a restart there is nothing to go back to.
+   */
+  takeMergeUndo?: () => { tabId: string; graph: AgentGraph } | null
 }
 
 /** `panel` is a person pressing a button in the app, which is its own approval. */
@@ -549,6 +557,41 @@ const branchMerge: ToolDef = {
       message,
       observed: { note: 'Tuval pencereye devredildi; pencere kendi kaydını yapar.' },
       data: { applied: true, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, failed: view.failed, baseChanged: view.baseChanged },
+    }
+  },
+}
+
+const mergeUndo: ToolDef = {
+  name: 'merge.undo',
+  summary: 'Son merge’ü geri alır: tuvali merge öncesi hâline döndürür. Yalnız panelden, bir kez.',
+  sendsInput: false,
+  ready: true,
+  run: async (_args, ctx, source) => {
+    if (source !== 'panel') return failed(mergeUndo.name, 'Merge geri almayı yalnız Nubbo penceresinden yapabilirsin.')
+    const take = ctx.takeMergeUndo
+    if (!take) return failed(mergeUndo.name, 'Bu sürümde merge geri alma yok.')
+    const snap = take()
+    if (!snap) {
+      return failed(mergeUndo.name, 'Geri alınacak merge yok. (Geri alma yalnız aynı oturumda ve bir kez çalışır; uygulama yeniden başladıysa unutulur.)')
+    }
+    const answer = await ctx.applyMerge(
+      { tabId: snap.tabId, graph: snap.graph, branchId: '', branchName: 'merge geri alma', reason: 'undo' },
+      { snapshot: false }
+    )
+    if (!answer.ok) {
+      const message = `Merge geri alınamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Tuval olduğu gibi kaldı.`
+      ctx.log('warn', `Ajan · merge · ${message}`)
+      return failed(mergeUndo.name, message)
+    }
+    const message = 'Son merge geri alındı: tuval merge öncesi hâline döndü, tarif yeniden açıldı. (Bir kez geri alınabilir.)'
+    ctx.log('info', `Ajan · merge · ${message}`)
+    return {
+      ok: true,
+      tool: mergeUndo.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Tuval pencereye devredildi; pencere kendi kaydını yapar.' },
+      data: { applied: true, undone: true, tabId: snap.tabId },
     }
   },
 }
@@ -1016,7 +1059,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

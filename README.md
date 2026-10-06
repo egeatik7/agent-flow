@@ -182,6 +182,7 @@ olabilir; branch silinince akışa hiçbir şey olmaz.
 - **Temel değişirse:** tarif **güncel** tuvaline uygulanır ve `baseChanged` bildirilir; artık uymayan
   grup **ismiyle** söylenir, kalanı yine uygulanır (sessizce yutulmaz).
 - **Merge iki adımlıdır ve senin elindedir:** `branch.merge` önce yalnız **deneme** yapar (ne yazılacağını, temel değişmişse uyarıyı ve uymayan grupları söyler, hiçbir şey yazmaz). `apply: true` ile **uygulama** yalnız **Nubbo penceresinden** yapılır ve tuvali **pencere** yazar (defterin sahibi o; bu yüzden merge ona devredilir ve onayı beklenir — pencere yanıt vermezse **hiçbir şey yazılmaz**). Uygulanınca branch **tarifi silinir**, çünkü aynı düzenlemeler artık akışın kendisindedir; silinmezse ikinci kez uygulanırdı.
+- **Yanlış merge geri alınabilir:** uygulamadan önceki tuval ve silinen tarif bellekte tutulur; panelde çıkan **“Son merge’ü geri al”** düğmesi tuvali merge öncesi hâline döndürür ve tarifi geri açar. **Bir kez** ve **aynı oturumda** çalışır (uygulama kapanınca unutulur); ajan bu geri almayı çağıramaz.
 
 `flow.suggest` tek başına da kullanılabilir: bir planı denetler ve **hiçbir şey yazmaz**.
 

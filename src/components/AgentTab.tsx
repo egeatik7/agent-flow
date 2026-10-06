@@ -50,6 +50,7 @@ export default function AgentTab({
   const [branchNodes, setBranchNodes] = useState<BranchNode[]>([])
   const [branchNode, setBranchNode] = useState('')
   const [mergeReady, setMergeReady] = useState('')
+  const [mergedOnce, setMergedOnce] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -166,9 +167,29 @@ export default function AgentTab({
       const r = await api.callTool('branch.merge', { branchId: id, apply: true })
       setResult(r)
       setMergeReady('')
+      if (r.ok && r.data?.applied === true) setMergedOnce(true)
       setBranchId('')
       setBranchNodes([])
       await refreshBranches()
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** A wrong merge must be takeable back: once, from the flow it replaced. */
+  const mergeUndo = async () => {
+    if (!api?.callTool) return
+    setBusy('merge.undo')
+    setError('')
+    try {
+      const r = await api.callTool('merge.undo', {})
+      setResult(r)
+      if (r.ok) {
+        setMergedOnce(false)
+        await refreshBranches()
+      }
     } catch (e) {
       setError(errText(e))
     } finally {
@@ -366,6 +387,11 @@ export default function AgentTab({
           <b> Mergele</b> iki adımlıdır: önce yalnız ne yazılacağını söyler, sonra <b>Uygula</b> ile senin tuvaline yazılır ve kaydedilir.
           Uygulanınca tarif silinir, çünkü aynı düzenlemeler artık akışın kendisinde.
         </p>
+        {mergedOnce && (
+          <button type="button" className="xp-btn" disabled={!!busy} onClick={() => void mergeUndo()}>
+            {busy === 'merge.undo' ? 'Geri alınıyor…' : 'Son merge’ü geri al'}
+          </button>
+        )}
       </div>
 
       {error && <p className="hint">Hata: {error}</p>}

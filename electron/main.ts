@@ -21,7 +21,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { toolLayerSave, windowSave } from './tool-branch'
+import { branchesOf, toolLayerSave, windowSave } from './tool-branch'
 import { listDirEntries } from './list-dir'
 import { normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -568,8 +568,21 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     saveCanvases: (book: CanvasBook) => {
       store.set('canvases', toolLayerSave(loadCanvases(), book.branches ?? []))
     },
-    applyMerge: (payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }) =>
-      applyMergeInWindow(payload),
+    applyMerge: (
+      payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
+      opts?: { snapshot?: boolean }
+    ) => applyMergeInWindow(payload, opts),
+    takeMergeUndo: () => {
+      const snap = lastMerge
+      lastMerge = null
+      if (!snap) return null
+      // The recipe was dropped when it was merged; put it back with the flow it was based on.
+      if (snap.branch) {
+        const book = loadCanvases()
+        store.set('canvases', toolLayerSave(book, [...branchesOf(book), snap.branch]))
+      }
+      return { tabId: snap.tabId, graph: snap.graph }
+    },
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
     callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
@@ -614,6 +627,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   // Without an answer from the window, nothing is written anywhere.
   let mergePending: { resolve: (a: { ok: boolean; error?: string }) => void; timer: ReturnType<typeof setTimeout> } | null = null
 
+  // The flow as it was just before the last merge, so a merge can be taken back once. Kept in
+  // memory on purpose: it is a safety net for a wrong click, not a version history.
+  let lastMerge: { tabId: string; graph: AgentGraph; branch: unknown; at: number } | null = null
+
   ipcMain.handle('canvas:mergeAnswer', (_e, answer: unknown) => {
     const pending = mergePending
     if (!pending) return false
@@ -624,14 +641,18 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return true
   })
 
-  function applyMergeInWindow(payload: {
-    tabId: string
-    graph: AgentGraph
-    branchId: string
-    branchName: string
-  }): Promise<{ ok: boolean; error?: string }> {
+  function applyMergeInWindow(
+    payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
+    opts?: { snapshot?: boolean }
+  ): Promise<{ ok: boolean; error?: string }> {
     if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ ok: false, error: 'pencere yok' })
     if (mergePending) return Promise.resolve({ ok: false, error: 'başka bir merge sürüyor' })
+    if (opts?.snapshot !== false) {
+      const cur = loadCanvases()
+      const tab = cur.tabs.find((t) => t.id === payload.tabId)
+      const branch = (cur.branches ?? []).find((b) => (b as { id?: string }).id === payload.branchId) ?? null
+      lastMerge = tab ? { tabId: payload.tabId, graph: structuredClone(tab.graph), branch, at: Date.now() } : null
+    }
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (mergePending && mergePending.resolve === resolve) {
