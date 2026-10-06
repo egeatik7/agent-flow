@@ -17,6 +17,8 @@ export type ProbeResult = {
   nodeStatus: 'done' | 'error' | 'none'
   /** The stop came from somewhere else: the user, or a timeout. */
   interrupted: boolean
+  /** The run's own summary, when the chain ended on its own. */
+  summary?: { steps: number; failed: number }
 }
 
 export type ProbeOptions = {
@@ -44,7 +46,7 @@ export async function probeOnce(graph: AgentGraph, nodeId: string, ex: Executor,
   }
 
   try {
-    await runGraph(copy, executor, {
+    const summary = await runGraph(copy, executor, {
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,
       startId: nodeId,
@@ -52,7 +54,7 @@ export async function probeOnce(graph: AgentGraph, nodeId: string, ex: Executor,
       packagePath: opts.packagePath?.length ? opts.packagePath : undefined,
     })
     // The chain ended on its own: this node was the last step of its chain.
-    return { reachedNode: nodeStatus !== 'none', nodeStatus, interrupted: false }
+    return { reachedNode: nodeStatus !== 'none', nodeStatus, interrupted: false, summary: { steps: summary.steps, failed: summary.failed } }
   } catch (e) {
     if (e instanceof StoppedError) return { reachedNode: stopAfter, nodeStatus, interrupted: !stopAfter }
     throw e

@@ -106,4 +106,30 @@ describe('tek adım: izole çalıştırma', () => {
 
     await expect(probeOnce(graph, a.id, failing, { maxSteps: 50, stepDelayMs: 0 })).rejects.toThrow('tıklama patladı')
   })
+
+  it('kutu hatayı yutsa bile node’un kendi durumu "error" olarak döner', async () => {
+    // Bir kutu, üyesi patlarsa akışı durdurmaz: hatayı sayıp sıradaki öğeye geçer. Bu yüzden
+    // koşu normal bitebilir; tek adımın bunu başarı saymaması gerekir.
+    const root = createNode('start', 0, 0)
+    const loop = createNode('loop', 100, 0)
+    loop.items = ['g1', 'g2']
+    const a = click('A')
+    loop.members = [a.id]
+    const graph: AgentGraph = { nodes: [root, loop, a], edges: [edge(root, 'next', loop)] }
+    const { base, clicked } = recorder()
+    const failing: Executor = {
+      ...base,
+      click: async (node: AgentNode) => {
+        clicked.push(node.prompt ?? '')
+        throw new Error('tıklama patladı')
+      },
+    }
+
+    const r = await probeOnce(graph, a.id, failing, { maxSteps: 50, stepDelayMs: 0 })
+
+    expect(clicked).toEqual(['A'])
+    expect(r.interrupted).toBe(false)
+    expect(r.reachedNode).toBe(true)
+    expect(r.nodeStatus).toBe('error')
+  })
 })

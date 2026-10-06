@@ -6,7 +6,7 @@ import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
-import { beginRun, endRun, noteError, noteStep } from './tool-state'
+import { beginRun, endRun, noteError, noteStep, probing } from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
@@ -41,6 +41,8 @@ let appRevealed = false
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 let running = false
 let stopRequested = false
+/** "Bu oturumda hep izin ver" from the approval dialog; the app restart clears it. */
+let sessionApproved = false
 
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
@@ -381,17 +383,21 @@ function revealApp() {
  * so a run an agent starts behaves exactly like a run started by hand: same target finding,
  * same stop, same resource cleanup.
  */
-async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]): Promise<{ ok: boolean; failed?: number; stopped?: boolean }> {
+async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
+  // A single step is driving the desktop; a run must not start on top of it.
+  if (probing()) throw new Error('Tek adım sürüyor; koşu için bitmesini bekle.')
   running = true
   stopRequested = false
   let awake: number | undefined
   let hidden = false
+  let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string } | undefined
+  let runId = ''
   try {
     const graph = normalizeGraph(raw)
     store.set('graph', graph)
     // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
-    beginRun(graph)
+    runId = beginRun(graph, startId)
     const s = getSettings()
     let shotDir = ''
     try {
@@ -419,18 +425,22 @@ async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
     })
     // A run that went through every step but had loop items end on an error is not a success.
-    return { ok: summary.failed === 0, failed: summary.failed }
+    outcome = { ok: summary.failed === 0, failed: summary.failed, steps: summary.steps }
+    return { ...outcome, runId }
   } catch (e) {
     if (e instanceof StoppedError) {
       log('warn', 'Ajan durduruldu.')
-      return { ok: false, stopped: true }
+      outcome = { ok: false, stopped: true }
+      return { ...outcome, runId }
     }
     log('error', (e as Error).message)
+    outcome = { ok: false, error: (e as Error).message }
     throw e
   } finally {
     // Reset the run state even when preparation failed before a resource
-    // was created, or a later OS cleanup call throws.
-    endRun()
+    // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
+    // still ask how the run ended after it is over.
+    endRun(outcome)
     running = false
     runLog = ''
     globalShortcut.unregister(STOP_HOTKEY)
@@ -510,18 +520,23 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     userStop: () => stopRequested,
     sendStep: (payload: unknown) => send('agent:step', payload),
     permission: () => getSettings().agentPermission,
-    askApproval: async (summary: string) => {
+    askApproval: async (summary: string, note: string) => {
       if (!mainWindow) return false
+      if (sessionApproved) return true
       const answer = await dialog.showMessageBox(mainWindow, {
         type: 'question',
-        buttons: ['İzin ver', 'Reddet'],
-        defaultId: 1,
-        cancelId: 1,
+        buttons: ['İzin ver', 'Bu oturumda hep izin ver', 'Reddet'],
+        defaultId: 2,
+        cancelId: 2,
         noLink: true,
         title: 'Ajan izni',
         message: 'Bir ajan Nubbo’yu kullanmak istiyor',
-        detail: `${summary}\n\nBu işlem gerçekten tıklar/yazar. Akış ilerlemez.`,
+        detail: `${summary}\n\n${note}\n\nUygulama kapanınca bu izin sıfırlanır.`,
       })
+      if (answer.response === 1) {
+        sessionApproved = true
+        return true
+      }
       return answer.response === 0
     },
     requestStop: () => {
@@ -554,6 +569,11 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     }
   }
   ipcMain.handle('tools:endpoint', () => endpointInfo())
+  ipcMain.handle('tools:endpointOpen', () => {
+    const info = endpointInfo()
+    if (info) shell.showItemInFolder(info.file)
+    return info ? info.file : null
+  })
   void syncEndpoint()
   ipcMain.handle('canvases:get', () => {
     const saved = store.get('canvases') as CanvasBook | undefined

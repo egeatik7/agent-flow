@@ -79,7 +79,11 @@ export default function AgentTab({
     }
   }
 
-  const steps = result?.data?.steps as { done?: number; errors?: number } | undefined
+  const observed = result?.data?.observed as { done?: number; errors?: number } | undefined
+  const last = result?.data?.last as
+    | { runId?: string; ok?: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string }
+    | null
+    | undefined
 
   return (
     <div>
@@ -119,6 +123,11 @@ export default function AgentTab({
               : 'Açılıyor…'
             : 'Kapalı. Açınca ajan araçları bu adresten çağırabilir; jeton dosyasından okunur, izin ayarı yine geçerli.'}
         </p>
+        {settings.agentEndpoint && endpoint && (
+          <button type="button" className="xp-btn" onClick={() => void api?.toolEndpointOpen?.()}>
+            Dosyanın konumunu aç
+          </button>
+        )}
       </div>
 
       <div className="field">
@@ -210,9 +219,17 @@ export default function AgentTab({
                   {result.data?.stopRequested ? ' · durdurma istendi' : ''}
                 </li>
                 {result.data?.nodeTitle ? <li>node: {String(result.data.nodeTitle)}</li> : null}
-                {steps ? (
+                {observed ? (
                   <li>
-                    gözlenen adımlar: {steps.done ?? 0} tamam · {steps.errors ?? 0} hata
+                    gözlenen adımlar: {observed.done ?? 0} tamam · {observed.errors ?? 0} hata
+                  </li>
+                ) : null}
+                {last ? (
+                  <li>
+                    son koşu ({last.runId}):{' '}
+                    {last.stopped ? 'durduruldu' : last.error ? `hata: ${last.error}` : last.ok ? 'tamamlandı' : 'hata ile bitti'}
+                    {typeof last.steps === 'number' ? ` · ${last.steps} adım` : ''}
+                    {last.failed ? ` · ${last.failed} hatalı öğe/tur` : ''}
                   </li>
                 ) : null}
                 {result.data?.lastError ? <li>son hata: {String(result.data.lastError)}</li> : null}

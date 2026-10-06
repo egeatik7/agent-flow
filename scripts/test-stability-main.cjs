@@ -32,6 +32,7 @@ function harness(overrides = {}) {
     // The tool layer's own run record, fed from the same handler: it must be released too.
     beginRun: () => events.push('run-begin'),
     endRun: () => events.push('run-end'),
+    probing: () => false,
     globalShortcut: { register: () => events.push('registered'), unregister: () => events.push('unregistered') },
     STOP_HOTKEY: 'Ctrl+Shift+Q',
     powerSaveBlocker: { start: () => { events.push('awake'); return 0; }, isStarted: () => true, stop: () => events.push('awake-stopped') },

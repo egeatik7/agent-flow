@@ -83,7 +83,7 @@ export type ToolContext = {
   /** What an outside caller may do without asking. The panel is never gated. */
   permission: () => 'off' | 'ask' | 'auto'
   /** Asks the person in front of the app. Resolves false when refused or not answered. */
-  askApproval: (summary: string) => Promise<boolean>
+  askApproval: (summary: string, note: string) => Promise<boolean>
   /** The user's own stop, for `run.stop`. */
   requestStop: () => void
   /** Starts a real run on the engine. Returns when the run has finished. */
@@ -101,6 +101,8 @@ type ToolDef = {
   /** True when the tool can send keyboard or mouse input to the desktop. */
   sendsInput: boolean
   ready: boolean
+  /** What the approval dialog should say about this tool's effect on the flow. */
+  approvalNote?: string
   run?: (args: Args, ctx: ToolContext) => Promise<ToolResult>
 }
 
@@ -174,6 +176,19 @@ function describeTrace(traces: TargetTrace[]): TraceSummary {
     .join(', ')
   const text = seen ? `Basamaklar: ${seen}.` : 'Hiçbir basamak aday listesi vermedi.'
   return { text, stage, window, candidates: stage ? counts.get(stage) : undefined, label, x, y, stages }
+}
+
+/**
+ * Did this step actually send something to the desktop?
+ *
+ * A click leaves an input trace, which is the strongest signal. Keys and typing keep no such
+ * trace, so for those a node that reported done is the evidence. A wait, a condition or a probe
+ * sends no input, so it is never reported as one.
+ */
+export function actionSent(kind: string, nodeStatus: string, traces: TargetTrace[]): boolean {
+  if (traces.some((e) => e.kind === 'input')) return true
+  if (kind === 'key' || kind === 'type') return nodeStatus === 'done'
+  return false
 }
 
 const flowRead: ToolDef = {
@@ -333,12 +348,12 @@ const stepRun: ToolDef = {
   summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır, akışı ilerletmez.',
   sendsInput: true,
   ready: true,
+  approvalNote: 'Tek adım: akış ilerlemez; döngü işareti, hafıza ve kayıtlı yol değişmez.',
   run: async (args, ctx) => {
     const graph = graphOf(args, ctx)
     const nodeId = text(args.nodeId)
     if (!nodeId) return failed(stepRun.name, 'nodeId gerekli.')
     if (ctx.isRunning()) return failed(stepRun.name, 'Bir koşu sürüyor; tek adım için önce durdur.')
-    if (probing()) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
     const place = findPlace(graph, nodeId)
     if (!place) return failed(stepRun.name, `Node bulunamadı: ${nodeId}`)
     const node = place.node
@@ -346,16 +361,18 @@ const stepRun: ToolDef = {
       return failed(stepRun.name, `“${NODE_SPECS[node.kind].label}” node’u tek adımda çalıştırılmaz.`)
     }
     const loop = loopOf(graph, nodeId)
+    // The slot is claimed before the first await, so two callers cannot both get through and a
+    // run cannot start on top of a step. It is released in the finally below.
+    if (!beginProbe(nodeId)) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
     const s = ctx.getSettings()
     const timeoutMs = Math.min(15 * 60_000, Math.max(5_000, num(args.timeoutMs) ?? 120_000))
-    const { createAgent } = await import('./agent')
-    const { probeOnce } = await import('./tool-probe')
     const logs: string[] = []
     const traces: TargetTrace[] = []
     let timedOut = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    beginProbe(nodeId)
     try {
+      const { createAgent } = await import('./agent')
+      const { probeOnce } = await import('./tool-probe')
       const agent = createAgent({
         log: (level, message) => {
           if (logs.length < 200) logs.push(`${level}: ${message}`)
@@ -386,13 +403,32 @@ const stepRun: ToolDef = {
       })
       const ms = Date.now() - started
       const t = describeTrace(traces)
-      const acted = traces.some((e) => e.kind === 'input')
+      const acted = actionSent(node.kind, r.nodeStatus, traces)
 
       if (r.interrupted) {
         const why = timedOut ? `süre doldu (${Math.round(timeoutMs / 1000)} sn)` : 'kullanıcı durdurdu'
         const message = `“${node.title}” çalıştırılamadı: ${why}.`
         ctx.log('warn', `Ajan · tek adım · ${message}`)
         return { ok: true, tool: stepRun.name, outcome: 'durduruldu', message, node: nodeRef(place), action: { kind: node.kind, sent: acted }, loop, log: logs.slice(-12) }
+      }
+
+      // A box can catch a failing member (a bad loop item does not stop the flow), so the run
+      // may end saying nothing while this very node failed. That must not read as success.
+      if (r.nodeStatus === 'error') {
+        const failed = r.summary?.failed ? ` Akış bu turu hatalı saydı (${r.summary.failed}).` : ''
+        const message = `“${node.title}” hata verdi.${t.text ? ` ${t.text}` : ''}${failed}`
+        ctx.log('warn', `Ajan · tek adım · ${message}`)
+        return {
+          ok: true,
+          tool: stepRun.name,
+          outcome: 'hata',
+          message,
+          node: nodeRef(place),
+          action: { kind: node.kind, sent: acted },
+          loop,
+          log: logs.slice(-12),
+          data: { ms, nodeStatus: r.nodeStatus, official: r.summary ?? null },
+        }
       }
 
       const parts = [`“${node.title}” çalıştırıldı.`]
@@ -419,7 +455,7 @@ const stepRun: ToolDef = {
         observed: { note: 'Tek adım: kopya akış üzerinde koştu; işaret, hafıza ve kayıtlı yol değişmedi.' },
         loop,
         log: logs.slice(-12),
-        data: { ms, reachedNode: r.reachedNode, nodeStatus: r.nodeStatus },
+        data: { ms, reachedNode: r.reachedNode, nodeStatus: r.nodeStatus, official: r.summary ?? null },
       }
     } catch (e) {
       const reason = (e as Error).message
@@ -439,6 +475,7 @@ const runFrom: ToolDef = {
   summary: 'Belirtilen node’dan akışı sürdürür. Koşu başlar ve hemen döner.',
   sendsInput: true,
   ready: true,
+  approvalNote: 'Koşu başlar ve akış ilerler; run.stop ile durdurulabilir.',
   run: async (args, ctx) => {
     const graph = graphOf(args, ctx)
     if (ctx.isRunning()) return failed(runFrom.name, 'Bir koşu zaten sürüyor.')
@@ -449,11 +486,14 @@ const runFrom: ToolDef = {
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
-    const message = `Koşu başladı (${from}); durumu run.state ile izle, durdurmak için run.stop.`
-    ctx.log('info', `Ajan · buradan devam · ${message}`)
     void ctx
       .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined)
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
+    // The run begins synchronously, so its id is already known: this answer means the run
+    // started, never that it finished.
+    const runId = snapshot().runId
+    const message = `Koşu başladı (${from})${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.`
+    ctx.log('info', `Ajan · buradan devam · ${message}`)
     return {
       ok: true,
       tool: runFrom.name,
@@ -462,7 +502,8 @@ const runFrom: ToolDef = {
       node: place ? nodeRef(place) : undefined,
       loop: nodeId ? loopOf(graph, nodeId) : undefined,
       action: { kind: 'run', sent: true },
-      data: { started: true, startId: nodeId || null, packagePath },
+      observed: { note: 'Koşu başlatıldı; bu cevap koşunun bittiği anlamına gelmez.' },
+      data: { started: true, runId: runId ?? null, startId: nodeId || null, packagePath },
     }
   },
 }
@@ -502,7 +543,8 @@ const screenRead: ToolDef = {
   },
 }
 
-const runStop: ToolDef = {  name: 'run.stop',
+const runStop: ToolDef = {
+  name: 'run.stop',
   summary: 'Çalışan koşuyu durdurur.',
   sendsInput: false,
   ready: true,
@@ -525,13 +567,19 @@ const runState: ToolDef = {
     const chain = s.loops.map((l) => `${l.title}${typeof l.index === 'number' ? ` ${l.index + 1}/${l.total}` : ''}${l.item ? ` (“${l.item}”)` : ''}`)
     const parts: string[] = []
     if (s.probing) parts.push(`Tek adım sürüyor: “${s.nodeTitle ?? s.nodeId ?? '—'}”.`)
-    else if (running) parts.push(`Koşu sürüyor: “${s.nodeTitle ?? s.nodeId ?? '—'}”.`)
+    else if (running) parts.push(`Koşu sürüyor${s.runId ? ` (${s.runId})` : ''}: “${s.nodeTitle ?? s.nodeId ?? '—'}”.`)
     else parts.push('Şu an koşu yok.')
     if (chain.length) parts.push(`Kutular: ${chain.join(' › ')}.`)
     if (s.packagePath.length) parts.push(`Paket: ${s.packagePath.length} katman derinde.`)
-    if (s.steps.done || s.steps.errors) parts.push(`Gözlenen adımlar: ${s.steps.done} tamam, ${s.steps.errors} hata.`)
+    if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adımlar: ${s.observed.done} tamam, ${s.observed.errors} hata.`)
     if (ctx.userStop()) parts.push('Durdurma isteği açık.')
     if (s.lastError) parts.push(`Son hata: ${s.lastError}`)
+    if (!running && !s.probing && s.last) {
+      const l = s.last
+      const how = l.stopped ? 'kullanıcı durdurdu' : l.error ? `hata: ${l.error}` : l.ok ? 'tamamlandı' : 'hata ile bitti'
+      const secs = Math.max(0, Math.round((l.endedAt - l.startedAt) / 1000))
+      parts.push(`Son koşu (${l.runId}): ${how} · ${l.steps ?? 0} adım · ${l.failed ? `${l.failed} hatalı öğe/tur` : 'hatalı öğe yok'} · ${secs} sn.`)
+    }
     const message = parts.join(' ')
     if (running || s.probing) ctx.log('info', `Ajan · durum · ${message}`)
     return {
@@ -545,13 +593,15 @@ const runState: ToolDef = {
         running,
         probing: s.probing,
         stopRequested: ctx.userStop(),
+        runId: s.runId ?? null,
         nodeId: s.nodeId,
         nodeTitle: s.nodeTitle,
         packagePath: s.packagePath,
-        steps: s.steps,
+        observed: s.observed,
+        last: s.last,
         lastError: s.lastError,
         startedAt: s.startedAt,
-        ms: s.startedAt ? Date.now() - s.startedAt : undefined,
+        ms: s.startedAt && running ? Date.now() - s.startedAt : undefined,
       },
     }
   },
@@ -578,7 +628,7 @@ export async function callTool(name: string, args: unknown, ctx: ToolContext, so
     if (mode === 'off') return failed(name, `“${tool.name}” için ajan izni kapalı. Ajan sekmesinden açabilirsin.`)
     if (mode === 'ask') {
       const what = typeof input.nodeId === 'string' ? ` (node ${input.nodeId})` : ''
-      const approved = await ctx.askApproval(`${tool.summary}${what}`)
+      const approved = await ctx.askApproval(`${tool.summary}${what}`, tool.approvalNote ?? 'Ekrana tıklar ya da yazar.')
       if (!approved) {
         ctx.log('warn', `Ajan · ${name} · onay verilmedi.`)
         return { ok: false, tool: name, outcome: 'durduruldu', message: 'Bu çağrı için onay verilmedi.' }

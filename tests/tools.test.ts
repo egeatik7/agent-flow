@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
-import { callTool, toolList, type ToolContext } from '../electron/tools'
+import { callTool, toolList, actionSent, type ToolContext } from '../electron/tools'
+import { beginRun, endRun } from '../electron/tool-state'
 
 let seq = 0
 const edge = (from: AgentNode, fromPort: string, to: AgentNode) => ({ id: `e${++seq}`, from: from.id, fromPort, to: to.id })
@@ -115,6 +116,33 @@ describe('araç katmanı', () => {
     expect(list.find((t) => t.name === 'screen.read')?.ready).toBe(true)
     // Katalogda "sırada" diye bekleyen araç kalmadı.
     expect(list.every((t) => t.ready)).toBe(true)
+  })
+
+  it('eylemin gönderildiği, node türüne göre dürüstçe bildirilir', async () => {
+    // Tıklama iz bırakır; tuş ve yazma iz bırakmaz, orada "node bitti" kanıttır.
+    expect(actionSent('click', 'done', [{ kind: 'input' } as never])).toBe(true)
+    expect(actionSent('click', 'done', [])).toBe(false)
+    expect(actionSent('key', 'done', [])).toBe(true)
+    expect(actionSent('key', 'error', [])).toBe(false)
+    expect(actionSent('type', 'done', [])).toBe(true)
+    expect(actionSent('wait', 'done', [])).toBe(false)
+    expect(actionSent('condition', 'done', [])).toBe(false)
+    // İnisiyatif yalnızca gerçekten tıkladıysa eylem göndermiş sayılır.
+    expect(actionSent('ai', 'done', [])).toBe(false)
+    expect(actionSent('ai', 'done', [{ kind: 'input' } as never])).toBe(true)
+  })
+
+  it('koşu bittikten sonra son sonucu bildirir', async () => {
+    const { graph } = fixture()
+    beginRun(graph, 'baslangic')
+    endRun({ ok: true, steps: 9, failed: 0 })
+    const r = await callTool('run.state', {}, ctx(graph))
+    expect(r.message).toContain('Son koşu')
+    expect(r.message).toContain('tamamlandı')
+    expect(r.message).toContain('9 adım')
+    const last = r.data?.last as { ok?: boolean; steps?: number } | null
+    expect(last?.ok).toBe(true)
+    expect(last?.steps).toBe(9)
   })
 
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
