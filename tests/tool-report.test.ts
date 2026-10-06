@@ -10,9 +10,13 @@ import {
   noteLogLine,
   noteRunFailed,
   noteStep,
+  noteUserStop,
   recentReports,
   setDebugRun,
   setErrorStopHook,
+  setStopAt,
+  setStopAtHook,
+  stopReason,
 } from '../electron/tool-state'
 
 function flow(): AgentGraph {
@@ -108,6 +112,41 @@ describe('koşu raporu', () => {
     noteError('Durduruldu')
     endRun({ ok: false, stopped: true })
     expect(frozenReport()).toBeNull()
+  })
+
+  it('sınırlı bölge testi: yalnız sınır node u bitince durur; neden ayrı bildirilir', () => {
+    const g = flow()
+    let stopped = 0
+    setStopAtHook(() => {
+      stopped += 1
+    })
+    beginRun(g)
+    setStopAt('n2')
+    noteStep({ id: 'n1', status: 'done' })
+    expect(stopped).toBe(0)
+    expect(stopReason()).toBeNull()
+    noteStep({ id: 'n2', status: 'done' })
+    expect(stopped).toBe(1)
+    expect(stopReason()).toBe('until')
+    // Sınırdan sonraki adımlar koşmaya devam etse bile ikinci kez durdurma istenmez.
+    noteStep({ id: 'n3', status: 'done' })
+    expect(stopped).toBe(1)
+
+    // Nedenler birbirine karışmaz.
+    beginRun(g)
+    expect(stopReason()).toBeNull()
+    noteUserStop()
+    expect(stopReason()).toBe('user')
+    beginRun(g)
+    setDebugRun(true)
+    noteStep({ id: 'x', status: 'error' })
+    expect(stopReason()).toBe('debug-error')
+    endRun({ ok: false })
+    beginRun(g)
+    setDebugRun(true)
+    noteRunFailed('koşu hatası')
+    expect(stopReason()).toBe('debug-error')
+    setStopAtHook(null)
   })
 
   it('yeni koşu günlük kuyruğunu temizler', () => {

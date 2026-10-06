@@ -57,6 +57,14 @@ let steps: { id: string; status: string; at: number }[] = []
 let lines: { level: string; text: string; at: number }[] = []
 let debugRun = false
 let stopOnError: (() => void) | null = null
+/**
+ * Why the run stopped: the person asked, a debug failure, or a bounded region test reaching the
+ * node it was told to stop after. Three very different things that must not be reported as one.
+ */
+let stoppedBy: 'user' | 'debug-error' | 'until' | null = null
+/** The node a bounded test stops after, once it has finished. */
+let stopAt: string | null = null
+let stopAtHook: (() => void) | null = null
 let frozen: FrozenReport | null = null
 /** Reports of earlier runs, newest first: a new run must not erase what the last one found. */
 let archive: FrozenReport[] = []
@@ -109,6 +117,9 @@ export function beginRun(graph: AgentGraph, startId?: string): string {
     frozen = null
   }
   lines = []
+  // A bounded test belongs to one run: the boundary and the reason start clean every time.
+  stopAt = null
+  stoppedBy = null
   return id
 }
 
@@ -168,6 +179,12 @@ export function noteStep(payload: unknown): void {
   if (p.status === 'error') errors++
   steps.push({ id: p.id, status, at: Date.now() })
   if (steps.length > STEP_RING) steps.splice(0, steps.length - STEP_RING)
+  // A bounded region test stops once the node it was told to stop after has finished, so nothing
+  // beyond the region being repaired runs.
+  if (status === 'done' && stopAt && p.id === stopAt) {
+    stoppedBy = 'until'
+    stopAtHook?.()
+  }
   // A debug run keeps the moment it broke: the loop item, the package path and the error are all
   // still true only right now. Within a step of this, the flow moves on to the next file.
   if (debugRun && status === 'error') openFailure(p.id, 'step')
@@ -203,6 +220,7 @@ function openFailure(nodeId: string, kind: 'step' | 'run', message?: string): vo
   }
   // Either way this is a failure, and a debug run stops at the next boundary for it: the message
   // may still be on its way, which is exactly why the record starts incomplete.
+  stoppedBy = 'debug-error'
   stopOnError?.()
 }
 
@@ -259,11 +277,34 @@ export function setErrorStopHook(fn: (() => void) | null): void {
   stopOnError = fn
 }
 
+/** Called when a bounded region test reaches the node it was told to stop after. */
+export function setStopAtHook(fn: (() => void) | null): void {
+  stopAtHook = fn
+}
+
+export function setStopAt(nodeId: string | null): void {
+  stopAt = nodeId ? String(nodeId) : null
+}
+
+export function stopReason(): 'user' | 'debug-error' | 'until' | null {
+  return stoppedBy
+}
+
+/** The person asked to stop: not a failure, and not a bounded test either. */
+export function noteUserStop(): void {
+  stoppedBy = 'user'
+}
+
 /** The frozen context of the moment a debug run broke: the current one, or an earlier one by run. */
 export function frozenReport(runId?: string): FrozenReport | null {
   if (!runId) return frozen
   if (frozen?.runId === runId) return frozen
   return archive.find((r) => r.runId === runId) ?? null
+}
+
+/** The last few step lines, so a caller can see what ran and what a stop cut off. */
+export function recentSteps(n = 6): { id: string; status: string }[] {
+  return steps.slice(-n).map((s) => ({ id: s.id, status: s.status }))
 }
 
 /** The reports of earlier runs, newest first: a new run must not overwrite what the last one found. */

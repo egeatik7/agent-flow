@@ -43,7 +43,7 @@ import {
   type BranchRecord,
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
-import { beginProbe, endProbe, frozenReport, isDebugRun, probing, recentReports, snapshot } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, setStopAt, snapshot, stopReason } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -1129,6 +1129,14 @@ const runFrom: ToolDef = {
     }
     const place = nodeId ? findPlace(graph, nodeId) : null
     if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}${branchNote}`)
+    // A bounded region test: run from here and stop after that node has finished, so a repair can
+    // be tried without the rest of the flow doing its work a second time.
+    const untilId = text(args.untilNodeId)
+    const untilPlace = untilId ? findPlace(graph, untilId) : null
+    if (untilId && !untilPlace) return failed(runFrom.name, `Duracak node bulunamadı: ${untilId}${branchNote}`)
+    if (untilId && !nodeId) {
+      return failed(runFrom.name, 'Sınırlı test için başlangıç node’u da gerekir (nodeId); bölge iki ucuyla belirtilir.')
+    }
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
@@ -1139,10 +1147,13 @@ const runFrom: ToolDef = {
         ...(args.fast === true ? { fast: true } : {}),
       })
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
+    // The boundary is set after the run starts, because beginRun clears it: it belongs to this run.
+    setStopAt(untilId || null)
     // The run begins synchronously, so its id is already known: this answer means the run
     // started, never that it finished.
     const runId = snapshot().runId
-    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
+    const untilNote = untilId ? ` · “${untilPlace?.node.title ?? untilId}” bitince duracak (sınırlı bölge testi)` : ''
+    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}${untilNote}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
     ctx.log('info', `Ajan · buradan devam · ${message}`)
     return {
       ok: true,
@@ -1153,7 +1164,7 @@ const runFrom: ToolDef = {
       loop: nodeId ? loopOf(graph, nodeId) : undefined,
       action: { kind: 'run', sent: true },
       observed: { note: 'Koşu başlatıldı; bu cevap koşunun bittiği anlamına gelmez.' },
-      data: { started: true, runId: runId ?? null, startId: nodeId || null, packagePath },
+      data: { started: true, runId: runId ?? null, startId: nodeId || null, packagePath, untilId: untilId || null },
     }
   },
 }
@@ -1281,8 +1292,24 @@ const runWait: ToolDef = {
       return { ok: true, tool: runWait.name, outcome: 'tamam', message, observed: { note: 'Süre doldu, koşu bitmedi.' }, data: { running: true, snapshot: s, waitedMs: Date.now() - started } }
     }
     const last = s.last
+    // When the run was stopped on purpose, the step that was in flight can be counted as an error.
+    // Saying which steps ran keeps that from reading as a failure that has to be investigated.
+    const tail =
+      (stopReason() === 'until' || stopReason() === 'user') && s.observed.errors > 0
+        ? ` · son adımlar: ${recentSteps(6)
+            .map((x) => `${x.status === 'error' ? '✗' : x.status === 'done' ? '✓' : '·'} ${x.id}`)
+            .join(' ')}`
+        : ''
+    const why =
+      stopReason() === 'until'
+        ? ' (istenen node bitince durduruldu: sınırlı bölge testi)'
+        : stopReason() === 'user'
+          ? ' (kullanıcı durdurdu)'
+          : stopReason() === 'debug-error'
+            ? ' (hata sonrası durdu)'
+            : ''
     const message = wasRunning
-      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`
+      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`
       : 'Beklenecek bir koşu yok.'
     ctx.log('info', `Ajan · bekle · ${message}`)
     return {
@@ -1291,7 +1318,7 @@ const runWait: ToolDef = {
       outcome: 'tamam',
       message,
       observed: { note: 'Koşunun resmî sonucu ve gözlenen adımlar ayrı alanlarda.' },
-      data: { running: false, last, snapshot: s, waitedMs: Date.now() - started },
+      data: { running: false, last, snapshot: s, waitedMs: Date.now() - started, stoppedBy: stopReason() },
     }
   },
 }
@@ -1303,6 +1330,8 @@ const runStop: ToolDef = {
   ready: true,
   run: async (_args, ctx) => {
     ctx.requestStop()
+    // Said out loud so a stop by the person is never read as a debug failure or a finished region.
+    noteUserStop()
     const message = 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
     ctx.log('warn', `Ajan · durdur · ${message}`)
     return { ok: true, tool: runStop.name, outcome: 'tamam', message }

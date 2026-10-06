@@ -21,6 +21,7 @@ import {
   probing,
   setDebugRun,
   setErrorStopHook,
+  setStopAtHook,
 } from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
@@ -210,6 +211,10 @@ const agent = createAgent({
 // A debug run stops itself at the first failed step: the stop is checked between steps, so the
 // failure's own screen, item and error are still the truth when the run ends.
 setErrorStopHook(() => {
+  stopRequested = true
+})
+// A bounded region test stops once its boundary node has finished, for the same reason.
+setStopAtHook(() => {
   stopRequested = true
 })
 

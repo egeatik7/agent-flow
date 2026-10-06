@@ -43,8 +43,8 @@ fs.mkdirSync(outDir, { recursive: true })
 
 const evidence = { name, profile, startedAt: new Date().toISOString(), classes: { 'tool-answered': [], 'input-sent': [], observed: [], completed: [] }, notes: [] }
 const checks = []
-function check(id, kind, ok, detail) {
-  checks.push({ id, kind, ok: !!ok, detail })
+function check(id, kind, ok, detail, skipped = false) {
+  checks.push({ id, kind, ok: !!ok, detail, skipped })
   if (ok) evidence.classes[kind].push(`${id}: ${detail}`)
   return !!ok
 }
@@ -203,7 +203,7 @@ async function main() {
     check('edits-accepted', 'tool-answered', true, 'düzenleme yok: bulunan akış olduğu gibi koşacak')
   }
 
-  const before = (scenario.expect?.files || []).map((f) => expand(f.path))
+  const before = [...(scenario.expect?.files || []), ...(scenario.expect?.absentFiles || [])].map((f) => expand(f.path))
   for (const p of before) if (fs.existsSync(p)) fs.rmSync(p, { force: true })
 
   if (scenario.expect?.screenshot === true) await call(info, 'screen.read', { image: true }, 60_000)
@@ -223,24 +223,37 @@ async function main() {
   }
 
   const runAt = Date.now()
-  const started = await call(info, 'run.from', { branchId, fromStart: scenario.run?.fromStart !== false, ...(scenario.run?.node ? { nodeId: scenario.run.node } : {}), ...(scenario.run?.fast ? { fast: true } : {}), ...(scenario.run?.debug ? { debug: true } : {}) }, 60_000)
+  const started = await call(info, 'run.from', { branchId, fromStart: scenario.run?.fromStart !== false, ...(scenario.run?.node ? { nodeId: scenario.run.node } : {}), ...(scenario.run?.until ? { untilNodeId: scenario.run.until } : {}), ...(scenario.run?.fast ? { fast: true } : {}), ...(scenario.run?.debug ? { debug: true } : {}) }, 60_000)
   must('run-started', started)
 
   const waited = await call(info, 'run.wait', { timeoutMs: scenario.run?.timeoutMs ?? 240_000 }, 20 * 60_000)
   const state = waited.result.data?.snapshot || {}
   evidence.waitedMs = waited.result.data?.waitedMs
   check('run-ended', 'observed', waited.result.data?.running === false, `bekleme ${evidence.waitedMs} ms · ${state.observed?.done ?? 0} tamam, ${state.observed?.errors ?? 0} hata`)
-  check('run-official-ok', 'observed', (waited.result.data?.last?.ok ?? false) === (scenario.expect?.runOk !== false), `resmî sonuç: ${JSON.stringify(waited.result.data?.last || null)}`)
-  if (typeof scenario.expect?.minSteps === 'number') check('min-steps', 'observed', (waited.result.data?.last?.steps ?? 0) >= scenario.expect.minSteps, `${waited.result.data?.last?.steps ?? 0} >= ${scenario.expect.minSteps}`)
-  if (typeof scenario.expect?.maxErrors === 'number') check('max-errors', 'observed', (state.observed?.errors ?? 0) <= scenario.expect.maxErrors, `${state.observed?.errors ?? 0} <= ${scenario.expect.maxErrors}`)
+  // A bounded region test is *meant* to end the run early, so its official outcome is a stop, not a
+  // success; and the step that was in flight when the boundary arrived can be counted as an error.
+  // Both are said in the scenario instead of being read as a failure.
+  const stoppedExpected = scenario.expect?.stoppedBy === 'until' || scenario.expect?.stoppedBy === 'user'
+  const wantOk = stoppedExpected ? scenario.expect?.runOk === true : scenario.expect?.runOk !== false
+  check('run-official-ok', 'observed', (waited.result.data?.last?.ok ?? false) === wantOk, `resmî sonuç: ${JSON.stringify(waited.result.data?.last || null)}`)
+  const stepsDone = stoppedExpected ? state.observed?.done ?? 0 : waited.result.data?.last?.steps ?? 0
+  if (typeof scenario.expect?.minSteps === 'number') check('min-steps', 'observed', stepsDone >= scenario.expect.minSteps, `${stepsDone} >= ${scenario.expect.minSteps}${stoppedExpected ? ' (gözlenen tamamlanan adım)' : ''}`)
+  if (typeof scenario.expect?.maxErrors === 'number') {
+    // A bounded stop cuts a step in half, and the engine counts that step as failed. The scenario
+    // says so out loud (allowInterrupted) instead of the runner quietly tolerating it.
+    const allowed = scenario.expect.allowInterrupted && stoppedExpected ? scenario.expect.maxErrors + 1 : scenario.expect.maxErrors
+    check('max-errors', 'observed', (state.observed?.errors ?? 0) <= allowed, `${state.observed?.errors ?? 0} <= ${allowed}${allowed !== scenario.expect.maxErrors ? ' (durdurma sırasında yarıda kesilen adım için +1)' : ''}`)
+  }
 
   const logFile = newestLog()
   if (logFile) {
     const text = fs.readFileSync(logFile, 'utf8')
     fs.writeFileSync(path.join(outDir, 'engine-log.txt'), text, 'utf8')
     evidence.logFile = logFile
-    check('field-verified', 'input-sent', /Alan doğrulandı/.test(text), 'motor yazdığı alanı geri okudu')
-    check('no-input-refusal', 'input-sent', !/INPUT_WINDOW_NOT_ACTIVE|INPUT_FOCUS_UNRESOLVED/.test(text), 'girdi reddi yok')
+    // A bounded test that stops before any typing cannot have verified a field: the check has no
+    // subject, so it is skipped with a reason instead of being reported as a failure or hidden.
+    const noTyping = stoppedExpected && /\.(type|yaz)/i.test(String(waited.result.data?.last?.error || '')) === false
+    check('field-verified', 'input-sent', noTyping ? false : /Alan doğrulandı/.test(text), noTyping ? 'sınırlı test yazma adımına varmadan durdu' : 'motor yazdığı alanı geri okudu', noTyping)    check('no-input-refusal', 'input-sent', !/INPUT_WINDOW_NOT_ACTIVE|INPUT_FOCUS_UNRESOLVED/.test(text), 'girdi reddi yok')
     const shot = /([A-Za-z]:\\[^\s"']+\.png)/.exec(text)
     if (shot && fs.existsSync(shot[1])) {
       fs.copyFileSync(shot[1], path.join(outDir, 'error-shot.png'))
@@ -259,6 +272,18 @@ async function main() {
     const ok = exists && (f.content === undefined || content === String(f.content).trim())
     check(`file:${path.basename(p)}`, 'completed', ok, exists ? `içerik “${content}”` : 'dosya yok')
     if (exists) fs.writeFileSync(path.join(outDir, `file-${path.basename(p)}.txt`), fs.readFileSync(p), 'utf8')
+  }
+  // A bounded region test is only proven by what did NOT happen: the step past the boundary must
+  // leave no trace at all.
+  for (const f of scenario.expect?.absentFiles || []) {
+    const p = expand(f.path)
+    const exists = fs.existsSync(p)
+    check(`absent:${path.basename(p)}`, 'completed', !exists, exists ? 'BEKLENMEDİK: dosya oluşmuş' : 'dosya yok (beklendiği gibi)')
+    if (exists) fs.rmSync(p, { force: true })
+  }
+  const stop = waited.result.data?.stoppedBy ?? null
+  if (scenario.expect?.stoppedBy !== undefined) {
+    check('stopped-by', 'observed', stop === scenario.expect.stoppedBy, `durdurma nedeni: ${String(stop)} (beklenen ${String(scenario.expect.stoppedBy)})`)
   }
 
   const screen = await call(info, 'screen.read', {}, 60_000)
@@ -281,7 +306,8 @@ async function main() {
   evidence.finishedAt = new Date().toISOString()
   evidence.ms = Date.now() - runAt
 
-  const passed = checks.every((c) => c.ok)
+  const skipped = checks.filter((c) => c.skipped).length
+  const passed = checks.every((c) => c.ok || c.skipped)
   if (passed && !keep && scenario.cleanup?.dropBranchOnPass !== false) {
     await call(info, 'branch.drop', { branchId }, 20_000)
     evidence.branchDropped = true
@@ -296,7 +322,7 @@ async function main() {
     '',
     '| kontrol | sınıf | sonuç | ayrıntı |',
     '|---|---|---|---|',
-    ...checks.map((c) => `| ${c.id} | ${c.kind} | ${c.ok ? '✓' : '✗'} | ${String(c.detail).replace(/\|/g, '/')} |`),
+    ...checks.map((c) => `| ${c.id} | ${c.kind} | ${c.skipped ? '—' : c.ok ? '✓' : '✗'} | ${String(c.detail).replace(/\|/g, '/')} |`),
     '',
     '## Sınıflar',
     '- tool-answered: ' + (evidence.classes['tool-answered'].length ? evidence.classes['tool-answered'].join(' · ') : '—'),
@@ -308,8 +334,8 @@ async function main() {
   ].join('\n')
   fs.writeFileSync(path.join(outDir, 'evidence.md'), md, 'utf8')
 
-  console.log(`${passed ? 'GEÇTİ' : 'KALDI'} · ${checks.filter((c) => c.ok).length}/${checks.length} kontrol · kanıt: ${path.relative(root, outDir)}`)
-  for (const c of checks.filter((x) => !x.ok)) console.log(`  ✗ ${c.id}: ${c.detail}`)
+  console.log(`${passed ? 'GEÇTİ' : 'KALDI'} · ${checks.filter((c) => c.ok).length}/${checks.length - skipped} kontrol${skipped ? ` (${skipped} atlandı)` : ''} · kanıt: ${path.relative(root, outDir)}`)
+  for (const c of checks.filter((x) => !x.ok && !x.skipped)) console.log(`  ✗ ${c.id}: ${c.detail}`)
   process.exit(passed ? 0 : 1)
 }
 

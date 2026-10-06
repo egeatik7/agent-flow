@@ -1,0 +1,25 @@
+{
+  "name": "region-bounded",
+  "profile": "test",
+  "canvas": "Tuval 1",
+  "setup": {
+    "packagePath": ["fixture-package"],
+    "ops": [
+      {
+        "op": "patchNode",
+        "id": "fixture-inner-type",
+        "fields": {
+          "text": "cmd /c md \"%TEMP%\\nubbo-pilot\" 2>nul & >\"%TEMP%\\nubbo-pilot\\inner2.txt\" echo inner2",
+          "title": "Fikstür · komutu yaz (onarıldı)"
+        }
+      }
+    ]
+  },
+  "run": { "fromStart": true, "node": "fixture-start", "fast": false, "until": "fixture-inner-key", "timeoutMs": 240000 },
+  "expect": {
+    "maxErrors": 0,
+    "allowInterrupted": true,
+    "stoppedBy": "until",
+    "absentFiles": [{ "path": "{{temp}}\\nubbo-pilot\\inner2.txt" }]
+  }
+}
