@@ -505,15 +505,28 @@ const flowEdit: ToolDef = {
     ctx.saveCanvases(book)
     const after = viewBranch(book, branch)
     const shape = after.path ? ` · alternatif yol: ${after.path.entry.nodeId} → ${after.path.exit.nodeId}` : ''
-    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${shape}. Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
-    ctx.log('info', `Ajan · branch · ${message}`)
+    // A warning nobody sees is not a warning: the checker's findings belong in the answer.
+    const warn = check.warnings.length ? ` Uyarı: ${check.warnings.join(' ')}` : ''
+    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${shape}.${warn} Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
+    ctx.log(check.warnings.length ? 'warn' : 'info', `Ajan · branch · ${message}`)
     return {
       ok: true,
       tool: flowEdit.name,
       outcome: 'tamam',
       message,
       observed: { note: 'Branch tarifine eklendi; çalışan akışa ve tuvale yazılmadı.' },
-      data: { valid: true, branchId: branch.id, groupId: group.id, lines, diff: after.diff, applied: after.applied, failed: after.failed, baseChanged: after.baseChanged, path: after.path },
+      data: {
+        valid: true,
+        branchId: branch.id,
+        groupId: group.id,
+        lines,
+        diff: after.diff,
+        applied: after.applied,
+        failed: after.failed,
+        baseChanged: after.baseChanged,
+        path: after.path,
+        warnings: check.warnings,
+      },
     }
   },
 }

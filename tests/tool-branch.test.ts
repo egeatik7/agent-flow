@@ -479,6 +479,21 @@ describe('branch: kopya değil, tarif', () => {
     expect(applied.message).toContain('silindi')
   })
 
+  it('uyarıyı cevapta gösterir: gösterilmeyen uyarı uyarı değildir', async () => {
+    const h = harness()
+    const id = await h.openBranch('Uyarı sınaması')
+    // Akışa bağlanmayan bir zincir: denetleyici uyarır, cevap bunu söylemek zorunda.
+    const edited = await callTool(
+      'flow.edit',
+      { branchId: id, ops: [{ op: 'addNode', key: 'a', kind: 'wait', fields: { ms: 100, title: 'Öksüz bekleme' } }] },
+      h.ctx
+    )
+    expect(edited.ok).toBe(true)
+    expect((edited.data?.warnings as string[]).join(' ')).toContain('Başlangıç')
+    expect(edited.message).toContain('Uyarı')
+    expect(edited.message).toContain('Öksüz bekleme')
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')
