@@ -270,6 +270,16 @@ describe('araç katmanı', () => {
     expect(storeCwd('test', 'C:\\u')).toBe('C:\\u')
   })
 
+  it('flow.read hangi tuvalde okuduğunu söyler', async () => {
+    const { graph } = fixture()
+    const c = ctx(graph)
+    const r = await callTool('flow.read', {}, c)
+    expect(r.ok).toBe(true)
+    expect(r.message).toContain('tuval: “Tuval 1”')
+    expect(r.data?.tabName).toBe('Tuval 1')
+    expect((r.data?.tabs as { active: boolean }[])[0].active).toBe(true)
+  })
+
   it('hedef aramayan node için önizleme "bulamadım" demez', async () => {
     const { graph, loop } = fixture()
     const c = ctx(graph)

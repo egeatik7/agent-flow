@@ -740,9 +740,28 @@ const flowRead: ToolDef = {
       members: memberIds.map((id) => ({ id, title: byId.get(id)?.title ?? id, kind: byId.get(id)?.kind ?? '?' })),
     }))
     const edges = countEdges(graph)
-    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü · ${edges} bağlantı (paketlerin içi dahil).`
+    // Which canvas this is matters: a flow of 249 nodes can have several, and a caller that does
+    // not know where it is reading from cannot know what it is about to change.
+    const book = ctx.getCanvases?.() ?? null
+    const active = book ? book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0] : null
+    const where = active ? ` · tuval: “${active.name}”${book && book.tabs.length > 1 ? ` (${book.tabs.length} tuval)` : ''}` : ''
+    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü · ${edges} bağlantı (paketlerin içi dahil)${where}.`
     ctx.log('info', `Ajan · akışı oku · ${message}`)
-    return { ok: true, tool: flowRead.name, outcome: 'tamam', message, data: { nodes, loops: loopsWithMembers, packages, edges } }
+    return {
+      ok: true,
+      tool: flowRead.name,
+      outcome: 'tamam',
+      message,
+      data: {
+        nodes,
+        loops: loopsWithMembers,
+        packages,
+        edges,
+        tabId: active?.id ?? null,
+        tabName: active?.name ?? null,
+        tabs: book?.tabs.map((t) => ({ id: t.id, name: t.name, active: t.id === book.activeId })) ?? [],
+      },
+    }
   },
 }
 

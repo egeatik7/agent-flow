@@ -1,0 +1,32 @@
+{
+  "name": "pilot-temp-file",
+  "profile": "test",
+  "canvas": "Tuval 1",
+  "setup": {
+    "ops": [
+      { "op": "addNode", "key": "run", "kind": "key", "fields": { "keys": "win+r", "title": "Pilot · Calistir" }, "connectFrom": "{{start}}" },
+      { "op": "addNode", "key": "w1", "kind": "wait", "fields": { "ms": 900, "title": "Pilot · 0,9 sn" }, "connectFrom": "run" },
+      {
+        "op": "addNode",
+        "key": "t1",
+        "kind": "type",
+        "fields": {
+          "text": "cmd /c md \"%TEMP%\\nubbo-pilot\" 2>nul & >\"%TEMP%\\nubbo-pilot\\tur1.txt\" echo tur1",
+          "pressEnter": true,
+          "clearFirst": true,
+          "title": "Pilot · komutu yaz"
+        },
+        "connectFrom": "w1"
+      },
+      { "op": "addNode", "key": "w2", "kind": "wait", "fields": { "ms": 1500, "title": "Pilot · 1,5 sn" }, "connectFrom": "t1" },
+      { "op": "addNode", "key": "son", "kind": "end", "fields": { "title": "Pilot · bitti" }, "connectFrom": "w2" }
+    ]
+  },
+  "run": { "fromStart": true, "fast": true, "timeoutMs": 180000 },
+  "expect": {
+    "files": [{ "path": "{{temp}}\\nubbo-pilot\\tur1.txt", "content": "tur1" }],
+    "runOk": true,
+    "maxErrors": 0,
+    "minSteps": 4
+  }
+}
