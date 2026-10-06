@@ -45,6 +45,7 @@ export default function AgentTab({
   const [error, setError] = useState('')
   const [specs, setSpecs] = useState<ToolSpec[]>([])
   const [endpoint, setEndpoint] = useState<{ port: number; file: string } | null>(null)
+  const [endpointTried, setEndpointTried] = useState(false)
   const [branches, setBranches] = useState<BranchRow[]>([])
   const [branchId, setBranchId] = useState('')
   const [branchNodes, setBranchNodes] = useState<BranchNode[]>([])
@@ -61,6 +62,8 @@ export default function AgentTab({
         if (alive && !e) setEndpoint(null)
       } catch {
         /* the endpoint is optional */
+      } finally {
+        if (alive) setEndpointTried(true)
       }
     })()
     return () => {
@@ -255,9 +258,29 @@ export default function AgentTab({
           {settings.agentEndpoint
             ? endpoint
               ? `Açık: http://127.0.0.1:${endpoint.port} · jeton dosyası: ${endpoint.file}`
-              : 'Açılıyor…'
+              : endpointTried
+                ? 'Açılamadı. Aşağıdaki düğme yeniden dener; olmazsa anahtarı kapatıp aç.'
+                : 'Açılıyor…'
             : 'Kapalı. Açınca ajan araçları bu adresten çağırabilir; jeton dosyasından okunur, izin ayarı yine geçerli.'}
         </p>
+        {settings.agentEndpoint && !endpoint && endpointTried && (
+          <button
+            type="button"
+            className="xp-btn"
+            onClick={() => {
+              setEndpointTried(false)
+              void (async () => {
+                try {
+                  setEndpoint(await api?.toolEndpoint?.() ?? null)
+                } finally {
+                  setEndpointTried(true)
+                }
+              })()
+            }}
+          >
+            Uç noktayı yeniden aç
+          </button>
+        )}
         {settings.agentEndpoint && endpoint && (
           <button type="button" className="xp-btn" onClick={() => void api?.toolEndpointOpen?.()}>
             Dosyanın konumunu aç

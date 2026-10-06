@@ -624,7 +624,13 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       log('info', 'Ajan uç noktası kapatıldı.')
     }
   }
-  ipcMain.handle('tools:endpoint', () => endpointInfo())
+  // Asking for the endpoint also makes sure it is really there: the setting can be on while the
+  // door is shut (an older instance's token file, a failed start), and then the panel would say
+  // "Açılıyor…" forever. Opening the Ajan tab is enough to put it right.
+  ipcMain.handle('tools:endpoint', async () => {
+    await syncEndpoint()
+    return endpointInfo()
+  })
   ipcMain.handle('tools:endpointOpen', () => {
     const info = endpointInfo()
     if (info) shell.showItemInFolder(info.file)
