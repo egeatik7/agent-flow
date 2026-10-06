@@ -39,6 +39,8 @@ function fixture() {
 function harness(permission: AppSettings['agentPermission'] = 'auto') {
   const { graph, book, start, click, wait, end } = fixture()
   const runs: { graph: AgentGraph; startId?: string; derived?: boolean }[] = []
+  const merges: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }[] = []
+  let mergeAnswer: { ok: boolean; error?: string } = { ok: true }
   const ctx: ToolContext = {
     getGraph: () => book.tabs[0].graph,
     getSettings: () => ({ agentPermission: permission }) as AppSettings,
@@ -61,6 +63,10 @@ function harness(permission: AppSettings['agentPermission'] = 'auto') {
       book.activeId = next.activeId
       book.branches = next.branches
     },
+    applyMerge: async (payload) => {
+      merges.push(payload)
+      return mergeAnswer
+    },
   }
   const openBranch = async (name = 'RunAgentFix 1') => {
     const created = await callTool('branch.create', { name }, ctx)
@@ -71,7 +77,22 @@ function harness(permission: AppSettings['agentPermission'] = 'auto') {
     if (!found) throw new Error(`branch yok: ${id}`)
     return found
   }
-  return { graph, book, ctx, runs, openBranch, branchOf, start, click, wait, end }
+  return {
+    graph,
+    book,
+    ctx,
+    runs,
+    merges,
+    setMergeAnswer: (answer: { ok: boolean; error?: string }) => {
+      mergeAnswer = answer
+    },
+    openBranch,
+    branchOf,
+    start,
+    click,
+    wait,
+    end,
+  }
 }
 
 const patchWait = (id: string, ms: number): EditOp => ({ op: 'patchNode', id, fields: { ms } })
@@ -235,6 +256,75 @@ describe('branch: kopya değil, tarif', () => {
     const listing = await callTool('branch.list', {}, h.ctx)
     expect(listing.ok).toBe(true)
     expect(branchesOf(h.book)).toHaveLength(0)
+  })
+
+  it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
+    const h = harness()
+    const id = await h.openBranch('Remesh düzeltmesi')
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4500)] }, h.ctx)
+    const before = JSON.stringify(h.book.tabs[0].graph)
+
+    const dry = await callTool('branch.merge', { branchId: id }, h.ctx, 'panel')
+    expect(dry.ok).toBe(true)
+    expect(dry.data?.applied).toBe(false)
+    expect(dry.message).toContain('uygulanmadı')
+    expect(h.merges).toHaveLength(0)
+    expect(JSON.stringify(h.book.tabs[0].graph)).toBe(before)
+
+    const applied = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(applied.ok).toBe(true)
+    expect(applied.data?.applied).toBe(true)
+    expect(h.merges).toHaveLength(1)
+    // Pencereye giden grafik, tarif uygulanmış hali: bekleme 4500 olmuş.
+    const sent = h.merges[0].graph.nodes.find((n) => n.id === h.wait.id) as AgentNode
+    expect(sent.ms).toBe(4500)
+    expect(h.merges[0].tabId).toBe('c1')
+    // Tarif silindi: aynı düzenlemeler ikinci kez uygulanmasın.
+    expect(branchesOf(h.book)).toHaveLength(0)
+    expect(applied.message).toContain('Tarif silindi')
+  })
+
+  it('merge’ü ajan çağıramaz; pencere uygulamazsa tarif yerinde kalır', async () => {
+    const h = harness()
+    const id = await h.openBranch()
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4500)] }, h.ctx)
+
+    const byAgent = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'agent')
+    expect(byAgent.ok).toBe(false)
+    expect(byAgent.message).toContain('uygulamak için Nubbo penceresini')
+    expect(h.merges).toHaveLength(0)
+    expect(branchesOf(h.book)).toHaveLength(1)
+
+    // Deneme yazmadığı için dışarıdan da sorulabilir.
+    const dryByAgent = await callTool('branch.merge', { branchId: id }, h.ctx, 'agent')
+    expect(dryByAgent.ok).toBe(true)
+    expect(dryByAgent.data?.applied).toBe(false)
+
+    h.setMergeAnswer({ ok: false, error: 'pencere 10 sn içinde yanıt vermedi' })
+    const failedApply = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(failedApply.ok).toBe(false)
+    expect(failedApply.message).toContain('yanıt vermedi')
+    expect(branchesOf(h.book)).toHaveLength(1)
+    expect((h.book.tabs[0].graph.nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(2000)
+  })
+
+  it('temel değişmişse merge uyarır ve uymayan grubu atlar', async () => {
+    const h = harness()
+    const id = await h.openBranch()
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4500)] }, h.ctx)
+    await callTool('flow.edit', { branchId: id, ops: [patchWait(h.click.id, 10)], note: 'tıkla üstünde' }, h.ctx)
+    h.book.tabs[0].graph.nodes = h.book.tabs[0].graph.nodes.filter((n) => n.id !== h.wait.id)
+
+    const dry = await callTool('branch.merge', { branchId: id }, h.ctx, 'panel')
+    expect(dry.data?.baseChanged).toBe(true)
+    expect(dry.message).toContain('temel tuval')
+    expect(dry.message).toContain('uymuyor')
+    expect((dry.data?.failed as string[]).length).toBe(1)
+
+    const applied = await callTool('branch.merge', { branchId: id, apply: true }, h.ctx, 'panel')
+    expect(applied.ok).toBe(true)
+    const sent = h.merges[0].graph.nodes.find((n) => n.id === h.click.id) as AgentNode
+    expect(sent.ms).toBe(10)
   })
 
   it('branch koşusu bilinmeyen branch’i ve süren koşuyu reddeder', async () => {

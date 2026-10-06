@@ -45,6 +45,9 @@ export type XpAgentApi = {
   toolList: () => Promise<ToolSpec[]>
   toolEndpoint: () => Promise<{ port: number; file: string; startedAt: number } | null>
   toolEndpointOpen: () => Promise<string | null>
+  /** The window is asked to apply a merged flow, and answers so the tool layer knows it landed. */
+  onMergeCanvas: (cb: (payload: { tabId: string; graph: unknown; branchId: string; branchName: string }) => void) => () => void
+  mergeCanvasAnswer: (answer: { ok: boolean; error?: string }) => Promise<boolean>
   openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>

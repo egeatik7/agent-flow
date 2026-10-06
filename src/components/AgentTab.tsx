@@ -49,6 +49,7 @@ export default function AgentTab({
   const [branchId, setBranchId] = useState('')
   const [branchNodes, setBranchNodes] = useState<BranchNode[]>([])
   const [branchNode, setBranchNode] = useState('')
+  const [mergeReady, setMergeReady] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -131,6 +132,43 @@ export default function AgentTab({
       setResult(r)
       const d = r.data?.diff as { addedNodes?: BranchNode[]; changedNodes?: BranchNode[] } | undefined
       setBranchNodes([...(d?.addedNodes ?? []), ...(d?.changedNodes ?? [])])
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** First step of a merge: this only computes the difference and says what would be written. */
+  const mergeTry = async (id: string) => {
+    if (!api?.callTool) return
+    setMergeReady('')
+    setBusy('branch.merge')
+    setError('')
+    setResult(null)
+    try {
+      const r = await api.callTool('branch.merge', { branchId: id })
+      setResult(r)
+      if (r.ok && r.data?.applied === false) setMergeReady(id)
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** Second step: the window applies it to the canvas and saves it; the recipe is dropped. */
+  const mergeApply = async (id: string) => {
+    if (!api?.callTool) return
+    setBusy('branch.merge')
+    setError('')
+    try {
+      const r = await api.callTool('branch.merge', { branchId: id, apply: true })
+      setResult(r)
+      setMergeReady('')
+      setBranchId('')
+      setBranchNodes([])
+      await refreshBranches()
     } catch (e) {
       setError(errText(e))
     } finally {
@@ -288,6 +326,14 @@ export default function AgentTab({
                   <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void dropBranch(b.branchId)}>
                     Sil
                   </button>
+                  <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void mergeTry(b.branchId)}>
+                    Mergele
+                  </button>
+                  {mergeReady === b.branchId && (
+                    <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void mergeApply(b.branchId)}>
+                      Uygula (akışa yaz)
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -317,6 +363,8 @@ export default function AgentTab({
         <p className="hint">
           <b>Test et</b> branch’i türetilmiş haliyle çalıştırır: kayıtlı akışa yazılmaz ve tuvalin döngü işaretlerini değiştirmez.
           <b> İncele</b> yalnız farkı hesaplar. <b>Sil</b> yalnız tarifi siler; akışa hiçbir şey olmaz.
+          <b> Mergele</b> iki adımlıdır: önce yalnız ne yazılacağını söyler, sonra <b>Uygula</b> ile senin tuvaline yazılır ve kaydedilir.
+          Uygulanınca tarif silinir, çünkü aynı düzenlemeler artık akışın kendisinde.
         </p>
       </div>
 

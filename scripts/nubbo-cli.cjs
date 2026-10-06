@@ -34,6 +34,19 @@ const USAGE = `nubbo <komut> [seçenekler]
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
              [--node <id>] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
+
+  branch list                    Açık branch'leri listele (uygulama açık olmalı)
+  branch create --name "<ad>"    Kendi branch'ini aç (temel: açık tuval)
+  branch diff --branch <id>      Temel tuvaline göre farkı göster (yazmaz)
+  branch merge --branch <id> [--apply]
+                                 Deneme herkese açık; --apply yalnız Nubbo
+                                 penceresinden yapılır (CLI reddeder)
+  branch drop --branch <id>      Tarifi sil (akışa dokunmaz)
+  step --branch <id> --node <id> Branch'te tek adım (türetilmiş grafik)
+  from --branch <id>             Branch'i çalıştır (kayıtlı akışa yazılmaz)
+  edit --branch <id> --ops-file <plan.json>
+                                 Branch'e düzenleme ekle (grup olarak; flow.undo ile geri)
+  undo --branch <id>             Branch'teki son düzenlemeyi geri al
 `
 
 function parse(argv) {
@@ -260,6 +273,7 @@ async function main() {
     const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', stop: 'run.stop', screen: 'screen.read' }
     const args = {}
     if (opts.node) args.nodeId = opts.node
+    if (opts.branch) args.branchId = opts.branch
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
@@ -290,6 +304,52 @@ async function main() {
       for (const n of d.addedNodes) console.log(`  + ${n.title} (${n.kind})`)
       for (const n of d.changedNodes) console.log(`  ~ ${n.title}: ${n.fields.join(', ')}`)
     }
+    process.exit(r && r.ok === false ? 2 : 0)
+  }
+
+  if (cmd === 'branch') {
+    const sub = rest.find((a) => !a.startsWith('--')) || ''
+    const remote = { list: 'branch.list', create: 'branch.create', diff: 'branch.diff', merge: 'branch.merge', drop: 'branch.drop' }
+    const name = remote[sub]
+    if (!name) {
+      console.error('branch alt komutları: list · create --name "<ad>" · diff --branch <id> · merge --branch <id> [--apply] · drop --branch <id>')
+      process.exit(3)
+    }
+    const args = {}
+    if (sub === 'create' && opts.name) args.name = opts.name
+    if (sub !== 'list' && sub !== 'create') args.branchId = opts.branch
+    if (sub === 'merge' && opts.apply) args.apply = true
+    const r = await call(name, args)
+    printResult(r, opts)
+    const rows = (r.data && r.data.branches) || []
+    for (const b of rows) {
+      console.log(`  ${b.branchId}  “${b.name}” · ${b.groups} düzenleme · ${b.ops} işlem · ${(b.size / 1024).toFixed(1)} KB${b.baseChanged ? ' · temeli değişmiş' : ''}${b.failed && b.failed.length ? ` · ${b.failed.length} grup uymuyor` : ''}`)
+    }
+    for (const line of (r.data && r.data.lines) || []) console.log(`  ${line}`)
+    if (r.data && r.data.diff) console.log(`  fark: ${r.data.diff.summary}`)
+    process.exit(r && r.ok === false ? 2 : 0)
+  }
+
+  if (cmd === 'edit' || cmd === 'undo') {
+    let ops
+    if (cmd === 'edit') {
+      try {
+        if (typeof opts['ops-file'] === 'string') ops = readJson(opts['ops-file'])
+        else if (typeof opts.ops === 'string') ops = JSON.parse(opts.ops.replace(/^\uFEFF/, ''))
+      } catch (e) {
+        console.error(`Plan okunamadı (JSON olmalı): ${e.message}`)
+        process.exit(3)
+      }
+      if (!Array.isArray(ops)) {
+        console.error('--ops-file <plan.json> gerekli (işlem listesi).')
+        process.exit(3)
+      }
+    }
+    const args = { branchId: opts.branch }
+    if (cmd === 'edit') args.ops = ops
+    const r = await call(cmd === 'edit' ? 'flow.edit' : 'flow.undo', args)
+    printResult(r, opts)
+    for (const line of (r.data && r.data.lines) || []) console.log(`  ${line}`)
     process.exit(r && r.ok === false ? 2 : 0)
   }
 

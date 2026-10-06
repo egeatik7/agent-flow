@@ -20,6 +20,7 @@ function ctx(graph: AgentGraph): ToolContext {
     startRun: async () => ({ ok: true }),
     getCanvases: () => ({ activeId: 'c1', tabs: [{ id: 'c1', name: 'Tuval 1', graph }] }),
     saveCanvases: () => {},
+    applyMerge: async () => ({ ok: true }),
   }
 }
 

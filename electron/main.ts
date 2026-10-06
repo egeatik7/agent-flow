@@ -567,6 +567,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     saveCanvases: (book: CanvasBook) => {
       store.set('canvases', normalizeCanvasBook(book))
     },
+    applyMerge: (payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }) =>
+      applyMergeInWindow(payload),
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
     callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
@@ -604,6 +606,42 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const saved = store.get('canvases') as CanvasBook | undefined
     if (saved?.tabs?.length) return normalizeCanvasBook(saved)
     return normalizeCanvasBook(undefined, normalizeGraph(store.get('graph')))
+  }
+
+  // A merge is handed to the window, because the window owns the canvas book and saves it on
+  // every change: writing it from here could be undone by a save the window already had queued.
+  // Without an answer from the window, nothing is written anywhere.
+  let mergePending: { resolve: (a: { ok: boolean; error?: string }) => void; timer: ReturnType<typeof setTimeout> } | null = null
+
+  ipcMain.handle('canvas:mergeAnswer', (_e, answer: unknown) => {
+    const pending = mergePending
+    if (!pending) return false
+    mergePending = null
+    clearTimeout(pending.timer)
+    const a = answer as { ok?: unknown; error?: unknown } | null
+    pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
+    return true
+  })
+
+  function applyMergeInWindow(payload: {
+    tabId: string
+    graph: AgentGraph
+    branchId: string
+    branchName: string
+  }): Promise<{ ok: boolean; error?: string }> {
+    if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ ok: false, error: 'pencere yok' })
+    if (mergePending) return Promise.resolve({ ok: false, error: 'başka bir merge sürüyor' })
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (mergePending && mergePending.resolve === resolve) {
+          mergePending = null
+          resolve({ ok: false, error: 'pencere 10 sn içinde yanıt vermedi' })
+        }
+      }, 10_000)
+      mergePending = { resolve, timer }
+      log('info', `Ajan · merge · pencereye soruldu: “${payload.branchName}”.`)
+      mainWindow?.webContents.send('canvas:merge', payload)
+    })
   }
 
   ipcMain.handle('canvases:get', () => loadCanvases())

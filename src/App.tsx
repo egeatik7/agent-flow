@@ -284,6 +284,40 @@ export default function App() {
     return () => clearTimeout(t)
   }, [graph, stack, loaded, rememberBook, commitActive])
 
+  /**
+   * A merge arrives from the tool layer and is applied here, because this side owns the book.
+   * The tab gets the merged flow, the branch record is dropped (its edits are in the flow now,
+   * so keeping it would apply them twice) and the answer tells the tool layer it landed.
+   */
+  useEffect(() => {
+    if (!api?.onMergeCanvas) return
+    const off = api.onMergeCanvas((payload) => {
+      try {
+        const cur = bookRef.current
+        const tabs = cur.tabs.map((t) => (t.id === payload.tabId ? { ...t, graph: payload.graph as AgentGraph } : t))
+        const branches = (cur.branches ?? []).filter((b) => (b as { id?: string }).id !== payload.branchId)
+        if (payload.tabId === activeIdRef.current) {
+          const view = reconcileLoopMembership(payload.graph as AgentGraph)
+          graphRef.current = view
+          stackRef.current = []
+          setStack([])
+          setGraph(view)
+          setSelectedNodeId(null)
+          setSelectedIds([])
+          selectedIdsRef.current = []
+          setSelectedEdgeId(null)
+        }
+        rememberBook({ ...cur, tabs, branches })
+        pushLog('info', `Ajan önerisi uygulandı: “${payload.branchName}”. Kaydedildi.`)
+        void api?.mergeCanvasAnswer?.({ ok: true })
+      } catch (e) {
+        pushLog('error', `Merge uygulanamadı: ${errText(e)}`)
+        void api?.mergeCanvasAnswer?.({ ok: false, error: errText(e) })
+      }
+    })
+    return off
+  }, [pushLog, rememberBook])
+
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
     const g = graphRef.current

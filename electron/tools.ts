@@ -111,6 +111,12 @@ export type ToolContext = {
   /** The canvas book: the flows of the app plus the agent branches that sit over them. */
   getCanvases: () => CanvasBook
   saveCanvases: (book: CanvasBook) => void
+  /**
+   * Applies a merged flow to a canvas. The window owns the canvas book — it saves it on every
+   * change — so the merge is handed to it and this resolves with its answer instead of writing
+   * the book from here, where a pending save from the window could undo it.
+   */
+  applyMerge: (payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }) => Promise<{ ok: boolean; error?: string }>
 }
 
 /** `panel` is a person pressing a button in the app, which is its own approval. */
@@ -482,6 +488,63 @@ const branchDrop: ToolDef = {
     const message = `Branch silindi: “${branch.name}” (${branch.groups.length} düzenleme). Akışa hiçbir şey olmadı.`
     ctx.log('info', `Ajan · branch · ${message}`)
     return { ok: true, tool: branchDrop.name, outcome: 'tamam', message, observed: { note: 'Yalnız kayıt silindi.' }, data: { branchId: branch.id, open: book.branches.length } }
+  },
+}
+
+const branchMerge: ToolDef = {
+  name: 'branch.merge',
+  summary: 'Branch’in tarifini temel tuvaline uygular. Varsayılan yalnız denemedir; uygulamak için apply.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx, source) => {
+    const picked = pickBranch(args, ctx)
+    if ('error' in picked) return failed(branchMerge.name, picked.error)
+    const { book, branch, view } = picked
+    const base = view.base
+    const derived = view.derived as AgentGraph
+    const wanted = args.apply === true
+    // Trying a merge writes nothing, so anyone may ask for it; applying it does, so that is the
+    // user's own move from the window.
+    if (wanted && source !== 'panel') {
+      return failed(branchMerge.name, 'Merge’ü uygulamak için Nubbo penceresini kullan (Ajan sekmesi · Mergele · Uygula). Deneme için apply göndermeden çağırabilirsin.')
+    }
+    const notes: string[] = []
+    if (view.baseChanged) notes.push('temel tuval, branch açıldığından beri değişmiş.')
+    if (view.failed.length) notes.push(`${view.failed.length} grup artık uymuyor ve atlanacak: ${view.failed.join(' | ')}`)
+    const tail = notes.length ? ` ${notes.join(' ')}` : ''
+
+    if (!wanted) {
+      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${tail} Uygulamak için apply: true.`
+      ctx.log('info', `Ajan · merge · ${message}`)
+      return {
+        ok: true,
+        tool: branchMerge.name,
+        outcome: 'tamam',
+        message,
+        observed: { note: 'Yalnız denendi; hiçbir şey yazılmadı.' },
+        data: { applied: false, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, lines: view.lines, failed: view.failed, baseChanged: view.baseChanged },
+      }
+    }
+
+    const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: derived, branchId: branch.id, branchName: branch.name })
+    if (!answer.ok) {
+      const message = `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Kullanıcının akışına hiçbir şey yazılmadı.`
+      ctx.log('warn', `Ajan · merge · ${message}`)
+      return failed(branchMerge.name, message)
+    }
+    // The recipe is now part of the base: keeping it would apply the same edits a second time.
+    book.branches = branchesOf(book).filter((b) => b.id !== branch.id)
+    ctx.saveCanvases(book)
+    const message = `Merge edildi: “${branch.name}” → “${base?.name ?? branch.baseTabId}” (${view.diff?.summary ?? '—'}). Tarif silindi, çünkü aynı düzenlemeler artık tuvalin kendisinde.${tail}`
+    ctx.log('info', `Ajan · merge · ${message}`)
+    return {
+      ok: true,
+      tool: branchMerge.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Tuval pencereye devredildi; pencere kendi kaydını yapar.' },
+      data: { applied: true, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, failed: view.failed, baseChanged: view.baseChanged },
+    }
   },
 }
 
@@ -948,7 +1011,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

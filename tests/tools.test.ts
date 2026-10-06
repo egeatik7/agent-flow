@@ -42,6 +42,7 @@ function ctx(graph: AgentGraph, over: Partial<ToolContext> = {}): ToolContext {
     saveCanvases: (next) => {
       book = structuredClone(next)
     },
+    applyMerge: async () => ({ ok: true }),
   }
   return { ...base, ...over }
 }
