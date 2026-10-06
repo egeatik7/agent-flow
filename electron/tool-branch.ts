@@ -21,6 +21,7 @@ import {
   type EditOp,
   type GraphDiff,
 } from './tool-edit'
+import { findPlace } from './tool-context'
 import type { AgentGraph, CanvasBook, CanvasTab } from './graph-types'
 
 export type BranchGroup = { id: string; at: number; note?: string; ops: EditOp[] }
@@ -153,13 +154,61 @@ export type BranchView = {
   failed: string[]
   /** The canvas this branch was based on is not what it was: the recipe is applied to the new one. */
   baseChanged: boolean
+  /**
+   * The nodes of the *base* flow that the recipe touches — where on the canvas this branch lives.
+   * A node inside a package carries its package path, so a window can mark the package node
+   * instead, which is what a person can actually find.
+   */
+  anchors: BranchAnchor[]
+}
+
+export type BranchAnchor = { id: string; title: string; packagePath: string[]; how: string[] }
+
+/** Every base node the recipe names, with what it does to it. */
+export function anchorsOf(base: AgentGraph, branch: BranchRecord): BranchAnchor[] {
+  let graph = structuredClone(base)
+  const seen = new Map<string, BranchAnchor>()
+  const note = (id: string, what: string) => {
+    if (!id) return
+    const place = findPlace(base, id)
+    if (!place) return
+    const found = seen.get(id)
+    if (found) {
+      if (!found.how.includes(what)) found.how.push(what)
+      return
+    }
+    seen.set(id, { id, title: place.node.title, packagePath: place.packagePath, how: [what] })
+  }
+  for (const group of branch.groups) {
+    const check = planOps(graph, group.ops, groupPrefix(group.id))
+    if (!check.ok) continue
+    for (const patch of check.plan.patches) note(patch.id, 'alan değişiyor')
+    for (const add of check.plan.adds) if (add.fromId) note(add.fromId, 'yeni adım buradan bağlanıyor')
+    for (const edge of check.plan.edges) {
+      note(edge.from, 'yeni bağlantı buradan çıkıyor')
+      note(edge.to, 'yeni bağlantı buraya giriyor')
+    }
+    for (const cut of check.plan.cuts) note(cut.from, 'bağlantısı kaldırılıyor')
+    graph = applyPlan(graph, check.plan)
+  }
+  return [...seen.values()]
 }
 
 /** Everything a caller needs to show, test or merge a branch. */
 export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
   const base = baseTabOf(book, branch)
   if (!base) {
-    return { branch, base: null, derived: null, diff: null, lines: [], applied: 0, failed: ['temel tuval bulunamadı'], baseChanged: false }
+    return {
+      branch,
+      base: null,
+      derived: null,
+      diff: null,
+      lines: [],
+      applied: 0,
+      failed: ['temel tuval bulunamadı'],
+      baseChanged: false,
+      anchors: [],
+    }
   }
   const { graph, applied, failed } = materialize(base.graph, branch)
   return {
@@ -171,6 +220,7 @@ export function viewBranch(book: CanvasBook, branch: BranchRecord): BranchView {
     applied,
     failed,
     baseChanged: graphStamp(base.graph) !== branch.baseStamp,
+    anchors: anchorsOf(base.graph, branch),
   }
 }
 

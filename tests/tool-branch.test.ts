@@ -168,6 +168,11 @@ describe('branch: kopya değil, tarif', () => {
     expect((derived.nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(4000)
     expect((diff.data?.baseGraph as AgentGraph).nodes.find((n) => n.id === h.wait.id)).toBeTruthy()
     expect((diff.data?.baseGraph as AgentGraph).nodes.find((n) => n.id === h.wait.id)?.ms).toBe(2000)
+    // Ve tarifin dokunduğu temel node'lar: "bölge" bunlarla bulunur.
+    const anchors = diff.data?.anchors as { id: string; title: string; packagePath: string[]; how: string[] }[]
+    expect(anchors.map((a) => a.id)).toEqual([h.wait.id])
+    expect(anchors[0].title).toBe('Zamanlayıcı 1')
+    expect(anchors[0].how.join(' ')).toContain('alan değişiyor')
   })
 
   it('geçersiz düzenlemeyi reddeder ve hiçbir şey eklemez', async () => {

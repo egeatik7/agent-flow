@@ -40,7 +40,9 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 type Props = {
   graph: AgentGraph
   /** When a branch is being looked at: the nodes it touches and the connections it adds. */
-  marks?: { nodes: string[]; edges: string[] }
+  marks?: { nodes: string[]; edges: string[]; anchors?: string[] }
+  /** Ask the canvas to bring this node into view (used to find a branch's region). */
+  focus?: { nodeId: string; at: number }
   selectedNodeId: string | null
   selectedIds: string[]
   selectedEdgeId: string | null
@@ -427,6 +429,18 @@ export default function NodeCanvas(p: Props) {
     setViewNow({ x: cx - canvasX, y: cy - canvasY, z: 1 })
   }
 
+  /** Brings a node to the middle of the view: the canvas may be much bigger than the screen. */
+  useEffect(() => {
+    if (!p.focus) return
+    const el = scrollRef.current
+    const node = byId.get(p.focus.nodeId)
+    if (!el || !node) return
+    const z = viewRef.current.z
+    setViewNow({ x: el.clientWidth / 2 - node.x * z, y: el.clientHeight / 2 - node.y * z, z })
+    // Only when the request changes (the stamp), so panning afterwards is not undone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.focus?.at])
+
   const menuNode = menu?.mode === 'node' ? byId.get(menu.nodeId) : undefined
   const menuOwner = menuNode ? ownerOf(p.graph, menuNode.id) : undefined
   const multi = p.selectedIds.length > 1
@@ -689,8 +703,10 @@ export default function NodeCanvas(p: Props) {
             p.selectedIds.includes(n.id) ? 'selected' : '',
             hoverTarget === n.id ? 'drop-target' : '',
             st !== 'idle' ? st : '',
-            // A branch being looked at: its own nodes get a dashed frame, the rest step back.
+            // A branch being looked at: its own nodes get a dashed frame, the rest step back, and
+            // the nodes it was written *on* carry a badge so the region can be found.
             marks ? (marks.nodes.includes(n.id) ? 'node-branch' : 'node-dim') : '',
+            marks?.anchors?.includes(n.id) ? 'node-anchor' : '',
           ]
             .filter(Boolean)
             .join(' ')

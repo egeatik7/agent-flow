@@ -444,6 +444,8 @@ const branchDiff: ToolDef = {
         graph: view.derived,
         baseGraph: view.base?.graph ?? null,
         tabId: branch.baseTabId,
+        /** Where on the canvas this branch lives, so the window can mark and jump to it. */
+        anchors: view.anchors,
       },
     }
   },

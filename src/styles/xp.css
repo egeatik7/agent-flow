@@ -629,6 +629,26 @@ body {
   opacity: 0.45;
 }
 
+/* The node (or the package node) the branch was written on: how the region is found. */
+.agent-node.node-anchor {
+  box-shadow: 0 0 0 3px rgba(176, 48, 106, 0.55);
+}
+
+.agent-node.node-anchor::after {
+  content: '⚑ öneri';
+  position: absolute;
+  top: -14px;
+  right: -2px;
+  z-index: 3;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: #fff;
+  background: #b0306a;
+  border: 1px solid #7d1f49;
+  white-space: nowrap;
+}
+
 .enter-pkg {
   margin-top: 4px;
   height: 20px;

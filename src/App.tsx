@@ -150,8 +150,17 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   /** The branch being looked at, if any: it is the document on canvas until it is closed. */
-  const [branchDoc, setBranchDoc] = useState<{ id: string; name: string; nodes: string[]; edges: string[] } | null>(null)
+  const [branchDoc, setBranchDoc] = useState<{
+    id: string
+    name: string
+    nodes: string[]
+    edges: string[]
+    anchors: string[]
+    where: string
+  } | null>(null)
   const branchDocRef = useRef<{ id: string; name: string; nodes: string[]; edges: string[] } | null>(null)
+  /** A request to bring a node into view, stamped so asking twice works. */
+  const [focus, setFocus] = useState<{ nodeId: string; at: number } | undefined>(undefined)
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -327,9 +336,23 @@ export default function App() {
         const d = r.data?.diff as { addedNodes?: { id: string }[]; changedNodes?: { id: string }[]; addedEdges?: string[] } | undefined
         const nodes = [...(d?.addedNodes ?? []), ...(d?.changedNodes ?? [])].map((n) => n.id)
         const edges = d?.addedEdges ?? []
+        const raw = (r.data?.anchors as { id: string; title: string; packagePath: string[] }[] | undefined) ?? []
+        // A node inside a package cannot be pointed at from the root view: mark the package node
+        // the flow shows, and keep the node itself in case the view is inside that package.
+        const anchors = [...new Set(raw.flatMap((a) => [a.packagePath[0] ?? a.id, a.id]))]
+        const where = raw.length
+          ? raw
+              .slice(0, 3)
+              .map((a) => `${a.title}${a.packagePath.length ? ` (${a.packagePath.length} katman paket içinde)` : ''}`)
+              .join(', ')
+          : 'değişiklik yok'
         const name = String((r.data?.name as string | undefined) ?? 'Öneri')
         branchDocRef.current = { id: branchId, name, nodes, edges }
-        setBranchDoc(branchDocRef.current)
+        setBranchDoc({ id: branchId, name, nodes, edges, anchors, where })
+        // Jumping to the region is the whole point of "İncele" on a canvas this size.
+        const first = raw[0]
+        const jumpTo = first ? first.packagePath[0] ?? first.id : ''
+        if (jumpTo) setFocus({ nodeId: jumpTo, at: Date.now() })
         const view = reconcileLoopMembership(structuredClone(derived))
         graphRef.current = view
         stackRef.current = []
@@ -1229,7 +1252,18 @@ export default function App() {
             {branchDoc && (
               <div className="branch-banner">
                 <b>İnceleme: “{branchDoc.name}”</b> · kesikli çizgiler ajanın önerisi ({branchDoc.nodes.length} node
-                {branchDoc.edges.length ? `, ${branchDoc.edges.length} yeni bağlantı` : ''}) · Çalıştır bunu koşar, akışına yazılmaz
+                {branchDoc.edges.length ? `, ${branchDoc.edges.length} yeni bağlantı` : ''}) · <b>⚑ {branchDoc.where}</b> · Çalıştır bunu
+                koşar, akışına yazılmaz
+                {branchDoc.anchors.length > 0 && (
+                  <button
+                    type="button"
+                    className="xp-btn"
+                    style={{ marginLeft: 6 }}
+                    onClick={() => setFocus({ nodeId: branchDoc.anchors[0], at: Date.now() })}
+                  >
+                    Bölgeye git
+                  </button>
+                )}
                 <button type="button" className="xp-btn" style={{ marginLeft: 6 }} onClick={() => void inspectBranch('')}>
                   İncelemeyi kapat
                 </button>
@@ -1238,7 +1272,8 @@ export default function App() {
             <BranchPanel onInspect={(id) => void inspectBranch(id)} />
             <NodeCanvas
               graph={graph}
-              marks={branchDoc ? { nodes: branchDoc.nodes, edges: branchDoc.edges } : undefined}
+              marks={branchDoc ? { nodes: branchDoc.nodes, edges: branchDoc.edges, anchors: branchDoc.anchors } : undefined}
+              focus={focus}
               selectedNodeId={selectedNodeId}
               selectedIds={selectedIds}
               selectedEdgeId={selectedEdgeId}
