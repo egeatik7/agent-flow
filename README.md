@@ -124,6 +124,7 @@ koruması (başka program öndeyse uygulama tuşu gönderilmez), aynı hafıza v
 | --- | --- | --- |
 | `flow.read` | Node’ları, paketleri, döngüleri, bağlantıları listeler | Hayır |
 | `flow.context` | Bir node’un paket yolunu, içindeki kutuları ve o anki öğeyi söyler | Hayır |
+| `flow.suggest` | Bir düzenleme planını denetler ve neyi değiştireceğini yazar | Hayır |
 | `target.preview` | O node için nereyi hedefleyeceğini, kaç aday bulduğunu söyler | Hayır |
 | `step.run` | **Tek adım**: yalnız o node’u çalıştırır, zincir orada durur | Evet |
 | `run.from` | Belirtilen node’dan koşuyu başlatır ve hemen döner (`runId` verir) | Evet |
@@ -148,6 +149,7 @@ ayarından geçer.
 node scripts/nubbo-cli.cjs tools                       # araç kataloğu (uygulama gerekmez)
 node scripts/nubbo-cli.cjs flow --file akis.json --nodes
 node scripts/nubbo-cli.cjs context --file akis.json --node <id>
+node scripts/nubbo-cli.cjs suggest --file akis.json --ops-file plan.json
 node scripts/nubbo-cli.cjs state                       # uygulama açık + uç nokta açık olmalı
 node scripts/nubbo-cli.cjs preview --node <id>
 node scripts/nubbo-cli.cjs step --node <id>
@@ -155,7 +157,13 @@ node scripts/nubbo-cli.cjs from --node <id>
 node scripts/nubbo-cli.cjs screen --image
 ```
 
-Ajan araçları **akışı düzenleyemez** (henüz). Araçlar yalnız okur, önizler, çalıştırır ve durdurur.
+Ajan araçları şu an akışı **düzenleyemez**. `flow.suggest` bir düzenleme planını **denetler** ve
+ne değişeceğini yazar (eklenen/değişen node, kurulan bağlantı) ama hiçbir şey yazmaz; yazma yolu
+(branch tuvalinde düzenleme ve geri alma) sonraki adımda geliyor. Denetim şunları reddeder:
+hedef kanıtı alanları (`locator`, simge, hafıza, çapa, yol, iz), `Başlangıç`/`Paket`/`Kutu` ekleme,
+olmayan çıkış adı, dolu bir çıkışa ikinci bağlantı (motor bir çıkışta **ilk oku** izler, ikincisi
+sessizce ölü kalırdı) ve `Başlangıç`’a ok çekme. Halka oluşturan bir değişiklik engellenmez ama
+açıkça uyarılır.
 
 ## Node türleri
 

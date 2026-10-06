@@ -20,10 +20,11 @@ import {
   type LogLevel,
 } from './graph-types'
 import type { TargetTrace } from './target-trace'
+import { ADDABLE_KINDS, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps } from './tool-edit'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { beginProbe, endProbe, probing, snapshot } from './tool-state'
 
-export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu'
+export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
 export type NodeRef = { id: string; kind: string; title: string; packagePath: string[] }
 
@@ -189,6 +190,66 @@ export function actionSent(kind: string, nodeStatus: string, traces: TargetTrace
   if (traces.some((e) => e.kind === 'input')) return true
   if (kind === 'key' || kind === 'type') return nodeStatus === 'done'
   return false
+}
+
+const flowSuggest: ToolDef = {
+  name: 'flow.suggest',
+  summary: 'Bir düzenleme planını denetler ve neyi değiştireceğini yazar. Hiçbir şey yazmaz.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const graph = graphOf(args, ctx)
+    // Without a plan this answers the other useful question: what may be touched here at all.
+    if (args.ops === undefined) {
+      const kinds = ADDABLE_KINDS.map((k) => `${k} (${NODE_SPECS[k].label})`).join(', ')
+      const message = `Düzenleme yüzeyi — kök: ${graph.nodes.length} node · ${graph.edges.length} bağlantı (paketlerin içi hariç; flow.read hepsini sayar). Eklenebilen türler: ${kinds}. Değiştirilebilen alanlar: ${EDITABLE_FIELDS.join(', ')}. Hedef kanıtı (locator, simge, hafıza, çapa) ve koşu durumu değiştirilemez; paketlerin içi bu sürümde düzenlenemez.`
+      ctx.log('info', `Ajan · öneri · ${message}`)
+      return {
+        ok: true,
+        tool: flowSuggest.name,
+        outcome: 'tamam',
+        message,
+        observed: { note: 'Yalnız bilgi verildi; akışa hiçbir şey yazılmadı.' },
+        data: {
+          valid: null,
+          editableFields: [...EDITABLE_FIELDS],
+          addableKinds: ADDABLE_KINDS,
+          nodes: graph.nodes.length,
+          edges: graph.edges.length,
+        },
+      }
+    }
+
+    const check = planOps(graph, args.ops)
+    const lines = describePlan(graph, check.plan)
+    if (!check.ok) {
+      const head = check.errors.slice(0, 3).join(' ')
+      const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
+      const message = `Plan geçersiz, hiçbir şey yazılmadı. ${head}${rest}`
+      ctx.log('warn', `Ajan · öneri · ${message}`)
+      return {
+        ok: true,
+        tool: flowSuggest.name,
+        outcome: 'plan-gecersiz',
+        message,
+        observed: { note: 'Akışa hiçbir şey yazılmadı.' },
+        data: { valid: false, errors: check.errors, warnings: check.warnings, lines },
+      }
+    }
+
+    const diff = diffGraphs(graph, applyPlan(graph, check.plan))
+    const warn = check.warnings.length ? ` Uyarı: ${check.warnings.join(' ')}` : ''
+    const message = `Plan geçerli: ${diff.summary}. Hiçbir şey yazılmadı; uygulamak için flow.edit kullan. Yeni node’ların gerçek id’lerini uygulamadan sonra flow.read ile al.${warn}`
+    ctx.log('info', `Ajan · öneri · ${message}`)
+    return {
+      ok: true,
+      tool: flowSuggest.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: 'Yalnız denetlendi; akışa hiçbir şey yazılmadı.' },
+      data: { valid: true, errors: [], warnings: check.warnings, diff, lines },
+    }
+  },
 }
 
 const flowRead: ToolDef = {
@@ -630,7 +691,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

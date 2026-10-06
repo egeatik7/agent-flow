@@ -158,6 +158,57 @@ describe('araç katmanı', () => {
     expect((asPanel.data?.nodes as unknown[]).length).toBe(5)
   })
 
+  it('öneri: geçerli planı denetler, farkı verir ve akışa hiçbir şey yazmaz', async () => {
+    const { graph, loop } = fixture()
+    const before = JSON.stringify(graph)
+    const r = await callTool(
+      'flow.suggest',
+      {
+        graph,
+        ops: [
+          { op: 'addNode', key: 'w', kind: 'wait', fields: { ms: 900, title: 'Remesh için bekle' }, connectFrom: loop.id, fromPort: 'done' },
+        ],
+      },
+      ctx(graph)
+    )
+    expect(r.ok).toBe(true)
+    expect(r.outcome).toBe('tamam')
+    expect(r.message).toContain('Plan geçerli')
+    expect(r.message).toContain('Hiçbir şey yazılmadı')
+    const diff = r.data?.diff as { addedNodes: unknown[]; addedEdges: string[] }
+    expect(diff.addedNodes).toHaveLength(1)
+    expect(diff.addedEdges).toHaveLength(1)
+    expect(r.data?.valid).toBe(true)
+    // Asıl güvence: araç grafiğe dokunmadı.
+    expect(JSON.stringify(graph)).toBe(before)
+  })
+
+  it('öneri: geçersiz planı açıkça söyler, yine de cevap verir ve yazmaz', async () => {
+    const { graph, loop } = fixture()
+    const before = JSON.stringify(graph)
+    const r = await callTool(
+      'flow.suggest',
+      { graph, ops: [{ op: 'patchNode', id: loop.id, fields: { locator: { text: 'x' } } }] },
+      ctx(graph)
+    )
+    expect(r.ok).toBe(true)
+    expect(r.outcome).toBe('plan-gecersiz')
+    expect(r.data?.valid).toBe(false)
+    expect((r.data?.errors as string[])[0]).toContain('locator')
+    expect(r.message).toContain('hiçbir şey yazılmadı')
+    expect(JSON.stringify(graph)).toBe(before)
+  })
+
+  it('öneri: plan verilmezse neyin düzenlenebileceğini söyler', async () => {
+    const { graph } = fixture()
+    const r = await callTool('flow.suggest', { graph }, ctx(graph))
+    expect(r.ok).toBe(true)
+    expect((r.data?.editableFields as string[])).toContain('prompt')
+    expect((r.data?.addableKinds as string[])).toContain('condition')
+    expect(r.message).toContain('locator')
+    expect(r.message).toContain('paketlerin içi')
+  })
+
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
     const { graph, pkg, click } = fixture()
     const calls: { nodeId?: string; packagePath?: string[] }[] = []

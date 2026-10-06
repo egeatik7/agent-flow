@@ -25,6 +25,11 @@ const USAGE = `nubbo <komut> [seçenekler]
                                  Bir paketin içini göster (aç, debug et)
   context  --file <akis.json> --node <id>
                                  Bir node'un paket yolunu ve kutu zincirini göster
+  suggest  --file <akis.json>    Bir düzenleme planını denetle; ne değişeceğini yaz.
+             --ops '<json>'        Planı doğrudan ver (işlem listesi)
+             --ops-file <plan.json>  Planı dosyadan oku
+             [--json]              Tam yapı
+                                 Hiçbir şey yazmaz, akış dosyası değişmez.
   preview | step | from | state | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
@@ -52,13 +57,21 @@ function parse(argv) {
   return { opts, rest }
 }
 
+/**
+ * Reads JSON the way Windows tools write it: Notepad and PowerShell save UTF-8 with a byte order
+ * mark, and JSON.parse refuses the leading character with a confusing message.
+ */
+function readJson(file) {
+  const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+  return JSON.parse(raw)
+}
+
 function readGraph(file) {
   if (!file || typeof file !== 'string') {
     console.error('--file <akis.json> gerekli.')
     process.exit(3)
   }
-  const raw = fs.readFileSync(file, 'utf8')
-  return JSON.parse(raw)
+  return readJson(file)
 }
 
 function toolContext(graph) {
@@ -252,6 +265,31 @@ async function main() {
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
     const r = await call(remote[cmd], args)
     printResult(r, opts)
+    process.exit(r && r.ok === false ? 2 : 0)
+  }
+
+  if (cmd === 'suggest') {
+    const graph = readGraph(opts.file)
+    let ops
+    try {
+      if (typeof opts['ops-file'] === 'string') ops = readJson(opts['ops-file'])
+      else if (typeof opts.ops === 'string') ops = JSON.parse(opts.ops.replace(/^\uFEFF/, ''))
+    } catch (e) {
+      console.error(`Plan okunamadı (JSON olmalı): ${e.message}`)
+      process.exit(3)
+    }
+    const r = await tools.callTool('flow.suggest', ops === undefined ? { graph } : { graph, ops }, toolContext(graph))
+    if (opts.json) {
+      console.log(JSON.stringify(r, null, 2))
+      process.exit(r && r.ok === false ? 2 : 0)
+    }
+    console.log(r.message)
+    for (const line of (r.data && r.data.lines) || []) console.log(`  ${line}`)
+    if (r.data && r.data.diff) {
+      const d = r.data.diff
+      for (const n of d.addedNodes) console.log(`  + ${n.title} (${n.kind})`)
+      for (const n of d.changedNodes) console.log(`  ~ ${n.title}: ${n.fields.join(', ')}`)
+    }
     process.exit(r && r.ok === false ? 2 : 0)
   }
 
