@@ -11,6 +11,8 @@ function on(channel: string) {
 }
 
 contextBridge.exposeInMainWorld('xpAgent', {
+  /** Empty for the person's own instance; the profile name for a test instance. */
+  profile: String(process.env.NUBBO_PROFILE ?? ''),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),

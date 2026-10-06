@@ -24,6 +24,8 @@ export type LogEntry = {
 export type ModelInfo = { id: string; vision: boolean }
 
 export type XpAgentApi = {
+  /** Empty for the person's own instance; the profile name for a test instance. */
+  profile?: string
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>

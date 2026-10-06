@@ -5,7 +5,7 @@ import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
-import { storeCwd } from './profile'
+import { isTestProfile, storeCwd } from './profile'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
@@ -212,7 +212,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
-    title: 'Nubbo Agent Studio',
+    title: isTestProfile(process.env.NUBBO_PROFILE) ? 'TEST · Nubbo Agent Studio (ayrı profil)' : 'Nubbo Agent Studio',
   })
 
   mainWindow.webContents.on('did-finish-load', () => {
@@ -222,6 +222,13 @@ function createWindow() {
   reportBoot(88, 'Arayüz yükleniyor…')
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  // The page writes its own title while loading, so the window's title is set once it has: a test
+  // instance has to be unmistakable in the taskbar too, not only inside its own title bar.
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (mainWindow && !mainWindow.isDestroyed() && isTestProfile(process.env.NUBBO_PROFILE)) {
+      mainWindow.setTitle(`TEST · Nubbo Agent Studio — ${String(process.env.NUBBO_PROFILE)} profili`)
+    }
+  })
 
   mainWindow.on('close', () => {
     destroyHud()
@@ -455,6 +462,11 @@ async function runFlow(
     })
     awake = powerSaveBlocker.start('prevent-display-sleep')
     if (runLog) log('info', `Günlük dosyası: ${runLog}`)
+    if (isTestProfile(process.env.NUBBO_PROFILE)) {
+      // Say it before anything else: this window is not the person's own, and its flows, key and
+      // models are its own empty ones. Being unable to tell them apart looked like lost data.
+      log('warn', `TEST profili çalışıyor (${process.env.NUBBO_PROFILE}): kendi boş profili, kendi akışları. Gerçek profilin verileri ayrı ve dokunulmadı.`)
+    }
     if (s.hideWhileRunning) {
       log('info', 'Uygulama küçültülüyor; durdurmak için Ctrl+Shift+Q.')
       hidden = await hideSelf()
