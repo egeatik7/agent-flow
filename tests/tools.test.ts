@@ -145,6 +145,19 @@ describe('araç katmanı', () => {
     expect(last?.steps).toBe(9)
   })
 
+  it('dış çağıran kendi tuvalini gönderemez; kayıtlı akış kullanılır', async () => {
+    const { graph } = fixture()
+    const stored: AgentGraph = { nodes: [createNode('start', 0, 0)], edges: [] }
+    const base = ctx(graph, { getGraph: () => stored })
+
+    // Ajan kaynağı: gönderilen tuval yok sayılır (run.from onu diske yazardı).
+    const asAgent = await callTool('flow.read', { graph }, base, 'agent')
+    expect((asAgent.data?.nodes as unknown[]).length).toBe(1)
+    // Panel kaynağı: kişi kendi tuvalini okur.
+    const asPanel = await callTool('flow.read', { graph }, base, 'panel')
+    expect((asPanel.data?.nodes as unknown[]).length).toBe(5)
+  })
+
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
     const { graph, pkg, click } = fixture()
     const calls: { nodeId?: string; packagePath?: string[] }[] = []

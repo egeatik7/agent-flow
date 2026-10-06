@@ -86,7 +86,7 @@ function endpointFile() {
   for (const file of candidates) {
     try {
       const info = JSON.parse(fs.readFileSync(file, 'utf8'))
-      if (info && info.port && info.token) return { port: info.port, token: info.token, file }
+      if (info && info.port && info.token) return { port: info.port, token: info.token, pid: info.pid, file }
     } catch {
       /* try the next one */
     }
@@ -94,10 +94,25 @@ function endpointFile() {
   return null
 }
 
+/** A leftover token file from a closed app must not read as "the app is broken". */
+function pidAlive(pid) {
+  if (!pid) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
 async function call(name, args) {
   const info = endpointFile()
   if (!info) {
     console.error('Nubbo açık değil ya da Ajan uç noktası kapalı. Ajan sekmesinden "Dışarı açık" işaretlenmeli.')
+    process.exit(3)
+  }
+  if (!pidAlive(info.pid)) {
+    console.error('Nubbo kapalı görünüyor (jeton dosyası önceki oturumdan kalmış). Uygulamayı aç.')
     process.exit(3)
   }
   let res

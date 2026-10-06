@@ -91,6 +91,10 @@ export async function startEndpoint(ctx: ToolContext, file: string): Promise<End
   const s = http.createServer((req, res) => {
     void handle(req, res, ctx, token)
   })
+  // A single step may legitimately run for minutes; Node's five minute default would cut the
+  // socket while the tool is still working. The tool's own timeout is the limit that matters.
+  s.requestTimeout = 0
+  s.headersTimeout = 65_000
   await new Promise<void>((resolve, reject) => {
     s.once('error', reject)
     s.listen(0, '127.0.0.1', () => resolve())

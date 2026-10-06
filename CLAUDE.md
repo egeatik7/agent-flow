@@ -194,7 +194,7 @@ Bir yardımcı araç gerekiyorsa açık bir kullanıcı işi yapmalı, yeniden k
 
 Repo: https://github.com/egeatik7/agent-flow
 
-İncelenen kaynak sürümü: **1.7.85**. Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
+İncelenen kaynak sürümü: **1.9.2** (bu belge ilk kez 1.7.85 üzerine yazıldı; aşağıdaki sürüm notları o tarihten kalan yerlerdir). Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
 
 | Dosya/bölüm | Rol |
 | --- | --- |
@@ -209,9 +209,13 @@ Repo: https://github.com/egeatik7/agent-flow
 | `electron/ocr-onnx.ts` | ONNX OCR |
 | `electron/openrouter.ts`, `electron/llm-flow.ts` | Model istekleri, prompt’lar ve algılama aşamaları |
 | `electron/confirm.ts` | Ekran tepkisinin sınıflandırılması |
+| `electron/tools.ts`, `tool-context.ts`, `tool-state.ts`, `tool-probe.ts` | Ajan araç katmanı: akış ve hedef okuma, izole tek adım, koşu durumu ve durdurma |
+| `electron/tool-http.ts`, `scripts/nubbo-cli.cjs` | Yerel uç nokta (yalnız 127.0.0.1, jeton dosyası) ve komut satırı istemcisi |
 | `src/components`, `src/App.tsx` | Node tuvali, Ekran Tarayıcı, ayarlar ve kullanıcı arayüzü |
 
-Temel kullanıcı node’ları Başlangıç, Tıkla, Yazı Yaz, Tuş Gönder, Zamanlayıcı, Koşul, Her Öğe İçin, İnisiyatif, Paket ve Bitir’dir. Tip tanımlarında eski node isimleri bulunması çalıştıkları anlamına gelmez: incelenen runner `browser`, `waitFile`, `moveFile` adımlarını kaldırılmış olarak atlar. Yeni akış üretmeden önce gerçek yürütücüyü kontrol et.
+Ajan araç katmanı (1.9.2) sağ panelin **Ajan** sekmesinde durur ve aynı motoru çağırır: ayrı bir tıklayıcı yoktur. Araçlar okur (`flow.read`, `flow.context`, `target.preview`, `run.state`, `screen.read`), tek adım çalıştırır (`step.run`, akışın kopyasında; işaret/hafıza/kayıtlı yol değişmez) ve koşu başlatıp durdurur (`run.from`, `run.stop`). Aynı anda tek işlem masaüstüne dokunabilir: koşu sürerken tek adım, tek adım sürerken koşu reddedilir. Dış çağıranlar izin ayarından geçer (kapalı/sor/otomatik); **akışı düzenleme yetkisi henüz yoktur**.
+
+Temel kullanıcı node’ları Başlangıç, Tıkla, Yazı Yaz, Tuş Gönder, Zamanlayıcı, Koşul, Her Öğe İçin, İnisiyatif, Paket ve Bitir’dir. Tip tanımlarında eski node isimleri bulunması çalıştıkları anlamına gelmez: incelenen runner `browser`, `waitFile`, `moveFile` adımlarını sessizce atlamaz: bu türler tip tablosunda durur ama çalıştırıldıklarında “Bu node türü artık desteklenmiyor, akışı güncelleyin.” diye açık hata verir. Tanınmayan bir tür ise `normalizeGraph`'ta akışı değiştirmeden reddedilir. Yeni akış üretmeden önce gerçek yürütücüyü kontrol et.
 
 Node’lar ve bağlantılar JSON olarak saklanır. **Mevcut node türlerini, anlamlarını, komutlarını, parametrelerini, çıkışlarını ve kullanıcının kurduğu akışları talep edilmeden değiştirme.** Yeni node türleri, birleştirilmiş node’lar veya şema değişiklikleri bu belgenin verdiği bir görev değildir. Amaç mevcut yapıyı güvenilir çalıştırmaktır. Kullanıcı ileride açıkça bir şema değişikliği isterse eski akışların korunması ve migration ayrıca ele alınır.
 
@@ -221,7 +225,7 @@ Node’lar ve bağlantılar JSON olarak saklanır. **Mevcut node türlerini, anl
 
 Paylaşılan loglar özellikle Windows Çalıştır penceresi ve FolderBatcher alanlarında odak/yazma sorunları gösteriyordu. Bu loglar Hunyuan–Blender zincirinin saatlerce başarıyla çalıştığını kanıtlamıyordu.
 
-Bu konuşmada 1.7.85 kaynağı üzerinde odak, alan seçimi ve yanlış başarı değerlendirmesi için yerel bir düzeltme hazırlandı. `fix/input-focus-and-confirmation` dalındaki `cba0d5765f13af7b0d9b763b8832877bf011fc40` commit’i GitHub’a gönderilmedi; ZIP/patch olarak teslim edildi. Repoyu yeni klonlayan ajan bu değişikliklerin orada olduğunu varsaymamalıdır.
+Bu konuşmada 1.7.85 kaynağı üzerinde odak, alan seçimi ve yanlış başarı değerlendirmesi için yerel bir düzeltme hazırlandı. Bu düzeltme artık repoda: `c20039c` (main geçmişinde) ve `origin/fix/input-focus-and-confirmation` dalı GitHub'da. Repoyu yeni klonlayan ajan bu değişiklikleri hazır bulur; yukarıdaki “gönderilmedi” notu geçersizdir.
 
 Düzeltme; seçilen alanın kimliğini koruma, adayları öndeki pencereyle sınırlama, native Edit odağını kullanma, etiket–alan ilişkisi, tek Enter, tam değer kontrolü ve gereksiz yazma taramalarını azaltma konularını ele alır. Yedi ajan regresyon testi, taklit UIA ile gerçek worker fonksiyonlarının kontrolleri ve build geçti. Gerçek Windows/Blender/Hunyuan oturumunda uçtan uca doğrulama yapılmadı.
 

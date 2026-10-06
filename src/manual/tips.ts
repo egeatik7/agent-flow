@@ -180,6 +180,12 @@ function buttonTip(el: HTMLButtonElement): Tip | null {
     ['Ajanı Çalıştır', { title: 'Ajanı Çalıştır', text: 'Açık tuvali Başlangıç’tan itibaren çalıştırır. Paketin içindeysen içi bittikten sonra dışarıdaki sonraki adımdan devam eder, en dıştaki Bitir’e kadar. Tuvaldeki her kutunun işareti 1. öğeye döner; açık paketin dışındaki kutular da. Diğer tuvaller durur. Çalışırken pencere küçülür. Durdurmak için Ctrl+Shift+Q.' }],
     ['Seçiliden Çalıştır', { title: 'Seçiliden Çalıştır', text: 'Akışı seçili node’dan başlatır. Kutular, listedeki işaretli satırdan devam eder; paket içindeki kutular da. Paketin içinde başlasan da akış paketin sonunda durmaz; dışarıdaki sonraki adımdan ve kutuların bitti çıkışından en dıştaki Bitir’e kadar gider. Bir kutu “bitti” dediyse işareti 1. öğededir, sıradaki klasör baştan gider. Yarıda duran kutunun işareti o dosyada kalır. Paketin içinde koptuysa paketin içine gir, koptuğu node’u seç ve Seçiliden Çalıştır: hatırlanan öğe kullanılır ve o node’dan turun kalanı işlenir, tamamlanmış adımlar tekrarlanmaz. Paketi seçersen yine hatırlanan öğe kullanılır, ama paket kendi en başından başlar. Ajanı Çalıştır hepsini 1. öğeden başlatır.' }],
     ['Durdur', { title: 'Durdur', text: 'Çalışan akışı durdurur. Ctrl+Shift+Q ile de durur. Bekleyen model isteği de kesilir.' }],
+    ['Ajan', { title: 'Ajan', text: 'Ajan buradan Nubbo’nun motorunu kullanır: aynı hedef bulma, aynı odak, aynı tuş koruması. Bu sekmedeki düğmeler sorulmaz — basman onayındır; dışarıdan gelen çağrılar izin ayarına uyar. Şu an akışı okuma, hedefi önizleme, tek adım, buradan devam, durum ve durdurma var; akışı düzenleme yok.' }],
+    ['Hedefi önizle', { title: 'Hedefi önizle', text: 'Seçili node için Nubbo’nun nereyi hedefleyeceğini söyler: hangi basamakta kaç aday buldu, hangisini seçti. Ekrana hiçbir şey göndermez, akış ilerlemez.' }],
+    ['Seçili node’u tek adım çalıştır', { title: 'Tek adım', text: 'Yalnız bu node’u çalıştırır: gerçekten tıklar, yazar veya basar; ama zincir bu adımdan sonra durur. Döngü işareti, hafıza ve kayıtlı yol değişmez. Bir koşu sürerken çalışmaz.' }],
+    ['Akışı oku', { title: 'Akışı oku', text: 'Node’ları, paketleri, döngüleri ve bağlantıları listeler; paketlerin içi dahildir. Kaydedilmemiş tuval de okunur. Hiçbir şey yazmaz.' }],
+    ['Durumu oku', { title: 'Durumu oku', text: 'Koşu sürüyorsa hangi node’da, hangi kutuda ve hangi öğede olduğunu; bittiyse son koşunun nasıl bittiğini (tamamlandı, durduruldu, hata) ve kaç öğe ya da turun hatalı sayıldığını söyler.' }],
+    ['Dosyanın konumunu aç', { title: 'Jeton dosyası', text: 'Yerel uç noktanın adresini ve jetonunu tutan dosyayı gösterir. Ajan araçları bu adresten çağırır. Jeton yalnız bu bilgisayarda ve yalnız bu uygulama açıkken geçerlidir.' }],
     ['Dışa Aktar', { title: 'Dışa Aktar', text: 'Açık tuvalin akışını bir JSON dosyası olarak indirir. Dosya adı tuvalin adıdır. Diğer tuvaller bu dosyaya yazılmaz. Paketin içindeyken de paketin tamamı, yani tuvalin kendisi iner.' }],
     ['İçe Aktar', { title: 'İçe Aktar', text: 'Bir JSON akışını açık tuvale yükler. Bu tuvalin eski akışının yerini alır. Diğer tuvaller durur.' }],
     ['Ekrandan Seç', { title: 'Ekrandan Seç', text: 'Ekranın görüntüsünü açar. Bir yazının veya öğenin üzerine tıklayınca o hedef bu node’a bağlanır.' }],
@@ -476,7 +482,7 @@ function regionTip(el: Element): Tip | null {
     return { title: 'Menü', text: 'Bir satırın üzerinde dur. O node’un ne yaptığı açılır.' }
   }
   if (el.classList.contains('tabs')) {
-    return { title: 'Sekmeler', text: 'Node: seçili adımın ayarları. Ayarlar: API anahtarı ve modeller.' }
+    return { title: 'Sekmeler', text: 'Node: seçili adımın ayarları. LLM: model ve prompt ayarları. Ayarlar: API anahtarı ve modeller. Ajan: ajanın kullanacağı araçlar, izin ve yerel uç nokta.' }
   }
   if (el.classList.contains('side-panel') || el.classList.contains('panel-body')) {
     return { title: 'Sağ panel', text: 'Seçili node’un ayarları. Tuvalde bir node’a tıklayınca burası ona göre değişir. Bir alanın üzerinde durursan o alanın ne işe yaradığı yazılır.' }

@@ -114,6 +114,49 @@ Güvenceler:
 - **Büyük pencereler** (tarayıcılar) öğe ağacı 6 sn’de okunamazsa atlanır, ekran taraması takılmaz.
 - **Günlük dosyası:** her sürüm kendi klasörünü açılışta oluşturur: `%APPDATA%/xp-agent-studio/logs/<sürüm>/` (o sürümden son 30 çalıştırma). Klasör adı sürüm numarasıdır. Bir tur hata verirse o anki ekran da bu klasöre kaydedilir. Ajan Günlüğü’ndeki **Günlük klasörü** düğmesi bu sürümün klasörünü açar.
 
+## Ajan sekmesi (araç katmanı)
+
+Sağ paneldeki **Ajan** sekmesi, akışı bir ajanın kullanabileceği araçlara açar. Araçlar ayrı bir
+tıklayıcı değildir: hepsi **mevcut motoru** kullanır — aynı hedef bulma, aynı odak, aynı tuş
+koruması (başka program öndeyse uygulama tuşu gönderilmez), aynı hafıza ve aynı durdurma.
+
+| Araç | Ne yapar | Ekrana dokunur |
+| --- | --- | --- |
+| `flow.read` | Node’ları, paketleri, döngüleri, bağlantıları listeler | Hayır |
+| `flow.context` | Bir node’un paket yolunu, içindeki kutuları ve o anki öğeyi söyler | Hayır |
+| `target.preview` | O node için nereyi hedefleyeceğini, kaç aday bulduğunu söyler | Hayır |
+| `step.run` | **Tek adım**: yalnız o node’u çalıştırır, zincir orada durur | Evet |
+| `run.from` | Belirtilen node’dan koşuyu başlatır ve hemen döner (`runId` verir) | Evet |
+| `run.state` | Koşunun hangi node’da/kutuda/öğede olduğunu, bittiyse son sonucu söyler | Hayır |
+| `run.stop` | Durdur düğmesinin yaptığını yapar | Hayır |
+| `screen.read` | Pencereleri ve ekrandaki yazıları okur; istenirse görüntü dosyasını verir | Hayır |
+
+**Tek adım izoledir.** Akışın bir **kopyasında** koşar: döngü işareti, hafıza ve kayıtlı yol
+değişmez; zincir o node’dan sonra motorun kendi durdurma yoluyla kesilir. Bir koşu sürerken tek
+adım, tek adım sürerken koşu **başlatılamaz** — aynı anda iki şey fareyi süremez.
+
+**İzin.** Bu sekmedeki düğmeler sorulmaz: basman onayındır. Dışarıdan gelen çağrılar için izin
+ayarı geçerlidir: **Kapalı** (eyleyen araç çalışmaz), **Sor** (her eyleyen çağrı onay ister;
+“Bu oturumda hep izin ver” uygulama kapanınca sıfırlanır), **Otomatik**. Okuma araçları hiç sorulmaz.
+
+**Yerel uç nokta.** “Dışarı açık” işaretlenirse uygulama yalnız `127.0.0.1` üzerinde bir kapı açar;
+adres ve jeton `%APPDATA%/xp-agent-studio/tool-endpoint.json` dosyasına yazılır (arayüzde
+**Dosyanın konumunu aç**). Kapı varsayılan olarak **kapalıdır** ve her çağrı yukarıdaki izin
+ayarından geçer.
+
+```
+node scripts/nubbo-cli.cjs tools                       # araç kataloğu (uygulama gerekmez)
+node scripts/nubbo-cli.cjs flow --file akis.json --nodes
+node scripts/nubbo-cli.cjs context --file akis.json --node <id>
+node scripts/nubbo-cli.cjs state                       # uygulama açık + uç nokta açık olmalı
+node scripts/nubbo-cli.cjs preview --node <id>
+node scripts/nubbo-cli.cjs step --node <id>
+node scripts/nubbo-cli.cjs from --node <id>
+node scripts/nubbo-cli.cjs screen --image
+```
+
+Ajan araçları **akışı düzenleyemez** (henüz). Araçlar yalnız okur, önizler, çalıştırır ve durdurur.
+
 ## Node türleri
 
 | Node | Ne yapar | Çıkışlar |

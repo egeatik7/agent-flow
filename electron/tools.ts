@@ -431,6 +431,24 @@ const stepRun: ToolDef = {
         }
       }
 
+      // The chain may also end without this node ever reporting: then there is no evidence that
+      // anything happened, and saying "çalıştırıldı" would be a claim the tool cannot support.
+      if (!r.reachedNode) {
+        const message = `“${node.title}” için zincir bitti ama node sonucunu bildirmedi; bu adım doğrulanmış sayılmıyor.`
+        ctx.log('warn', `Ajan · tek adım · ${message}`)
+        return {
+          ok: true,
+          tool: stepRun.name,
+          outcome: 'eylem-belirsiz',
+          message,
+          node: nodeRef(place),
+          action: { kind: node.kind, sent: acted },
+          loop,
+          log: logs.slice(-12),
+          data: { ms, nodeStatus: r.nodeStatus, official: r.summary ?? null },
+        }
+      }
+
       const parts = [`“${node.title}” çalıştırıldı.`]
       if (t.stage) {
         parts.push(
@@ -511,6 +529,8 @@ const runFrom: ToolDef = {
 const screenRead: ToolDef = {
   name: 'screen.read',
   summary: 'Pencereleri ve ekrandaki yazıları okur; isterse ekran görüntüsünün yolunu verir.',
+  // When an MCP adapter is added, a requested image must travel with the answer itself, not
+  // only as a path: the model has to receive the picture, not a file name.
   sendsInput: false,
   ready: true,
   run: async (args, ctx) => {
@@ -620,7 +640,11 @@ export async function callTool(name: string, args: unknown, ctx: ToolContext, so
   const tool = TOOLS.find((t) => t.name === name)
   if (!tool) return failed(name, `Bilinmeyen araç: ${name}`)
   if (!tool.ready || !tool.run) return failed(name, `“${tool.name}” henüz hazır değil: ${tool.summary}`)
-  const input: Args = args && typeof args === 'object' ? (args as Args) : {}
+  const input: Args = args && typeof args === 'object' ? { ...(args as Args) } : {}
+
+  // An outside caller works on the saved flow. It cannot hand us a canvas: `run.from` stores
+  // the graph it is given, so a caller-supplied one could replace the user's flow unseen.
+  if (source === 'agent') delete input.graph
 
   // An outside caller has to earn the right to touch the desktop; the panel already has it.
   if (source === 'agent' && tool.sendsInput) {
