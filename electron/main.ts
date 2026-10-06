@@ -21,6 +21,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
+import { toolLayerSave, windowSave } from './tool-branch'
 import { listDirEntries } from './list-dir'
 import { normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -565,7 +566,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     // Branch records are the only thing the tool layer writes here. The active flow is left
     // exactly as it was, which is why an agent can never reach the user's canvas this way.
     saveCanvases: (book: CanvasBook) => {
-      store.set('canvases', normalizeCanvasBook(book))
+      store.set('canvases', toolLayerSave(loadCanvases(), book.branches ?? []))
     },
     applyMerge: (payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string }) =>
       applyMergeInWindow(payload),
@@ -646,7 +647,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
 
   ipcMain.handle('canvases:get', () => loadCanvases())
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
-    const next = normalizeCanvasBook(book)
+    // The window writes the flows; the branch records belong to the tool layer, so they are
+    // taken from what the tool layer last wrote instead of from the window's own copy.
+    const next = windowSave(normalizeCanvasBook(book), loadCanvases())
     store.set('canvases', next)
     const active = next.tabs.find((t) => t.id === next.activeId) ?? next.tabs[0]
     if (active) store.set('graph', active.graph)

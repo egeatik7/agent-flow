@@ -8,7 +8,16 @@ import {
   type CanvasBook,
 } from '../electron/graph-types'
 import { callTool, type ToolContext } from '../electron/tools'
-import { MAX_BRANCHES, branchesOf, materialize, viewBranch, type BranchRecord } from '../electron/tool-branch'
+import {
+  MAX_BRANCHES,
+  branchesOf,
+  materialize,
+  newBranch,
+  toolLayerSave,
+  viewBranch,
+  windowSave,
+  type BranchRecord,
+} from '../electron/tool-branch'
 import { beginRun, endRun } from '../electron/tool-state'
 import type { EditOp } from '../electron/tool-edit'
 
@@ -283,6 +292,32 @@ describe('branch: kopya değil, tarif', () => {
     // Aynı tarif ikinci kez uygulansa da aynı kimlikler: malzeme tekrarı id uydurmaz.
     const again = materialize(h.book.tabs[0].graph, h.branchOf(id))
     expect(again.graph.nodes.some((n) => n.id === fromFirst)).toBe(true)
+  })
+
+  it('iki yazar tek defteri paylaşır: her biri yalnız kendi yarısını yazar', () => {
+    const { book } = fixture()
+    const flowBook: CanvasBook = { activeId: 'c1', tabs: [{ id: 'c1', name: 'Tuval 1', graph: fixture().graph }] }
+    const branch = newBranch(flowBook.tabs[0], 'öneri')
+    const toolWritten = toolLayerSave(flowBook, [branch])
+
+    // Pencere kendi kopyasını kaydediyor (branch'i hiç duymamış): branch yine de durur.
+    const staleWindowSave: CanvasBook = { activeId: 'c1', tabs: flowBook.tabs, branches: [] }
+    const afterWindowSave = windowSave(staleWindowSave, toolWritten)
+    expect(afterWindowSave.branches).toHaveLength(1)
+    expect((afterWindowSave.branches?.[0] as { id: string }).id).toBe(branch.id)
+    expect(afterWindowSave.tabs).toHaveLength(1)
+    expect(book).toBeTruthy()
+
+    // Araç katmanı kaydediyor: pencerenin tuvali olduğu gibi kalır.
+    const windowBook: CanvasBook = { activeId: 'c2', tabs: [{ id: 'c2', name: 'Başka', graph: fixture().graph }] }
+    const afterToolSave = toolLayerSave(windowBook, [])
+    expect(afterToolSave.tabs).toEqual(windowBook.tabs)
+    expect(afterToolSave.activeId).toBe('c2')
+    expect(afterToolSave.branches).toEqual([])
+
+    // Ve pencere kendi kaydında branşları araç katmanından alır: silinen branch geri gelmez.
+    const afterDrop = windowSave(staleWindowSave, toolLayerSave(windowBook, []))
+    expect(afterDrop.branches).toEqual([])
   })
 
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {

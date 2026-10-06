@@ -320,7 +320,12 @@ async function main() {
     if (sub !== 'list' && sub !== 'create') args.branchId = opts.branch
     if (sub === 'merge' && opts.apply) args.apply = true
     const r = await call(name, args)
-    printResult(r, opts)
+    if (opts.json) {
+      // Only the object goes out, so the answer can be piped into another tool.
+      console.log(JSON.stringify(r, null, 2))
+      process.exit(r && r.ok === false ? 2 : 0)
+    }
+    console.log(r.message)
     const rows = (r.data && r.data.branches) || []
     for (const b of rows) {
       console.log(`  ${b.branchId}  “${b.name}” · ${b.groups} düzenleme · ${b.ops} işlem · ${(b.size / 1024).toFixed(1)} KB${b.baseChanged ? ' · temeli değişmiş' : ''}${b.failed && b.failed.length ? ` · ${b.failed.length} grup uymuyor` : ''}`)
@@ -348,6 +353,10 @@ async function main() {
     const args = { branchId: opts.branch }
     if (cmd === 'edit') args.ops = ops
     const r = await call(cmd === 'edit' ? 'flow.edit' : 'flow.undo', args)
+    if (opts.json) {
+      console.log(JSON.stringify(r, null, 2))
+      process.exit(r && r.ok === false ? 2 : 0)
+    }
     printResult(r, opts)
     for (const line of (r.data && r.data.lines) || []) console.log(`  ${line}`)
     process.exit(r && r.ok === false ? 2 : 0)

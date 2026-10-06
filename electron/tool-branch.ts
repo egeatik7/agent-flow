@@ -70,6 +70,23 @@ export function branchesOf(book: CanvasBook): BranchRecord[] {
   return (book.branches ?? []).filter(isBranch)
 }
 
+/**
+ * The canvas book has two writers: the window saves the flows (tabs, active tab) and the tool
+ * layer saves the branches. To keep one from dropping the other's work, each side only ever
+ * writes its own half. These two functions are that rule, in one place, so it cannot drift.
+ *
+ * This is not theoretical: a branch was lost once because the window's save carried its own
+ * copy of the book, which had never heard of the branch the agent had just opened.
+ */
+export function windowSave(written: CanvasBook, fromToolLayer: CanvasBook): CanvasBook {
+  return { ...written, branches: fromToolLayer.branches ?? [] }
+}
+
+/** A tool-layer save writes branches and leaves the flows exactly as the window left them. */
+export function toolLayerSave(current: CanvasBook, branches: unknown[]): CanvasBook {
+  return { ...current, branches }
+}
+
 export function findBranch(book: CanvasBook, id: string): BranchRecord | null {
   return branchesOf(book).find((b) => b.id === id) ?? null
 }
