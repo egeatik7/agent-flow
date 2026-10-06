@@ -252,6 +252,14 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
       plan.adds.push({ node, key: op.key, fromId: anchor?.id, fromPort: anchor ? port : undefined })
       planned.set(node.id, node)
       if (op.key) keyToId.set(op.key, node.id)
+      // Seen in use: a typing step with no target writes only while the focus happens to sit in a
+      // text field. That worked for the Run box and failed for Notepad, where the window in front
+      // and the keyboard focus were not the same. Allowed, but said out loud.
+      if (newKind === 'type' && !String(fields.prompt ?? '').trim()) {
+        warnings.push(
+          `“${node.title}” hedefsiz bir yazı adımı: motor yalnız odağı doğrulanmış bir alana yazar, odak kayarsa yazı gönderilmez. Mümkünse “prompt” ile hedefini yaz.`
+        )
+      }
       return
     }
     if (kind === 'patchNode') {

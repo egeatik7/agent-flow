@@ -59,6 +59,19 @@ describe('düzenleme planı', () => {
     expect(portName).toBeTruthy()
   })
 
+  it('hedefsiz yazı adımını ekler ama açıkça uyarır', () => {
+    const { graph, cond } = fixture()
+    const blind = run(graph, [{ op: 'addNode', key: 't', kind: 'type', fields: { text: 'deneme' }, connectFrom: cond.id, fromPort: 'false' }])
+    expect(blind.check.ok).toBe(true)
+    expect(blind.check.warnings.join(' ')).toContain('hedefsiz')
+
+    const aimed = run(graph, [
+      { op: 'addNode', key: 't', kind: 'type', fields: { text: 'deneme', prompt: 'Kaydet' }, connectFrom: cond.id, fromPort: 'false' },
+    ])
+    expect(aimed.check.ok).toBe(true)
+    expect(aimed.check.warnings).toEqual([])
+  })
+
   it('verilen grafiği değiştirmez; yeni grafik döndürür', () => {
     const { graph, click, cond } = fixture()
     const before = JSON.stringify(graph)
