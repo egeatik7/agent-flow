@@ -65,7 +65,11 @@ async function main() {
   if (fs.existsSync(tokenFile)) fs.rmSync(tokenFile, { force: true })
   await sleep(3000)
 
-  const build = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout?.trim() || ''
+  // The stamp must describe the code that was actually built, not the last commit: building a dirty
+  // tree and calling it "abc1234" makes the evidence lie about what was tested.
+  const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout?.trim() || ''
+  const dirty = (spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout || '').trim().length > 0
+  const build = head ? `${head}${dirty ? '-dirty' : ''}` : ''
   // Copy the fresh build in here, after the kill and before the start: doing it in the caller's
   // script is how "the exe is in use" happens, and then a stale build gets tested by accident.
   const packed = path.join(root, 'release', 'Nubbo.exe')

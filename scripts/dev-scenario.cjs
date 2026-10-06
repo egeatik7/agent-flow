@@ -207,6 +207,18 @@ async function main() {
   const branchId = must('branch-created', created).data?.branchId
   check('branch-created', 'tool-answered', !!branchId, `branch ${branchId}`)
   if (!branchId) throw new Error('branch açılamadı')
+  // Whatever happens next - a crash, a refusal, a failed check - this scenario's branch is left
+  // behind, because the branch limit is small and failed runs are exactly when it fills up.
+  process.on('exit', () => {
+    try {
+      require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'nubbo-cli.cjs'), 'branch', 'drop', '--branch', String(branchId)], {
+        encoding: 'utf8',
+        env: process.env,
+      })
+    } catch {
+      /* temizlik başarısız olsa da koşu sonucu değişmez */
+    }
+  })
 
   const ops = (scenario.setup?.ops || []).map((op) => {
     const copy = JSON.parse(JSON.stringify(op))

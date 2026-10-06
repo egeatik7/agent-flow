@@ -297,4 +297,9 @@ Bu bölüm, ürünü geliştirirken kullanılan **kendi kendini denetleyen döng
 
 **Kurallar.** Motor (runner/agent/worker) değiştirilmez; düzeltmeler araç ve arayüz katmanında yapılır. Kullanıcının gerçek akışı ve açık tuvali test için **değiştirilmez** — öneri dalı + geçici klasör kullanılır. Bir sürüm yeniden açıldığında **eski jeton kullanılmaz** (yukarıdaki başlatıcı bunu garanti eder). `main`'e otomatik merge **yok**; değişiklik dalda, kanıtıyla birlikte PR olarak bırakılır.
 
+**Masaüstü güvenliği (şart).** Her koşu gerçek fareyi ve klavyeyi kullanır. Bu yüzden masaüstüne dokunan her komut **tek kapıdan** geçer: `node scripts/dev-safe.cjs -- <komut>`. Kapı, son girdiden bu yana geçen süreyi (`GetLastInputInfo`) ölçer ve insan son 60 saniyede bir şeye dokunduysa **koşuyu başlatmaz** (çıkış 4). Senaryo koşucusu da aynı denetimi kendi içinde yapar. Bu kural, bir koşunun kullanıcının odağını ve tıklamasını çalmasından sonra eklendi; `--yes` yalnız insan açıkça istediğinde kullanılır.
+
+**Tek ekranda durum.** `node scripts/dev-status.cjs [profil]` — dal/sha ve **kirli ağaç** uyarısı, main'e göre kaç commit, uç noktanın port/pid/sürüm/**build damgası** (ölü jeton ve damga uyuşmazlığı ayrıca uyarılır), ekranın boş olup olmadığı ve son beş senaryonun kararı. Build damgası artık **kirli ağacı** da söyler (`<sha>-dirty`), çünkü "abc1234" damgalı ama commit edilmemiş bir ağaçtan derlenen exe kanıtı yanıltıyordu.
+
+
 
