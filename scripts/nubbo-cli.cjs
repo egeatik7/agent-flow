@@ -30,11 +30,12 @@ const USAGE = `nubbo <komut> [seçenekler]
              --ops-file <plan.json>  Planı dosyadan oku
              [--json]              Tam yapı
                                  Hiçbir şey yazmaz, akış dosyası değişmez.
-  preview | step | from | state | stop | screen
+  preview | step | from | state | report | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
-             [--node <id>] [--branch <id>] [--fast] [--start] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
+             [--node <id>] [--branch <id>] [--fast] [--debug] [--start] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
                                  --fast: yalnız ekran aşamaları (model çağrısı yok, çok daha hızlı)
+                                 --debug: ilk hatalı adımda durur, o anın bağlamını saklar (report)
                                  --start: from için şart; akışı baştan çalıştırır (açık onay)
 
   branch list                    Açık branch'leri listele (uygulama açık olmalı)
@@ -284,8 +285,8 @@ async function main() {
     process.exit(0)
   }
 
-  if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'stop' || cmd === 'screen') {
-    const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', stop: 'run.stop', screen: 'screen.read' }
+  if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'report' || cmd === 'stop' || cmd === 'screen') {
+    const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', report: 'run.report', stop: 'run.stop', screen: 'screen.read' }
     if (cmd === 'from' && !opts.node && !opts.start) {
       // A whole flow from the first step is never an accident.
       console.error('Baştan koşu için --start gerekir (akışın tamamı ilk adımdan çalışır). Tek node için: --node <id>.')
@@ -296,6 +297,7 @@ async function main() {
     if (opts.branch) args.branchId = opts.branch
     if (opts.fast) args.fast = true
     if (opts.start) args.fromStart = true
+    if (opts.debug) args.debug = true
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)

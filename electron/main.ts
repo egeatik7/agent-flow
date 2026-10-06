@@ -7,7 +7,7 @@ import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
-import { beginRun, endRun, noteError, noteStep, probing } from './tool-state'
+import { beginRun, endRun, noteError, noteLogLine, noteStep, probing, setDebugRun, setErrorStopHook } from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
@@ -149,6 +149,9 @@ let voiceHoldUntil = 0
 
 function log(level: LogLevel, message: string, forceHud = false) {
   if (level === 'error') noteError(message)
+  // Kept in memory too: a report of a broken run can quote the engine's own lines without the
+  // caller having to find and read a log file.
+  noteLogLine(level, message)
   send('agent:log', { level, message })
   const held = !forceHud && Date.now() < voiceHoldUntil && level !== 'error' && level !== 'warn'
   if (!held) pushHud(level, message)
@@ -176,6 +179,12 @@ const agent = createAgent({
   shouldStop: () => stopRequested,
   setLoop: (text) => pushLoop(text),
   setMethod: (text) => pushMethod(text),
+})
+
+// A debug run stops itself at the first failed step: the stop is checked between steps, so the
+// failure's own screen, item and error are still the truth when the run ends.
+setErrorStopHook(() => {
+  stopRequested = true
 })
 
 function createWindow() {
@@ -402,7 +411,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean }
+  opts?: { derived?: boolean; debug?: boolean }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -410,6 +419,8 @@ async function runFlow(
   running = true
   stopRequested = false
   derivedRun = !!opts?.derived
+  // Debug: the run stops itself at the first failed step, keeping that moment's context.
+  setDebugRun(!!opts?.debug)
   let awake: number | undefined
   let hidden = false
   let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string } | undefined
@@ -580,7 +591,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     clearStop: () => {
       stopRequested = false
     },
-    startRun: (graph: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
+    startRun: (graph: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; debug?: boolean }) =>
       runFlow(graph, startId, packagePath, opts),
     getCanvases: () => loadCanvases(),
     // Branch records are the only thing the tool layer writes here. The active flow is left

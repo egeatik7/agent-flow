@@ -33,6 +33,12 @@ function harness(overrides = {}) {
     beginRun: () => events.push('run-begin'),
     endRun: () => events.push('run-end'),
     probing: () => false,
+    // Debug mode is asked for per run and is set before the run starts, so a prepare failure must
+    // still release everything; the harness needs the same surface `runFlow` uses.
+    setDebugRun: (on) => events.push(on ? 'debug-on' : 'debug-off'),
+    setErrorStopHook: () => events.push('error-hook'),
+    noteError: () => {},
+    noteLogLine: () => {},
     globalShortcut: { register: () => events.push('registered'), unregister: () => events.push('unregistered') },
     STOP_HOTKEY: 'Ctrl+Shift+Q',
     powerSaveBlocker: { start: () => { events.push('awake'); return 0; }, isStarted: () => true, stop: () => events.push('awake-stopped') },

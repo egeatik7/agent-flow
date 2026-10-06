@@ -39,7 +39,7 @@ import {
   type BranchRecord,
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
-import { beginProbe, endProbe, probing, snapshot } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, probing, snapshot } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -114,7 +114,7 @@ export type ToolContext = {
     graph: AgentGraph,
     startId?: string,
     packagePath?: string[],
-    opts?: { derived?: boolean }
+    opts?: { derived?: boolean; debug?: boolean }
   ) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
   /** The canvas book: the flows of the app plus the agent branches that sit over them. */
   getCanvases: () => CanvasBook
@@ -1018,12 +1018,15 @@ const runFrom: ToolDef = {
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
     void ctx
-      .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined, derived ? { derived: true } : undefined)
+      .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined, {
+        ...(derived ? { derived: true } : {}),
+        ...(args.debug === true ? { debug: true } : {}),
+      })
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
     // The run begins synchronously, so its id is already known: this answer means the run
     // started, never that it finished.
     const runId = snapshot().runId
-    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}`
+    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
     ctx.log('info', `Ajan · buradan devam · ${message}`)
     return {
       ok: true,
@@ -1095,6 +1098,50 @@ const screenRead: ToolDef = {
   },
 }
 
+const runReport: ToolDef = {
+  name: 'run.report',
+  summary: 'Koşunun son hata anını bağlamıyla verir: node, paket yolu, kutu öğeleri, adım geçmişi, günlük ve hata görüntüsü.',
+  sendsInput: false,
+  ready: true,
+  run: async (_args, ctx) => {
+    const frozen = frozenReport()
+    const s = snapshot()
+    if (!frozen) {
+      return {
+        ok: true,
+        tool: runReport.name,
+        outcome: 'tamam',
+        message: `Donmuş hata yok${ctx.isRunning() ? ' (koşu sürüyor)' : ''}. Şu an: ${s.nodeTitle ?? '—'} · gözlenen ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`,
+        observed: {
+          note: 'Debug koşusu (run.from · debug: true) ilk hatalı adımda durur ve o anın bağlamını saklar; normal koşuda motor kendi hata politikasını uygular.',
+        },
+        data: { frozen: null, snapshot: s, debug: isDebugRun() },
+      }
+    }
+    const loops = frozen.loops.length
+      ? frozen.loops
+          .map((l) => `${l.title}${typeof l.index === 'number' ? ` ${l.index + 1}/${l.total ?? '?'}` : ''}${l.item ? ` (“${l.item}”)` : ''}`)
+          .join(' · ')
+      : 'kutu yok'
+    const message =
+      `Hata anı: “${frozen.nodeTitle || frozen.nodeId}” · kutu: ${loops}` +
+      `${frozen.packagePath.length ? ` · paket: ${frozen.packagePath.join(' › ')}` : ''}` +
+      ` · ${frozen.steps.filter((x) => x.status === 'done').length} adım tamamlandı, hata: ${frozen.error || '—'}` +
+      `${frozen.shot ? ` · ekran görüntüsü: ${frozen.shot}` : ' · hata görüntüsü günlükte yok'}`
+    ctx.log('warn', `Ajan · koşu raporu · ${message}`)
+    return {
+      ok: true,
+      tool: runReport.name,
+      outcome: 'tamam',
+      message,
+      observed: {
+        note: 'Bu, hatanın olduğu andaki bağlamdır: motor durdurulduğu için sonraki öğeye geçilmedi. Bir bölgenin geçmesi yalnız o bölgenin kanıtıdır, akışın tamamının değil.',
+      },
+      data: { frozen, snapshot: s, debug: isDebugRun() },
+    }
+  },
+}
+
 const runStop: ToolDef = {
   name: 'run.stop',
   summary: 'Çalışan koşuyu durdurur.',
@@ -1162,7 +1209,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

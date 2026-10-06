@@ -52,6 +52,30 @@ let errors = 0
 let lastError: string | undefined
 let last: RunResult | null = null
 let seq = 0
+/** The last steps in order, the engine's log lines and what a broken debug run looked like. */
+let steps: { id: string; status: string; at: number }[] = []
+let lines: { level: string; text: string; at: number }[] = []
+let lastShot = ''
+let debugRun = false
+let stopOnError: (() => void) | null = null
+let frozen: FrozenReport | null = null
+const STEP_RING = 60
+const LOG_RING = 200
+
+export type StepLine = { id: string; status: string; at: number }
+
+export type FrozenReport = {
+  at: number
+  nodeId: string
+  nodeTitle: string
+  error: string
+  loops: { title: string; index?: number; total?: number; item?: string }[]
+  packagePath: string[]
+  steps: StepLine[]
+  log: { level: string; text: string }[]
+  /** The error screenshot the engine saved, if its log line named one. */
+  shot: string
+}
 
 function newRunId(): string {
   seq += 1
@@ -67,6 +91,8 @@ export function beginRun(graph: AgentGraph, startId?: string): string {
   done = 0
   errors = 0
   lastError = undefined
+  steps = []
+  frozen = null
   return id
 }
 
@@ -87,6 +113,8 @@ export function endRun(result?: { ok?: boolean; failed?: number; steps?: number;
   }
   run = null
   current = undefined
+  // Debug mode belongs to one run; the frozen report of that run stays readable afterwards.
+  debugRun = false
 }
 
 export function runId(): string | undefined {
@@ -115,16 +143,65 @@ export function probing(): boolean {
 export function noteStep(payload: unknown): void {
   const p = payload as { id?: unknown; status?: unknown } | null
   if (!p || typeof p.id !== 'string') return
+  const status = typeof p.status === 'string' ? p.status : ''
   if (p.status === 'running') current = p.id
   if (p.status === 'done') {
     done++
     if (current === p.id) current = undefined
   }
   if (p.status === 'error') errors++
+  steps.push({ id: p.id, status, at: Date.now() })
+  if (steps.length > STEP_RING) steps.splice(0, steps.length - STEP_RING)
+  // A debug run keeps the moment it broke: the loop item, the package path and the error are all
+  // still true only right now. Within a step of this, the flow moves on to the next file.
+  if (debugRun && status === 'error' && !frozen) {
+    const snap = snapshot()
+    frozen = {
+      at: Date.now(),
+      nodeId: p.id,
+      nodeTitle: snap.nodeTitle ?? '',
+      error: snap.lastError ?? '',
+      loops: snap.loops,
+      packagePath: snap.packagePath,
+      steps: [...steps].slice(-20),
+      log: [...lines].slice(-40),
+      shot: lastShot,
+    }
+    // Stop the run at the next step boundary, so nothing after the failure happens by itself.
+    stopOnError?.()
+  }
 }
 
 export function noteError(message: string): void {
   lastError = message
+}
+
+/** Debug mode: stop at the first failed step and keep everything that was true at that moment. */
+export function setDebugRun(on: boolean): void {
+  debugRun = on
+  if (on) frozen = null
+}
+
+export function isDebugRun(): boolean {
+  return debugRun
+}
+
+/** The engine's own log lines, kept in memory: a report can quote them without reading a file. */
+export function noteLogLine(level: string, text: string): void {
+  lines.push({ level, text, at: Date.now() })
+  if (lines.length > LOG_RING) lines.splice(0, lines.length - LOG_RING)
+  const shot = /([A-Za-z]:\\[^\s"']+\.png)/.exec(text)
+  if (shot) lastShot = shot[1]
+}
+
+/** Called when a debug run breaks: the app stops the run at the next boundary. */
+export function setErrorStopHook(fn: (() => void) | null): void {
+  stopOnError = fn
+}
+
+/** The frozen context of the moment a debug run broke, if it did. */
+export function frozenReport(): FrozenReport | null {
+  return frozen
 }
 
 export function snapshot(): RunSnapshot {
