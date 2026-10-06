@@ -761,7 +761,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return bridge.captureAtCursor()
   })
 
-  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[]) => runFlow(raw, startId, packagePath))
+  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
+    runFlow(raw, startId, packagePath, opts)
+  )
   ipcMain.handle('logs:open', async () => {
     const dir = ensureLogsDir()
     await shell.openPath(dir)

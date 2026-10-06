@@ -39,7 +39,13 @@ export type XpAgentApi = {
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => Promise<{ text: string; type: string } | null>
   pickScreenBox: (box: { x: number; y: number; w: number; h: number }) => Promise<Locator | null>
   captureAfter: (ms: number) => Promise<Locator | null>
-  runAgent: (graph: AgentGraph, startId?: string, packagePath?: string[]) => Promise<{ ok: boolean; stopped?: boolean; failed?: number }>
+  runAgent: (
+    graph: AgentGraph,
+    startId?: string,
+    packagePath?: string[],
+    /** `derived`: this graph is a branch being tried, not the saved flow; do not store it. */
+    opts?: { derived?: boolean }
+  ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number }>
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
   toolList: () => Promise<ToolSpec[]>

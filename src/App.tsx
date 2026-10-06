@@ -1004,7 +1004,9 @@ export default function App() {
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (api) {
-        const result = await api.runAgent(full, startId, path)
+        // While a branch is on canvas, what runs is that branch and it must not be stored as the
+        // flow: the window says so, and the run path leaves the saved flow alone.
+        const result = await api.runAgent(full, startId, path, branchDocRef.current ? { derived: true } : undefined)
         // The agent log already explains each error; this one line says the run did not end clean.
         if (!result.ok && !result.stopped) pushLog('error', `“${name}” ${result.failed ?? 0} öğe/tur hatayla bitti, başarılı sayılmaz. Hatalar yukarıdaki kayıtlarda.`)
       } else

@@ -24,6 +24,7 @@ import type { TargetTrace } from './target-trace'
 import { ADDABLE_KINDS, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps, type EditOp } from './tool-edit'
 import {
   MAX_BRANCHES,
+  MAX_GROUPS,
   addGroup,
   branchOps,
   branchesOf,
@@ -462,6 +463,14 @@ const flowEdit: ToolDef = {
     const picked = pickBranch(args, ctx)
     if ('error' in picked) return failed(flowEdit.name, picked.error)
     const { book, branch, view } = picked
+    // A full recipe is refused, not trimmed: its groups build on each other, so dropping the
+    // oldest would take away the edits the later ones stand on.
+    if (branch.groups.length >= MAX_GROUPS) {
+      return failed(
+        flowEdit.name,
+        `“${branch.name}” tarifi dolu (${branch.groups.length}/${MAX_GROUPS} düzenleme). Yeni bir branch aç ya da flow.undo ile yer aç; eski gruplar kendiliğinden silinmez.`
+      )
+    }
     // The group id is chosen before checking so the ids this answer reports are the same ones a
     // later look at the branch will show.
     const groupId = newGroupId()

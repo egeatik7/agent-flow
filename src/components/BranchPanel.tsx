@@ -67,7 +67,11 @@ export default function BranchPanel({ onInspect }: { onInspect?: (branchId: stri
     setBusy('branch.list')
     try {
       const r = await api.callTool('branch.list', {})
-      if (r.ok) setBranches(((r.data?.branches as BranchRow[] | undefined) ?? []).slice())
+      if (r.ok) {
+        const list = ((r.data?.branches as BranchRow[] | undefined) ?? []).slice()
+        setBranches(list)
+        afterRefresh(list)
+      }
     } catch (e) {
       setError(errText(e))
     } finally {
@@ -123,8 +127,19 @@ export default function BranchPanel({ onInspect }: { onInspect?: (branchId: stri
     if (branchId === id) {
       setBranchId('')
       setBranchNodes([])
+      // The canvas may still be showing the branch that no longer exists.
+      onInspect?.('')
     }
     await refreshBranches()
+  }
+
+  /** The branch may be gone (dropped elsewhere, or merged): the canvas must not keep showing it. */
+  const afterRefresh = (list: BranchRow[]) => {
+    if (branchId && !list.some((b) => b.branchId === branchId)) {
+      setBranchId('')
+      setBranchNodes([])
+      onInspect?.('')
+    }
   }
 
   return (
@@ -158,15 +173,6 @@ export default function BranchPanel({ onInspect }: { onInspect?: (branchId: stri
                     <button type="button" className="xp-btn" disabled={!!busy} onClick={() => void inspectBranch(b.branchId)}>
                       İncele
                     </button>
-                    <button
-                      type="button"
-                      className="xp-btn"
-                      style={{ marginLeft: 4 }}
-                      disabled={!!busy}
-                      onClick={() => void call('run.from', { branchId: b.branchId, fromStart: true })}
-                    >
-                      Test et
-                    </button>
                     <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void mergeTry(b.branchId)}>
                       Mergele
                     </button>
@@ -199,9 +205,10 @@ export default function BranchPanel({ onInspect }: { onInspect?: (branchId: stri
                 className="xp-btn"
                 style={{ marginLeft: 4 }}
                 disabled={!branchNode || !!busy}
-                onClick={() => void call('step.run', { nodeId: branchNode, branchId })}
+                title="Seçili node’dan başlar; akışın tamamını baştan koşturmaz."
+                onClick={() => void call('run.from', { nodeId: branchNode, branchId })}
               >
-                Tek adım
+                Seçili node’dan dene
               </button>
             </div>
           )}
@@ -220,8 +227,9 @@ export default function BranchPanel({ onInspect }: { onInspect?: (branchId: stri
             </div>
           )}
           <p className="hint" style={{ margin: '4px 0 0' }}>
-            <b>İncele</b> yalnız farkı hesaplar ve tuvalde gösterir. <b>Test et</b> türetilmiş hâliyle çalıştırır (kayıtlı akışa yazmaz).
-            <b> Mergele</b> iki adımlıdır: önce ne yazılacağını söyler, <b>Uygula</b> gerçekten yazar ve kaydeder.
+            <b>İncele</b> yalnız farkı hesaplar, tuvalde gösterir ve o bölgeye götürür. <b>Seçili node’dan dene</b> öneriyi yalnız o
+            noktadan başlatır: bütün akışı baştan koşturmaz (üretim adımları iki kez çalışmasın diye). <b>Merkele</b> iki adımlıdır: önce
+            ne yazılacağını söyler, <b>Uygula</b> gerçekten yazar ve kaydeder.
           </p>
         </div>
       )}

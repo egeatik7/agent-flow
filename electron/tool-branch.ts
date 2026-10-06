@@ -110,7 +110,8 @@ export function newBranch(base: CanvasTab, name: unknown): BranchRecord {
 export function addGroup(branch: BranchRecord, ops: EditOp[], note?: string, id?: string): BranchGroup {
   const group: BranchGroup = { id: id ?? newGroupId(), at: Date.now(), ops, ...(note ? { note: String(note).slice(0, 200) } : {}) }
   branch.groups.push(group)
-  if (branch.groups.length > MAX_GROUPS) branch.groups.splice(0, branch.groups.length - MAX_GROUPS)
+  // No trimming here on purpose: a recipe is applied group by group, so dropping the oldest group
+  // would silently delete the edits later ones stand on. The caller refuses instead when it is full.
   return group
 }
 

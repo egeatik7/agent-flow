@@ -10,6 +10,7 @@ import {
 import { callTool, type ToolContext } from '../electron/tools'
 import {
   MAX_BRANCHES,
+  MAX_GROUPS,
   branchesOf,
   materialize,
   newBranch,
@@ -387,6 +388,31 @@ describe('branch: kopya değil, tarif', () => {
     expect(byAgent.ok).toBe(false)
     expect(byAgent.message).toContain('yalnız Nubbo penceresinden')
     expect(branchesOf(h.book)).toHaveLength(0)
+  })
+
+  it('dolu tarif yeni düzenlemeyi reddeder, eski grupları silmez', async () => {
+    const h = harness()
+    const id = await h.openBranch('Dolu tarif')
+    // Tarifi sınıra kadar doldur (her çağrı bir grup).
+    for (let i = 1; i <= MAX_GROUPS; i++) {
+      const r = await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 2000 + i)] }, h.ctx)
+      expect(r.ok).toBe(true)
+    }
+    expect(h.branchOf(id).groups).toHaveLength(MAX_GROUPS)
+    expect(h.branchOf(id).groups[0].ops).toHaveLength(1)
+
+    const extra = await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 9999)] }, h.ctx)
+    expect(extra.ok).toBe(false)
+    expect(extra.message).toContain('dolu')
+    // İlk grup yerinde ve tarif bozulmadı.
+    expect(h.branchOf(id).groups).toHaveLength(MAX_GROUPS)
+    const view = viewBranch(h.book, h.branchOf(id))
+    expect((view.derived?.nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(2000 + MAX_GROUPS)
+
+    // Yer açılınca yeniden düzenlenebilir.
+    await callTool('flow.undo', { branchId: id }, h.ctx)
+    const again = await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4321)] }, h.ctx)
+    expect(again.ok).toBe(true)
   })
 
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
