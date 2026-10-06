@@ -372,6 +372,22 @@ export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): Pla
   if (!errors.length) {
     const ring = findRing(edges)
     if (ring) warnings.push(`Bu işlemler bir halka oluşturuyor: ${ring} — koşu orada adım sınırına kadar döner.`)
+    // A chain that is wired to itself but not to the flow's start runs nowhere: the run reports
+    // "completed, one step" and nothing happens. Seen in a real pilot, so it is said out loud.
+    const reachable = new Set<string>()
+    const queue = graph.nodes.filter((n) => n.kind === 'start').map((n) => n.id)
+    while (queue.length) {
+      const id = queue.pop() as string
+      if (reachable.has(id)) continue
+      reachable.add(id)
+      for (const e of edges) if (e.from === id) queue.push(e.to)
+    }
+    const orphan = plan.adds.filter((a) => !reachable.has(a.node.id)).map((a) => a.node.title)
+    if (orphan.length) {
+      warnings.push(
+        `Bu düzenleme akışı “Başlangıç”a bağlamıyor: ${orphan.map((t) => `“${t}”`).join(', ')} koşuda hiç çalışmaz (koşu hemen biter). İlk adımı bir node’a bağla ya da Başlangıç’tan bağla.`
+      )
+    }
   }
 
   return { ok: errors.length === 0, errors, warnings, plan }

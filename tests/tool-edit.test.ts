@@ -112,6 +112,28 @@ describe('düzenleme planı', () => {
     expect(bad.check.errors.join(' ')).toContain('zaten bir bağlantı var')
   })
 
+  it('Başlangıç’a bağlanmayan zinciri kabul eder ama açıkça uyarır', () => {
+    const { graph, start, cond, end } = fixture()
+    // Kendi içinde bağlı ama akışa bağlı olmayan bir zincir: koşu hemen biter.
+    const orphan = run(graph, [
+      { op: 'addNode', key: 'a', kind: 'wait', fields: { ms: 100, title: 'Öksüz bekleme' } },
+      { op: 'addNode', key: 'b', kind: 'key', fields: { keys: '{ESC}', title: 'Öksüz tuş' }, connectFrom: 'a' },
+    ])
+    expect(orphan.check.ok).toBe(true)
+    expect(orphan.check.warnings.join(' ')).toContain('Başlangıç')
+    expect(orphan.check.warnings.join(' ')).toContain('Öksüz bekleme')
+
+    // Başlangıç'tan bağlanınca uyarı yok. (Başlangıç → tıkla dolu olduğu için önce kesiyoruz.)
+    const wired = run(graph, [
+      { op: 'disconnect', from: start.id },
+      { op: 'addNode', key: 'a', kind: 'wait', fields: { ms: 100, title: 'Bağlı bekleme' }, connectFrom: start.id },
+      { op: 'connect', from: 'a', to: cond.id, fromPort: 'next' },
+    ])
+    expect(wired.check.ok).toBe(true)
+    expect(wired.check.warnings.join(' ')).not.toContain('Başlangıç')
+    expect(end.title).toBeTruthy()
+  })
+
   it('verilen grafiği değiştirmez; yeni grafik döndürür', () => {
     const { graph, click, cond } = fixture()
     const before = JSON.stringify(graph)
