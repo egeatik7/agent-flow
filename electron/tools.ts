@@ -36,6 +36,7 @@ import {
   newGroupId,
   pruneBypassed,
   summaryOf,
+  targetGraph,
   undoLast,
   viewBranch,
   type BranchRecord,
@@ -481,10 +482,19 @@ const flowEdit: ToolDef = {
     // The group id is chosen before checking so the ids this answer reports are the same ones a
     // later look at the branch will show.
     const groupId = newGroupId()
-    const check = planOps(view.derived as AgentGraph, args.ops, groupPrefix(groupId))
-    if (!check.ok) {      const head = check.errors.slice(0, 3).join(' ')
+    // A package holds a flow of its own. The ops are written against one level, and the group
+    // remembers which: without this an edit inside a package could never be expressed at all.
+    const targetPath = Array.isArray(args.packagePath) ? args.packagePath.filter((x): x is string => typeof x === 'string' && !!x) : []
+    const where = targetGraph(view.derived as AgentGraph, targetPath)
+    if (!where) {
+      return failed(flowEdit.name, `Paket bulunamadı: ${targetPath.join(' › ') || '(boş yol)'}. Yolu flow.read’in verdiği packagePath ile ver.`)
+    }
+    const prefix = where.title ? `[${where.title}] ` : ''
+    const check = planOps(where.graph, args.ops, groupPrefix(groupId))
+    if (!check.ok) {
+      const head = check.errors.slice(0, 3).join(' ')
       const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
-      const message = `Düzenleme reddedildi, hiçbir şey eklenmedi. ${head}${rest}`
+      const message = `Düzenleme reddedildi, hiçbir şey eklenmedi. ${prefix}${head}${rest}`
       ctx.log('warn', `Ajan · branch · ${message}`)
       return {
         ok: true,
@@ -495,8 +505,8 @@ const flowEdit: ToolDef = {
         data: { valid: false, errors: check.errors, warnings: check.warnings },
       }
     }
-    const lines = describePlan(view.derived as AgentGraph, check.plan)
-    const group = addGroup(branch, args.ops as EditOp[], text(args.note), groupId)
+    const lines = describePlan(where.graph, check.plan).map((l) => prefix + l)
+    const group = addGroup(branch, args.ops as EditOp[], text(args.note), groupId, targetPath)
     // The alternative's shape goes into the record straight away, so the stored recipe says
     // "leaves at A, comes back at B" instead of leaving that to be read out of the ops by hand.
     const shaped = derivePath((picked.view.base?.graph ?? view.derived) as AgentGraph, branch)
@@ -505,9 +515,10 @@ const flowEdit: ToolDef = {
     ctx.saveCanvases(book)
     const after = viewBranch(book, branch)
     const shape = after.path ? ` · alternatif yol: ${after.path.entry.nodeId} → ${after.path.exit.nodeId}` : ''
+    const inPackage = targetPath.length ? ` · hedef: paket “${where.title}” içinde` : ''
     // A warning nobody sees is not a warning: the checker's findings belong in the answer.
     const warn = check.warnings.length ? ` Uyarı: ${check.warnings.join(' ')}` : ''
-    const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${shape}.${warn} Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
+    const message = `“${branch.name}” branch’ine eklendi: ${prefix}${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem)${shape}${inPackage}.${warn} Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
     ctx.log(check.warnings.length ? 'warn' : 'info', `Ajan · branch · ${message}`)
     return {
       ok: true,

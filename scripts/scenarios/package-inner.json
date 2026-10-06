@@ -1,0 +1,25 @@
+{
+  "name": "package-inner",
+  "profile": "test",
+  "canvas": "Tuval 1",
+  "setup": {
+    "packagePath": ["fixture-package"],
+    "ops": [
+      {
+        "op": "patchNode",
+        "id": "fixture-inner-type",
+        "fields": {
+          "text": "cmd /c md \"%TEMP%\\nubbo-pilot\" 2>nul & >\"%TEMP%\\nubbo-pilot\\inner2.txt\" echo inner2",
+          "title": "Fikstür · komutu yaz (onarıldı)"
+        }
+      }
+    ]
+  },
+  "run": { "fromStart": true, "fast": true, "timeoutMs": 180000 },
+  "expect": {
+    "files": [{ "path": "{{temp}}\\nubbo-pilot\\inner2.txt", "content": "inner2" }],
+    "runOk": true,
+    "maxErrors": 0,
+    "minSteps": 2
+  }
+}

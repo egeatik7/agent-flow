@@ -22,9 +22,19 @@ import {
   type GraphDiff,
 } from './tool-edit'
 import { findPlace } from './tool-context'
-import type { AgentGraph, CanvasBook, CanvasTab } from './graph-types'
+import type { AgentGraph, AgentNode, CanvasBook, CanvasTab } from './graph-types'
 
-export type BranchGroup = { id: string; at: number; note?: string; ops: EditOp[] }
+export type BranchGroup = {
+  id: string
+  at: number
+  note?: string
+  ops: EditOp[]
+  /**
+   * The package this group edits, by node id from the root down. Absent means the flow itself.
+   * An edit inside a package is still just a recipe; this says which level it belongs to.
+   */
+  target?: string[]
+}
 
 /**
  * Where an alternative path leaves the flow and where it comes back.
@@ -201,8 +211,14 @@ export function newBranch(base: CanvasTab, name: unknown): BranchRecord {
   }
 }
 
-export function addGroup(branch: BranchRecord, ops: EditOp[], note?: string, id?: string): BranchGroup {
-  const group: BranchGroup = { id: id ?? newGroupId(), at: Date.now(), ops, ...(note ? { note: String(note).slice(0, 200) } : {}) }
+export function addGroup(branch: BranchRecord, ops: EditOp[], note?: string, id?: string, target?: string[]): BranchGroup {
+  const group: BranchGroup = {
+    id: id ?? newGroupId(),
+    at: Date.now(),
+    ops,
+    ...(note ? { note: String(note).slice(0, 200) } : {}),
+    ...(target?.length ? { target } : {}),
+  }
   branch.groups.push(group)
   // No trimming here on purpose: a recipe is applied group by group, so dropping the oldest group
   // would silently delete the edits later ones stand on. The caller refuses instead when it is full.
@@ -229,6 +245,9 @@ export function derivePath(base: AgentGraph, branch: BranchRecord): BranchPath |
   let entry: { nodeId: string; port: string } | null = null
   let exitId = ''
   for (const group of branch.groups) {
+    // An alternative path is a shape of the flow itself. A group written inside a package is not
+    // that shape, so it is skipped here rather than mistaken for a root-level cut.
+    if (group.target?.length) continue
     const check = planOps(graph, group.ops, groupPrefix(group.id))
     if (!check.ok) continue
     for (const cut of check.plan.cuts) {
@@ -249,6 +268,37 @@ export function derivePath(base: AgentGraph, branch: BranchRecord): BranchPath |
 export type Materialized = { graph: AgentGraph; applied: number; failed: string[] }
 
 /**
+ * The graph a group's ops are written against: the whole flow, or the inside of a package.
+ *
+ * A package holds a flow of its own. Editing inside one has to address that inner graph, and the
+ * group remembers which one it was written for - otherwise the same recipe would be applied to the
+ * wrong level the moment it is looked at again.
+ */
+export function targetGraph(root: AgentGraph, target?: string[]): { graph: AgentGraph; title: string } | null {
+  if (!target || !target.length) return { graph: root, title: '' }
+  let nodes = root.nodes
+  let found: AgentNode | null = null
+  for (const id of target) {
+    found = nodes.find((n) => n.id === id) ?? null
+    if (!found) return null
+    nodes = found.inner?.nodes ?? []
+  }
+  if (!found?.inner) return null
+  return { graph: found.inner, title: found.title }
+}
+
+/** Writes a graph back where it belongs: the root, or the inside of the package named. */
+function withGraphAt(root: AgentGraph, target: string[] | undefined, next: AgentGraph): AgentGraph {
+  if (!target || !target.length) return next
+  const [head, ...rest] = target
+  const clone = structuredClone(root)
+  const node = clone.nodes.find((n) => n.id === head)
+  if (!node || !node.inner) return clone
+  node.inner = rest.length ? withGraphAt(node.inner, rest, next) : next
+  return clone
+}
+
+/**
  * Applies the recipe to the base, group by group: a group that no longer fits (its node was
  * deleted, its output was rewired) is named and skipped so the rest of the branch still shows.
  */
@@ -257,12 +307,18 @@ export function materialize(base: AgentGraph, branch: BranchRecord): Materialize
   let applied = 0
   const failed: string[] = []
   for (const group of branch.groups) {
-    const check = planOps(graph, group.ops, groupPrefix(group.id))
+    const where = targetGraph(graph, group.target)
+    if (!where) {
+      failed.push(`${group.note ?? group.id}: hedef paket bulunamadı (${(group.target ?? []).join(' › ')})`)
+      continue
+    }
+    const check = planOps(where.graph, group.ops, groupPrefix(group.id))
     if (!check.ok) {
       failed.push(`${group.note ?? group.id}: ${check.errors[0]}`)
       continue
     }
-    graph = applyPlan(graph, check.plan)
+    const nextInner = applyPlan(where.graph, check.plan)
+    graph = group.target?.length ? withGraphAt(graph, group.target, nextInner) : nextInner
     applied += group.ops.length
   }
   return { graph, applied, failed }
@@ -306,7 +362,9 @@ export function anchorsOf(base: AgentGraph, branch: BranchRecord): BranchAnchor[
     seen.set(id, { id, title: place.node.title, packagePath: place.packagePath, how: [what] })
   }
   for (const group of branch.groups) {
-    const check = planOps(graph, group.ops, groupPrefix(group.id))
+    const where = targetGraph(graph, group.target)
+    if (!where) continue
+    const check = planOps(where.graph, group.ops, groupPrefix(group.id))
     if (!check.ok) continue
     for (const patch of check.plan.patches) note(patch.id, 'alan değişiyor')
     for (const add of check.plan.adds) if (add.fromId) note(add.fromId, 'yeni adım buradan bağlanıyor')
@@ -315,7 +373,8 @@ export function anchorsOf(base: AgentGraph, branch: BranchRecord): BranchAnchor[
       note(edge.to, 'yeni bağlantı buraya giriyor')
     }
     for (const cut of check.plan.cuts) note(cut.from, 'bağlantısı kaldırılıyor')
-    graph = applyPlan(graph, check.plan)
+    const nextInner = applyPlan(where.graph, check.plan)
+    graph = group.target?.length ? withGraphAt(graph, group.target, nextInner) : nextInner
   }
   return [...seen.values()]
 }
@@ -357,13 +416,20 @@ export function describeBranch(baseGraph: AgentGraph, branch: BranchRecord): str
   let graph = structuredClone(baseGraph)
   const lines: string[] = []
   for (const group of branch.groups) {
-    const check = planOps(graph, group.ops, groupPrefix(group.id))
+    const where = targetGraph(graph, group.target)
+    if (!where) {
+      lines.push(`(hedef paket bulunamadı: ${(group.target ?? []).join(' › ')})`)
+      continue
+    }
+    const check = planOps(where.graph, group.ops, groupPrefix(group.id))
     if (!check.ok) {
       lines.push(`(bu grup artık uymuyor: ${check.errors[0]})`)
       continue
     }
-    lines.push(...describePlan(graph, check.plan))
-    graph = applyPlan(graph, check.plan)
+    const prefix = where.title ? `[${where.title}] ` : ''
+    lines.push(...describePlan(where.graph, check.plan).map((l) => prefix + l))
+    const nextInner = applyPlan(where.graph, check.plan)
+    graph = group.target?.length ? withGraphAt(graph, group.target, nextInner) : nextInner
   }
   return lines
 }

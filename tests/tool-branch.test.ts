@@ -494,6 +494,48 @@ describe('branch: kopya değil, tarif', () => {
     expect(edited.message).toContain('Öksüz bekleme')
   })
 
+  it('paket içindeki node düzenlenebilir; temel tuval dokunulmaz', async () => {
+    const h = harness()
+    const id = await h.openBranch('Paket içi onarım')
+    // Kullanıcının akışında olduğu gibi bir paket ve içinde bir akış: dışarıdan düzenlenemez.
+    const pkg = createNode('package', 400, 200, 1)
+    pkg.title = 'Remesh paketi'
+    const innerStart = createNode('start', 0, 0)
+    const innerWait = createNode('wait', 220, 0, 1)
+    innerWait.title = 'Paket içi bekleme'
+    innerWait.ms = 2000
+    const innerEnd = createNode('end', 460, 0)
+    pkg.inner = {
+      nodes: [innerStart, innerWait, innerEnd],
+      edges: [
+        { id: 'ie1', from: innerStart.id, fromPort: 'next', to: innerWait.id },
+        { id: 'ie2', from: innerWait.id, fromPort: 'next', to: innerEnd.id },
+      ],
+    }
+    h.book.tabs[0].graph.nodes.push(pkg)
+
+    const edited = await callTool(
+      'flow.edit',
+      { branchId: id, packagePath: [pkg.id], ops: [{ op: 'patchNode', id: innerWait.id, fields: { ms: 4321 } }], note: 'paket içi bekleme' },
+      h.ctx
+    )
+    expect(edited.ok).toBe(true)
+    expect(edited.message).toContain('paket')
+    expect(edited.message).toContain('Remesh paketi')
+
+    const view = viewBranch(h.book, h.branchOf(id))
+    const derivedPkg = (view.derived as AgentGraph).nodes.find((n) => n.id === pkg.id) as AgentNode
+    expect((derivedPkg.inner?.nodes.find((n) => n.id === innerWait.id) as AgentNode).ms).toBe(4321)
+    // Temel tuval dokunulmadı: paketin kendi hâli hâlâ 2000.
+    const basePkg = h.book.tabs[0].graph.nodes.find((n) => n.id === pkg.id) as AgentNode
+    expect((basePkg.inner?.nodes.find((n) => n.id === innerWait.id) as AgentNode).ms).toBe(2000)
+
+    // Aynı düzenleme, paket yolu verilmeden reddedilir: dışarıdan içeri erişilemez.
+    const noPath = await callTool('flow.edit', { branchId: id, ops: [{ op: 'patchNode', id: innerWait.id, fields: { ms: 9 } }] }, h.ctx)
+    expect(noPath.outcome).toBe('plan-gecersiz')
+    expect(noPath.message).toContain('bulunamadı')
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')

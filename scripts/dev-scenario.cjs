@@ -154,7 +154,7 @@ async function main() {
     if (copy.fields) for (const k of Object.keys(copy.fields)) if (typeof copy.fields[k] === 'string') copy.fields[k] = expand(copy.fields[k])
     return copy
   })
-  const edited = await call(info, 'flow.edit', { branchId, ops, note: `senaryo ${name}` }, 60_000)
+  const edited = await call(info, 'flow.edit', { branchId, ops, note: `senaryo ${name}`, ...(scenario.setup?.packagePath ? { packagePath: scenario.setup.packagePath } : {}) }, 60_000)
   must('edits-accepted', edited)
   evidence.warnings = edited.result.data?.warnings || []
   if (scenario.setup?.expectNoWarnings) check('no-warnings', 'tool-answered', evidence.warnings.length === 0, evidence.warnings.join(' | '))

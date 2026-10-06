@@ -274,4 +274,27 @@ Bu bölüm, sahibinin denemeler sonunda verdiği kararları kaydeder. Burada yaz
 
 **Kodun durumu (1.7.85 sonrası, dürüst not):** 1. ve 3. madde kodda uygulandı: akış hatalı öğe/tur içeriyorsa sonuç `ok: false` döner, kaldırılmış node türleri sessizce geçilmez, hafızaya yalnızca `confirm.ts` içindeki `proven` kanıtı olan hedefler yazılır. 2. madde **henüz uygulanmadı**: `ensureActed` (`electron/agent.ts`) hâlâ her eylemde iki ekran taraması yapıyor. Sonucu adımı başarısız saymıyor ve eylemi tekrar etmiyor, ama bekleme süresini, model çağrılarını ve hafıza yazımını etkiliyor. “Kapalı / yalnızca-günlük / açık” seçeneği ve “bakman gereken” sonuç kategorisi yapılacak işler olarak bekliyor.
 
-**Nubbo’nun ana fikri: kullanıcı mevcut node’lara basit komutlar verir; program, bu komutları gerçek bilgisayarın değişken koşullarında tekrar tekrar güvenilir biçimde uygular. Node sayısından ve hızdan önce robust çalışma gelir.**
+## 18. Geliştirme döngüsü: Nubbo'yu Nubbo ile sınamak (dal: feat/test-profile)
+
+Bu bölüm, ürünü geliştirirken kullanılan **kendi kendini denetleyen döngüyü** anlatır. Amaç, "araç cevap verdi" ile "iş gerçekten oldu"yu karıştırmamaktır.
+
+**Ayrı örnek (şart).** `NUBBO_PROFILE=test` bir örneği **kendi klasörüne** koyar (akışlar, günlükler, jeton). Yalnız test profili kendi depo yolunu (`cwd`) alır; **gerçek profilin deposu yerinden oynamaz**. Jeton dosyası artık **uygulama sürümü + build damgası + profil** taşır; `nubbo where` "hangi örneğe bağlıyım"ı sürüm, build, jeton yaşı ve sağlıkla söyler.
+
+**Tek komutla temiz örnek.**
+- `node scripts/dev-seed-fixture.cjs test` → test profilini kapatır ve **sabit id'li fikstürü** yazar (`fixture-package` içinde `fixture-inner-type`, `fixture-inner-key`, `fixture-inner-wait`).
+- `node scripts/dev-start-test.cjs test` → jetonun gösterdiği süreci **ağacıyla** kapatır → yeni exe'yi **kapatma sonrası** kopyalar → profil + build damgasıyla açar → `/health` yanıt verene kadar bekler. (Sıralama önemli: kopyalama kapatmadan önce yapılırsa eski build sınanır.)
+
+**Senaryo + kanıt.**
+`node scripts/dev-scenario.cjs scripts/scenarios/<ad>.json` → branch açar, düzenlemeleri yapar, `run.from` ile koşar, `run.wait` ile bekler ve **senaryodaki beklentilere** göre karar verir; `test-artifacts/<ad>-<zaman>/` altına senaryo, tüm kontroller, **motor günlüğü**, `run.report`, hata görüntüsü ve `evidence.md` bırakır. Dört sınıf ayrı tutulur:
+`tool-answered` (kapı cevap verdi) · `input-sent` (motor yazdığı alanı geri okudu) · `observed` (adım/hata/resmî sonuç) · `completed` (diskte dosya, pencerede başlık). **Yalnız `completed` başarı sayılır.** Reddedilen bir çağrı kurulumu durdurur; beklentiler senaryodan gelir, koşucu onları asla yumuşatmaz.
+
+**Araç katmanındaki yenilikler (bu dalda).**
+- `flow.read` hangi **tuvalde** okuduğunu söyler (`tabName`, `tabs`) ve paketlerin içini `packagePath` ile listeler.
+- **`flow.edit` artık paketin içini düzenleyebilir**: `packagePath: ["<paket node id>"]` verilirse işlemler o paketin **iç grafına** yazılır; grup bu hedefi hatırlar (`target`), `materialize`/`anchorsOf`/`describeBranch` aynı yolu izler. Alternatif yol (`path`) çıkarımı yalnız kök düzeyde çalışır; paket içi gruplar oraya karışmaz.
+- `run.from { debug: true }` ilk hatalı adımda durur ve o anı dondurur; `run.report` node + paket yolu + kutu öğeleri + **son adımlar** + günlük + hata görüntüsü yolunu verir.
+- `run.from { fast: true }` koşuyu ekran aşamalarında tutar (model çağrısı yok); `run.wait { timeoutMs }` koşu bitene kadar bekler ve resmî sonucu gözlenen adımlarla birlikte döndürür.
+- `target.preview` hedef **aramayan** node'lar için (tuş/bekleme/bitir/kutu) "bulamadım" demez; ne yaptığını söyler.
+
+**Kurallar.** Motor (runner/agent/worker) değiştirilmez; düzeltmeler araç ve arayüz katmanında yapılır. Kullanıcının gerçek akışı ve açık tuvali test için **değiştirilmez** — öneri dalı + geçici klasör kullanılır. Bir sürüm yeniden açıldığında **eski jeton kullanılmaz** (yukarıdaki başlatıcı bunu garanti eder). `main`'e otomatik merge **yok**; değişiklik dalda, kanıtıyla birlikte PR olarak bırakılır.
+
+
