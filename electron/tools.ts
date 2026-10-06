@@ -148,6 +148,19 @@ type ToolDef = {
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
+/** The stages that look at the screen itself: no model call, so a look stays fast. */
+const FAST_STAGES = ['chrome', 'uia', 'icon', 'windows', 'onnx']
+
+/**
+ * Settings for a quick look: the model stages are dropped from the ladder. Called for
+ * `fast: true`, so an agent can check where a step would aim without waiting for a model round
+ * trip — and it follows the project rule that a certain, local job is not sent to a model.
+ */
+export function withFastFind(settings: AppSettings): AppSettings {
+  const order = settings.findOrder.filter((stage) => FAST_STAGES.includes(stage))
+  return { ...settings, findOrder: order.length ? order : ['uia'], findOff: [] }
+}
+
 /** The flow the caller means: its live canvas when it sent one, otherwise the saved flow. */
 function graphOf(args: Args, ctx: ToolContext): AgentGraph {
   const raw = args.graph
@@ -642,16 +655,26 @@ const flowRead: ToolDef = {
 
 const targetPreview: ToolDef = {
   name: 'target.preview',
-  summary: 'Bir node için Nubbo’nun nereyi hedefleyeceğini gösterir. Ekrana girdi göndermez.',
+  summary: 'Bir node için Nubbo’nun nereyi hedefleyeceğini gösterir. Ekrana girdi göndermez. fast: yalnız ekran aşamaları.',
   sendsInput: false,
   ready: true,
   run: async (args, ctx) => {
-    const graph = graphOf(args, ctx)
+    // A branch is looked at as its derived graph, exactly like a single step.
+    let graph = graphOf(args, ctx)
+    let branchNote = ''
+    if (text(args.branchId)) {
+      const picked = pickBranch(args, ctx)
+      if ('error' in picked) return failed(targetPreview.name, picked.error)
+      graph = picked.view.derived as AgentGraph
+      branchNote = ` · branch “${picked.branch.name}”`
+      if (picked.view.failed.length) branchNote += ` (${picked.view.failed.length} grup uymuyor)`
+    }
     const nodeId = text(args.nodeId)
     if (!nodeId) return failed(targetPreview.name, 'nodeId gerekli.')
     const place = findPlace(graph, nodeId)
-    if (!place) return failed(targetPreview.name, `Node bulunamadı: ${nodeId}`)
+    if (!place) return failed(targetPreview.name, `Node bulunamadı: ${nodeId}${branchNote}`)
     const node = place.node
+    const fast = args.fast === true
     // The engine is loaded only when a tool actually needs it, so the tool layer stays light
     // and testable. A separate, silent agent: a preview writes no memory, sends no patch and
     // keeps no log of its own.
@@ -660,7 +683,7 @@ const targetPreview: ToolDef = {
     const agent = createAgent({
       log: () => {},
       send: () => {},
-      settings: ctx.getSettings,
+      settings: () => (fast ? withFastFind(ctx.getSettings()) : ctx.getSettings()),
       shouldStop: () => false,
       onTargetTrace: (event) => {
         if (traces.length < 200) traces.push(event)
@@ -750,10 +773,10 @@ const flowContext: ToolDef = {
 
 const stepRun: ToolDef = {
   name: 'step.run',
-  summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır, akışı ilerletmez.',
+  summary: 'Tek adım: seçilen node’u mevcut motorla çalıştırır, akışı ilerletmez. fast: model aşamalarını atlar.',
   sendsInput: true,
   ready: true,
-  approvalNote: 'Tek adım: akış ilerlemez; döngü işareti, hafıza ve kayıtlı yol değişmez.',
+  approvalNote: 'Tek adım: akış ilerlemez; döngü işareti, hafıza ve kayıtlı yol değişmez. Hedef bulmak uzun sürebilir.',
   run: async (args, ctx) => {
     // A branch is stepped through as its derived graph: the saved flow and the open canvas stay
     // as they are, and the step highlight is not sent to a canvas that is not showing it.
@@ -781,7 +804,8 @@ const stepRun: ToolDef = {
     // The slot is claimed before the first await, so two callers cannot both get through and a
     // run cannot start on top of a step. It is released in the finally below.
     if (!beginProbe(nodeId)) return failed(stepRun.name, 'Başka bir tek adım sürüyor.')
-    const s = ctx.getSettings()
+    const fast = args.fast === true
+    const s = fast ? withFastFind(ctx.getSettings()) : ctx.getSettings()
     const timeoutMs = Math.min(15 * 60_000, Math.max(5_000, num(args.timeoutMs) ?? 120_000))
     const logs: string[] = []
     const traces: TargetTrace[] = []

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings, type CanvasBook } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
-import { callTool, toolList, actionSent, type ToolContext } from '../electron/tools'
+import { callTool, toolList, actionSent, withFastFind, type ToolContext } from '../electron/tools'
 import { beginRun, endRun } from '../electron/tool-state'
 
 let seq = 0
@@ -215,6 +215,22 @@ describe('araç katmanı', () => {
     expect((r.data?.addableKinds as string[])).toContain('condition')
     expect(r.message).toContain('locator')
     expect(r.message).toContain('paketlerin içi')
+  })
+
+  it('hızlı bakış yalnız ekran aşamalarını bırakır, model aşamalarını atar', () => {
+    const settings = {
+      findOrder: ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'],
+      findOff: ['list'],
+    } as unknown as AppSettings
+    const fast = withFastFind(settings)
+    expect(fast.findOrder).toEqual(['chrome', 'uia', 'icon', 'windows', 'onnx'])
+    expect(fast.findOrder).not.toContain('tars')
+    expect(fast.findOrder).not.toContain('offset')
+    expect(fast.findOff).toEqual([])
+    // Hiç ekran aşaması yoksa en azından UIA kalır: arama boş bir merdivenle çalışmaz.
+    expect(withFastFind({ findOrder: ['list', 'tars'], findOff: [] } as unknown as AppSettings).findOrder).toEqual(['uia'])
+    // Ve ayarın kendisi değişmez.
+    expect(settings.findOrder).toHaveLength(8)
   })
 
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {

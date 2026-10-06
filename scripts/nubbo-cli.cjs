@@ -33,7 +33,8 @@ const USAGE = `nubbo <komut> [seçenekler]
   preview | step | from | state | stop | screen
                                  Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
                                  sekmesinde "Dışarı açık" işaretli olmalı.
-             [--node <id>] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
+             [--node <id>] [--branch <id>] [--fast] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
+                                 --fast: yalnız ekran aşamaları (model çağrısı yok, çok daha hızlı)
 
   branch list                    Açık branch'leri listele (uygulama açık olmalı)
   branch create --name "<ad>"    Kendi branch'ini aç (temel: açık tuval)
@@ -131,6 +132,9 @@ function pidAlive(pid) {
   }
 }
 
+/** A tool that looks for a target can take minutes, so the client waits longer than it looks. */
+const REQUEST_TIMEOUT_MS = 15 * 60_000
+
 async function call(name, args) {
   const info = endpointFile()
   if (!info) {
@@ -147,9 +151,19 @@ async function call(name, args) {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${info.token}` },
       body: JSON.stringify({ name, args }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   } catch (e) {
-    console.error(`Uç noktaya ulaşılamadı: ${e.message}`)
+    const slow = e && (e.name === 'TimeoutError' || e.name === 'AbortError' || /fetch failed|timeout/i.test(String(e.message)))
+    if (slow) {
+      console.error(
+        `Araç ${Math.round(REQUEST_TIMEOUT_MS / 60000)} dakikada bitmedi ve istemci vazgeçti. ` +
+          'Uygulama çalışıyor olabilir ve adım hâlâ sürüyor: "state" ile durumu oku, gerekirse "stop" ile durdur. ' +
+          'Bir sonraki denemede --fast kullan (yalnız ekran aşamaları, model çağrısı yok).'
+      )
+    } else {
+      console.error(`Uç noktaya ulaşılamadı: ${e.message}`)
+    }
     process.exit(3)
   }
   if (res.status === 401) {
@@ -274,6 +288,7 @@ async function main() {
     const args = {}
     if (opts.node) args.nodeId = opts.node
     if (opts.branch) args.branchId = opts.branch
+    if (opts.fast) args.fast = true
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
