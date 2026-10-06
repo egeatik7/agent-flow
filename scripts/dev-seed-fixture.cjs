@@ -214,6 +214,182 @@ if (mode === 'ui') {
   }
   canvasName = 'Blender'
   summary = 'Başlangıç → win+d (masaüstünü aç) → win+r → yaz(başlat komutu + Enter) → 9 sn → Bitir'
+} else if (mode === 'suzannered') {
+  // Suzanne duruyor; simdi YALNIZ arayuzle kirmizi materyal: Material sekmesi -> New -> Base Color
+  // -> renk secicinin Hex alanina FF0000. Simge/kutu oldugu icin gorsel basamak gosterir.
+  const tab = createNode('click', 300, 0, 1)
+  tab.id = 'sr-tab'
+  tab.title = 'Kırmızı · Material Properties sekmesi'
+  tab.prompt = 'Properties panel header: the Material tab icon (red-and-white sphere), right side of the header'
+  const w1 = createNode('wait', 520, 0, 1)
+  w1.id = 'sr-w1'
+  w1.title = 'Kırmızı · 1,5 sn'
+  w1.ms = 1500
+  const neu = createNode('click', 740, 0, 1)
+  neu.id = 'sr-new'
+  neu.title = 'Kırmızı · “New” düğmesi'
+  neu.prompt = 'the New button inside the Material properties panel: the button labelled exactly New that sits on the same row as the words Material Properties'
+  const w2 = createNode('wait', 960, 0, 1)
+  w2.id = 'sr-w2'
+  w2.title = 'Kırmızı · 1,8 sn'
+  w2.ms = 1800
+  const swatch = createNode('click', 1180, 0, 1)
+  swatch.id = 'sr-swatch'
+  swatch.title = 'Kırmızı · Base Color kutusu'
+  swatch.prompt = 'the small colour swatch (a dark grey rectangle) immediately to the LEFT of the words Base Color, at the left end of that same row'
+  const w3 = createNode('wait', 1400, 0, 1)
+  w3.id = 'sr-w3'
+  w3.title = 'Kırmızı · 1,5 sn'
+  w3.ms = 1500
+  const hex = createNode('click', 1620, 0, 1)
+  hex.id = 'sr-hex'
+  hex.title = 'Kırmızı · Hex alanı'
+  hex.prompt = 'the Hex text field at the bottom of the colour picker dialog, the field that shows a hex colour value'
+  const w4 = createNode('wait', 1840, 0, 1)
+  w4.id = 'sr-w4'
+  w4.title = 'Kırmızı · 1,2 sn'
+  w4.ms = 1200
+  const type = createNode('type', 2060, 0, 1)
+  type.id = 'sr-type'
+  type.title = 'Kırmızı · FF0000 yaz'
+  type.text = 'FF0000'
+  type.pressEnter = true
+  type.clearFirst = true
+  const w5 = createNode('wait', 2280, 0, 1)
+  w5.id = 'sr-w5'
+  w5.title = 'Kırmızı · 1,5 sn'
+  w5.ms = 1500
+  const end = createNode('end', 2500, 0)
+  end.id = 'sr-end'
+  graph = {
+    nodes: [start, tab, w1, neu, w2, swatch, w3, hex, w4, type, w5, end],
+    edges: [
+      { id: 'sr-e1', from: start.id, fromPort: 'next', to: tab.id },
+      { id: 'sr-e2', from: tab.id, fromPort: 'next', to: w1.id },
+      { id: 'sr-e3', from: w1.id, fromPort: 'next', to: neu.id },
+      { id: 'sr-e4', from: neu.id, fromPort: 'next', to: w2.id },
+      { id: 'sr-e5', from: w2.id, fromPort: 'next', to: swatch.id },
+      { id: 'sr-e6', from: swatch.id, fromPort: 'next', to: w3.id },
+      { id: 'sr-e7', from: w3.id, fromPort: 'next', to: hex.id },
+      { id: 'sr-e8', from: hex.id, fromPort: 'next', to: w4.id },
+      { id: 'sr-e9', from: w4.id, fromPort: 'next', to: type.id },
+      { id: 'sr-e10', from: type.id, fromPort: 'next', to: w5.id },
+      { id: 'sr-e11', from: w5.id, fromPort: 'next', to: end.id },
+    ],
+  }
+  canvasName = 'Suzanne kırmızı'
+  summary = 'Başlangıç → tıkla(Material sekmesi) → tıkla(“New”) → tıkla(Base Color) → tıkla(Hex) → yaz(FF0000 + Enter) → Bitir (yalnız arayüz)'
+} else if (mode === 'suzanne') {
+  // YALNIZ insan arayuzu: Blender zaten acik. Ust menuden Add -> Mesh -> Monkey secilir.
+  // Betik yok, Python yok, kisayol yok: ekrandaki yaziyi okuyup tiklamak.
+  const addMenu = createNode('click', 300, 0, 1)
+  addMenu.id = 'sz-add'
+  addMenu.title = 'Suzanne · üst menüden “Add”'
+  addMenu.prompt = 'Add'
+  const w1 = createNode('wait', 520, 0, 1)
+  w1.id = 'sz-w1'
+  w1.title = 'Suzanne · 1,2 sn (menü)'
+  w1.ms = 1200
+  const mesh = createNode('click', 740, 0, 1)
+  mesh.id = 'sz-mesh'
+  mesh.title = 'Suzanne · “Mesh”'
+  mesh.prompt = 'Mesh'
+  const w2 = createNode('wait', 960, 0, 1)
+  w2.id = 'sz-w2'
+  w2.title = 'Suzanne · 1,2 sn (alt menü)'
+  w2.ms = 1200
+  const monkey = createNode('click', 1180, 0, 1)
+  monkey.id = 'sz-monkey'
+  monkey.title = 'Suzanne · “Monkey”'
+  monkey.prompt = 'Monkey'
+  const w3 = createNode('wait', 1400, 0, 1)
+  w3.id = 'sz-w3'
+  w3.title = 'Suzanne · 1,5 sn'
+  w3.ms = 1500
+  const end = createNode('end', 1620, 0)
+  end.id = 'sz-end'
+  graph = {
+    nodes: [start, addMenu, w1, mesh, w2, monkey, w3, end],
+    edges: [
+      { id: 'sz-e1', from: start.id, fromPort: 'next', to: addMenu.id },
+      { id: 'sz-e2', from: addMenu.id, fromPort: 'next', to: w1.id },
+      { id: 'sz-e3', from: w1.id, fromPort: 'next', to: mesh.id },
+      { id: 'sz-e4', from: mesh.id, fromPort: 'next', to: w2.id },
+      { id: 'sz-e5', from: w2.id, fromPort: 'next', to: monkey.id },
+      { id: 'sz-e6', from: monkey.id, fromPort: 'next', to: w3.id },
+      { id: 'sz-e7', from: w3.id, fromPort: 'next', to: end.id },
+    ],
+  }
+  canvasName = 'Suzanne arayüz'
+  summary = 'Başlangıç → tıkla(“Add”) → tıkla(“Mesh”) → tıkla(“Monkey”) → Bitir (yalnız arayüz, betik yok)'
+} else if (mode === 'blenderui') {
+  // Gercek arayuz isi: Blender acilir, sonra ARAYUZ menusunden maymun konur. Betik yok: motor
+  // ekrandaki yaziyi okuyup (OCR) ve gerekirse gorsel modelle menuyu bulup tiklar.
+  const key = createNode('key', 320, 0, 1)
+  key.id = 'bui-run'
+  key.title = 'Blender · Çalıştır penceresi'
+  key.keys = 'win+r'
+  const w1 = createNode('wait', 520, 0, 1)
+  w1.id = 'bui-w1'
+  w1.title = 'Blender · 0,9 sn'
+  w1.ms = 900
+  const type = createNode('type', 720, 0, 1)
+  type.id = 'bui-type'
+  type.title = 'Blender · başlat komutunu yaz'
+  type.text = '"C:\\Users\\ASUS TUF\\AppData\\Local\\Temp\\nubbo-blender-open.cmd"'
+  type.pressEnter = true
+  type.clearFirst = true
+  const w2 = createNode('wait', 920, 0, 1)
+  w2.id = 'bui-w2'
+  w2.title = 'Blender · 15 sn (açılış)'
+  w2.ms = 15000
+  // Add menusu: kisayol yerine TIKLAMA. Kisayol, "onde baska program var" korumasina takiliyor
+  // (uygulamayi acip sonra ona kisayol gondermek bugun ifade edilemiyor); tiklamalar koordinata
+  // gider ve arayuzu gercek bir insan gibi kullanir.
+  const addMenu = createNode('click', 1120, 0, 1)
+  addMenu.id = 'bui-add'
+  addMenu.title = 'Blender · üst menüden “Add”'
+  addMenu.prompt = 'Add'
+  const menu = addMenu
+  const w3 = createNode('wait', 1300, 0, 1)
+  w3.id = 'bui-w3'
+  w3.title = 'Blender · 1,2 sn (menü çizilsin)'
+  w3.ms = 1200
+  const mesh = createNode('click', 1500, 0, 1)
+  mesh.id = 'bui-mesh'
+  mesh.title = 'Blender · menüden “Mesh”'
+  mesh.prompt = 'Mesh'
+  const w4 = createNode('wait', 1700, 0, 1)
+  w4.id = 'bui-w4'
+  w4.title = 'Blender · 1,2 sn (alt menü)'
+  w4.ms = 1200
+  const monkey = createNode('click', 1900, 0, 1)
+  monkey.id = 'bui-monkey'
+  monkey.title = 'Blender · menüden “Monkey”'
+  monkey.prompt = 'Monkey'
+  const w5 = createNode('wait', 2100, 0, 1)
+  w5.id = 'bui-w5'
+  w5.title = 'Blender · 1,5 sn'
+  w5.ms = 1500
+  const end = createNode('end', 2300, 0)
+  end.id = 'bui-end'
+  graph = {
+    nodes: [start, key, w1, type, w2, menu, w3, mesh, w4, monkey, w5, end],
+    edges: [
+      { id: 'bui-e1', from: start.id, fromPort: 'next', to: key.id },
+      { id: 'bui-e2', from: key.id, fromPort: 'next', to: w1.id },
+      { id: 'bui-e3', from: w1.id, fromPort: 'next', to: type.id },
+      { id: 'bui-e4', from: type.id, fromPort: 'next', to: w2.id },
+      { id: 'bui-e5', from: w2.id, fromPort: 'next', to: menu.id },
+      { id: 'bui-e6', from: menu.id, fromPort: 'next', to: w3.id },      { id: 'bui-e7', from: w3.id, fromPort: 'next', to: mesh.id },
+      { id: 'bui-e8', from: mesh.id, fromPort: 'next', to: w4.id },
+      { id: 'bui-e9', from: w4.id, fromPort: 'next', to: monkey.id },
+      { id: 'bui-e10', from: monkey.id, fromPort: 'next', to: w5.id },
+      { id: 'bui-e11', from: w5.id, fromPort: 'next', to: end.id },
+    ],
+  }
+  canvasName = 'Blender arayüz'
+  summary = 'Başlangıç → win+r → yaz(blender aç) → 15 sn → tıkla(“Add”) → tıkla(“Mesh”) → tıkla(“Monkey”) → Bitir'
 } else {
 const pkg = createNode('package', 340, 0, 1)
 pkg.id = 'fixture-package'

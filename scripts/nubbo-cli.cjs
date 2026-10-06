@@ -37,7 +37,8 @@ const USAGE = `nubbo <komut> [seçenekler]
   click --target "<yazı>"         Akış kurmadan tıkla (act.click) · [--mode left|double|right]
   type  --text "<yazı>"           Akış kurmadan yaz (act.type) · [--into "<alan>"] [--enter] [--noclear]
   key   --keys "<kısayol>"        Akış kurmadan tuş gönder (act.key): "win+r", "ctrl+s", "enter"
-  wait  --ms <süre>               Akış kurmadan bekle (act.wait)
+  delay --ms <süre>               Akış kurmadan bekle (act.wait) · bekleme komutunun adı "delay",
+                                   çünkü "wait" koşuyu bekleyen komuttur.
                                    Bu dördü eylem sırasında pencereyi küçültür (masaüstü görünsün);
                                    --show ile pencere önde kalır. Hiçbiri akışa yazmaz.
   read                           Uygulamadaki CANLI akışı oku (araç katmanından, flow.read)
@@ -357,9 +358,10 @@ async function main() {
     process.exit(r && r.ok === false ? 2 : 0)
   }
 
-  if (cmd === 'click' || cmd === 'type' || cmd === 'key' || cmd === 'wait') {
+  if (cmd === 'click' || cmd === 'type' || cmd === 'key' || cmd === 'delay') {
     // Tek tek eylemler: bir akış kurmadan, node node çağırarak çalışmak için.
-    const tool = { click: 'act.click', type: 'act.type', key: 'act.key', wait: 'act.wait' }[cmd]
+    // NOT: bekleme komutunun adı "delay": "wait" zaten koşuyu bekleyen komut, gölgelenmemeli.
+    const tool = { click: 'act.click', type: 'act.type', key: 'act.key', delay: 'act.wait' }[cmd]
     const args = {}
     if (cmd === 'click') {
       if (typeof opts.target !== 'string') {
@@ -386,7 +388,7 @@ async function main() {
       }
       args.keys = opts.keys
     }
-    if (cmd === 'wait') args.ms = Number(opts.ms ?? 1000)
+    if (cmd === 'delay') args.ms = Number(opts.ms ?? 1000)
     if (opts.show === true) args.hide = false
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
     const r = await call(tool, args)
