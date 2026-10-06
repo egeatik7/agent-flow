@@ -666,6 +666,38 @@ describe('branch: kopya değil, tarif', () => {
     expect(String(failedShow.message)).toContain('gösterilemedi')
   })
 
+  it('iki onarım aynı branch’te birikir; yeni branch öncekini taşımaz ve bunu söyler', async () => {
+    const h = harness()
+    const id = await h.openBranch('Onarım 1 ve 2')
+    // Birinci onarım: beklemeyi kısalt. İkinci onarım: tıklamanın metnini değiştir.
+    const one = await callTool('flow.edit', { branchId: id, ops: [patchWait(h.wait.id, 4000)], note: 'onarım 1' }, h.ctx)
+    expect(one.ok).toBe(true)
+    const two = await callTool('flow.edit', { branchId: id, ops: [{ op: 'patchNode', id: h.click.id, fields: { prompt: 'Kaydet (yeni)' } }], note: 'onarım 2' }, h.ctx)
+    expect(two.ok).toBe(true)
+
+    // İki onarım da aynı türetilmiş grafikte: ikincisi birinciyi ezmiyor.
+    const view = viewBranch(h.book, h.branchOf(id))
+    const nodes = (view.derived as AgentGraph).nodes
+    expect((nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(4000)
+    expect((nodes.find((n) => n.id === h.click.id) as AgentNode).prompt).toBe('Kaydet (yeni)')
+    expect(h.branchOf(id).groups).toHaveLength(2)
+    expect(two.message).toContain('2 düzenleme')
+
+    // Yeni bir branch temel tuvalden başlar: önceki onarımları İÇERMEZ, ve uyarı bunu söyler.
+    const fresh = await callTool('branch.create', { name: 'Yeni yol' }, h.ctx)
+    expect(fresh.ok).toBe(true)
+    expect(String(fresh.message)).toContain('İÇERMEZ')
+    expect((fresh.data?.carriesEarlier as { name: string }[])[0].name).toBe('Onarım 1 ve 2')
+    const freshId = String(fresh.data?.branchId ?? '')
+    const freshView = viewBranch(h.book, h.branchOf(freshId))
+    expect(((freshView.derived as AgentGraph).nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(2000)
+
+    // Bilerek istenirse uyarı susar.
+    await callTool('branch.drop', { branchId: freshId }, h.ctx)
+    const onPurpose = await callTool('branch.create', { name: 'Bilinçli yeni yol', allowCarry: true }, h.ctx)
+    expect(String(onPurpose.message)).not.toContain('İÇERMEZ')
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')

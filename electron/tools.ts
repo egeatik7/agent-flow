@@ -372,15 +372,23 @@ const branchCreate: ToolDef = {
     const branch = newBranch(base, args.name)
     book.branches = [...open, branch]
     ctx.saveCanvases(book)
-    const message = `Branch açıldı: “${branch.name}” (${branch.id}) · temel: “${base.name}”. Akışın kopyası değil, düzenleme tarifi; akışa hiçbir şey yazılmadı. Düzenlemek için flow.edit, görmek için branch.diff.`
-    ctx.log('info', `Ajan · branch · ${message}`)
+    // A new branch starts from the canvas, not from another branch's recipe, so any edits already
+    // made elsewhere are not in it. Saying so is what stops a second repair from quietly undoing
+    // the first one: the earlier fix lives in its own branch, and continuing there keeps it.
+    const holding = open.filter((b) => b.groups.length > 0 && b.baseTabId === base.id)
+    const carry =
+      holding.length && args.allowCarry !== true
+        ? ` UYARI: “${holding.map((b) => b.name).join('”, “')}” branch’inde ${holding.reduce((n, b) => n + b.groups.length, 0)} düzenleme var ve bu yeni branch onları İÇERMEZ (temel tuvalden başlar). Önceki düzeltmeyi kaybetmemek için aynı branch’te devam et (flow.edit) ya da bilerek yeni bir yol istiyorsan allowCarry: true gönder.`
+        : ''
+    const message = `Branch açıldı: “${branch.name}” (${branch.id}) · temel: “${base.name}”. Akışın kopyası değil, düzenleme tarifi; akışa hiçbir şey yazılmadı. Düzenlemek için flow.edit, görmek için branch.diff.${carry}`
+    ctx.log(holding.length ? 'warn' : 'info', `Ajan · branch · ${message}`)
     return {
       ok: true,
       tool: branchCreate.name,
       outcome: 'tamam',
       message,
       observed: { note: 'Branch kaydı açıldı; koşan akışa ve tuvale dokunulmadı.' },
-      data: { branchId: branch.id, name: branch.name, baseTabId: base.id, baseName: base.name, baseStamp: branch.baseStamp, open: open.length + 1 },
+      data: { branchId: branch.id, name: branch.name, baseTabId: base.id, baseName: base.name, baseStamp: branch.baseStamp, open: open.length + 1, carriesEarlier: holding.map((b) => ({ branchId: b.id, name: b.name, groups: b.groups.length })) },
     }
   },
 }
