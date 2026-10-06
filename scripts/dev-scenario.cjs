@@ -166,7 +166,7 @@ async function main() {
     check('screen-free', 'tool-answered', free, `son girdiden ${idle < 0 ? '?' : Math.round(idle / 1000)} sn · gereken ${Math.round(need / 1000)} sn`)
     if (!free) {
       console.error(`\n${name} BAŞLATILMADI: ekran şu an kullanılıyor. Fareyi ve klavyeyi senden çalmamak için koşu başlatılmadı.`)
-      writeReport()
+      fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify({ scenario: name, passed: false, refused: 'screen-busy', checks }, null, 2), 'utf8')
       process.exit(4)
     }
   }

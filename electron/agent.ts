@@ -99,6 +99,75 @@ function center(t: { x: number; y: number; w: number; h: number }) {
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
 }
 
+/** Control types that carry their own click target. A control beats a label that merely names it. */
+const CLICKABLE_CONTROLS = [
+  'Button',
+  'MenuItem',
+  'Link',
+  'CheckBox',
+  'RadioButton',
+  'TabItem',
+  'ListItem',
+  'TreeItem',
+  'ComboBox',
+  'Edit',
+  'Image',
+]
+
+function normName(s: string): string {
+  return String(s || '')
+    .toLocaleLowerCase('tr')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** The candidate closest to the last click, because that is the one the person just aimed at. */
+function nearestTo(hits: ScreenItem[], near?: { x: number; y: number }): ScreenItem | undefined {
+  if (hits.length <= 1 || !near) return hits[0]
+  return hits.reduce((a, b) => {
+    const da = Math.hypot(a.x + a.w / 2 - near.x, a.y + a.h / 2 - near.y)
+    const db = Math.hypot(b.x + b.w / 2 - near.x, b.y + b.h / 2 - near.y)
+    return db < da ? b : a
+  })
+}
+
+/**
+ * The element a written click command means.
+ *
+ * The name must match exactly: a partial match is how the wrong control gets clicked. When several
+ * elements carry the same name, a real control is preferred over a text label, and then the one
+ * nearest the last click. This is also why the uia tree beats the text drawn on screen: the middle
+ * of an OCR box for a caption is not always the middle of the button.
+ */
+function clickableBy(items: ScreenItem[], wanted: string, near?: { x: number; y: number }): ScreenItem | undefined {
+  const w = normName(wanted)
+  if (!w) return undefined
+  const exact = items.filter((it) => normName(it.text) === w)
+  if (!exact.length) return undefined
+  const controls = exact.filter((it) => CLICKABLE_CONTROLS.includes(it.type))
+  return nearestTo(controls.length ? controls : exact, near)
+}
+
+/** Control types that actually accept typing. A label next to a field is not one of them. */
+const WRITABLE_TYPES = ['Edit', 'Document', 'ComboBox']
+
+/**
+ * The element a written command should be typed into.
+ *
+ * The visual stages can find the *label* beside a field and click its spot, which focuses the field,
+ * but typing needs the field element itself and that is only in the uia tree. Only editable control
+ * types are accepted and the name must match the command exactly. When more than one field matches,
+ * the one nearest the last click wins, because that is the field the person just selected.
+ */
+function writableBy(items: ScreenItem[], wanted: string, near?: { x: number; y: number }): ScreenItem | undefined {
+  const w = normName(wanted)
+  if (!w) return undefined
+  return nearestTo(
+    items.filter((it) => WRITABLE_TYPES.includes(it.type) && normName(it.text) === w),
+    near
+  )
+}
+
 /** Replace this lap's values with their placeholders so the trace fits the next lap too. */
 function generalize(line: string, vars: Record<string, string>): string {
   let out = line
@@ -405,6 +474,43 @@ export function createAgent(ctx: AgentContext) {
           const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true)
           if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
           log('info', '[chrome] Sayfada bulunamadı.')
+        }
+        if (stage === 'uia' && !loc && node.kind === 'click' && hasText) {
+          // A written click command with no saved element. The uia tree names the control itself,
+          // which is a better target than the text drawn on it - the middle of a caption's box is
+          // not always the middle of the button.
+          ctx.setMethod?.('Uygulama öğesi (UIA)')
+          const scan = await windowsScan()
+          const hit = clickableBy(scan.items, (quoted || prompt || '').trim(), lastClickPoint)
+          if (hit) {
+            log('info', `[uia] Uygulama öğesi bulundu: “${hit.text}” (${hit.type}) @${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)}`)
+            return resolved(
+              { ...center(hit), label: `uygulama öğesi “${hit.text || hit.type}”`, memo: memoOf(hit, scan.area, 'uia') },
+              'uia',
+              hit,
+              hit
+            )
+          }
+        }
+        if (stage === 'uia' && !loc && node.kind === 'type' && hasText) {
+          // A write node whose only command is written text, with no saved element. Typing needs the
+          // field itself, and the field is only in the uia tree: the visual text stages can find the
+          // label next to it and click it, which focuses the field, but they cannot type into it.
+          // Only an editable control type is accepted, and the value read back after typing is the
+          // proof - a read-only or disabled field simply fails that check instead of being trusted.
+          ctx.setMethod?.('Yazılabilir alan (UIA)')
+          const scan = await windowsScan()
+          const wanted = (quoted || prompt || '').trim()
+          const hit = writableBy(scan.items, wanted, lastClickPoint)
+          if (hit) {
+            log('info', `[uia] Yazılabilir alan bulundu: “${hit.text}” (${hit.type}) @${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)}`)
+            return resolved(
+              { ...center(hit), label: `yazılabilir alan “${hit.text || hit.type}”`, memo: memoOf(hit, scan.area, 'uia') },
+              'uia',
+              hit,
+              hit
+            )
+          }
         }
         if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)
           && (!quoted || locatorFitsText(node, quoted))) {
