@@ -71,4 +71,14 @@ describe('paketin içinde koptuğu yerden elle devam', () => {
     // g1 için B ve C işlenir (A tekrar edilmez), sonra g2 baştan işlenir.
     expect(clicked).toEqual(['B', 'C', 'A', 'B', 'C'])
   })
+
+  it('paketi seçip çalıştırırsan paket kendi başından başlar', async () => {
+    const { graph, pkg } = build()
+    const { ex, clicked } = recorder()
+
+    await runGraph(graph, ex, { maxSteps: 100, stepDelayMs: 0, startId: pkg.id, resume: true })
+
+    // İşaretli öğe için paket baştan: A, B, C. Sonra sıradaki öğe de baştan: A, B, C.
+    expect(clicked).toEqual(['A', 'B', 'C', 'A', 'B', 'C'])
+  })
 })
