@@ -87,6 +87,33 @@ edilmeyecek ✗. Kabul ölçütü: **`ui-local` model kapalıyken geçmeli** ✓
 **Ayrıca bulunan iki küçük kusur** ✗: (a) `until` sınırı başlangıç node'uyla aynıysa koşu durmuyor ✗;
 (b) koşu hatası **hangi node'da** düştüğünü söylemiyor ✗ (kutu içinde öğe adı geçiyor ✓).
 
+## Kapanış — açık kapandı ✓ (canlı kanıt)
+
+`uia` basamağı artık **yazılı komutu olan** node'lar için de koşuyor:
+- **Yazma**: yalnız **yazılabilir** öğe (`Edit`/`Document`/`ComboBox`) ve adı komutla **tam** eşleşen öğe;
+  kabul kanıtı yazdıktan sonra **değerin geri okunması** (§8 ✓) → salt-okunur alan bu kontrolü geçemez.
+- **Tıklama**: adı eşleşen öğe; **gerçek denetim**, yazı etiketine yeğlenir; birden fazlaysa **son tıklamaya en yakın**.
+
+| Senaryo | Model | Sonuç |
+|---|---|---|
+| `ui-local` | **KAPALI** | **Koşu geçti**: `ok:true · failed:0 · steps:5` ✓ · `Alan doğrulandı` ✓ · `"text":"nubbo-ui-test"` ✓ · `"id":"continue"` ✓ |
+| `ui-real` | AÇIK | **GEÇTİ 16/16** ✓ (aynı sonuçlar) |
+
+**Beklenmedik iyi haber** ✓: model kapalı koşuda fıkstür **önde değildi** (`host-foreground` ✗) ve akış
+**yine de geçti** → "sürülen pencere önde olmalı" ön koşulu bu iş için gerekli değilmiş ✓.
+
+**Kabul edilmesi gereken davranış değişikliği** ✗✓: yazılı komutlu **tıkla/yaz** node'u artık `uia`
+basamağında (metin basamaklarından **önce**) öğe arıyor → tıklama, yazının kutusunun ortası yerine
+**öğenin** ortasına düşüyor. Kayıtlı öğesi olan node'larda davranış **değişmiyor** ✗.
+
+**Küçük kusurlardan biri kapandı** ✓: tek adımlık sınır (`until` = başlangıç) artık **dürüstçe
+reddediliyor** ✓ (`"…tek adımlık bölge bu yolla ölçülemez… step.run kullan"` ✓). Diğeri zaten
+karşılanıyor ✓: koşu hatasının **hangi node'da** olduğunu `run.report` donmuş raporda söylüyor ✓.
+
+**Henüz ölçülmemiş olan** ✗ (dürüst sınır): gerçek Hunyuan–Blender akışında **saatlerce uzun koşu**;
+bellek/model çağrısı/gecikme eşikleri (§16) — bunlar gerçek görevle ölçülmeden "robust" denmez ✗.
+
+
 `Nubbo Agent Studio` **yerel basamaklarla bulunamadı** ve bu *ikinci hatayı* üretti. Aynı hedef, model
 açıkken (11. adım) bulundu. Yani yerel basamak açığı burada da görünür durumda; onarımın kendisi doğru.
 

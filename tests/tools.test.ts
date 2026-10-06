@@ -347,6 +347,20 @@ describe('araç katmanı', () => {
     endRun({ ok: true })
   })
 
+  it('sınırlı bölge: sınır başlangıçla aynıysa dürüstçe reddeder ve step.run’a yollar', async () => {
+    const { graph } = fixture()
+    const c = ctx(graph, { startRun: async () => ({ ok: true }) })
+    const nodeId = graph.nodes[0].id
+    const r = await callTool('run.from', { nodeId, untilNodeId: nodeId }, c)
+    expect(r.ok).toBe(false)
+    expect(String(r.message)).toContain('tek adımlık bölge')
+    expect(String(r.message)).toContain('step.run')
+    // Sınırsız ve iki uçlu bölge etkilenmez: yalnız aynı-node durumu reddedilir.
+    const ok = await callTool('run.from', { nodeId, untilNodeId: graph.nodes[1].id }, c)
+    expect(ok.ok).toBe(true)
+    endRun({ ok: true })
+  })
+
   it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
     const { graph, pkg, click } = fixture()
     const calls: { nodeId?: string; packagePath?: string[] }[] = []

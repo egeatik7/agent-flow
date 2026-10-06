@@ -1174,6 +1174,14 @@ const runFrom: ToolDef = {
     if (untilId && !nodeId) {
       return failed(runFrom.name, 'Sınırlı test için başlangıç node’u da gerekir (nodeId); bölge iki ucuyla belirtilir.')
     }
+    // The stop is checked between steps, so a single-node region cannot be measured this way: the
+    // chain is over before any boundary arrives. Saying so is better than pretending it stopped.
+    if (untilId && untilId === nodeId) {
+      return failed(
+        runFrom.name,
+        'Sınır başlangıçla aynı: tek adımlık bölge bu yolla ölçülemez (durdurma adımlar arasında denetlenir). Tek bir node denemek için step.run kullan.'
+      )
+    }
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
