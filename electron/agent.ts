@@ -5,6 +5,7 @@ import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { assertModelKeysAllowed } from './key-guard'
 import {
   containsText,
   containsTextStrict,
@@ -1164,7 +1165,7 @@ export function createAgent(ctx: AgentContext) {
         const t = trace.map((l) => generalize(l, vars))
         runTrace.set(node.id, t)
         send('agent:patch', { id: node.id, patch: { trace: t } })
-        log('success', `İnisiyatif hedefe ulaştı (${history.length} eylem).`)
+        log('success', `İnisiyatif hedefe ulaştı (${history.length} eylem; liste motoru ekrandan doğrulamaz).`)
         return true
       }
       if (a.action === 'fail') {
@@ -1177,6 +1178,7 @@ export function createAgent(ctx: AgentContext) {
           history.push(`${a.seconds} sn beklendi`)
         } else if (a.action === 'key') {
           if (!a.keys) throw new Error('tuş boş')
+          assertModelKeysAllowed(a.keys)
           checkStopped()
           lastInput = undefined; lastClickPoint = undefined
           await bridge.sendKeys(a.keys)
@@ -1286,6 +1288,7 @@ export function createAgent(ctx: AgentContext) {
       }
       case 'hotkey':
         if (a.keys?.length) {
+          assertModelKeysAllowed(a.keys)
           guiReplace = a.keys.join('+') === 'ctrl+a'
           if (a.keys.join('+') !== 'ctrl+a') { lastInput = undefined; lastClickPoint = undefined }
           await bridge.hotkey(a.keys)
@@ -1313,11 +1316,11 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
-  async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string }> {
+  async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string; verified: boolean }> {
     checkStopped()
     const s = getSettings()
     const model = modelChain(s.visionModel, s.visionBackups)
-    if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok' }
+    if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok', verified: false }
     try {
       await pause(800)
       const shot = await agentShot(tars, 'inisiyatif kontrol')
@@ -1327,11 +1330,11 @@ export function createAgent(ctx: AgentContext) {
         question: `Görev istenen sonuca ulaşmış mı? Bir programı açmak, penceresinin açık ve kullanılabilir olmasıdır. “bitir”, “finish” veya “complete” programı kapatmak değildir. Metinde kapat, çık, quit, exit veya kill yoksa uygulamayı kapatmayı isteme. Görev: ${goal}`,
         image: shot.img,
       })
-      return { ok: r.answer, reason: r.reason }
+      return { ok: r.answer, reason: r.reason, verified: true }
     } catch (e) {
       if (e instanceof StoppedError) throw e
       log('warn', `Bitti kontrolü yapılamadı, modelin sözüne güveniliyor: ${(e as Error).message}`)
-      return { ok: true, reason: '' }
+      return { ok: true, reason: '', verified: false }
     }
   }
 
@@ -1422,7 +1425,8 @@ export function createAgent(ctx: AgentContext) {
       if (r.ok) {
         const v = await verifyGoal(goal, tars)
         if (v.ok) {
-          log('success', `Kayıtlı yol hedefe ulaştı (${saved.length} adım).`)
+          if (v.verified) log('success', `Kayıtlı yol hedefe ulaştı (${saved.length} adım).`)
+          else log('warn', `Kayıtlı yol bitti ama hedef doğrulanamadı (${v.reason || 'kontrol modeli yok'}); akış “tamam” çıkışından devam ediyor.`)
           return true
         }
         log('info', `Kayıtlı yol bitti ama hedef tamam görünmüyor${v.reason ? ` (${v.reason})` : ''}. Model devam ediyor.`)
@@ -1495,7 +1499,8 @@ export function createAgent(ctx: AgentContext) {
         const v = await verifyGoal(goal, tars)
         if (v.ok) {
           savePath(node, path, vars)
-          log('success', `İnisiyatif hedefe ulaştı (${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
+          if (v.verified) log('success', `İnisiyatif hedefe ulaştı (${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
+          else log('warn', `İnisiyatif bitti dedi ama doğrulama yapılamadı (${v.reason || 'kontrol modeli yok'}); başarı olarak bildirilmiyor, akış “tamam” çıkışından devam ediyor.`)
           return true
         }
         rejected++
