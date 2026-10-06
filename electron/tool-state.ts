@@ -27,6 +27,12 @@ export type RunResult = {
   startId?: string
 }
 
+export type StepLine = { id: string; status: string; at: number }
+
+/**
+ * A box around the node carries everything a resume needs - which box, which item, and the
+ * variables resolved for it - and `LoopContext` from the context reader is already that shape.
+ */
 export type RunSnapshot = {
   runId?: string
   /** The node the engine last reported as running, or the probed node. */
@@ -72,8 +78,6 @@ const ARCHIVE_MAX = 3
 const STEP_RING = 60
 const LOG_RING = 200
 
-export type StepLine = { id: string; status: string; at: number }
-
 export type FrozenReport = {
   /** Which run this belongs to, and which failure inside it: two runs must never be mixed up. */
   runId: string
@@ -86,7 +90,7 @@ export type FrozenReport = {
   /** The engine's own message. Empty until it arrives, which the pending flag says. */
   error: string
   errorPending: boolean
-  loops: { title: string; index?: number; total?: number; item?: string }[]
+  loops: LoopContext[]
   packagePath: string[]
   steps: StepLine[]
   log: { level: string; text: string }[]

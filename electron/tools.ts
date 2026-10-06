@@ -1129,8 +1129,34 @@ const runFrom: ToolDef = {
     }
     const place = nodeId ? findPlace(graph, nodeId) : null
     if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}${branchNote}`)
-    // A bounded region test: run from here and stop after that node has finished, so a repair can
-    // be tried without the rest of the flow doing its work a second time.
+    // Resuming where the failure left off: the boxes around it and the item they were on are only
+    // known from the frozen report, and setting them back in the graph is what keeps a lap from
+    // starting its list over. It only ever happens on a branch copy, never on the saved flow.
+    let resumeNote = ''
+    if (args.resumeFromFailure === true) {
+      if (!derived) {
+        return failed(runFrom.name, 'Hatadan devam yalnız bir branch koşusunda yapılır; kayıtlı akışta işaretler değiştirilmez.')
+      }
+      const report = frozenReport(text(args.resumeRunId) || undefined)
+      if (!report) return failed(runFrom.name, 'Devam edilecek donmuş hata yok; önce debug: true ile koş.')
+      if (!report.loops.length) return failed(runFrom.name, 'Donmuş hatada kutu yok; devam edilecek öğe de yok.')
+      const missing: string[] = []
+      for (const box of report.loops) {
+        const at = box.id ? graph.nodes.find((n) => n.id === box.id) : undefined
+        const idx = typeof box.index === 'number' ? box.index : 0
+        if (!at) {
+          missing.push(box.title)
+          continue
+        }
+        at.loopIndex = idx
+        at.startIndex = idx
+      }
+      if (missing.length) return failed(runFrom.name, `Bazı kutular bu branch’te yok: ${missing.join(', ')}. Devam edilemez.`)
+      const inner = report.loops[report.loops.length - 1]
+      const vars = inner?.vars ? Object.entries(inner.vars).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(', ') : ''
+      resumeNote = ` · hatadan devam: “${inner?.title ?? '?'}” ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}${vars ? ` · değişkenler: ${vars}` : ''}`
+      ctx.log('info', `Ajan · buradan devam · aynı öğeden devam ediliyor: ${inner?.title ?? '?'} ${(inner?.index ?? 0) + 1}/${inner?.total ?? '?'}${inner?.item ? ` (“${inner.item}”)` : ''}.`)
+    }
     const untilId = text(args.untilNodeId)
     const untilPlace = untilId ? findPlace(graph, untilId) : null
     if (untilId && !untilPlace) return failed(runFrom.name, `Duracak node bulunamadı: ${untilId}${branchNote}`)
@@ -1153,7 +1179,7 @@ const runFrom: ToolDef = {
     // started, never that it finished.
     const runId = snapshot().runId
     const untilNote = untilId ? ` · “${untilPlace?.node.title ?? untilId}” bitince duracak (sınırlı bölge testi)` : ''
-    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}${untilNote}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
+    const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}${untilNote}${resumeNote}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
     ctx.log('info', `Ajan · buradan devam · ${message}`)
     return {
       ok: true,

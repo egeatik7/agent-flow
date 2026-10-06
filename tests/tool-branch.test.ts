@@ -19,7 +19,7 @@ import {
   windowSave,
   type BranchRecord,
 } from '../electron/tool-branch'
-import { beginRun, endRun } from '../electron/tool-state'
+import { beginRun, endRun, frozenReport, noteStep, setDebugRun } from '../electron/tool-state'
 import type { EditOp } from '../electron/tool-edit'
 
 const edge = (from: AgentNode, fromPort: string, to: AgentNode): AgentEdge => ({
@@ -586,6 +586,56 @@ describe('branch: kopya değil, tarif', () => {
     expect(after.nodes.some((n) => n.id === h.wait.id)).toBe(true)
     expect(after.nodes.some((n) => n.id === h.click.id)).toBe(true)
     expect(after.nodes.length).toBeGreaterThanOrEqual(before.split(',').length)
+  })
+
+  it('hatadan devam: donmuş kutunun aynı öğesinden başlar, kayıtlı akışa dokunmaz', async () => {
+    const h = harness()
+    const id = await h.openBranch('Devam sınaması')
+    // Kutulu bir akış: Başlangıç → kutu (öğeler: a, b, c) → Bitir
+    const box = createNode('loop', 300, 0, 1)
+    box.id = 'resume-loop'
+    box.title = 'Üç öğe'
+    box.items = ['a', 'b', 'c']
+    const inner = createNode('wait', 500, 0, 1)
+    inner.id = 'resume-inner'
+    inner.title = 'Öğe işi'
+    inner.ms = 100
+    box.members = [inner.id]
+    h.book.tabs[0].graph.nodes.push(box, inner)
+    h.book.tabs[0].graph.edges.push({ id: 're1', from: box.id, fromPort: 'next', to: inner.id })
+
+    // Donmuş bir hata varmış gibi: kutu ikinci öğede (index 1) ve çözülmüş değişkenleriyle.
+    beginRun(h.book.tabs[0].graph)
+    setDebugRun(true)
+    noteStep({ id: 'resume-inner', status: 'error' })
+    const frozen = frozenReport()
+    expect(frozen).not.toBeNull()
+    // Donma anında kutu bağlamı rapora girer.
+    const boxNote = { id: box.id, title: box.title, index: 1, total: 3, item: 'b', vars: { '{{öğe}}': 'b', '{{sıra}}': '2' } }
+    ;(frozen as unknown as { loops: unknown[] }).loops = [boxNote]
+    endRun({ ok: false })
+
+    // Kayıtlı akışta devam yok: işaretler yalnız branch kopyasında değişir.
+    const plain = await callTool('run.from', { branchId: '', nodeId: inner.id, resumeFromFailure: true, fromStart: true }, h.ctx)
+    expect(plain.ok).toBe(false)
+
+    const resumed = await callTool(
+      'run.from',
+      { branchId: id, nodeId: 'resume-inner', packagePath: [], derivedIgnore: true, resumeFromFailure: true, fromStart: true },
+      h.ctx
+    )
+    expect(resumed.ok).toBe(true)
+    expect(String(resumed.message)).toContain('hatadan devam')
+    expect(String(resumed.message)).toContain('2/3')
+    expect(String(resumed.message)).toContain('b')
+    expect(String(resumed.message)).toContain('{{sıra}}=2')
+    // Devam, kutunun işaretini gerçekten kurar.
+    const ran = h.runs.at(-1)?.graph as AgentGraph
+    const ranBox = ran.nodes.find((n) => n.id === box.id) as AgentNode
+    expect(ranBox.startIndex).toBe(1)
+    // Kayıtlı tuval dokunulmadı.
+    const baseBox = h.book.tabs[0].graph.nodes.find((n) => n.id === box.id) as AgentNode
+    expect(baseBox.startIndex ?? 0).toBe(0)
   })
 
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
