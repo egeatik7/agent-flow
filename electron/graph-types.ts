@@ -181,6 +181,8 @@ export type AppSettings = {
    * pressing a button is the approval. `ask` shows a confirmation for every acting call.
    */
   agentPermission: 'off' | 'ask' | 'auto'
+  /** Listen on 127.0.0.1 so an outside agent can reach the same tools the panel uses. */
+  agentEndpoint: boolean
 }
 
 export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } {
@@ -219,6 +221,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   findOff: ['list'],
   llmPrompts: {},
   agentPermission: 'ask',
+  agentEndpoint: false,
 }
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'

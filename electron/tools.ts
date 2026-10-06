@@ -86,6 +86,8 @@ export type ToolContext = {
   askApproval: (summary: string) => Promise<boolean>
   /** The user's own stop, for `run.stop`. */
   requestStop: () => void
+  /** Starts a real run on the engine. Returns when the run has finished. */
+  startRun: (graph: AgentGraph, startId?: string, packagePath?: string[]) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
 }
 
 /** `panel` is a person pressing a button in the app, which is its own approval. */
@@ -432,8 +434,75 @@ const stepRun: ToolDef = {
   },
 }
 
-const runStop: ToolDef = {
-  name: 'run.stop',
+const runFrom: ToolDef = {
+  name: 'run.from',
+  summary: 'Belirtilen node’dan akışı sürdürür. Koşu başlar ve hemen döner.',
+  sendsInput: true,
+  ready: true,
+  run: async (args, ctx) => {
+    const graph = graphOf(args, ctx)
+    if (ctx.isRunning()) return failed(runFrom.name, 'Bir koşu zaten sürüyor.')
+    if (probing()) return failed(runFrom.name, 'Tek adım sürüyor; bitmesini bekle.')
+    const nodeId = text(args.nodeId)
+    const place = nodeId ? findPlace(graph, nodeId) : null
+    if (nodeId && !place) return failed(runFrom.name, `Node bulunamadı: ${nodeId}`)
+    const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
+    const packagePath = asked.length ? asked : place?.packagePath ?? []
+    const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
+    const message = `Koşu başladı (${from}); durumu run.state ile izle, durdurmak için run.stop.`
+    ctx.log('info', `Ajan · buradan devam · ${message}`)
+    void ctx
+      .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined)
+      .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
+    return {
+      ok: true,
+      tool: runFrom.name,
+      outcome: 'tamam',
+      message,
+      node: place ? nodeRef(place) : undefined,
+      loop: nodeId ? loopOf(graph, nodeId) : undefined,
+      action: { kind: 'run', sent: true },
+      data: { started: true, startId: nodeId || null, packagePath },
+    }
+  },
+}
+
+const screenRead: ToolDef = {
+  name: 'screen.read',
+  summary: 'Pencereleri ve ekrandaki yazıları okur; isterse ekran görüntüsünün yolunu verir.',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const { listWindows, scan } = await import('./a11y-bridge')
+    const windows = await listWindows()
+    const windowTitle = text(args.windowTitle) || undefined
+    const wantImage = args.image === true
+    const s = await scan({
+      windowTitle,
+      ocr: true,
+      uia: true,
+      readOnly: true,
+      fresh: true,
+      image: wantImage ? 'plain' : 'none',
+      maxImageW: num(args.maxImageW) ?? 1600,
+      sig: true,
+    })
+    const items = (s.items ?? []).slice(0, 200).map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, w: i.w, h: i.h, src: i.src, type: i.type }))
+    const where = windowTitle ? `“${windowTitle}”` : 'önde olan pencere'
+    const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${s.shot ? ` · görüntü: ${s.shot}` : ''}`
+    ctx.log('info', `Ajan · ekranı oku · ${message}`)
+    return {
+      ok: true,
+      tool: screenRead.name,
+      outcome: 'tamam',
+      message,
+      observed: { note: s.shot ? `Ekran görüntüsü dosyası: ${s.shot}` : 'Görüntü istenmedi.' },
+      data: { windows: windows.slice(0, 40), window: s.window, area: s.area, ocr: s.ocr, shot: s.shot, sig: s.sig, items },
+    }
+  },
+}
+
+const runStop: ToolDef = {  name: 'run.stop',
   summary: 'Çalışan koşuyu durdurur.',
   sendsInput: false,
   ready: true,
@@ -489,12 +558,9 @@ const runState: ToolDef = {
 }
 
 /** Announced in the panel, refused with a clear reason until they are built. */
-const planned: ToolDef[] = [
-  { name: 'run.from', summary: 'Belirtilen node’dan akışı sürdürür.', sendsInput: true, ready: false },
-  { name: 'screen.read', summary: 'Pencereyi ve ekrandaki yazıları okur.', sendsInput: false, ready: false },
-]
+const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, targetPreview, stepRun, runState, runStop, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, targetPreview, stepRun, runState, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

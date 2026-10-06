@@ -29,6 +29,23 @@ export default function AgentTab({
   const [result, setResult] = useState<ToolResult | null>(null)
   const [error, setError] = useState('')
   const [specs, setSpecs] = useState<ToolSpec[]>([])
+  const [endpoint, setEndpoint] = useState<{ port: number; file: string } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const e = await api?.toolEndpoint?.()
+        if (alive && e) setEndpoint(e)
+        if (alive && !e) setEndpoint(null)
+      } catch {
+        /* the endpoint is optional */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [settings.agentEndpoint])
 
   useEffect(() => {
     let alive = true
@@ -83,6 +100,25 @@ export default function AgentTab({
           <option value="auto">Otomatik — onay sormaz</option>
         </select>
         <p className="hint">Bu sekmedeki düğmeler sorulmaz: düğmeye basman zaten onayın. Okuma araçları hiç sorulmaz.</p>
+      </div>
+
+      <div className="field">
+        <label>Dışarı açık (yerel uç nokta)</label>
+        <label style={{ display: 'block', fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={!!settings.agentEndpoint}
+            onChange={(e) => onSaveSettings({ agentEndpoint: e.target.checked })}
+          />{' '}
+          Yalnız 127.0.0.1 üzerinde dinle
+        </label>
+        <p className="hint">
+          {settings.agentEndpoint
+            ? endpoint
+              ? `Açık: http://127.0.0.1:${endpoint.port} · jeton dosyası: ${endpoint.file}`
+              : 'Açılıyor…'
+            : 'Kapalı. Açınca ajan araçları bu adresten çağırabilir; jeton dosyasından okunur, izin ayarı yine geçerli.'}
+        </p>
       </div>
 
       <div className="field">

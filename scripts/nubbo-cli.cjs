@@ -26,7 +26,9 @@ const USAGE = `nubbo <komut> [seçenekler]
   context  --file <akis.json> --node <id>
                                  Bir node'un paket yolunu ve kutu zincirini göster
   preview | step | from | state | stop | screen
-                                 Ekrana dokunan araçlar: Nubbo açık olmalı (1B)
+                                 Ekrana dokunan araçlar; Nubbo açık olmalı ve Ajan
+                                 sekmesinde "Dışarı açık" işaretli olmalı.
+             [--node <id>] [--window "<başlık>"] [--image] [--timeout <ms>] [--json]
 `
 
 function parse(argv) {
@@ -65,6 +67,78 @@ function toolContext(graph) {
     getSettings: () => ({}),
     log: () => {},
     isRunning: () => false,
+    userStop: () => false,
+    sendStep: () => {},
+    permission: () => 'off',
+    askApproval: async () => false,
+    requestStop: () => {},
+    startRun: async () => ({ ok: false }),
+  }
+}
+
+/** Where the running app leaves its address and token. */
+function endpointFile() {
+  const base = process.env.APPDATA || ''
+  const candidates = [
+    path.join(base, 'xp-agent-studio', 'tool-endpoint.json'),
+    path.join(base, 'Nubbo Agent Studio', 'tool-endpoint.json'),
+  ]
+  for (const file of candidates) {
+    try {
+      const info = JSON.parse(fs.readFileSync(file, 'utf8'))
+      if (info && info.port && info.token) return { port: info.port, token: info.token, file }
+    } catch {
+      /* try the next one */
+    }
+  }
+  return null
+}
+
+async function call(name, args) {
+  const info = endpointFile()
+  if (!info) {
+    console.error('Nubbo açık değil ya da Ajan uç noktası kapalı. Ajan sekmesinden "Dışarı açık" işaretlenmeli.')
+    process.exit(3)
+  }
+  let res
+  try {
+    res = await fetch(`http://127.0.0.1:${info.port}/call`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${info.token}` },
+      body: JSON.stringify({ name, args }),
+    })
+  } catch (e) {
+    console.error(`Uç noktaya ulaşılamadı: ${e.message}`)
+    process.exit(3)
+  }
+  if (res.status === 401) {
+    console.error('Jeton geçersiz; uygulama yeniden başlamış olabilir.')
+    process.exit(3)
+  }
+  const body = await res.json().catch(() => null)
+  if (!body) {
+    console.error('Cevap okunamadı.')
+    process.exit(3)
+  }
+  return body
+}
+
+function printResult(r, opts) {
+  if (opts.json) {
+    console.log(JSON.stringify(r, null, 2))
+    return
+  }
+  console.log(r.message ?? '')
+  if (r.target && r.target.found && typeof r.target.x === 'number') {
+    console.log(`hedef: ${r.target.stage ?? '—'} · ${r.target.candidates ?? '—'} aday · (${Math.round(r.target.x)}, ${Math.round(r.target.y)})`)
+  }
+  if (r.loop) {
+    console.log(`döngü: ${r.loop.title}${typeof r.loop.index === 'number' ? ` ${r.loop.index + 1}/${r.loop.total}` : ''}${r.loop.item ? ` · ${r.loop.item}` : ''}`)
+  }
+  if (r.data && r.data.steps) console.log(`adımlar: ${r.data.steps.done} tamam · ${r.data.steps.errors} hata`)
+  if (Array.isArray(r.log) && r.log.length) {
+    console.log('günlük:')
+    for (const line of r.log.slice(-6)) console.log(`  ${line}`)
   }
 }
 
@@ -155,8 +229,15 @@ async function main() {
   }
 
   if (cmd === 'preview' || cmd === 'step' || cmd === 'from' || cmd === 'state' || cmd === 'stop' || cmd === 'screen') {
-    console.error(`${cmd}: bu araç ekrana dokunur ve Nubbo açıkken çalışır. Yerel uç nokta 1B'de geliyor.`)
-    process.exit(2)
+    const remote = { preview: 'target.preview', step: 'step.run', from: 'run.from', state: 'run.state', stop: 'run.stop', screen: 'screen.read' }
+    const args = {}
+    if (opts.node) args.nodeId = opts.node
+    if (opts.window) args.windowTitle = opts.window
+    if (opts.image) args.image = true
+    if (opts.timeout) args.timeoutMs = Number(opts.timeout)
+    const r = await call(remote[cmd], args)
+    printResult(r, opts)
+    process.exit(r && r.ok === false ? 2 : 0)
   }
 
   if (cmd === 'context') {

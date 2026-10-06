@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
   callTool: (name: string, args?: unknown) => ipcRenderer.invoke('tools:call', name, args, 'panel'),
   toolList: () => ipcRenderer.invoke('tools:list'),
+  toolEndpoint: () => ipcRenderer.invoke('tools:endpoint'),
   openLogs: () => ipcRenderer.invoke('logs:open'),
 
   testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),

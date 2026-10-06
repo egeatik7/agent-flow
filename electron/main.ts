@@ -5,6 +5,7 @@ import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { callTool, toolList, type ToolSource } from './tools'
+import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import { beginRun, endRun, noteError, noteStep } from './tool-state'
 import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
@@ -373,6 +374,72 @@ function revealApp() {
 }
 
 /** Called from boot.ts once the splash window is already on screen. */
+/**
+ * Run a flow, from the start or from a node.
+ *
+ * The Ajanı Çalıştır and Seçiliden Çalıştır buttons and the tool layer both go through here,
+ * so a run an agent starts behaves exactly like a run started by hand: same target finding,
+ * same stop, same resource cleanup.
+ */
+async function runFlow(raw: AgentGraph, startId?: string, packagePath?: string[]): Promise<{ ok: boolean; failed?: number; stopped?: boolean }> {
+  if (running) throw new Error('Ajan zaten çalışıyor.')
+  running = true
+  stopRequested = false
+  let awake: number | undefined
+  let hidden = false
+  try {
+    const graph = normalizeGraph(raw)
+    store.set('graph', graph)
+    // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
+    beginRun(graph)
+    const s = getSettings()
+    let shotDir = ''
+    try {
+      shotDir = ensureLogsDir()
+      openRunLog()
+    } catch {
+      runLog = ''
+    }
+    agent.beginRun(shotDir)
+    globalShortcut.register(STOP_HOTKEY, () => {
+      stopRequested = true
+    })
+    awake = powerSaveBlocker.start('prevent-display-sleep')
+    if (runLog) log('info', `Günlük dosyası: ${runLog}`)
+    if (s.hideWhileRunning) {
+      log('info', 'Uygulama küçültülüyor; durdurmak için Ctrl+Shift+Q.')
+      hidden = await hideSelf()
+      revealHud()
+    }
+    const summary = await runGraph(graph, agent.executor, {
+      maxSteps: Math.max(1, s.maxSteps),
+      stepDelayMs: Math.max(0, s.stepDelayMs),
+      startId,
+      resume: !!startId,
+      packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
+    })
+    // A run that went through every step but had loop items end on an error is not a success.
+    return { ok: summary.failed === 0, failed: summary.failed }
+  } catch (e) {
+    if (e instanceof StoppedError) {
+      log('warn', 'Ajan durduruldu.')
+      return { ok: false, stopped: true }
+    }
+    log('error', (e as Error).message)
+    throw e
+  } finally {
+    // Reset the run state even when preparation failed before a resource
+    // was created, or a later OS cleanup call throws.
+    endRun()
+    running = false
+    runLog = ''
+    globalShortcut.unregister(STOP_HOTKEY)
+    if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
+    hideHudSoon()
+    if (hidden) showSelf()
+  }
+}
+
 export async function startApp(report: (pct: number, line: string) => void, closeSplash: () => void) {
   reportBoot = report
   closeBoot = closeSplash
@@ -423,6 +490,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
     store.set('settings', next)
     bridge.setOcrEngine(next.ocrEngine)
+    void syncEndpoint()
     return next
   })
 
@@ -459,11 +527,34 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     requestStop: () => {
       stopRequested = true
     },
+    startRun: (graph: AgentGraph, startId?: string, packagePath?: string[]) => runFlow(graph, startId, packagePath),
   }
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
     callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
   )
   ipcMain.handle('tools:list', () => toolList())
+
+  // The local door an outside agent uses. It exists only while the Ajan tab asks for it, and
+  // every call it carries goes through the same gate as the panel (source 'agent'), so the
+  // permission setting, the limits and the logging are the ones already written down.
+  const endpointFile = path.join(app.getPath('userData'), 'tool-endpoint.json')
+  async function syncEndpoint() {
+    const want = getSettings().agentEndpoint
+    const live = endpointInfo()
+    if (want && !live) {
+      try {
+        const started = await startEndpoint(toolContext, endpointFile)
+        log('info', `Ajan uç noktası açık: http://127.0.0.1:${started.port} · jeton dosyası: ${started.file}`)
+      } catch (e) {
+        log('error', `Ajan uç noktası açılamadı: ${(e as Error).message}`)
+      }
+    } else if (!want && live) {
+      await stopEndpoint()
+      log('info', 'Ajan uç noktası kapatıldı.')
+    }
+  }
+  ipcMain.handle('tools:endpoint', () => endpointInfo())
+  void syncEndpoint()
   ipcMain.handle('canvases:get', () => {
     const saved = store.get('canvases') as CanvasBook | undefined
     if (saved?.tabs?.length) return normalizeCanvasBook(saved)
@@ -539,64 +630,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return bridge.captureAtCursor()
   })
 
-  ipcMain.handle('agent:run', async (_e, raw: AgentGraph, startId?: string, packagePath?: string[]) => {
-    if (running) throw new Error('Ajan zaten çalışıyor.')
-    running = true
-    stopRequested = false
-    let awake: number | undefined
-    let hidden = false
-    try {
-      const graph = normalizeGraph(raw)
-      store.set('graph', graph)
-      // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
-      beginRun(graph)
-      const s = getSettings()
-      let shotDir = ''
-      try {
-        shotDir = ensureLogsDir()
-        openRunLog()
-      } catch {
-        runLog = ''
-      }
-      agent.beginRun(shotDir)
-      globalShortcut.register(STOP_HOTKEY, () => {
-        stopRequested = true
-      })
-      awake = powerSaveBlocker.start('prevent-display-sleep')
-      if (runLog) log('info', `Günlük dosyası: ${runLog}`)
-      if (s.hideWhileRunning) {
-        log('info', 'Uygulama küçültülüyor; durdurmak için Ctrl+Shift+Q.')
-        hidden = await hideSelf()
-        revealHud()
-      }
-      const summary = await runGraph(graph, agent.executor, {
-        maxSteps: Math.max(1, s.maxSteps),
-        stepDelayMs: Math.max(0, s.stepDelayMs),
-        startId,
-        resume: !!startId,
-        packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
-      })
-      // A run that went through every step but had loop items end on an error is not a success.
-      return { ok: summary.failed === 0, failed: summary.failed }
-    } catch (e) {
-      if (e instanceof StoppedError) {
-        log('warn', 'Ajan durduruldu.')
-        return { ok: false, stopped: true }
-      }
-      log('error', (e as Error).message)
-      throw e
-    } finally {
-      // Reset the run state even when preparation failed before a resource
-      // was created, or a later OS cleanup call throws.
-      endRun()
-      running = false
-      runLog = ''
-      globalShortcut.unregister(STOP_HOTKEY)
-      if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
-      hideHudSoon()
-      if (hidden) showSelf()
-    }
-  })
+  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[]) => runFlow(raw, startId, packagePath))
   ipcMain.handle('logs:open', async () => {
     const dir = ensureLogsDir()
     await shell.openPath(dir)

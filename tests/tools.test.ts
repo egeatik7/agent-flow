@@ -83,14 +83,11 @@ describe('araç katmanı', () => {
     expect((r.data?.packages as unknown[]).length).toBe(1)
   })
 
-  it('bilinmeyen aracı ve henüz hazır olmayanı açıkça reddeder', async () => {
+  it('bilinmeyen aracı açıkça reddeder', async () => {
     const { graph } = fixture()
     const unknown = await callTool('yok.boyle', {}, ctx(graph))
     expect(unknown.ok).toBe(false)
     expect(unknown.message).toContain('Bilinmeyen')
-    const planned = await callTool('run.from', { nodeId: 'x' }, ctx(graph))
-    expect(planned.ok).toBe(false)
-    expect(planned.message).toContain('hazır değil')
   })
 
   it('önizleme, eksik nodeId ve bilinmeyen node için motoru yüklemeden cevap verir', async () => {
@@ -114,7 +111,32 @@ describe('araç katmanı', () => {
     expect(list.find((t) => t.name === 'step.run')?.sendsInput).toBe(true)
     expect(list.find((t) => t.name === 'run.state')?.ready).toBe(true)
     expect(list.find((t) => t.name === 'run.stop')?.ready).toBe(true)
-    expect(list.find((t) => t.name === 'run.from')?.ready).toBe(false)
+    expect(list.find((t) => t.name === 'run.from')?.ready).toBe(true)
+    expect(list.find((t) => t.name === 'screen.read')?.ready).toBe(true)
+    // Katalogda "sırada" diye bekleyen araç kalmadı.
+    expect(list.every((t) => t.ready)).toBe(true)
+  })
+
+  it('buradan devam: kutu yoluyla koşuyu başlatır, sürerken reddeder', async () => {
+    const { graph, pkg, click } = fixture()
+    const calls: { nodeId?: string; packagePath?: string[] }[] = []
+    const starting = ctx(graph, {
+      startRun: async (_g, startId, packagePath) => {
+        calls.push({ nodeId: startId, packagePath })
+        return { ok: true }
+      },
+    })
+    const started = await callTool('run.from', { nodeId: click.id }, starting)
+    expect(started.ok).toBe(true)
+    expect(started.message).toContain('Koşu başladı')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].nodeId).toBe(click.id)
+    // Paket içindeki node: koşu doğru paket yolundan devam eder.
+    expect(calls[0].packagePath).toEqual([pkg.id])
+
+    const busy = await callTool('run.from', { nodeId: click.id }, ctx(graph, { isRunning: () => true }))
+    expect(busy.ok).toBe(false)
+    expect(busy.message).toContain('zaten sürüyor')
   })
 
   it('tek adım: eksik node, bilinmeyen node, başlangıç/bitir ve koşu sürerken reddedilir', async () => {

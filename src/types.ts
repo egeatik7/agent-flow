@@ -43,6 +43,7 @@ export type XpAgentApi = {
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
   toolList: () => Promise<ToolSpec[]>
+  toolEndpoint: () => Promise<{ port: number; file: string; startedAt: number } | null>
   openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>
