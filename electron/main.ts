@@ -653,6 +653,12 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     ) => applyMergeInWindow(payload, opts),
     showBranch: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) =>
       showBranchInWindow(payload, opts),
+    // One action at a time may step aside from the desktop, exactly like a run does.
+    hideApp: () => hideSelf(),
+    showApp: async () => {
+      showSelf()
+      return true
+    },
     takeMergeUndo: undefined,
     // Reading the undo does not consume it: a window that never answers must leave the right to
     // try again, and must not have the recipe put back while the merge is still in the flow.

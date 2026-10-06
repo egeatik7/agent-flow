@@ -156,6 +156,64 @@ if (mode === 'ui') {
   graph = { nodes: [start, pkg, end], edges: [{ id: 'pilot-r1', from: start.id, fromPort: 'next', to: pkg.id }, { id: 'pilot-r2', from: pkg.id, fromPort: 'next', to: end.id }] }
   canvasName = 'Pilot'
   summary = 'Başlangıç → Paket(“Pilot · paket ve döngü”: start → kutu[bir,iki] içinde win+r → yaz({{sıra}}.txt = {{öğe}}) → BULUNMAYAN yazıya tıkla) → Bitir'
+} else if (mode === 'blender') {
+  // Gerçek bir iş: Nubbo Blender'ı açar, küpü koyar ve kırmızı materyali atar. İş Blender'ın kendi
+  // Python'unda yapılır (fabrika ayarlarıyla, kullanıcının ayarlarına/addon'larına dokunulmaz) ve
+  // kanıt olarak %TEMP% içine bir rapor ile bir .blend yazar.
+  const key = createNode('key', 320, 0, 1)
+  key.id = 'blender-key'
+  key.title = 'Blender · Çalıştır penceresi'
+  key.keys = 'win+r'
+  // Once masaustundeki kisayola tiklanir: tek tik simgeyi secer ve odagi masaustune verir, boylece
+  // motor kisayolu guvenle gonderebilir (baska bir pencere ondeyken gondermiyor).
+  const pick = createNode('click', 120, 0, 1)
+  pick.id = 'blender-pick'
+  pick.title = 'Blender · masaüstündeki simgeye tıkla'
+  pick.prompt = 'Blender 5.2'
+  const wait0 = createNode('wait', 220, 0, 1)
+  wait0.id = 'blender-wait0'
+  wait0.title = 'Blender · 0,8 sn'
+  wait0.ms = 800
+  const wait1 = createNode('wait', 560, 0, 1)
+  wait1.id = 'blender-wait1'
+  wait1.title = 'Blender · 0,9 sn'
+  wait1.ms = 900
+  const type = createNode('type', 800, 0, 1)
+  type.id = 'blender-type'
+  type.title = 'Blender · başlat komutunu yaz'
+  type.text = '"C:\\Users\\ASUS TUF\\AppData\\Local\\Temp\\nubbo-blender-cube.cmd"'
+  type.pressEnter = true
+  type.clearFirst = true
+  const wait2 = createNode('wait', 1040, 0, 1)
+  wait2.id = 'blender-wait2'
+  wait2.title = 'Blender · 9 sn (açılış)'
+  wait2.ms = 9000
+  const end = createNode('end', 1280, 0)
+  end.id = 'blender-end'
+  // Once masaustu one gelir: pencere yoneticisi tum pencereleri kucultur, boylece Calistir kutusu
+  // temiz bir on planda acilir ve kullanici ne oldugunu ekranda gorur.
+  const desk = createNode('key', 160, 0, 1)
+  desk.id = 'blender-desktop'
+  desk.title = 'Blender · masaüstünü aç (win+d)'
+  desk.keys = 'win+d'
+  const waitDesk = createNode('wait', 220, 0, 1)
+  waitDesk.id = 'blender-wait-desk'
+  waitDesk.title = 'Blender · 1 sn'
+  waitDesk.ms = 1000
+  graph = {
+    nodes: [start, desk, waitDesk, key, wait1, type, wait2, end],
+    edges: [
+      { id: 'bl-e0', from: start.id, fromPort: 'next', to: desk.id },
+      { id: 'bl-e0b', from: desk.id, fromPort: 'next', to: waitDesk.id },
+      { id: 'bl-e1', from: waitDesk.id, fromPort: 'next', to: key.id },
+      { id: 'bl-e2', from: key.id, fromPort: 'next', to: wait1.id },
+      { id: 'bl-e3', from: wait1.id, fromPort: 'next', to: type.id },
+      { id: 'bl-e4', from: type.id, fromPort: 'next', to: wait2.id },
+      { id: 'bl-e5', from: wait2.id, fromPort: 'next', to: end.id },
+    ],
+  }
+  canvasName = 'Blender'
+  summary = 'Başlangıç → win+d (masaüstünü aç) → win+r → yaz(başlat komutu + Enter) → 9 sn → Bitir'
 } else {
 const pkg = createNode('package', 340, 0, 1)
 pkg.id = 'fixture-package'

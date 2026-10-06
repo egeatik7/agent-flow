@@ -43,6 +43,7 @@ import {
   type BranchRecord,
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
+import { actionGraph, runAction, type ActSpec } from './tool-act'
 import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, setStopAt, snapshot, stopReason } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
@@ -140,6 +141,9 @@ export type ToolContext = {
   peekMergeUndo?: () => { tabId: string; graph: AgentGraph } | null
   /** Asks the window to show a branch on the canvas, or to close the view. */
   showBranch?: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) => Promise<{ ok: boolean; error?: string }>
+  /** One action at a time may step aside from the desktop: the window minimizes so the screen is usable. */
+  hideApp?: () => Promise<boolean>
+  showApp?: () => Promise<boolean>
   /** Spends the undo right: clears the snapshot and puts the recipe back. */
   commitMergeUndo?: () => boolean
 }
@@ -1227,6 +1231,158 @@ export function windowMismatch(wanted: string, got: string | undefined): boolean
   return have !== want && !have.includes(want)
 }
 
+/**
+ * Tek tek eylemler: akış kurmadan çalışmanın kapısı.
+ *
+ * Her çağrı tek kullanımlık bir grafik kurar (tek node), motoru onun kopyasında koşturur ve node
+ * bitince durur. Tuval, branch ve kayıtlı akış görülmez; hiçbir şey yazılmaz. Motorun hedef bulma,
+ * odak ve güvenlik yolları aynen kullanılır. Uygulama eylem sırasında küçültülür (koşularda olduğu
+ * gibi) ki masaüstünde ne olduğu görülebilsin; sonda geri açılır.
+ */
+async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolContext): Promise<ToolResult> {
+  if (probing()) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
+  const { node } = actionGraph(spec)
+  if (!beginProbe(node.id)) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
+  const s = ctx.getSettings()
+  const timeoutMs = num(args.timeoutMs) ?? (spec.kind === 'wait' ? 60_000 : 90_000)
+  const logs: string[] = []
+  const traces: TargetTrace[] = []
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let hidden = false
+  try {
+    const { createAgent } = await import('./agent')
+    const agent = createAgent({
+      log: (level, message) => {
+        if (logs.length < 200) logs.push(`${level}: ${message}`)
+        ctx.log(level, `Ajan · eylem · ${message}`)
+      },
+      send: (channel, payload) => {
+        if (channel === 'agent:step') ctx.sendStep(payload)
+      },
+      settings: ctx.getSettings,
+      shouldStop: () => timedOut || ctx.userStop(),
+      setLoop: () => {},
+      setMethod: () => {},
+      onTargetTrace: (event) => {
+        if (traces.length < 200) traces.push(event)
+      },
+      captureTargetImages: false,
+    })
+    if (args.hide !== false && ctx.hideApp) hidden = await ctx.hideApp().catch(() => false)
+    timer = setTimeout(() => {
+      timedOut = true
+    }, timeoutMs)
+    const r = await runAction(spec, agent.executor, {
+      maxSteps: Math.max(1, s.maxSteps),
+      stepDelayMs: Math.max(0, s.stepDelayMs),
+      userStop: () => timedOut || ctx.userStop(),
+      onTrace: (e) => {
+        if (traces.length < 200) traces.push(e as TargetTrace)
+      },
+    })
+    const t = describeTrace(traces)
+    const where = `${t.text}${spec.kind === 'wait' ? '' : ` Seçilen: ${t.stage ?? '—'}${t.candidates !== undefined ? ` · ${t.candidates} aday` : ''}.`}`
+    if (timedOut) {
+      const message = `${spec.title} zaman aşımına uğradı (${Math.round(timeoutMs / 1000)} sn). ${where}`
+      ctx.log('warn', `Ajan · eylem · ${message}`)
+      return { ok: false, tool: name, outcome: 'hata', message, data: { logs: logs.slice(-16), status: r.status, ms: r.ms, stages: t.stages } }
+    }
+    if (r.status === 'done') {
+      const message = `${spec.title} yapıldı (${r.ms} ms). ${where}`
+      ctx.log('info', `Ajan · eylem · ${message}`)
+      return { ok: true, tool: name, outcome: 'tamam', message, action: { kind: spec.kind, sent: true }, data: { logs: logs.slice(-16), status: 'done', ms: r.ms, stages: t.stages } }
+    }
+    if (r.status === 'error') {
+      const message = `${spec.title} yapılamadı: hedef bulunamadı ya da eylem reddedildi. ${where}`
+      ctx.log('warn', `Ajan · eylem · ${message}`)
+      return { ok: false, tool: name, outcome: /ekranda bulunamadı|bulunamadı/.test(t.text) ? 'hedef-yok' : 'hata', message, action: { kind: spec.kind, sent: false }, data: { logs: logs.slice(-16), status: 'error', ms: r.ms, stages: t.stages } }
+    }
+    const message = `${spec.title} sonucu belirsiz: node sonuç bildirmedi (${r.ms} ms). ${where}`
+    ctx.log('warn', `Ajan · eylem · ${message}`)
+    return { ok: true, tool: name, outcome: 'eylem-belirsiz', message, action: { kind: spec.kind, sent: false }, data: { logs: logs.slice(-16), status: 'none', ms: r.ms, stages: t.stages } }
+  } finally {
+    if (timer) clearTimeout(timer)
+    endProbe()
+    if (hidden) await ctx.showApp?.().catch(() => false)
+  }
+}
+
+function actFields(args: Args): { spec: ActSpec; problem?: string } {
+  const target = text(args.target) || text(args.text)
+  const into = text(args.into)
+  const keys = text(args.keys)
+  return { spec: { kind: 'click', title: '', fields: {} }, problem: undefined }
+}
+
+const actClick: ToolDef = {
+  name: 'act.click',
+  summary: 'Şu an ekranda olan bir şeye tıkla (akış kurmadan). Hedefi metniyle söyle.',
+  sendsInput: true,
+  ready: true,
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
+    if (denied) return failed(actClick.name, denied)
+    const target = text(args.target)
+    if (!target) return failed(actClick.name, 'Ne tıklanacağını söyle: { target: "Kaydet" }.')
+    return runOneAction(
+      actClick.name,
+      { kind: 'click', title: `Tıkla: “${target}”`, fields: { prompt: target, ...(args.mode ? { clickMode: text(args.mode) } : {}) } },
+      args,
+      ctx
+    )
+  },
+}
+
+const actType: ToolDef = {
+  name: 'act.type',
+  summary: 'Ekrandaki alana yaz (akış kurmadan). Alanı metniyle söyle; boş bırakılırsa odaktaki alana yazar.',
+  sendsInput: true,
+  ready: true,
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
+    if (denied) return failed(actType.name, denied)
+    const body = text(args.text)
+    if (!body) return failed(actType.name, 'Ne yazılacağını söyle: { text: "merhaba" }.')
+    const into = text(args.into)
+    return runOneAction(
+      actType.name,
+      {
+        kind: 'type',
+        title: into ? `“${into}” alanına yaz` : 'Odaktaki alana yaz',
+        fields: { text: body, ...(into ? { prompt: into } : {}), pressEnter: args.enter === true, clearFirst: args.clear !== false },
+      },
+      args,
+      ctx
+    )
+  },
+}
+
+const actKey: ToolDef = {
+  name: 'act.key',
+  summary: 'Klavye kısayolu gönder (akış kurmadan): "win+r", "ctrl+s", "enter".',
+  sendsInput: true,
+  ready: true,
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
+    if (denied) return failed(actKey.name, denied)
+    const keys = text(args.keys)
+    if (!keys) return failed(actKey.name, 'Hangi tuş: { keys: "win+r" }.')
+    return runOneAction(actKey.name, { kind: 'key', title: `Tuş: ${keys}`, fields: { keys } }, args, ctx)
+  },
+}
+
+const actWait: ToolDef = {
+  name: 'act.wait',
+  summary: 'Belirtilen süre kadar bekle (akış kurmadan).',
+  sendsInput: false,
+  ready: true,
+  run: async (args, ctx) => {
+    const ms = num(args.ms) ?? 1000
+    return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle`, fields: { ms } }, args, ctx)
+  },
+}
+
 const screenRead: ToolDef = {
   name: 'screen.read',
   summary: 'Pencereleri ve ekrandaki yazıları okur; isterse ekran görüntüsünün yolunu verir.',
@@ -1477,7 +1633,7 @@ const runState: ToolDef = {
 /** Announced in the panel, refused with a clear reason until they are built. */
 const planned: ToolDef[] = []
 
-const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, branchShow, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, targetPreview, stepRun, runState, runReport, runWait, runStop, runFrom, screenRead, ...planned]
+const TOOLS: ToolDef[] = [flowRead, flowContext, flowSuggest, branchCreate, branchList, branchDiff, branchShow, flowEdit, flowUndo, branchMerge, mergeUndo, branchDrop, actClick, actType, actKey, actWait, targetPreview, stepRun, runState, runReport, runWait, runStop, runFrom, screenRead, ...planned]
 
 export function toolList(): ToolSpec[] {
   return TOOLS.map(({ name, summary, sendsInput, ready }) => ({ name, summary, sendsInput, ready }))

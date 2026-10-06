@@ -32,6 +32,14 @@ const USAGE = `nubbo <komut> [seçenekler]
              --ops-file <plan.json>  Planı dosyadan oku
              [--json]              Tam yapı
                                  Hiçbir şey yazmaz, akış dosyası değişmez.
+  call                            Herhangi bir aracı doğrudan çağır
+                                   call --tool act.click --args '{"target":"Kaydet"}'
+  click --target "<yazı>"         Akış kurmadan tıkla (act.click) · [--mode left|double|right]
+  type  --text "<yazı>"           Akış kurmadan yaz (act.type) · [--into "<alan>"] [--enter] [--noclear]
+  key   --keys "<kısayol>"        Akış kurmadan tuş gönder (act.key): "win+r", "ctrl+s", "enter"
+  wait  --ms <süre>               Akış kurmadan bekle (act.wait)
+                                   Bu dördü eylem sırasında pencereyi küçültür (masaüstü görünsün);
+                                   --show ile pencere önde kalır. Hiçbiri akışa yazmaz.
   read                           Uygulamadaki CANLI akışı oku (araç katmanından, flow.read)
   show --branch <id>             Öneriyi tuvalde göster (İncele gibi) · show --close kapatır
   preview | step | from | state | wait | report | stop | screen
@@ -326,6 +334,64 @@ async function main() {
     }
     console.log(`sağlık: ${health}`)
     process.exit(alive && health === 'yanıt veriyor' ? 0 : 3)
+  }
+
+  if (cmd === 'call') {
+    // Herhangi bir araç, doğrudan. Akış kurmadan tek tek çağırmanın en kısa yolu.
+    const tool = typeof opts.tool === 'string' ? opts.tool : ''
+    if (!tool) {
+      console.error('Kullanım: call --tool <araç> [--args \'<json>\']')
+      process.exit(2)
+    }
+    let args = {}
+    if (typeof opts.args === 'string') {
+      try {
+        args = JSON.parse(opts.args)
+      } catch (e) {
+        console.error(`--args JSON değil: ${e.message}`)
+        process.exit(3)
+      }
+    }
+    const r = await call(tool, args)
+    printResult(r, opts)
+    process.exit(r && r.ok === false ? 2 : 0)
+  }
+
+  if (cmd === 'click' || cmd === 'type' || cmd === 'key' || cmd === 'wait') {
+    // Tek tek eylemler: bir akış kurmadan, node node çağırarak çalışmak için.
+    const tool = { click: 'act.click', type: 'act.type', key: 'act.key', wait: 'act.wait' }[cmd]
+    const args = {}
+    if (cmd === 'click') {
+      if (typeof opts.target !== 'string') {
+        console.error('Kullanım: click --target "<ekrandaki yazı>"')
+        process.exit(2)
+      }
+      args.target = opts.target
+      if (typeof opts.mode === 'string') args.mode = opts.mode
+    }
+    if (cmd === 'type') {
+      if (typeof opts.text !== 'string') {
+        console.error('Kullanım: type --text "<yazılacak>" [--into "<alan etiketi>"] [--enter]')
+        process.exit(2)
+      }
+      args.text = opts.text
+      if (typeof opts.into === 'string') args.into = opts.into
+      if (opts.enter === true) args.enter = true
+      if (opts.noclear === true) args.clear = false
+    }
+    if (cmd === 'key') {
+      if (typeof opts.keys !== 'string') {
+        console.error('Kullanım: key --keys "win+r"')
+        process.exit(2)
+      }
+      args.keys = opts.keys
+    }
+    if (cmd === 'wait') args.ms = Number(opts.ms ?? 1000)
+    if (opts.show === true) args.hide = false
+    if (opts.timeout) args.timeoutMs = Number(opts.timeout)
+    const r = await call(tool, args)
+    printResult(r, opts)
+    process.exit(r && r.ok === false ? 2 : 0)
   }
 
   if (cmd === 'show') {
