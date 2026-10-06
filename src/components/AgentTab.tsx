@@ -3,21 +3,6 @@ import type { AgentGraph, AgentNode, AppSettings, ToolResult, ToolSpec } from '.
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
 
-/** One line of the branch list, as `branch.list` reports it. */
-type BranchRow = {
-  branchId: string
-  name: string
-  baseName: string | null
-  groups: number
-  ops: number
-  baseChanged: boolean
-  failed: string[]
-  size: number
-}
-
-/** A node a branch adds or changes, for the single-step picker. */
-type BranchNode = { id: string; kind: string; title: string }
-
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -46,12 +31,6 @@ export default function AgentTab({
   const [specs, setSpecs] = useState<ToolSpec[]>([])
   const [endpoint, setEndpoint] = useState<{ port: number; file: string } | null>(null)
   const [endpointTried, setEndpointTried] = useState(false)
-  const [branches, setBranches] = useState<BranchRow[]>([])
-  const [branchId, setBranchId] = useState('')
-  const [branchNodes, setBranchNodes] = useState<BranchNode[]>([])
-  const [branchNode, setBranchNode] = useState('')
-  const [mergeReady, setMergeReady] = useState('')
-  const [mergedOnce, setMergedOnce] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -109,125 +88,13 @@ export default function AgentTab({
     | null
     | undefined
 
-  /** The branch list is read on its own, so it does not push the last answer off the screen. */
-  const refreshBranches = async () => {
-    if (!api?.callTool) return
-    setBusy('branch.list')
-    try {
-      const r = await api.callTool('branch.list', {})
-      if (r.ok) setBranches(((r.data?.branches as BranchRow[] | undefined) ?? []).slice())
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const inspectBranch = async (id: string) => {
-    if (!api?.callTool) return
-    setBranchId(id)
-    setBranchNodes([])
-    setBranchNode('')
-    setBusy('branch.diff')
-    setError('')
-    setResult(null)
-    try {
-      const r = await api.callTool('branch.diff', { branchId: id })
-      setResult(r)
-      const d = r.data?.diff as { addedNodes?: BranchNode[]; changedNodes?: BranchNode[] } | undefined
-      setBranchNodes([...(d?.addedNodes ?? []), ...(d?.changedNodes ?? [])])
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  /** First step of a merge: this only computes the difference and says what would be written. */
-  const mergeTry = async (id: string) => {
-    if (!api?.callTool) return
-    setMergeReady('')
-    setBusy('branch.merge')
-    setError('')
-    setResult(null)
-    try {
-      const r = await api.callTool('branch.merge', { branchId: id })
-      setResult(r)
-      if (r.ok && r.data?.applied === false) setMergeReady(id)
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  /** Second step: the window applies it to the canvas and saves it; the recipe is dropped. */
-  const mergeApply = async (id: string) => {
-    if (!api?.callTool) return
-    setBusy('branch.merge')
-    setError('')
-    try {
-      const r = await api.callTool('branch.merge', { branchId: id, apply: true })
-      setResult(r)
-      setMergeReady('')
-      if (r.ok && r.data?.applied === true) setMergedOnce(true)
-      setBranchId('')
-      setBranchNodes([])
-      await refreshBranches()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  /** A wrong merge must be takeable back: once, from the flow it replaced. */
-  const mergeUndo = async () => {
-    if (!api?.callTool) return
-    setBusy('merge.undo')
-    setError('')
-    try {
-      const r = await api.callTool('merge.undo', {})
-      setResult(r)
-      if (r.ok) {
-        setMergedOnce(false)
-        await refreshBranches()
-      }
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const dropBranch = async (id: string) => {
-    if (!api?.callTool) return
-    setBusy('branch.drop')
-    try {
-      await api.callTool('branch.drop', { branchId: id })
-      if (branchId === id) {
-        setBranchId('')
-        setBranchNodes([])
-      }
-      await refreshBranches()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  useEffect(() => {
-    void refreshBranches()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   return (
     <div>
       <p className="hint">
         Ajan buradan Nubbo’nun <b>mevcut motorunu</b> kullanır: aynı hedef bulma, aynı odak, aynı hafıza. Hazır olanlar: <b>akışı okuma</b>,
-        <b> hedefi önizleme</b>, <b>tek adım çalıştırma</b> ve <b>branch önerisi</b> (tarif olarak; akışına yazmaz). Önizleme ekrana hiç
-        dokunmaz, tek adım ve branch testi dokunur ama akışı ilerletmez.
+        <b> hedefi önizleme</b> ve <b>tek adım çalıştırma</b>. Önizleme ekrana hiç dokunmaz, tek adım dokunur ama akışı ilerletmez.
+        <b> Ajanın önerileri (branch’ler)</b> artık burada değil: tuvalin sol altındaki <b>Ajan tavsiyeleri</b> penceresinde.
       </p>
 
       <div className="field">
@@ -336,86 +203,6 @@ export default function AgentTab({
         <p className="hint">Durum: hangi node, hangi kutu, hangi öğe, kaç adım gözlendi, son hata ne.</p>
       </div>
 
-      <div className="field">
-        <label>Ajan branch’leri (öneri tarifi)</label>
-        <button type="button" className="xp-btn" disabled={busy === 'branch.list'} onClick={() => void refreshBranches()}>
-          {busy === 'branch.list' ? 'Bakılıyor…' : 'Branch’leri yenile'}
-        </button>
-        {branches.length === 0 ? (
-          <p className="hint">
-            Açık branch yok. Ajan <b>branch.create</b> ile kendi branch’ini açar: bu, akışının <b>kopyası değil</b>, düzenleme tarifidir.
-            Senin akışına ve açık tuvaline hiçbir şey yazılmaz; tarifi ana akışa geçirmek (merge) sonraki adımda geliyor.
-          </p>
-        ) : (
-          <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: 12, lineHeight: 1.5 }}>
-            {branches.map((b) => (
-              <li key={b.branchId} style={{ marginBottom: 6 }}>
-                <b>{b.name}</b> · {b.groups} düzenleme · {b.ops} işlem · {(b.size / 1024).toFixed(1)} KB
-                {b.baseName ? ` · temel: ${b.baseName}` : ''}
-                {b.baseChanged ? ' · temeli değişmiş' : ''}
-                {b.failed?.length ? ` · ${b.failed.length} grup uymuyor` : ''}
-                <div style={{ marginTop: 2 }}>
-                  <button type="button" className="xp-btn" disabled={!!busy} onClick={() => void inspectBranch(b.branchId)}>
-                    İncele
-                  </button>
-                  <button
-                    type="button"
-                    className="xp-btn"
-                    style={{ marginLeft: 4 }}
-                    disabled={!!busy}
-                    onClick={() => void call('run.from', { branchId: b.branchId })}
-                  >
-                    Test et
-                  </button>
-                  <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void dropBranch(b.branchId)}>
-                    Sil
-                  </button>
-                  <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void mergeTry(b.branchId)}>
-                    Mergele
-                  </button>
-                  {mergeReady === b.branchId && (
-                    <button type="button" className="xp-btn" style={{ marginLeft: 4 }} disabled={!!busy} onClick={() => void mergeApply(b.branchId)}>
-                      Uygula (akışa yaz)
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {branchNodes.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            <select className="xp-input" value={branchNode} onChange={(e) => setBranchNode(e.target.value)}>
-              <option value="">— branch’te değişen bir node seç —</option>
-              {branchNodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title} ({n.kind})
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="xp-btn"
-              style={{ marginLeft: 4 }}
-              disabled={!branchNode || !!busy}
-              onClick={() => void call('step.run', { nodeId: branchNode, branchId })}
-            >
-              Tek adım (branch)
-            </button>
-          </div>
-        )}
-        <p className="hint">
-          <b>Test et</b> branch’i türetilmiş haliyle çalıştırır: kayıtlı akışa yazılmaz ve tuvalin döngü işaretlerini değiştirmez.
-          <b> İncele</b> yalnız farkı hesaplar. <b>Sil</b> yalnız tarifi siler; akışa hiçbir şey olmaz.
-          <b> Mergele</b> iki adımlıdır: önce yalnız ne yazılacağını söyler, sonra <b>Uygula</b> ile senin tuvaline yazılır ve kaydedilir.
-          Uygulanınca tarif silinir, çünkü aynı düzenlemeler artık akışın kendisinde.
-        </p>
-        {mergedOnce && (
-          <button type="button" className="xp-btn" disabled={!!busy} onClick={() => void mergeUndo()}>
-            {busy === 'merge.undo' ? 'Geri alınıyor…' : 'Son merge’ü geri al'}
-          </button>
-        )}
-      </div>
 
       {error && <p className="hint">Hata: {error}</p>}
 

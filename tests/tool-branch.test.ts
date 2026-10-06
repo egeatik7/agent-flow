@@ -163,6 +163,11 @@ describe('branch: kopya değil, tarif', () => {
     expect((diff.data?.diff as { changedNodes: unknown[] }).changedNodes).toHaveLength(1)
     expect((diff.data?.lines as string[]).some((l) => l.includes('4000'))).toBe(true)
     expect(diff.data?.baseChanged).toBe(false)
+    // Tuvale çizilebilsin diye türetilmiş grafik ve temeli de geliyor.
+    const derived = diff.data?.graph as AgentGraph
+    expect((derived.nodes.find((n) => n.id === h.wait.id) as AgentNode).ms).toBe(4000)
+    expect((diff.data?.baseGraph as AgentGraph).nodes.find((n) => n.id === h.wait.id)).toBeTruthy()
+    expect((diff.data?.baseGraph as AgentGraph).nodes.find((n) => n.id === h.wait.id)?.ms).toBe(2000)
   })
 
   it('geçersiz düzenlemeyi reddeder ve hiçbir şey eklemez', async () => {

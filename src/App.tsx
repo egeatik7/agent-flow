@@ -3,6 +3,7 @@ import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import NodeCanvas from './components/NodeCanvas'
+import BranchPanel from './components/BranchPanel'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
@@ -148,6 +149,9 @@ export default function App() {
   const [windows, setWindows] = useState<{ title: string; handle: string }[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
+  /** The branch being looked at, if any: it is the document on canvas until it is closed. */
+  const [branchDoc, setBranchDoc] = useState<{ id: string; name: string; nodes: string[]; edges: string[] } | null>(null)
+  const branchDocRef = useRef<{ id: string; name: string; nodes: string[]; edges: string[] } | null>(null)
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -219,9 +223,12 @@ export default function App() {
   }, [pushLog])
 
   const commitActive = useCallback((): CanvasBook => {
+    const cur = bookRef.current
+    // While a branch is on canvas, the open tab keeps what it had: a suggestion must never be
+    // saved as the flow, whatever the user does next (switching tabs, closing one, adding one).
+    if (branchDocRef.current) return cur
     const root = rooted(graphRef.current, stackRef.current)
     const id = activeIdRef.current
-    const cur = bookRef.current
     return {
       activeId: id,
       tabs: cur.tabs.map((t) => (t.id === id ? { ...t, graph: root } : t)),
@@ -231,6 +238,9 @@ export default function App() {
   const showCanvas = useCallback((book: CanvasBook, id: string) => {
     const tab = book.tabs.find((t) => t.id === id) ?? book.tabs[0]
     const next = { ...book, activeId: tab.id }
+    // Coming back to a real canvas ends the branch view.
+    branchDocRef.current = null
+    setBranchDoc(null)
     rememberBook(next)
     const view = reconcileLoopMembership(tab.graph)
     graphRef.current = view
@@ -280,9 +290,65 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded) return
+    // While a branch is being looked at, the canvas is that branch: saving it into the open tab
+    // would write the suggestion into the user's flow, which is exactly what must not happen.
+    if (branchDocRef.current) return
     const t = setTimeout(() => rememberBook(commitActive()), 400)
     return () => clearTimeout(t)
-  }, [graph, stack, loaded, rememberBook, commitActive])
+  }, [graph, stack, loaded, rememberBook, commitActive, branchDoc])
+
+  /**
+   * Shows a branch on the canvas without touching the flow.
+   *
+   * "İncele" makes the branch the document being looked at: the canvas draws its derived graph,
+   * the nodes and connections it changes are marked, and anything started from here runs the
+   * branch. The flow itself stays where it was — it is saved before the switch and restored when
+   * the view is closed, and nothing is written to it.
+   */
+  const inspectBranch = useCallback(
+    async (branchId: string) => {
+      if (!branchId) {
+        branchDocRef.current = null
+        setBranchDoc(null)
+        showCanvas(bookRef.current, activeIdRef.current)
+        pushLog('info', 'İnceleme kapatıldı; tuval kendi hâline döndü.')
+        return
+      }
+      if (!api?.callTool) return
+      try {
+        // The flow as it stands is kept first, so closing the view loses nothing.
+        rememberBook(commitActive())
+        const r = await api.callTool('branch.diff', { branchId })
+        const derived = r.data?.graph as AgentGraph | undefined
+        if (!r.ok || !derived) {
+          pushLog('warn', `Öneri açılamadı: ${r.message}`)
+          return
+        }
+        const d = r.data?.diff as { addedNodes?: { id: string }[]; changedNodes?: { id: string }[]; addedEdges?: string[] } | undefined
+        const nodes = [...(d?.addedNodes ?? []), ...(d?.changedNodes ?? [])].map((n) => n.id)
+        const edges = d?.addedEdges ?? []
+        const name = String((r.data?.name as string | undefined) ?? 'Öneri')
+        branchDocRef.current = { id: branchId, name, nodes, edges }
+        setBranchDoc(branchDocRef.current)
+        const view = reconcileLoopMembership(structuredClone(derived))
+        graphRef.current = view
+        stackRef.current = []
+        setStack([])
+        setGraph(view)
+        setSelectedNodeId(null)
+        setSelectedIds([])
+        selectedIdsRef.current = []
+        setSelectedEdgeId(null)
+        pushLog(
+          'info',
+          `İnceleme: “${name}” (${nodes.length} node, ${edges.length} yeni bağlantı). Kesikli çizgiler öneridir; Çalıştır bunu koşar, akışına yazılmaz.`
+        )
+      } catch (e) {
+        pushLog('error', `Öneri açılamadı: ${errText(e)}`)
+      }
+    },
+    [pushLog, rememberBook, commitActive, showCanvas]
+  )
 
   /**
    * A merge arrives from the tool layer and is applied here, because this side owns the book.
@@ -934,6 +1000,12 @@ export default function App() {
   }
 
   const exportGraph = () => {
+    if (branchDocRef.current) {
+      // The canvas is showing a suggestion, not the flow: exporting it would hand out a file that
+      // is not the user's flow at all.
+      pushLog('warn', `Dışa aktarma durduruldu: tuvalde “${branchDocRef.current.name}” önerisi inceleniyor. Önce incelemeyi kapat.`)
+      return
+    }
     const name = canvasName()
     const blob = new Blob([JSON.stringify(rooted(graphRef.current, stackRef.current), null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
@@ -1154,8 +1226,19 @@ export default function App() {
                 Paketten çık
               </button>
             )}
+            {branchDoc && (
+              <div className="branch-banner">
+                <b>İnceleme: “{branchDoc.name}”</b> · kesikli çizgiler ajanın önerisi ({branchDoc.nodes.length} node
+                {branchDoc.edges.length ? `, ${branchDoc.edges.length} yeni bağlantı` : ''}) · Çalıştır bunu koşar, akışına yazılmaz
+                <button type="button" className="xp-btn" style={{ marginLeft: 6 }} onClick={() => void inspectBranch('')}>
+                  İncelemeyi kapat
+                </button>
+              </div>
+            )}
+            <BranchPanel onInspect={(id) => void inspectBranch(id)} />
             <NodeCanvas
               graph={graph}
+              marks={branchDoc ? { nodes: branchDoc.nodes, edges: branchDoc.edges } : undefined}
               selectedNodeId={selectedNodeId}
               selectedIds={selectedIds}
               selectedEdgeId={selectedEdgeId}

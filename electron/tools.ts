@@ -433,7 +433,18 @@ const branchDiff: ToolDef = {
       outcome: 'tamam',
       message,
       observed: { note: 'Yalnız hesaplandı; akışa ve tuvale yazılmadı.' },
-      data: { diff: view.diff, lines: view.lines, applied: view.applied, failed: view.failed, baseChanged: view.baseChanged, baseName: view.base?.name ?? null },
+      data: {
+        diff: view.diff,
+        lines: view.lines,
+        applied: view.applied,
+        failed: view.failed,
+        baseChanged: view.baseChanged,
+        baseName: view.base?.name ?? null,
+        /** The derived flow itself, so the window can show the branch on the canvas. */
+        graph: view.derived,
+        baseGraph: view.base?.graph ?? null,
+        tabId: branch.baseTabId,
+      },
     }
   },
 }
