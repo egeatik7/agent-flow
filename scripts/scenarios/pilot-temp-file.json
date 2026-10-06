@@ -4,6 +4,7 @@
   "canvas": "Tuval 1",
   "setup": {
     "ops": [
+      { "op": "disconnect", "from": "{{start}}" },
       { "op": "addNode", "key": "run", "kind": "key", "fields": { "keys": "win+r", "title": "Pilot · Calistir" }, "connectFrom": "{{start}}" },
       { "op": "addNode", "key": "w1", "kind": "wait", "fields": { "ms": 900, "title": "Pilot · 0,9 sn" }, "connectFrom": "run" },
       {
