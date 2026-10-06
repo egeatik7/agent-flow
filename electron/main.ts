@@ -448,7 +448,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const r = await dialog.showOpenDialog(mainWindow, { title: 'Klasör seç', properties: ['openDirectory'] })
     const dir = r.filePaths[0]
     if (r.canceled || !dir) return null
-    return { folder: dir, files: listDirEntries(dir) ?? [] }
+    const files = listDirEntries(dir)
+    if (!files) {
+      // An unreadable folder is not an empty one: say so instead of handing back an empty
+      // list that makes the box look like it has nothing to do.
+      log('warn', `“${dir}” okunamadı; liste boş bırakıldı.`)
+      return { folder: dir, files: [] }
+    }
+    return { folder: dir, files }
   })
 
   ipcMain.handle('dialog:pickDir', async () => {

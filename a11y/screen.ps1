@@ -655,38 +655,47 @@ function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [in
   $solid = New-Bitmap24 $bmp
   $out = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
   $g = [System.Drawing.Graphics]::FromImage($out)
-  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
-  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-  $g.DrawImage($solid, 0, 0, $w, $h)
-  $solid.Dispose()
-  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
-  if ($marks) {
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
-    $font = New-Object System.Drawing.Font('Tahoma', 9, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $penU = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(230, 0, 90, 255)), 1
-    $penO = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(230, 255, 110, 0)), 1
-    $bgU = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 0, 70, 220))
-    $bgO = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 220, 90, 0))
-    foreach ($it in $items) {
-      $x = ($it.x - $rect.x) * $scale
-      $y = ($it.y - $rect.y) * $scale
-      $pen = $penU; $bg = $bgU
-      if ($it.src -eq 'ocr') { $pen = $penO; $bg = $bgO }
-      $g.DrawRectangle($pen, [float]$x, [float]$y, [float]([Math]::Max(2, $it.w * $scale)), [float]([Math]::Max(2, $it.h * $scale)))
-      $label = [string]$it.id
-      $sz = $g.MeasureString($label, $font)
-      $g.FillRectangle($bg, [float]$x, [float]([Math]::Max(0, $y - $sz.Height + 2)), [float]$sz.Width, [float]($sz.Height - 2))
-      $g.DrawString($label, $font, [System.Drawing.Brushes]::White, [float]$x, [float]([Math]::Max(0, $y - $sz.Height + 2)))
+  $font = $null; $penU = $null; $penO = $null; $bgU = $null; $bgO = $null
+  try {
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    $g.DrawImage($solid, 0, 0, $w, $h)
+    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+    if ($marks) {
+      $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+      $font = New-Object System.Drawing.Font('Tahoma', 9, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+      $penU = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(230, 0, 90, 255)), 1
+      $penO = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(230, 255, 110, 0)), 1
+      $bgU = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 0, 70, 220))
+      $bgO = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 220, 90, 0))
+      foreach ($it in $items) {
+        $x = ($it.x - $rect.x) * $scale
+        $y = ($it.y - $rect.y) * $scale
+        $pen = $penU; $bg = $bgU
+        if ($it.src -eq 'ocr') { $pen = $penO; $bg = $bgO }
+        $g.DrawRectangle($pen, [float]$x, [float]$y, [float]([Math]::Max(2, $it.w * $scale)), [float]([Math]::Max(2, $it.h * $scale)))
+        $label = [string]$it.id
+        $sz = $g.MeasureString($label, $font)
+        $g.FillRectangle($bg, [float]$x, [float]([Math]::Max(0, $y - $sz.Height + 2)), [float]$sz.Width, [float]($sz.Height - 2))
+        $g.DrawString($label, $font, [System.Drawing.Brushes]::White, [float]$x, [float]([Math]::Max(0, $y - $sz.Height + 2)))
+      }
     }
-    $font.Dispose(); $penU.Dispose(); $penO.Dispose(); $bgU.Dispose(); $bgO.Dispose()
+    $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+    $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+    $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), ([long]72)
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-preview-{0}.jpg" -f ([guid]::NewGuid().ToString('N')))
+    $out.Save($path, $codec, $ep)
+  } finally {
+    # One bad frame must not leave a full screen bitmap (and its pens) behind.
+    if ($null -ne $font) { $font.Dispose() }
+    if ($null -ne $penU) { $penU.Dispose() }
+    if ($null -ne $penO) { $penO.Dispose() }
+    if ($null -ne $bgU) { $bgU.Dispose() }
+    if ($null -ne $bgO) { $bgO.Dispose() }
+    $g.Dispose()
+    $solid.Dispose()
+    $out.Dispose()
   }
-  $g.Dispose()
-  $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
-  $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
-  $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), ([long]72)
-  $path = Join-Path ([System.IO.Path]::GetTempPath()) ("xpas-preview-{0}.jpg" -f ([guid]::NewGuid().ToString('N')))
-  $out.Save($path, $codec, $ep)
-  $out.Dispose()
   return [pscustomobject]@{ path = $path; data = ''; w = $w; h = $h; mime = 'image/jpeg' }
 }
 
