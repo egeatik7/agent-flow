@@ -8,6 +8,8 @@ release/*.blockmap
 .DS_Store
 out
 test-artifacts
+release/
+.claude/
 .env
 .env.*
 release/*.exe
