@@ -39,6 +39,11 @@ namespace System.Windows.Forms {
   public static System.Action<string> OnKey = null;
   public static void SendWait(string k){ Sent.Add(k); if (OnKey != null) OnKey(k); }
  }
+ // CapsLock is not toggled, only read: the test drives both states from here.
+ public static class Control {
+  public static bool CapsLockOn = false;
+  public static bool IsKeyLocked(object key){ return CapsLockOn; }
+ }
 }
 public static class XpInput {
  public sealed class Hit {
@@ -458,4 +463,18 @@ $bad = ''
 try { Send-KeyString '#rΩ' } catch { $bad = [string]$_.Exception.Message }
 Check ($bad.Length -gt 0 -and @([XpInput]::Chords).Count -eq 0) 'Validate later characters before executing an earlier Windows shortcut'
 
-Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) and plain shortcuts (win+r, ctrl+s) while old SendKeys strings stay on SendKeys.'
+# CapsLock: SendKeys never looks at it, so the worker flips a letter's case before handing it over.
+[System.Windows.Forms.Control]::CapsLockOn = $false
+Reset-Keys
+Send-TextPaced 'Kalem 1' 0
+Check (((@([System.Windows.Forms.SendKeys]::Sent)) -join '') -eq 'Kalem 1') 'With CapsLock off the text goes to SendKeys unchanged'
+[System.Windows.Forms.Control]::CapsLockOn = $true
+Reset-Keys
+Send-TextPaced 'Kalem 1' 0
+Check (((@([System.Windows.Forms.SendKeys]::Sent)) -join '') -eq 'kALEM 1') 'With CapsLock on letter cases are flipped for SendKeys, so the screen shows the text the flow asked for'
+Reset-Keys
+Send-TextPaced 'a1!+%' 0
+Check (((@([System.Windows.Forms.SendKeys]::Sent)) -join '') -eq 'A1!{+}{%}') 'With CapsLock on digits and symbols are left alone; only SendKeys escapes are added'
+[System.Windows.Forms.Control]::CapsLockOn = $false
+
+Write-Output 'PASS: worker syntax; readonly filtering; stable selection; closed/changed-window guard; adjacent label; empty clear; native Edit focus; classic Win32 form (Static captions, native text, password and unreadable boxes); clearing a box that ignores Ctrl+A; Windows key shortcuts (#, {WIN}, {LWIN}, {RWIN}) and plain shortcuts (win+r, ctrl+s) while old SendKeys strings stay on SendKeys; text is typed with the right letter case whether CapsLock is on or off.'

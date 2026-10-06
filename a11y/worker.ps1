@@ -9,11 +9,31 @@ function ConvertTo-SendKeysText([string]$t) {
   return ($t -replace '([\+\^%~\(\)\{\}\[\]])', '{$1}')
 }
 
+# CapsLock is a global key: the worker must not toggle it, it must type around it. A failure to
+# read it means "unknown", and unknown is treated as off, which is what the rest of the worker
+# assumes anyway.
+function Get-CapsLock {
+  try { return [bool][System.Windows.Forms.Control]::IsKeyLocked('CapsLock') } catch { return $false }
+}
+
+# SendKeys presses Shift for an upper case letter and none for a lower case one, and it never
+# looks at CapsLock. With CapsLock on, the physical result is therefore flipped, so the case is
+# flipped back before handing the character over: the screen then shows what the flow asked for.
+function Switch-TextCase([string]$t) {
+  if ([string]::IsNullOrEmpty($t)) { return $t }
+  $ch = [char]$t[0]
+  if ($ch -ge 'a' -and $ch -le 'z') { return [string][char]::ToUpperInvariant($ch) }
+  if ($ch -ge 'A' -and $ch -le 'Z') { return [string][char]::ToLowerInvariant($ch) }
+  return $t
+}
+
 function Send-TextPaced([string]$t, [int]$gapMs, [scriptblock]$checkFocus = $null) {
   if ([string]::IsNullOrEmpty($t)) { return }
+  $caps = Get-CapsLock
   foreach ($ch in $t.ToCharArray()) {
     if ($null -ne $checkFocus) { & $checkFocus }
-    [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText ([string]$ch)))
+    $out = if ($caps) { Switch-TextCase ([string]$ch) } else { [string]$ch }
+    [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $out))
     if ($gapMs -gt 0) { Start-Sleep -Milliseconds $gapMs }
   }
 }
