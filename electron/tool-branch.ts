@@ -44,8 +44,16 @@ function branchId(): string {
   return `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 }
 
-function groupId(): string {
+export function newGroupId(): string {
   return `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
+}
+
+/**
+ * Ids of the nodes a group adds: derived from the group, so looking at a branch twice gives the
+ * same graph. Without this a caller could not name a node it just saw in the difference.
+ */
+export function groupPrefix(groupId: string): string {
+  return `nb${groupId}`
 }
 
 export function cleanName(name: unknown): string {
@@ -81,8 +89,8 @@ export function newBranch(base: CanvasTab, name: unknown): BranchRecord {
   }
 }
 
-export function addGroup(branch: BranchRecord, ops: EditOp[], note?: string): BranchGroup {
-  const group: BranchGroup = { id: groupId(), at: Date.now(), ops, ...(note ? { note: String(note).slice(0, 200) } : {}) }
+export function addGroup(branch: BranchRecord, ops: EditOp[], note?: string, id?: string): BranchGroup {
+  const group: BranchGroup = { id: id ?? newGroupId(), at: Date.now(), ops, ...(note ? { note: String(note).slice(0, 200) } : {}) }
   branch.groups.push(group)
   if (branch.groups.length > MAX_GROUPS) branch.groups.splice(0, branch.groups.length - MAX_GROUPS)
   return group
@@ -107,7 +115,7 @@ export function materialize(base: AgentGraph, branch: BranchRecord): Materialize
   let applied = 0
   const failed: string[] = []
   for (const group of branch.groups) {
-    const check = planOps(graph, group.ops)
+    const check = planOps(graph, group.ops, groupPrefix(group.id))
     if (!check.ok) {
       failed.push(`${group.note ?? group.id}: ${check.errors[0]}`)
       continue
@@ -154,7 +162,7 @@ export function describeBranch(baseGraph: AgentGraph, branch: BranchRecord): str
   let graph = structuredClone(baseGraph)
   const lines: string[] = []
   for (const group of branch.groups) {
-    const check = planOps(graph, group.ops)
+    const check = planOps(graph, group.ops, groupPrefix(group.id))
     if (!check.ok) {
       lines.push(`(bu grup artık uymuyor: ${check.errors[0]})`)
       continue

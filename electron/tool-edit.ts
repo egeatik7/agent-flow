@@ -177,7 +177,7 @@ function autoSpot(graph: AgentGraph, taken: { x: number; y: number }[], anchor: 
  * Checks a list of operations against a graph and turns it into a plan: new nodes with their
  * ids already made, the real names behind keys, and the edges to write. Nothing is applied here.
  */
-export function planOps(graph: AgentGraph, raw: unknown): PlanCheck {
+export function planOps(graph: AgentGraph, raw: unknown, idPrefix?: string): PlanCheck {
   const errors: string[] = []
   const warnings: string[] = []
   const plan: Plan = { adds: [], patches: [], edges: [], cuts: [] }
@@ -191,6 +191,7 @@ export function planOps(graph: AgentGraph, raw: unknown): PlanCheck {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const keyToId = new Map<string, string>()
   const planned = new Map<string, AgentNode>()
+  let addedCount = 0
   const known = (ref: string): AgentNode | null => {
     const id = keyToId.get(ref) ?? ref
     return planned.get(id) ?? byId.get(id) ?? null
@@ -229,6 +230,19 @@ export function planOps(graph: AgentGraph, raw: unknown): PlanCheck {
       }
       const sameKind = graph.nodes.filter((n) => n.kind === newKind).length + plan.adds.filter((a) => a.node.kind === newKind).length
       const node = createNode(newKind, 0, 0, sameKind + 1)
+      // A recipe is applied again on every look, so an added node needs the *same* id each time:
+      // otherwise the id a caller just read would be gone by its next call. The prefix comes from
+      // the group the edits belong to; a clash with the flow's own ids is stepped over.
+      if (idPrefix) {
+        addedCount += 1
+        let candidate = `${idPrefix}-${addedCount}`
+        let guard = 0
+        while (byId.has(candidate) || planned.has(candidate)) {
+          guard += 1
+          candidate = `${idPrefix}-${addedCount}-${guard}`
+        }
+        node.id = candidate
+      }
       Object.assign(node, fields)
       if (typeof fields.x !== 'number' || typeof fields.y !== 'number') {
         const spot = autoSpot(graph, plan.adds.map((a) => ({ x: a.node.x, y: a.node.y })), anchor)

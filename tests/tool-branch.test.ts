@@ -8,7 +8,7 @@ import {
   type CanvasBook,
 } from '../electron/graph-types'
 import { callTool, type ToolContext } from '../electron/tools'
-import { MAX_BRANCHES, branchesOf, materialize, type BranchRecord } from '../electron/tool-branch'
+import { MAX_BRANCHES, branchesOf, materialize, viewBranch, type BranchRecord } from '../electron/tool-branch'
 import { beginRun, endRun } from '../electron/tool-state'
 import type { EditOp } from '../electron/tool-edit'
 
@@ -256,6 +256,33 @@ describe('branch: kopya değil, tarif', () => {
     const listing = await callTool('branch.list', {}, h.ctx)
     expect(listing.ok).toBe(true)
     expect(branchesOf(h.book)).toHaveLength(0)
+  })
+
+  it('türetilen node kimlikleri sabittir: fark, tek adım ve akış aynı kimliği görür', async () => {
+    const h = harness()
+    const id = await h.openBranch()
+    const edit = await callTool(
+      'flow.edit',
+      { branchId: id, ops: [{ op: 'addNode', key: 'w', kind: 'wait', fields: { ms: 900, title: 'deneme bekleme' } }] },
+      h.ctx
+    )
+    const first = await callTool('branch.diff', { branchId: id }, h.ctx)
+    const second = await callTool('branch.diff', { branchId: id }, h.ctx)
+    const added = (r: { data?: Record<string, unknown> }) => ((r.data?.diff as { addedNodes: { id: string }[] }).addedNodes[0]?.id ?? '')
+    const fromEdit = added(edit as { data?: Record<string, unknown> })
+    const fromFirst = added(first as { data?: Record<string, unknown> })
+    const fromSecond = added(second as { data?: Record<string, unknown> })
+
+    expect(fromEdit).toMatch(/^nb/)
+    expect(fromFirst).toBe(fromEdit)
+    // İkinci kez bakmak yeni kimlik üretmez; yoksa okuyan bir çağıran node'u adlandıramaz.
+    expect(fromSecond).toBe(fromFirst)
+    // Ve o kimlik türetilmiş grafikte gerçekten duruyor.
+    const view = viewBranch(h.book, h.branchOf(id))
+    expect(view.derived?.nodes.some((n) => n.id === fromFirst)).toBe(true)
+    // Aynı tarif ikinci kez uygulansa da aynı kimlikler: malzeme tekrarı id uydurmaz.
+    const again = materialize(h.book.tabs[0].graph, h.branchOf(id))
+    expect(again.graph.nodes.some((n) => n.id === fromFirst)).toBe(true)
   })
 
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {

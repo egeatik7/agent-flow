@@ -28,8 +28,10 @@ import {
   branchOps,
   branchesOf,
   findBranch,
+  groupPrefix,
   materialize,
   newBranch,
+  newGroupId,
   summaryOf,
   undoLast,
   viewBranch,
@@ -410,7 +412,10 @@ const flowEdit: ToolDef = {
     const picked = pickBranch(args, ctx)
     if ('error' in picked) return failed(flowEdit.name, picked.error)
     const { book, branch, view } = picked
-    const check = planOps(view.derived as AgentGraph, args.ops)
+    // The group id is chosen before checking so the ids this answer reports are the same ones a
+    // later look at the branch will show.
+    const groupId = newGroupId()
+    const check = planOps(view.derived as AgentGraph, args.ops, groupPrefix(groupId))
     if (!check.ok) {
       const head = check.errors.slice(0, 3).join(' ')
       const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
@@ -426,7 +431,7 @@ const flowEdit: ToolDef = {
       }
     }
     const lines = describePlan(view.derived as AgentGraph, check.plan)
-    const group = addGroup(branch, args.ops as EditOp[], text(args.note))
+    const group = addGroup(branch, args.ops as EditOp[], text(args.note), groupId)
     ctx.saveCanvases(book)
     const after = viewBranch(book, branch)
     const message = `“${branch.name}” branch’ine eklendi: ${after.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem). Geri almak için flow.undo (${group.id}). Akışına hiçbir şey yazılmadı.`
