@@ -73,11 +73,45 @@ yeni build'de doğru reddetti** ✓✓. Bu, incelemenin "damga derlemeye gömül
 önemli olduğunun canlı kanıtıdır.
 
 ## Bu bataryanın **kapsamadığı** şeyler ✗
-- Moturun (runner/agent) iç davranışı: bu batarya **araç katmanını** sınar; koşu/döngü/odak
-  yollarının tamamı burada değil.
+- Moturun yürütücü kısmı: graf gezinme, döngü kuralları, yargı ve hafıza **Katman 4'te** sınandı ✓;
+  ama eylemlerin gerçek uygulamaya karşı çalışması hâlâ kapsam dışı ✗.
 - Gerçek masaüstü tıklamaları: canlı katman yalnız **reddetme** yollarını kullandı; tıklama,
   yazma ve Blender arayüzü işleri bu bataryanın dışında (ayrı koşularda ölçülür).
-- Uzun koşu eşikleri (§16): bellek/model çağrısı/gecikme ölçülmedi.
+- Uzun koşu eşikleri (§16): **saatler** süren bellek/model çağrısı/gecikme ölçülmedi ✗.
+
+## Katman 4 (ikinci tur): **moturun saf mantığı** — 24 kontrol
+
+İlk batarya yalnız **araç katmanını** sınamış ve "moturun iç davranışı kapsam dışı" diye yazmıştı.
+Bu katman o boşluğu kapatır: `tool-context` (graf gezinme), `graph-types` (döngü kuralları),
+`runner` (giriş noktası, API kesintisi ayrımı, kesilebilir bekleme), `confirm` (tepki yargısı),
+`matcher` (yazı eşleştirme), `memory` (hafıza çelişkisi), `run-events` ve `profile`.
+
+**Sonuç:** ürün hatası **bulunmadı** ✗ — çünkü bu kez **önce sözleşmeler okundu** (önceki turun
+dersi). Buna karşılık 24 beklentimin **5'i yanlıştı** ve ölçümle düzeltildi:
+`walkGraph` düğüm değil **`NodePlace`** veriyor ✓ · `itemVars` anahtarları **normalleştiriyor** ✓ ·
+`norm('İNDİR')` → `'indir'` (birleşen nokta atılıyor ✓) · `noteActPoint({x,y})` nesne alıyor ✓ ·
+`stopReason()` sınır **konunca** değil **durulunca** doluyor ✓.
+
+**Yeni kanıtlanan davranışlar** (daha önce hiç sınanmamıştı):
+- **Döngü güvenli gezinme**: kendine bağlı düğümde gezinme **sonlanıyor** ✓ (sonsuz döngü yok ✓)
+- **İç içe kutular**: dış → iç sırası ✓ ve iç node paketin yolunu görüyor ✓
+- **Döngü kuralları**: liste kırpılır/boş satır düşer ✓ · sayım modunda `#1..#N` ✓ ·
+  `startIndex` sınırlanır (negatif→0 ✓, NaN→0 ✓, taşan→son ✓, `resume:false`→0 ✓)
+- **API kesintisi ayrımı (§9)**: 3 gerçek kesinti tanındı ✓ **ve 5 sıradan hata kesinti sayılmadı** ✓
+  (yanlış pozitif, bütün listeyi boşuna durdururdu ✓)
+- **Profil ayrımı**: yalnız **test** profili kendi çalışma klasörünü alır ✓; gerçek profilde `undefined` ✓
+  → **gerçek depo yerinden oynayamaz** ✓
+- **Türetilmiş koşu tuvali ışıklandırmaz**: `agent:step`/`agent:patch` reddedilir, `agent:log` geçer ✓
+- **Yargı dürüstlüğü (§17)**: "hazır" **yalnız** beklenen yazı **yeni** geldiğinde ✓; ölçüm:
+  `judgeScreen` zaten duran yazı için **`missed`** dedi (*"…tıklama ekranı değiştirmedi"* ✓) — **başarı demedi** ✓
+- **Hafıza (§6)**: en fazla **5** kayıt ✓, yeni kayıt başta ✓; başka pencere ✓ veya ekranın
+  bambaşka yeri ✓ **çelişki** olarak bildirilir, sessizce kullanılmaz ✓
+- **Kanıt arşivi sınırlı (§9 bellek)**: ölçüm → **30 debug koşusundan sonra 4 rapor** tutuluyor ✓
+- **Durdurma gecikmesi (§9)**: 5 saniyelik bekleme, istek gelince **600 ms altında** kesiliyor ✓
+- **Giriş noktası**: açık kimlik > `Başlangıç` > girdisi olmayan ilk node ✓
+
+**Hâlâ kapsam dışı** ✗: yürütücünün masaüstüne dokunan kısmı (tıklama/yazma/döngü, gerçek
+uygulamaya karşı) ve **saatler süren** kaynak/gecikme eşikleri (§16).
 
 ## Nasıl yeniden koşulur
 ```powershell
