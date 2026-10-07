@@ -346,7 +346,15 @@ async function main() {
       process.exit(2)
     }
     let args = {}
-    if (typeof opts.args === 'string') {
+    if (typeof opts['args-file'] === 'string') {
+      // JSON'u kabuk tırnaklarıyla geçirmek kırılgan: dosyadan okumak sağlam yol.
+      try {
+        args = JSON.parse(fs.readFileSync(opts['args-file'], 'utf8').replace(/^\uFEFF/, ''))
+      } catch (e) {
+        console.error(`--args-file okunamadı: ${e.message}`)
+        process.exit(3)
+      }
+    } else if (typeof opts.args === 'string') {
       try {
         args = JSON.parse(opts.args)
       } catch (e) {
@@ -433,6 +441,8 @@ async function main() {
     // Sınırlı bölge testi: "--until <node>" olmadan seçenek sessizce yok sayılıyordu.
     if (opts.until) args.untilNodeId = opts.until
     if (opts.window) args.windowTitle = opts.window
+    // Belirli bir koşunun donmuş raporunu istemek: report --run-id <id>
+    if (opts['run-id']) args.runId = opts['run-id']
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)
     const r = await call(remote[cmd], args)
