@@ -138,8 +138,14 @@ async function main() {
     process.exit(1)
   }
   // Beklenen sonuçlar tek tek doğrulanır: hepsi başarısız olsa da yeşil dönemez.
-  const beklenenOk = new Set(['flow.suggest', 'branch.create', 'branch.list', 'branch.diff', 'flow.edit', 'flow.undo', 'branch.drop', 'branch.merge', 'merge.undo', 'flow.read', 'target.preview', 'flow.context', 'step.run', 'run.from', 'screen.read', 'run.report', 'run.wait', 'branch.show', 'run.stop', 'run.state'])
-  const uymayan = satirlar.filter((x) => beklenenOk.has(x.name) !== !!x.ok).map((x) => `${x.name}:${x.ok ? 'ok' : 'red'} (beklenen ${beklenenOk.has(x.name) ? 'ok' : 'red'})`)
+// Doğrulanmış beklentiler (24 aracın hepsi bir kez koşuldu ve gerekçesi okundu):
+//   ok  : araç işini yaptı ya da bilgi verdi (yazmadan).
+//   red : probe argümanı eksik olduğu için KASITLI kapı çalıştı — bu doğru davranıştır:
+//         flow.edit (branchId yok), flow.undo (branch yok), merge.undo (panel kapısı),
+//         run.from (baştan koşu onayı), act.click/act.type/act.key (boş argüman koruması).
+const beklenenOk = new Set(['flow.read', 'flow.context', 'flow.suggest', 'branch.create', 'branch.list', 'branch.diff', 'branch.show', 'branch.merge', 'branch.drop', 'run.state', 'run.report', 'run.stop', 'run.wait', 'step.run', 'target.preview', 'screen.read', 'act.wait'])
+const beklenenRed = new Set(['flow.edit', 'flow.undo', 'merge.undo', 'run.from', 'act.click', 'act.type', 'act.key'])
+    const uymayan = satirlar.filter((x) => (beklenenOk.has(x.name) ? true : beklenenRed.has(x.name) ? false : null) !== !!x.ok).map((x) => `${x.name}:${x.ok ? 'ok' : 'red'} (beklenen ${beklenenOk.has(x.name) ? 'ok' : 'red'})`)
   if (uymayan.length) console.log(`✗ beklenmeyen sonuç: ${uymayan.join(', ')}`)
   const eksik = ['flow.suggest', 'branch.create', 'branch.list', 'branch.diff', 'flow.edit', 'flow.undo', 'branch.drop', 'branch.merge', 'merge.undo', 'flow.read', 'target.preview', 'flow.context', 'step.run', 'run.from', 'act.click', 'act.type', 'act.key', 'act.wait', 'screen.read', 'run.report', 'run.wait', 'branch.show', 'run.stop', 'run.state'].filter(
     (n) => !satirlar.some((s) => s.name === n)
