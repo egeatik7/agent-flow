@@ -1660,12 +1660,19 @@ const runStop: ToolDef = {
   sendsInput: false,
   ready: true,
   run: async (_args, ctx) => {
+    // Ölçüldü: koşu yokken "durdurma istendi" demek yanıltıcıydı — run.state "Şu an koşu yok"
+    // derken bu araç durdurma istendi diye raporluyordu. Doğrusu: koşu varsa istek iletildi, yoksa
+    // hiçbir koşunun durdurulmadığı açıkça söylenir (istek yine kaydedilir, bir sonraki koşu onu
+    // beginRun ile temizler).
+    const kosuyor = ctx.isRunning()
     ctx.requestStop()
     // Said out loud so a stop by the person is never read as a debug failure or a finished region.
     noteUserStop()
-    const message = 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
-    ctx.log('warn', `Ajan · durdur · ${message}`)
-    return { ok: true, tool: runStop.name, outcome: 'tamam', message }
+    const message = kosuyor
+      ? 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
+      : 'Şu an koşu yok; durdurulacak bir koşu bulunmadı. İstek yine de kaydedildi (bir sonraki koşu temiz başlar).'
+    ctx.log(kosuyor ? 'warn' : 'info', `Ajan · durdur · ${message}`)
+    return { ok: true, tool: runStop.name, outcome: 'tamam', message, observed: { note: kosuyor ? 'Koşu sürüyordu.' : 'Koşu yoktu.' } }
   },
 }
 
