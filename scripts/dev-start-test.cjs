@@ -80,6 +80,72 @@ function killTree(pid) {
   const r = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
   return r.status === 0
 }
+/**
+ * Portable paket kendini %TEMP% altına açar; zorla öldürülünce klasör kalır (~330 MB).
+ * Kural ürünle AYNI: dist-electron/temp-sweep.js içindeki saf fonksiyon kullanılır.
+ * Ölçüldü: 5 günde 16 klasör · 4,93 GB; sızıntının kaynağı bu geliştirme döngüsüydü.
+ */
+function portableTempSupur() {
+  try {
+    const kural = require(path.join(root, 'dist-electron', 'temp-sweep.js'))
+    const dir = os.tmpdir()
+    const adlar = fs.readdirSync(dir).filter((ad) => {
+      try {
+        return fs.statSync(path.join(dir, ad)).isDirectory()
+      } catch {
+        return false
+      }
+    })
+    const girdiler = kural.geciciGirdileriTopla({
+      tempDir: dir,
+      adlar,
+      varMi: (y) => fs.existsSync(y),
+      mtimeMs: (y) => {
+        try {
+          return fs.statSync(y).mtimeMs
+        } catch {
+          return Date.now()
+        }
+      },
+    })
+    const secilen = kural.bayatCikarmaKlasorleri(girdiler, { now: Date.now(), ownDir: path.dirname(exe) })
+    let mb = 0
+    for (const g of secilen) {
+      try {
+        mb += boyutMB(g.yol)
+        fs.rmSync(g.yol, { recursive: true, force: true })
+      } catch {
+        /* kilitliyse sonraki açılışta */
+      }
+    }
+    if (secilen.length) console.log(`  geçici · ${secilen.length} bayat portable klasörü silindi (${mb.toFixed(0)} MB)`)
+  } catch {
+    /* kural dosyası yoksa (henüz derlenmediyse) sessizce atla */
+  }
+}
+/** Bir klasörün yaklaşık boyutu (MB). */
+function boyutMB(dir) {
+  let toplam = 0
+  const gez = (d) => {
+    for (const ad of fs.readdirSync(d)) {
+      const yol = path.join(d, ad)
+      try {
+        const st = fs.statSync(yol)
+        if (st.isDirectory()) gez(yol)
+        else toplam += st.size
+      } catch {
+        /* atla */
+      }
+    }
+  }
+  try {
+    gez(dir)
+  } catch {
+    /* atla */
+  }
+  return toplam / (1024 * 1024)
+}
+
 function health(port) {
   return new Promise((resolve) => {
     const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: 3000 }, (res) => {
@@ -93,6 +159,9 @@ function health(port) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function main() {
+  // Kendi sızıntımızı temizle: zorla öldürülen portable örnekler klasör bırakıyor.
+  portableTempSupur()
+
   const before = readToken()
   if (before?.pid) {
     // Only kill it if the process really is our stub: a stale token means the pid may belong to

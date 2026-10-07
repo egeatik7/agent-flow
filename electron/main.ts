@@ -6,6 +6,7 @@ import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
 import { isTestProfile, storeCwd } from './profile'
+import { bayatCikarmaKlasorleri, geciciGirdileriTopla } from './temp-sweep'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource } from './tools'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
@@ -147,6 +148,7 @@ function openRunLog() {
  * long enough that a live run cannot own them.
  */
 function sweepStaleTempShots() {
+  sweepStaleExtractions()
   const dir = app.getPath('temp')
   let names: string[] = []
   try {
@@ -164,6 +166,75 @@ function sweepStaleTempShots() {
       /* another instance may own it now */
     }
   }
+}
+
+/**
+ * Portable paket kendini %TEMP% altına açar ve NORMAL çıkışta siler; süreç zorla
+ * öldürülürse klasör kalır (~330 MB). Ölçüldü: 5 günde 16 klasör · 4,93 GB. Seçim kuralı
+ * `temp-sweep.ts` içinde saf fonksiyondur; burada yalnız dosya sistemiyle konuşulur.
+ * Kendi klasörümüz ve son 10 dakikada açılmış olanlar KORUNUR.
+ */
+function sweepStaleExtractions() {
+  try {
+    const dir = app.getPath('temp')
+    const adlar = fs.readdirSync(dir).filter((ad) => {
+      try {
+        return fs.statSync(path.join(dir, ad)).isDirectory()
+      } catch {
+        return false
+      }
+    })
+    const girdiler = geciciGirdileriTopla({
+      tempDir: dir,
+      adlar,
+      varMi: (y) => fs.existsSync(y),
+      mtimeMs: (y) => {
+        try {
+          return fs.statSync(y).mtimeMs
+        } catch {
+          return Date.now()
+        }
+      },
+    })
+    const secilen = bayatCikarmaKlasorleri(girdiler, { now: Date.now(), ownDir: path.dirname(process.execPath) })
+    let mb = 0
+    for (const g of secilen) {
+      try {
+        mb += boyutMB(g.yol)
+        fs.rmSync(g.yol, { recursive: true, force: true })
+      } catch {
+        /* kilitliyse bir sonraki açılışta denenir */
+      }
+    }
+    if (secilen.length) {
+      log('info', `Geçici · ${secilen.length} bayat portable klasörü silindi (${mb.toFixed(0)} MB). Zorla kapatılan örneklerden kalıyordu.`)
+    }
+  } catch {
+    /* süpürme yapılamadı; açılış engellenmez */
+  }
+}
+
+/** Bir klasörün yaklaşık boyutu (MB) — yalnız günlük için. */
+function boyutMB(dir: string): number {
+  let toplam = 0
+  const gez = (d: string) => {
+    for (const ad of fs.readdirSync(d)) {
+      const yol = path.join(d, ad)
+      try {
+        const st = fs.statSync(yol)
+        if (st.isDirectory()) gez(yol)
+        else toplam += st.size
+      } catch {
+        /* atla */
+      }
+    }
+  }
+  try {
+    gez(dir)
+  } catch {
+    /* atla */
+  }
+  return toplam / (1024 * 1024)
 }
 
 let voiceHoldUntil = 0
