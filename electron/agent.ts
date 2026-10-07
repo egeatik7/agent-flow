@@ -41,7 +41,6 @@ import {
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, type InputGuard, type InputWindow, type Point } from './input-policy'
-import { observedInput, matchesObservedInput } from './custom-input'
 import { rememberShot } from './shots'
 import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
 import type { FindStageId } from './llm-flow'
@@ -1102,7 +1101,7 @@ export function createAgent(ctx: AgentContext) {
     const write = async (clearField = clear): Promise<bridge.TypeResult | null> => {
       // Enter belongs to this function, after readback, never to the worker.
       checkStopped()
-      const guard: InputGuard | undefined = binding ? { window: binding.window, at: binding.at, visual } : undefined
+      const guard: InputGuard | undefined = binding ? { window: binding.window, at: binding.at, visual, direct: !!clearField && !!binding.at && !binding.mustRetarget } : undefined
       let typed: bridge.TypeResult | null = binding?.mustRetarget
         ? { cleared: false, pasted: false, focusType: '', skippedClear: true, writeSent: false, code: 'INPUT_LAYOUT_CHANGED', diagnostics: await bridge.inputState() || undefined }
         : await bridge.typeText(text, false, clearField, binding ? binding.at : at, undefined, guard)
@@ -1140,28 +1139,6 @@ export function createAgent(ctx: AgentContext) {
           + ', pencere=' + (d?.window || typed.where || '?') + ', HWND=' + (d?.hwnd || '?')
           + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + JSON.stringify(d?.caret ?? null)
           + ', odak kutusu=' + JSON.stringify(d?.rect ?? null) + ', ret=' + (d?.inputRejection || typed.code || '?') + '.')
-        if (!inputWasSent && typed.writeSent !== true && clearField && binding?.at && !binding.mustRetarget && d?.native === 'TkChild' && guard && bridge.probeInput) {
-          // Fresh OCR and actual copied value must agree before ANY destructive input.
-          const scan = await bridge.scan({ image: 'none', fresh: true, uia: false, tilt: false, deferOnnx: true })
-          bridge.discardShot(scan.shot)
-          checkStopped()
-          const observation = observedInput(scan, binding.window, binding.at)
-          if (observation) {
-            const probeGuard = { ...guard, observation }
-            const probe = await bridge.probeInput(probeGuard)
-            checkStopped()
-            if (probe.token && typeof probe.value === 'string' && matchesObservedInput(observation.text, probe.value)) {
-              log('info', 'Tk alanı: yeni OCR satırı ve alandan kopyalanan değer eşleşti; tek kullanımlık odak kanıtıyla yazılıyor.')
-              const result = await bridge.typeText(text, false, clearField, binding.at, undefined, { ...probeGuard, copyToken: probe.token })
-              checkStopped()
-              if (result?.skippedClear || result?.writeSent !== true || result.value == null) throw new Error('INPUT_COPY_WRITE_FAILED: Kopyayla doğrulanan alan yazılamadı; Enter gönderilmedi.')
-              inputWasSent = true
-              reportTyping(result)
-              return result
-            }
-            log('warn', 'Tk alanı kopya kanıtı alınamadı veya OCR metniyle eşleşmedi; silme ve yazma gönderilmedi.' + (probe.reason ? ' ' + probe.reason : ''))
-          }
-        }
         if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
           recoveryCount++
           ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')
@@ -1176,9 +1153,10 @@ export function createAgent(ctx: AgentContext) {
           + ')' + (typed.where ? ' — ' + typed.where : '') + '. Yazı gönderilmedi; alan kurtarılamadı.')
       }
       inputWasSent = inputWasSent || (!typed?.needChoice && (typed?.writeSent !== false || clearField))
-      if (binding && ['visual-caret', 'visual-copy'].includes(typed?.via || '') && typed?.value == null) {
+      if (binding && typed?.via === 'visual-caret' && typed?.value == null) {
         throw new Error('INPUT_READBACK_UNAVAILABLE: Görsel alanın değeri doğrulanamadı; Enter gönderilmedi.')
       }
+      if (typed?.via === 'clicked-input') log('info', 'Seçilmiş alana Ctrl+A → Delete → yazma gönderildi; OCR/içerik eşleştirmesi yapılmadı.')
       reportTyping(typed)
       return typed
     }

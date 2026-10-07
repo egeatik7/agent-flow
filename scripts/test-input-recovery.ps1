@@ -183,45 +183,57 @@ $sentAfter = @([System.Windows.Forms.SendKeys]::Sent | Select-Object -Skip $sent
 Check ($sentAfter -notcontains '^v') 'No paste was sent after the clipboard check failed'
 Write-Host "PASS: $script:Checks total recovery worker checks including Unicode clipboard path."
 
-# Real worker copy proof with the logged Tk 1x1 dummy caret, no native caret bypass.
-[XpWin]::DummyCaret=$true; [XpText]::Direct=$true
-$guard=@{window=$target;at=@{x=662;y=462};observation=@{text='C:\Users\ASUS TUF\Downloads\Medieval';rect=@{x=232;y=456;w=280;h=13}}}
-[System.Windows.Forms.SendKeys]::Sent.Clear();[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
-$r=Invoke-Op 'probeInput' @{guard=$guard}
-Check ($r.token -and $r.value -eq $guard.observation.text) 'Dummy caret allows non-destructive copy evidence, not blind write'
-Check (@([System.Windows.Forms.SendKeys]::Sent | Where-Object {$_ -ne '^a' -and $_ -ne '^c'}).Count -eq 0) 'Probe sends selection/copy only, no delete, paste, type or Enter'
-Check ([System.Windows.Forms.Clipboard]::GetText() -eq 'old clipboard') 'Probe restores clipboard text'
-Check ([System.Windows.Forms.Clipboard]::Current.GetData('Binary',$false).Length -eq 3) 'Probe restores binary clipboard'
-$guard.copyToken=$r.token
-$r=Invoke-Op 'typeText' @{text='hello';clearFirst=$true;guard=$guard;x=662;y=462;pressEnter=$false}
-Check ($r.value -eq 'hello' -and $r.via -eq 'visual-copy' -and $r.writeSent) 'One-use copied value authorizes actual replacement with dummy caret'
-$before=[System.Windows.Forms.SendKeys]::Sent.Count
-Throws {Invoke-Op 'typeText' @{text='again';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_PROOF_STALE' 'Consumed token cannot authorize a second write'
-Check ([System.Windows.Forms.SendKeys]::Sent.Count -eq $before) 'Stale proof sends no input'
-$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
-$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
-[System.Windows.Forms.SendKeys]::FieldText='other value';[System.Windows.Forms.SendKeys]::Sent.Clear()
-Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_VALUE_CHANGED' 'Changed field value rejects deletion'
-Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('{DEL}')) 'Changed text was not deleted'
-$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
-$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
-$script:CopyInputProof.created=[DateTime]::UtcNow.AddSeconds(-20)
-$before=[System.Windows.Forms.SendKeys]::Sent.Count
-Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_PROOF_STALE' 'Expired proof rejects input'
-Check ([System.Windows.Forms.SendKeys]::Sent.Count -eq $before) 'Expired proof sends no keys'
-$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
-$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
-[XpWin]::Focus=210
-Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_FOCUS_CHANGED' 'Focus loss invalidates copy proof before deletion'
-[XpWin]::Focus=110;$guard.Remove('copyToken')
-[System.Windows.Forms.SendKeys]::Sent.Clear();[System.Windows.Forms.Clipboard]::FailCopy=$true
-$p=Invoke-Op 'probeInput' @{guard=$guard}
-Check ($p.reason -eq 'INPUT_COPY_UNAVAILABLE' -and -not $p.token) 'Failed copy grants no proof'
-Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('{DEL}')) 'Failed copy did not delete'
-[System.Windows.Forms.Clipboard]::FailCopy=$false
-[System.Windows.Forms.SendKeys]::FieldText='';$p=Invoke-Op 'probeInput' @{guard=$guard}
-Check (-not $p.token) 'Empty dummy-caret field cannot be silently authorized'
-$guard.observation.rect.y=300;[System.Windows.Forms.SendKeys]::Sent.Clear()
-$p=Invoke-Op 'probeInput' @{guard=$guard}
-Check ($p.reason -eq 'OBSERVATION_NOT_AT_CLICK' -and [System.Windows.Forms.SendKeys]::Sent.Count -eq 0) 'Unrelated OCR row sends no probe keys'
-Write-Host "PASS: $script:Checks total recovery worker checks including dummy-caret copy proof."
+# User-requested direct replacement: no OCR, caret or copy-value gate.
+[XpWin]::DummyCaret=$true; [XpWin]::HasCaret=$false; [XpText]::Direct=$true
+$guard=@{window=$target;at=@{x=662;y=462};direct=$true}
+[System.Windows.Forms.Clipboard]::FailCopy=$true
+foreach ($old in @('', 'D:\Completely Different Folder\Some File.png')) {
+ [System.Windows.Forms.SendKeys]::Sent.Clear();[System.Windows.Forms.SendKeys]::FieldText=$old
+ $r=Invoke-Op 'typeText' @{text='hello';clearFirst=$true;guard=$guard;x=662;y=462;pressEnter=$false}
+ Check ($r.via -eq 'clicked-input' -and $r.writeSent -and $r.cleared -and $null -eq $r.value) 'Selected custom field writes even with empty/unrelated text and no readable caret'
+ $keys=[System.Windows.Forms.SendKeys]::Sent
+ Check ($keys[0] -eq '^a' -and $keys[1] -eq '{DEL}' -and ($keys | Select-Object -Skip 2) -join '' -eq 'hello') 'Real dispatcher sends Ctrl+A then Delete then text'
+ Check (-not $keys.Contains('^c') -and -not $keys.Contains('{ENTER}')) 'No copy probe/readback or unintended Enter'
+ Check ([System.Windows.Forms.SendKeys]::FieldText -eq 'hello') 'Previous contents replaced'
+}
+# UIA-readable fields use the same explicit keyboard sequence after a click.
+$field.Current.ControlType='Edit'
+[System.Windows.Forms.SendKeys]::Sent.Clear()
+$r=Invoke-Op 'typeText' @{text='hello';clearFirst=$true;guard=$guard;x=662;y=462}
+Check ($r.via -eq 'clicked-input' -and [System.Windows.Forms.SendKeys]::Sent[0] -eq '^a' -and [System.Windows.Forms.SendKeys]::Sent[1] -eq '{DEL}') 'Standard clicked field also clears with keyboard without retargeting'
+$field.Current.ControlType='Pane'
+[System.Windows.Forms.SendKeys]::Sent.Clear()
+$field.ReadOnly=$true
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_READ_ONLY' 'Known read-only field is not deleted'
+$field.ReadOnly=$null
+$field.Current.ControlType='Button'
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_NOT_FIELD' 'Known button does not receive Delete'
+$field.Current.ControlType='Pane'
+[XpWin]::UnderPoint=200
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_FOCUS_CHANGED' 'Window overlay prevents deletion'
+[XpWin]::UnderPoint=100;[XpWin]::Focus=210
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_FOCUS_CHANGED' 'Focus in another window prevents deletion'
+[XpWin]::Focus=110
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$false;guard=$guard}} 'INPUT_DIRECT_REPLACEMENT_REQUIRED' 'Forced route cannot erase during append'
+Check ([System.Windows.Forms.SendKeys]::Sent.Count -eq 0) 'All rejected direct requests send no keys'
+[XpWin]::Enabled=$false
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_FOCUS_CHANGED' 'Disabled native focus prevents deletion'
+[XpWin]::Enabled=$true
+$guard.at.x=1100
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_TARGET_UNRESOLVED' 'Point outside target window prevents deletion'
+$guard.at.x=662
+[XpWin]::Foreground=200
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_WINDOW_NOT_ACTIVE' 'Foreground switch prevents deletion'
+[XpWin]::Foreground=100
+[System.Windows.Forms.SendKeys]::LoseFocusOnDelete=$true
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard}} 'INPUT_FOCUS_CHANGED' 'Focus change during Delete prevents text and Enter'
+Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('b') -and -not [System.Windows.Forms.SendKeys]::Sent.Contains('{ENTER}')) 'No later text or Enter after focus changed'
+[System.Windows.Forms.SendKeys]::LoseFocusOnDelete=$false;[XpWin]::Focus=110
+# Unicode uses paste, restores all clipboard formats, but still never copies old field contents.
+[XpText]::Direct=$false;[System.Windows.Forms.SendKeys]::Sent.Clear()
+$r=Invoke-Op 'typeText' @{text=$unicode;clearFirst=$true;guard=$guard;x=662;y=462}
+Check ($r.pasted -and [System.Windows.Forms.SendKeys]::FieldText -eq $unicode) 'Direct custom Unicode replacement works'
+Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('^c')) 'Unicode paste does not read old contents'
+Check ([System.Windows.Forms.Clipboard]::GetText() -eq 'old clipboard') 'Clipboard text preserved after direct paste'
+Check ([System.Windows.Forms.Clipboard]::Current.GetData('Binary',$false).Length -eq 3) 'Binary clipboard preserved after direct paste'
+Write-Host "PASS: $script:Checks total recovery worker checks including direct replacement."

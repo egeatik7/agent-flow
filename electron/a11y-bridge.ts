@@ -484,12 +484,6 @@ export type TypeResult = {
   value?: string | null
 }
 
-/** Non-destructive Ctrl+A/C probe of a bound custom field. No deletion or typing. */
-export async function probeInput(guard: InputGuard): Promise<{ token?: string; value?: string; reason?: string }> {
-  if (!IS_WIN) return { reason: 'WINDOWS_REQUIRED' }
-  return worker.call('probeInput', { guard })
-}
-
 export async function typeText(
   text: string,
   pressEnter: boolean,

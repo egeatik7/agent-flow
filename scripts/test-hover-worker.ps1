@@ -5,13 +5,28 @@ $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScr
 if ($errors.Count) { throw ($errors | Out-String) }
 $fn=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Op'},$true)
 Invoke-Expression $fn.Extent.Text
+# Verify the call against the REAL production declarations, not an invented mock.
+$commonTokens=$null; $commonErrors=$null
+$common=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../a11y/common.ps1'),[ref]$commonTokens,[ref]$commonErrors)
+if ($commonErrors.Count) { throw ($commonErrors | Out-String) }
+$native=$common.FindAll({param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value -match 'public static class XpNative \{'},$true) | Select-Object -First 1
+$win=$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value -match 'public static class XpWin \{'},$true) | Select-Object -First 1
+Add-Type -TypeDefinition ($native.Value.Replace('class XpNative {','class NativeDeclarationCheck {'))
+Add-Type -TypeDefinition ($win.Value.Replace('class XpWin {','class WinDeclarationCheck {'))
+$case=$fn.Find({param($n) $n -is [System.Management.Automation.Language.SwitchStatementAst]},$true).Clauses | Where-Object {$_.Item1.Value -eq 'moveAt'}
+if ($case.Item2.Extent.Text -notmatch '\[XpNative\]::SetCursorPos') { throw 'moveAt must use the actual XpNative cursor API' }
+$m=[NativeDeclarationCheck].GetMethod('SetCursorPos')
+if (-not $m -or $m.ReturnType -ne [bool] -or -not $m.IsPublic -or -not $m.IsStatic) { throw 'Missing production native move method' }
 Add-Type -TypeDefinition @'
 using System;
 public static class XpWin {
- public static bool MoveOk = true;
- public static int Root = 42, Moves;
- public static bool SetCursorPos(int x,int y) { Moves++; return MoveOk; }
+ public static int Root = 42;
  public static IntPtr RootAt(int x,int y) { return new IntPtr(Root); }
+}
+public static class XpNative {
+ public static bool MoveOk = true;
+ public static int Moves;
+ public static bool SetCursorPos(int x,int y) { Moves++; return MoveOk; }
 }
 '@
 function Set-HudHandle { }
@@ -23,10 +38,10 @@ function Reject($op,$p,$code) {
  catch { if (-not $_.Exception.Message.Contains($code)) { throw } }
 }
 $r=Invoke-Op 'moveAt' ([pscustomobject]@{x=10;y=20})
-if ([XpWin]::Moves -ne 1 -or $script:clicks -ne 0 -or $r.hwnd -ne 42) { throw 'Move injected click or failed to record window' }
-[XpWin]::MoveOk=$false
+if ([XpNative]::Moves -ne 1 -or $script:clicks -ne 0 -or $r.hwnd -ne 42) { throw 'Move injected click or failed to record window' }
+[XpNative]::MoveOk=$false
 Reject 'moveAt' ([pscustomobject]@{x=10;y=20}) 'INPUT_MOVE_FAILED'
-[XpWin]::MoveOk=$true
+[XpNative]::MoveOk=$true
 Reject 'clickCurrentAt' ([pscustomobject]@{x=10;y=20}) 'INPUT_CLICK_STALE'
 [XpWin]::Root=99
 Reject 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42}) 'INPUT_CLICK_STALE'

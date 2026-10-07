@@ -926,6 +926,7 @@ function Test-VisualInput($guard) {
 
 function Assert-TypeFocus($field, $guard, [string]$nativeFocus) {
   if ($guard) { [void](Get-BoundWindow $guard.window $false) }
+  if ($guard -and $guard.direct) { Assert-DirectInput $guard }
   if ($nativeFocus) {
     if ([string][XpWin]::FocusHandle() -ne $nativeFocus) { throw 'INPUT_FOCUS_CHANGED: Keyboard focus changed; input stopped' }
     if ($guard -and [XpWin]::RootOf([IntPtr]([long]$nativeFocus)) -ne [IntPtr]([long]$guard.window.hwnd)) { throw 'INPUT_FOCUS_CHANGED: Keyboard focus belongs to another window' }
@@ -980,35 +981,20 @@ function Read-VisualInput($field, $guard, [string]$nativeFocus) {
   return $value
 }
 
-# Tk often exposes a whole container and a 1x1 dummy system caret. A copy probe
-# is separate from typing: it may select/copy, never delete, paste, type or Enter.
-function Get-CopyProbeRejection($d, $guard) {
-  if (-not $guard -or -not $guard.at -or -not $guard.observation) { return 'NO_OBSERVED_INPUT' }
-  if ($d.native -ne 'TkChild' -or -not $d.focusHwnd -or $d.readOnly -eq $true) { return 'NOT_CUSTOM_INPUT' }
-  if (@('Button','CheckBox','RadioButton','MenuItem','Hyperlink','Text') -contains $d.type) { return 'NON_INPUT_CONTROL' }
-  $o = $guard.observation
-  if (([string]$o.text).Trim().Length -lt 12 -or ([string]$o.text).Length -gt 512 -or $o.rect.h -le 0 -or $o.rect.h -gt 60 -or $o.rect.w -le 0) { return 'INVALID_OBSERVATION' }
-  if (-not (Test-RectPoint $d.rect $guard.at.x $guard.at.y)) { return 'CLICK_OUTSIDE_FOCUS' }
-  if (-not (Test-RectPoint $guard.window.rect $o.rect.x $o.rect.y) -or -not (Test-RectPoint $guard.window.rect ($o.rect.x + $o.rect.w - 1) ($o.rect.y + $o.rect.h - 1))) { return 'OBSERVATION_OUTSIDE_WINDOW' }
-  $pad = [Math]::Max(6, $o.rect.h / 2)
-  if ([Math]::Abs($guard.at.y - ($o.rect.y + $o.rect.h / 2)) -gt $pad -or $guard.at.x -lt ($o.rect.x - 12) -or $guard.at.x -gt ($o.rect.x + $o.rect.w + [Math]::Min(240, $guard.window.rect.w / 3))) { return 'OBSERVATION_NOT_AT_CLICK' }
-  $fh = [IntPtr]([long]$d.focusHwnd)
-  $wh = [IntPtr]([long]$guard.window.hwnd)
-  if ([XpWin]::RootOf($fh) -ne $wh -or [XpWin]::RootAt([int]$guard.at.x,[int]$guard.at.y) -ne $wh -or -not [XpWin]::IsWindowEnabled($fh)) { return 'WRONG_OR_DISABLED_WINDOW' }
-  return ''
-}
-
-function Get-CopyInputProof($field, $guard) {
-  if (-not $guard -or -not $guard.copyToken) { return $null }
-  $proof = $script:CopyInputProof
-  $script:CopyInputProof = $null # one use, including failed attempts
-  if (-not $proof -or $proof.token -ne $guard.copyToken -or $proof.window -ne $guard.window.hwnd -or $null -eq $guard.at -or $proof.x -ne $guard.at.x -or $proof.y -ne $guard.at.y -or ([DateTime]::UtcNow - $proof.created).TotalSeconds -gt 8) { throw 'INPUT_COPY_PROOF_STALE: Copy proof expired or changed' }
+# Explicit replacement after a targeted click does not depend on OCR, old text,
+# UIA Edit classification or a native caret. Keep only window/focus association.
+function Assert-DirectInput($guard) {
+  if (-not $guard -or -not $guard.direct -or -not $guard.at) { throw 'INPUT_TARGET_INVALID: Explicit clicked input is required' }
   [void](Get-BoundWindow $guard.window $false)
   $d = Get-InputDiagnostics
-  if ($d.focusHwnd -ne $proof.focusHwnd -or (Get-CopyProbeRejection $d $guard)) { throw 'INPUT_FOCUS_CHANGED: Copy-proved field changed' }
-  $current = Read-VisualInput $field $guard $proof.focusHwnd
-  if ($current -cne $proof.before) { throw 'INPUT_COPY_VALUE_CHANGED: Field changed before replacement; no delete sent' }
-  return $proof
+  if ($d.readOnly -eq $true) { throw 'INPUT_READ_ONLY: Selected control is read-only' }
+  if (@('Button','CheckBox','RadioButton','MenuItem','Hyperlink','Text') -contains $d.type) { throw 'INPUT_NOT_FIELD: Selected focus is a non-input control' }
+  if (-not $d.focusHwnd -or $d.focusHwnd -eq '0') { throw 'INPUT_FOCUS_CHANGED: No native keyboard focus identity' }
+  $fh = [IntPtr]([long]$d.focusHwnd)
+  $wh = [IntPtr]([long]$guard.window.hwnd)
+  if (-not (Test-RectPoint $guard.window.rect $guard.at.x $guard.at.y) -or -not (Test-RectPoint $d.rect $guard.at.x $guard.at.y)) { throw 'INPUT_TARGET_UNRESOLVED: Click is outside focused control' }
+  if ([XpWin]::RootOf($fh) -ne $wh -or [XpWin]::RootAt([int]$guard.at.x,[int]$guard.at.y) -ne $wh) { throw 'INPUT_FOCUS_CHANGED: Click and focus belong to different windows' }
+  if (-not [XpWin]::IsWindowEnabled($fh)) { throw 'INPUT_FOCUS_CHANGED: Selected focus is disabled' }
 }
 
 function Invoke-Op([string]$op, $P) {
@@ -1034,22 +1020,6 @@ function Invoke-Op([string]$op, $P) {
       return (Invoke-Scan $P)
     }
     'inputTarget' { return (Get-InputTarget $P) }
-    'probeInput' {
-      $script:CopyInputProof = $null
-      [void](Get-BoundWindow $P.guard.window $false)
-      $d = Get-InputDiagnostics
-      $reason = Get-CopyProbeRejection $d $P.guard
-      if ($reason) { return [pscustomobject]@{ reason=$reason } }
-      try { $value = Read-VisualInput (Get-InputFocus) $P.guard ([string]$d.focusHwnd) }
-      catch {
-        if ($_.Exception.Message -notmatch 'INPUT_READBACK_UNAVAILABLE') { throw }
-        return [pscustomobject]@{ reason='INPUT_COPY_UNAVAILABLE' }
-      }
-      if (-not $value -or $value.Length -gt 2048 -or $value -match '[\r\n]') { return [pscustomobject]@{ reason='INPUT_COPY_NOT_SINGLE_VALUE' } }
-      $token = [Guid]::NewGuid().ToString('N')
-      $script:CopyInputProof = @{ token=$token; window=$P.guard.window.hwnd; focusHwnd=[string]$d.focusHwnd; x=$P.guard.at.x; y=$P.guard.at.y; before=$value; created=[DateTime]::UtcNow }
-      return [pscustomobject]@{ token=$token; value=$value }
-    }
     'assertInputTarget' {
       if ($P.focusHwnd) { Assert-LastTypeFocus $P.target ([string]$P.focusHwnd) }
       else { [void](Get-BoundWindow $P.target $false) }
@@ -1087,7 +1057,7 @@ function Invoke-Op([string]$op, $P) {
         [void](Get-BoundWindow $P.target $false)
         if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
       }
-      if (-not [XpWin]::SetCursorPos([int]$P.x, [int]$P.y)) { throw 'INPUT_MOVE_FAILED: Cursor movement failed' }
+      if (-not [XpNative]::SetCursorPos([int]$P.x, [int]$P.y)) { throw 'INPUT_MOVE_FAILED: Cursor movement failed' }
       return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
     }
     'clickAt' {
@@ -1141,8 +1111,11 @@ function Invoke-Op([string]$op, $P) {
       $script:LastTypeFocus = $null
       if ($P.guard) { [void](Get-BoundWindow $P.guard.window $false) }
       $focus = Get-InputFocus
-      $copyProof = Get-CopyInputProof $focus $P.guard
-      if ($null -ne $copyProof -and (-not $P.clearFirst -or $P.fieldToken)) { throw 'INPUT_CUSTOM_APPEND_UNSUPPORTED: Copy proof only permits replacement of the same field' }
+      $direct = $P.guard -and $P.guard.direct
+      if ($direct) {
+        if (-not $P.clearFirst -or $P.fieldToken) { throw 'INPUT_DIRECT_REPLACEMENT_REQUIRED: Clicked input route only permits explicit replacement' }
+        Assert-DirectInput $P.guard
+      }
       if ($null -ne $focus) { $out.focusType = Get-CT $focus }
       $atX = 0
       $atY = 0
@@ -1161,7 +1134,7 @@ function Invoke-Op([string]$op, $P) {
         $front = $script:AE::FromHandle([XpWin]::GetForegroundWindow())
         if (-not (Test-Same $top $front)) { throw 'Seçim sırasında öndeki pencere değişti; yazı gönderilmedi.' }
         $picked = [pscustomobject]@{ el = $el; window = [string]$top.Current.Name; type = (Get-CT $el) }
-      } elseif ($null -eq $copyProof -and $P.clearFirst -and (($atX -ne 0 -or $atY -ne 0) -or -not (Test-TextLike $focus))) {
+      } elseif (-not $direct -and $P.clearFirst -and (($atX -ne 0 -or $atY -ne 0) -or -not (Test-TextLike $focus))) {
         $script:TypeChoiceCache.Clear()
         $choices = @(Get-TypeChoices $ownPid $atX $atY)
         $public = @($choices | ForEach-Object { [pscustomobject]@{ id = $_.id; token = $_.token; window = $_.window; type = $_.type; native = $_.native; name = $_.name; value = $_.value; valueKnown = $_.valueKnown; label = $_.label; clicked = $_.clicked; related = $_.related } })
@@ -1206,7 +1179,7 @@ function Invoke-Op([string]$op, $P) {
         $out.focusType = Get-CT $focus
       }
       try { $out.where = [string](Get-TopLevel $focus).Current.Name } catch {}
-      $visual = (-not (Test-TextLike $focus)) -and (($null -ne $copyProof) -or (Test-VisualInput $P.guard))
+      $visual = (-not (Test-TextLike $focus)) -and ($direct -or (Test-VisualInput $P.guard))
       if (-not (Test-TextLike $focus) -and -not $visual) {
         $out.skippedClear = $true
         $out.code = 'INPUT_FOCUS_UNRESOLVED'
@@ -1214,7 +1187,7 @@ function Invoke-Op([string]$op, $P) {
         $out.diagnostics | Add-Member -NotePropertyName inputRejection -NotePropertyValue $script:VisualInputRejection
         return [pscustomobject]$out
       }
-      if ($P.guard -and $P.guard.at -and -not $visual -and $null -eq $picked -and -not (Test-PointInside $focus $atX $atY)) {
+      if ($P.guard -and $P.guard.at -and -not $visual -and -not $direct -and $null -eq $picked -and -not (Test-PointInside $focus $atX $atY)) {
         $out.skippedClear = $true
         $out.code = 'INPUT_TARGET_UNRESOLVED'
         $out.diagnostics = Get-InputDiagnostics
@@ -1230,9 +1203,10 @@ function Invoke-Op([string]$op, $P) {
         if (-not $P.clearFirst) { throw 'INPUT_CUSTOM_APPEND_UNSUPPORTED: Use explicit replacement for a custom field' }
         # Check clipboard access before input. Do not require copying the old
         # text: an empty editable field legitimately has nothing to copy.
-        [void](Get-ClipboardSnapshot)
-        $out.via = if ($null -ne $copyProof) { 'visual-copy' } else { 'visual-caret' }
+        if (-not $direct) { [void](Get-ClipboardSnapshot) }
+        $out.via = 'visual-caret'
       }
+      if ($direct) { $out.via = 'clicked-input' }
       $check = { Assert-TypeFocus $focus $P.guard $nativeFocus }
       if ($P.guard) { & $check }
       if ($P.clearFirst) {
@@ -1301,7 +1275,7 @@ function Invoke-Op([string]$op, $P) {
         $native = Get-NativeEditText $focus
         if ($null -ne $native) { $out.value = $native }
       }
-      if ($visual) { $out.value = Read-VisualInput $focus $P.guard $nativeFocus }
+      if ($visual -and -not $direct) { $out.value = Read-VisualInput $focus $P.guard $nativeFocus }
       if ($P.guard) {
         & $check
         $script:LastTypeFocus = @{ window = $P.guard.window.hwnd; field = $focus }

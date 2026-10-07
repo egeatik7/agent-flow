@@ -2,7 +2,7 @@
 export type Point = { x: number; y: number }
 export type Rect = Point & { w: number; h: number }
 export type InputWindow = { hwnd: string; pid: number; title: string; rect: Rect }
-export type InputGuard = { window: InputWindow; at?: Point; visual?: boolean; observation?: { text: string; rect: Rect }; copyToken?: string }
+export type InputGuard = { window: InputWindow; at?: Point; visual?: boolean; direct?: boolean }
 export type InputState = {
   type: string; writable: boolean; name: string; window: string
   inputRejection?: string; native?: string; hwnd?: string; pid?: number; focusHwnd?: string

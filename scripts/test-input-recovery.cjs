@@ -21,7 +21,6 @@ function fixture(settings = {}) {
   const scan = { area: { ...win.rect }, items: [{ id: 1, text: 'Kaynak klasör', type: 'Text', src: 'ocr', x: 200, y: 500, w: 200, h: 30 }], image: { data: 'mock', w: 1000, h: 700 }, sig: Buffer.alloc(576).toString('base64'), window: 'Renamer', uiaCount: 0, ocrCount: 1 };
   const bridge = {
     isLocked: async () => false, scan: async () => scan, discardShot: () => {},
-    probeInput: async () => ({reason:'NO_COPY'}),
     inputTarget: async opts => { calls.push(['target', structuredClone(opts)]); return structuredClone(current); },
     assertInputTarget: async (...args) => calls.push(['assert', ...args]),
     inputState: async () => ({ type: 'Pane', writable: false, window: 'Renamer' }),
@@ -183,27 +182,28 @@ test('coordinate policy rejects resized/invalid points, preserves negative monit
   assert.equal(policy.repeatedClick(action('double', { x: .3, y: .5 }), area, { x: -700, y: 370, kind: 'click' }), false);
 });
 
-test('logged Tk dummy caret is recovered by fresh OCR/copy proof without another guessed click', async () => {
- const f=fixture(); await clickField(f);
- f.scan.items=[{id:9,text:'C:YUser$/ASUS TUF/Ccwnlcad5/Medievel',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
- f.queue.push(missed,{value:'hello',via:'visual-copy',writeSent:true,focusHwnd:'110'});
- f.bridge.probeInput=async guard=>{f.calls.push(['probe',guard]);return {token:'opaque',value:'C:\\Users\\ASUS TUF\\Downloads\\Medieval'};};
+test('clicked input replacement does not scan old contents or copy them', async () => {
+ const f=fixture({screenCheck:'off'});await clickField(f);
+ f.scan.items=[];
+ f.bridge.scan=async()=>{throw new Error('No OCR while replacing the clicked field');};
+ f.queue.push({value:null,via:'clicked-input',writeSent:true,focusHwnd:'110'});
  await f.ex.type(writing({pressEnter:true}),2);
+ const w=callsOf(f,'write');assert.equal(w.length,1);assert.equal(w[0][6].direct,true);
  assert.equal(f.queries.length,0);assert.equal(callsOf(f,'click').length,1);
- assert.equal(callsOf(f,'write')[1][6].copyToken,'opaque');assert.equal(callsOf(f,'keys').length,1);
+ assert.equal(callsOf(f,'keys').length,1);
+ assert(f.logs.some(l=>l.message.includes('OCR/içerik eşleştirmesi yapılmadı')));
 });
-test('unrelated copied field text does not authorize a write', async () => {
- const f=fixture();await clickField(f);f.scan.items=[{id:9,text:'C:\\Users\\ASUS TUF\\Downloads\\Medieval',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
- f.queue.push(missed);f.bridge.probeInput=async()=>({token:'opaque',value:'other-key-other-field'});
- f.models.guiStep=async()=>action('call_user');
- await assert.rejects(f.ex.type(writing(),2),/alan kurtarılamadı/);
- assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'keys').length,0);
+test('append and a type node without a clicked point do not request forced replacement', async () => {
+ const f=fixture();await f.ex.type(writing(),1);
+ assert.equal(callsOf(f,'write')[0][6].direct,false);
+ const g=fixture();await clickField(g);await g.ex.type(writing({clearFirst:false}),2);
+ assert.equal(callsOf(g,'write')[0][6].direct,false);
 });
-test('stop during copy probe prevents delete/write/Enter', async () => {
- const f=fixture();await clickField(f);f.scan.items=[{id:9,text:'C:\\Users\\ASUS TUF\\Downloads\\Medieval',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
- f.queue.push(missed);f.bridge.probeInput=async()=>{f.stop();return {token:'opaque',value:'C:\\Users\\ASUS TUF\\Downloads\\Medieval'};};
+test('stop after resolving clicked input prevents writing and Enter', async () => {
+ const f=fixture();await clickField(f);
+ f.bridge.inputTarget=async()=>{f.stop();return structuredClone(win);};
  await assert.rejects(f.ex.type(writing({pressEnter:true}),2),realRunner.StoppedError);
- assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'keys').length,0);
+ assert.equal(callsOf(f,'write').length,0);assert.equal(callsOf(f,'keys').length,0);
 });
 test('coordinate click on Add profile only moves; next screenshot can correct it before clicking', async () => {
  const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('move',{x:.557,y:.557}),action('clickCurrent'),action('finished')];
