@@ -44,7 +44,7 @@ import {
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { actionGraph, runAction, type ActSpec } from './tool-act'
-import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, setStopAt, snapshot, stopReason } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, setStopAt, snapshot, stopReason, actPointWithin, noteActPoint } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -143,7 +143,11 @@ export type ToolContext = {
   showBranch?: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) => Promise<{ ok: boolean; error?: string }>
   /** One action at a time may step aside from the desktop: the window minimizes so the screen is usable. */
   hideApp?: () => Promise<boolean>
-  showApp?: () => Promise<boolean>
+  /**
+   * Brings the window back. `focus: false` restores it without taking the foreground, which is what
+   * a sequence of actions needs: the dialog the next action types into must keep the focus.
+   */
+  showApp?: (opts?: { focus?: boolean }) => Promise<boolean>
   /** Spends the undo right: clears the snapshot and puts the recipe back. */
   commitMergeUndo?: () => boolean
 }
@@ -1165,6 +1169,19 @@ const runFrom: ToolDef = {
         }
         at.loopIndex = idx
         at.startIndex = idx
+        // The index is not the item. If files were added or the list changed, position 2 is a
+        // different file now; continuing would quietly work on the wrong one. The record says which
+        // item it was, so it is compared before anything starts.
+        const member = (at as { members?: string[] }).members?.[0]
+        if (member && typeof box.item === 'string' && box.item) {
+          const now = contextOf(graph, member)?.loops?.find((l) => l.id === box.id)
+          if (now && String(now.item ?? '') !== String(box.item)) {
+            return failed(
+              runFrom.name,
+              `Liste değişmiş: “${box.title}” kutusunun ${idx + 1}. öğesi artık “${now.item ?? ''}”, kayıtlı öğe “${box.item}”. Yanlış öğeden devam etmemek için duruyorum.`
+            )
+          }
+        }
       }
       if (missing.length) return failed(runFrom.name, `Bazı kutular bu branch’te yok: ${missing.join(', ')}. Devam edilemez.`)
       const inner = report.loops[report.loops.length - 1]
@@ -1240,9 +1257,15 @@ export function windowMismatch(wanted: string, got: string | undefined): boolean
  * gibi) ki masaüstünde ne olduğu görülebilsin; sonda geri açılır.
  */
 async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolContext): Promise<ToolResult> {
+  // A running flow owns the desktop. The single-step slot is not enough: a normal run uses the mouse
+  // too, and an action slipping into the middle of one would fight it for the same cursor.
+  if (ctx.isRunning()) return failed(name, 'Bir koşu sürüyor; tek eylem için önce bitmesini bekle ya da durdur.')
   if (probing()) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
   const { node } = actionGraph(spec)
   if (!beginProbe(node.id)) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
+  // The desktop is ours now: a stop left over from an earlier run or a debug failure must not cut
+  // this action short. A stop that arrives from here on is honoured.
+  ctx.clearStop?.()
   const s = ctx.getSettings()
   const timeoutMs = num(args.timeoutMs) ?? (spec.kind === 'wait' ? 60_000 : 90_000)
   const logs: string[] = []
@@ -1252,6 +1275,12 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
   let hidden = false
   try {
     const { createAgent } = await import('./agent')
+    // The previous action's target is a hint, not an answer: it only helps tell two same-named
+    // controls apart, and only while it is recent.
+    const near = actPointWithin(60_000)
+    if (near && !spec.fields.locator && spec.kind !== 'wait' && spec.kind !== 'key') {
+      spec.fields.locator = { x: near.x, y: near.y }
+    }
     const agent = createAgent({
       log: (level, message) => {
         if (logs.length < 200) logs.push(`${level}: ${message}`)
@@ -1274,14 +1303,23 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
       timedOut = true
     }, timeoutMs)
     const r = await runAction(spec, agent.executor, {
-      maxSteps: Math.max(1, s.maxSteps),
-      stepDelayMs: Math.max(0, s.stepDelayMs),
+      maxSteps: Math.max(1, s.maxSteps),      stepDelayMs: Math.max(0, s.stepDelayMs),
       userStop: () => timedOut || ctx.userStop(),
       onTrace: (e) => {
         if (traces.length < 200) traces.push(e as TargetTrace)
       },
     })
     const t = describeTrace(traces)
+    // Remember where this action aimed: the next one uses it only to tell two same-named controls
+    // apart, and only for a minute.
+    if (r.status === 'done') {
+      const hit = [...traces].reverse().find((e) => (e as { kind?: string }).kind === 'resolved') as
+        | { target?: { x?: number; y?: number } }
+        | undefined
+      if (hit?.target && typeof hit.target.x === 'number' && typeof hit.target.y === 'number') {
+        noteActPoint({ x: hit.target.x, y: hit.target.y })
+      }
+    }
     const where = `${t.text}${spec.kind === 'wait' ? '' : ` Seçilen: ${t.stage ?? '—'}${t.candidates !== undefined ? ` · ${t.candidates} aday` : ''}.`}`
     if (timedOut) {
       const message = `${spec.title} zaman aşımına uğradı (${Math.round(timeoutMs / 1000)} sn). ${where}`
@@ -1304,7 +1342,9 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
   } finally {
     if (timer) clearTimeout(timer)
     endProbe()
-    if (hidden) await ctx.showApp?.().catch(() => false)
+    // Bringing the window back must not take the focus back: in a sequence like Win+R, type, Enter
+    // that would pull the foreground out of the dialog the next action has to type into.
+    if (hidden) await ctx.showApp?.({ focus: false }).catch(() => false)
   }
 }
 
@@ -1406,12 +1446,39 @@ const screenRead: ToolDef = {
       sig: true,
     })
     const items = (s.items ?? []).slice(0, 200).map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, w: i.w, h: i.h, src: i.src, type: i.type }))
+    // An asked-for picture must travel with the answer: as data the caller can actually look at, and
+    // as a file with a path it can open. Before this, asking for an image produced a message about a
+    // screenshot whose path was never returned, so the caller was told about an image it could not see.
+    let imagePath = ''
+    let imageData: { data: string; mime: string; w: number; h: number } | null = null
+    if (wantImage) {
+      if (s.image?.data) {
+        imageData = { data: s.image.data, mime: s.image.mime || 'image/png', w: s.image.w ?? 0, h: s.image.h ?? 0 }
+        try {
+          const fs = await import('node:fs')
+          const os = await import('node:os')
+          const pathMod = await import('node:path')
+          const ext = /jpe?g/i.test(s.image.mime || '') ? 'jpg' : 'png'
+          imagePath = pathMod.join(os.tmpdir(), `nubbo-screen-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`)
+          fs.writeFileSync(imagePath, Buffer.from(s.image.data, 'base64'))
+        } catch {
+          imagePath = ''
+        }
+      }
+    }
     const where = windowTitle ? `“${windowTitle}”` : 'önde olan pencere'
     const wrong = windowMismatch(windowTitle ?? '', s.window)
     const warning = wrong
       ? ` DİKKAT: istediğin pencere bulunamadı; bunun yerine “${s.window || 'öndeki pencere'}” okundu.`
       : ''
-    const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${s.shot ? ` · görüntü: ${s.shot}` : ''}${warning}`
+    const imageNote = !wantImage
+      ? ''
+      : imageData
+        ? ` · görüntü eklendi${imagePath ? ` ve kaydedildi: ${imagePath}` : ''}`
+        : s.shot
+          ? ` · görüntü: ${s.shot}`
+          : ' · görüntü alınamadı'
+    const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${imageNote}${warning}`
     ctx.log(wrong ? 'warn' : 'info', `Ajan · ekranı oku · ${message}`)
     return {
       ok: true,
@@ -1419,9 +1486,9 @@ const screenRead: ToolDef = {
       outcome: 'tamam',
       message,
       observed: {
-        note: `${s.shot ? `Ekran görüntüsü dosyası: ${s.shot}. ` : 'Görüntü istenmedi. '}${wrong ? 'İstenen pencere ile okunan pencere aynı değil.' : 'İstenen pencere okundu.'}`,
+        note: `${wantImage ? (imageData ? 'İstenen görüntü cevabın içinde (data.image) ve diskte.' : 'Görüntü istendi ama alınamadı.') : 'Görüntü istenmedi.'}${wrong ? ' İstenen pencere ile okunan pencere aynı değil.' : ' İstenen pencere okundu.'}`,
       },
-      data: { windows: windows.slice(0, 40), window: s.window, requested: windowTitle ?? '', matched: !wrong, area: s.area, ocr: s.ocr, shot: s.shot, sig: s.sig, items },
+      data: { windows: windows.slice(0, 40), window: s.window, requested: windowTitle ?? '', matched: !wrong, area: s.area, ocr: s.ocr, shot: s.shot, imagePath, image: imageData, sig: s.sig, items },
     }
   },
 }

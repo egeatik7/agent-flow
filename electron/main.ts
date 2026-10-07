@@ -414,11 +414,37 @@ async function hideSelf() {
   return true
 }
 
-function showSelf() {
-  if (!mainWindow) return
+/**
+ * The build stamp that was written into the package when it was built, if it is there. Reading it
+ * from inside the exe is what makes the stamp describe the code that is actually running.
+ */
+function embeddedBuild(): string {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'build.json') : '',
+    path.join(app.getAppPath(), 'resources', 'build.json'),
+  ]
+  for (const file of candidates) {
+    try {
+      if (!file || !fs.existsSync(file)) continue
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { build?: unknown }
+      if (typeof parsed.build === 'string' && parsed.build) return parsed.build
+    } catch {
+      /* an unreadable stamp is not worth failing a start over */
+    }
+  }
+  return ''
+}
+
+function showSelf(focus = true) {  if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
+  // Putting the window back is not the same as taking the foreground: during a sequence of actions
+  // the dialog the next action must type into has to keep the focus.
+  if (focus) {
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    mainWindow.showInactive()
+  }
 }
 
 function revealApp() {
@@ -655,8 +681,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       showBranchInWindow(payload, opts),
     // One action at a time may step aside from the desktop, exactly like a run does.
     hideApp: () => hideSelf(),
-    showApp: async () => {
-      showSelf()
+    showApp: async (opts?: { focus?: boolean }) => {
+      showSelf(opts?.focus !== false)
       return true
     },
     takeMergeUndo: undefined,
@@ -692,7 +718,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
         const started = await startEndpoint(toolContext, endpointFile, {
           app: app.getVersion(),
           profile: String(process.env.NUBBO_PROFILE ?? ''),
-          build: String(process.env.NUBBO_BUILD ?? ''),
+          // The stamp that was written into the package when it was built wins. The environment
+          // variable is only a fallback for development runs: taking the current commit at launch
+          // time let an old exe claim to come from newer code.
+          build: embeddedBuild() || String(process.env.NUBBO_BUILD ?? ''),
         })
         log('info', `Ajan uç noktası açık: http://127.0.0.1:${started.port} · jeton dosyası: ${started.file}`)
       } catch (e) {

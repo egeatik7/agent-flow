@@ -169,6 +169,25 @@ describe('koşu raporu', () => {
     expect(frozenReport('yok-boyle-kosu')).toBeNull()
   })
 
+  it('ikinci debug koşusu önceki donmuş raporu silmez, arşive alır', () => {
+    const g = flow()
+    beginRun(g)
+    setDebugRun(true)
+    noteStep({ id: 'a', status: 'error' })
+    completeFailure('ilk hata')
+    const first = frozenReport()?.runId as string
+    expect(first).toBeTruthy()
+    endRun({ ok: false })
+    // Gerçek başlatma sırası budur: setDebugRun(true) ÖNCE, beginRun SONRA. Bu sıra eskiden ilk
+    // kaydı siliyordu, çünkü setDebugRun donmuş raporu temizliyordu.
+    setDebugRun(true)
+    beginRun(g)
+    // Yeni koşu henüz hata vermedi; kimliksiz arama en son saklanan raporu verir, yani İLK kayıt
+    // yerinde duruyor. (Eskiden setDebugRun onu siliyordu.)
+    expect(frozenReport(first)?.error).toBe('ilk hata')
+    expect(recentReports().some((r) => r.runId === first)).toBe(true)
+  })
+
   it('yeni koşu günlük kuyruğunu temizler', () => {
     const g = flow()
     beginRun(g)

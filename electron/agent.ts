@@ -5,6 +5,7 @@ import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { clickableBy, writableBy } from './target-match'
 import { assertModelKeysAllowed } from './key-guard'
 import {
   containsText,
@@ -97,75 +98,6 @@ const ICON_CHECK_MIN = 0.88
 
 function center(t: { x: number; y: number; w: number; h: number }) {
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
-}
-
-/** Control types that carry their own click target. A control beats a label that merely names it. */
-const CLICKABLE_CONTROLS = [
-  'Button',
-  'MenuItem',
-  'Link',
-  'CheckBox',
-  'RadioButton',
-  'TabItem',
-  'ListItem',
-  'TreeItem',
-  'ComboBox',
-  'Edit',
-  'Image',
-]
-
-function normName(s: string): string {
-  return String(s || '')
-    .toLocaleLowerCase('tr')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** The candidate closest to the last click, because that is the one the person just aimed at. */
-function nearestTo(hits: ScreenItem[], near?: { x: number; y: number }): ScreenItem | undefined {
-  if (hits.length <= 1 || !near) return hits[0]
-  return hits.reduce((a, b) => {
-    const da = Math.hypot(a.x + a.w / 2 - near.x, a.y + a.h / 2 - near.y)
-    const db = Math.hypot(b.x + b.w / 2 - near.x, b.y + b.h / 2 - near.y)
-    return db < da ? b : a
-  })
-}
-
-/**
- * The element a written click command means.
- *
- * The name must match exactly: a partial match is how the wrong control gets clicked. When several
- * elements carry the same name, a real control is preferred over a text label, and then the one
- * nearest the last click. This is also why the uia tree beats the text drawn on screen: the middle
- * of an OCR box for a caption is not always the middle of the button.
- */
-function clickableBy(items: ScreenItem[], wanted: string, near?: { x: number; y: number }): ScreenItem | undefined {
-  const w = normName(wanted)
-  if (!w) return undefined
-  const exact = items.filter((it) => normName(it.text) === w)
-  if (!exact.length) return undefined
-  const controls = exact.filter((it) => CLICKABLE_CONTROLS.includes(it.type))
-  return nearestTo(controls.length ? controls : exact, near)
-}
-
-/** Control types that actually accept typing. A label next to a field is not one of them. */
-const WRITABLE_TYPES = ['Edit', 'Document', 'ComboBox']
-
-/**
- * The element a written command should be typed into.
- *
- * The visual stages can find the *label* beside a field and click its spot, which focuses the field,
- * but typing needs the field element itself and that is only in the uia tree. Only editable control
- * types are accepted and the name must match the command exactly. When more than one field matches,
- * the one nearest the last click wins, because that is the field the person just selected.
- */
-function writableBy(items: ScreenItem[], wanted: string, near?: { x: number; y: number }): ScreenItem | undefined {
-  const w = normName(wanted)
-  if (!w) return undefined
-  return nearestTo(
-    items.filter((it) => WRITABLE_TYPES.includes(it.type) && normName(it.text) === w),
-    near
-  )
 }
 
 /** Replace this lap's values with their placeholders so the trace fits the next lap too. */

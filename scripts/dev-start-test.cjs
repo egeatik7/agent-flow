@@ -15,7 +15,7 @@
 const fs = require('fs')
 const path = require('path')
 const http = require('http')
-const { spawnSync } = require('child_process')
+const { spawnSync, execFileSync } = require('child_process')
 
 const root = path.join(__dirname, '..')
 const profile = (process.argv[2] || 'test').trim()
@@ -32,6 +32,35 @@ function readToken() {
     return JSON.parse(fs.readFileSync(tokenFile, 'utf8'))
   } catch {
     return null
+  }
+}
+/**
+ * Kapatmadan önce sürecin gerçekten bizim örnek olduğunu doğrular.
+ *
+ * Jeton dosyası eski olabilir ve o PID bu arada başka bir programa verilmiş olabilir; o zaman
+ * "taskkill /PID" yanlış süreci kapatır. Bu yüzden süreç adı ve çalıştırılabilir yolu kontrol edilir.
+ */
+function pidLooksLikeOurStub(pid) {
+  try {
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" -ErrorAction SilentlyContinue; if ($p) { "$($p.Name)|$($p.ExecutablePath)" }`,
+      ],
+      { encoding: 'utf8' }
+    ).trim()
+    if (!out) return { ok: false, why: 'süreç yok' }
+    const [name, exePath] = out.split('|')
+    const expected = path.join(process.env.USERPROFILE || '', 'Desktop', 'Nubbo-test.exe').toLowerCase()
+    if (String(name).toLowerCase() !== 'nubbo-test.exe') return { ok: false, why: `ad “${name}” beklenen “Nubbo-test.exe” değil` }
+    if (exePath && expected && path.resolve(String(exePath)).toLowerCase() !== expected) {
+      return { ok: false, why: `yol “${exePath}” beklenen “${expected}” değil` }
+    }
+    return { ok: true, why: 'ad ve yol uyuşuyor' }
+  } catch (e) {
+    return { ok: false, why: `kimlik okunamadı: ${e && e.message ? e.message : String(e)}` }
   }
 }
 function killTree(pid) {
@@ -54,9 +83,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function main() {
   const before = readToken()
   if (before?.pid) {
-    const killed = killTree(before.pid)
-    // The stub that started it is the parent; it goes too, or a second window appears.
-    console.log(`  eski örnek: pid ${before.pid} (${before.app || '?'} / ${before.build || 'damgasız'}) ${killed ? 'kapatıldı' : 'kapatılamadı'}`)
+    // Only kill it if the process really is our stub: a stale token means the pid may belong to
+    // something else by now, and killing that would be someone else's program.
+    const id = pidLooksLikeOurStub(before.pid)
+    if (id.ok) {
+      const killed = killTree(before.pid)
+      // The stub that started it is the parent; it goes too, or a second window appears.
+      console.log(`  eski örnek: pid ${before.pid} (${before.app || '?'} / ${before.build || 'damgasız'}) ${killed ? 'kapatıldı' : 'kapatılamadı'} · ${id.why}`)
+    } else {
+      console.log(`  eski örnek: pid ${before.pid} KAPATILMADI (${id.why}) — jeton eski olabilir.`)
+    }
   } else {
     console.log('  eski örnek yok')
   }

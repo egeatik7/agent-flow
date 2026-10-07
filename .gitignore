@@ -15,3 +15,5 @@ release/
 release/*.exe
 resources/boot/splash.bmp
 *.exe
+
+resources/build.json

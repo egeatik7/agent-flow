@@ -50,6 +50,7 @@ const USAGE = `nubbo <komut> [seçenekler]
                                  --fast: yalnız ekran aşamaları (model çağrısı yok, çok daha hızlı)
                                  --debug: ilk hatalı adımda durur, o anın bağlamını saklar (report)
                                  --resume: donmuş hatanın AYNI öğesinden devam eder (branch koşusunda)
+                                 --until <node>: bu node bitince durur (sınırlı bölge testi)
                                  --start: from için şart; akışı baştan çalıştırır (açık onay)
 
   branch list                    Açık branch'leri listele (uygulama açık olmalı)
@@ -429,6 +430,8 @@ async function main() {
     if (opts.start) args.fromStart = true
     if (opts.debug) args.debug = true
     if (opts.resume) args.resumeFromFailure = true
+    // Sınırlı bölge testi: "--until <node>" olmadan seçenek sessizce yok sayılıyordu.
+    if (opts.until) args.untilNodeId = opts.until
     if (opts.window) args.windowTitle = opts.window
     if (opts.image) args.image = true
     if (opts.timeout) args.timeoutMs = Number(opts.timeout)

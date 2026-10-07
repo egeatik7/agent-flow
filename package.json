@@ -24,8 +24,8 @@
     "build:electron": "npm run build:renderer && npm run build:main",
     "test": "vitest run",
     "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4521",
-    "pack:win": "npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
-    "pack:dir": "npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
+    "pack:win": "node scripts/stamp-build.cjs && npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --x64",
+    "pack:dir": "node scripts/stamp-build.cjs && npm run build:electron && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
   },
   "build": {
     "appId": "com.xpagentsudio.app",
@@ -57,6 +57,10 @@
       {
         "from": "ocr",
         "to": "ocr"
+      },
+      {
+        "from": "resources/build.json",
+        "to": "build.json"
       }
     ],
     "asarUnpack": [

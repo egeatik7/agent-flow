@@ -263,7 +263,9 @@ export function noteError(message: string): void {
 /** Debug mode: stop at the first failed step and keep everything that was true at that moment. */
 export function setDebugRun(on: boolean): void {
   debugRun = on
-  if (on) frozen = null
+  // The previous report is NOT cleared here. Turning debug on happens before a run begins
+  // (setDebugRun then beginRun), so clearing it here destroyed the record before beginRun could put
+  // it aside - a second debug run wiped the first one's evidence. beginRun archives it instead.
 }
 
 export function isDebugRun(): boolean {
@@ -321,6 +323,22 @@ export function recentSteps(n = 6): { id: string; status: string }[] {
 /** The reports of earlier runs, newest first: a new run must not overwrite what the last one found. */
 export function recentReports(): FrozenReport[] {
   return [...(frozen ? [frozen] : []), ...archive]
+}
+
+/**
+ * Where the last single action aimed. It is a hint for telling two same-named controls apart in the
+ * next action, never an answer on its own, and it is forgotten after a minute - long enough for a
+ * Win+R, type, Enter sequence, short enough not to leak into unrelated work.
+ */
+let actPoint: { x: number; y: number; at: number } | null = null
+
+export function noteActPoint(p: { x: number; y: number }): void {
+  actPoint = { x: p.x, y: p.y, at: Date.now() }
+}
+
+export function actPointWithin(ms: number): { x: number; y: number } | null {
+  if (!actPoint || Date.now() - actPoint.at > ms) return null
+  return { x: actPoint.x, y: actPoint.y }
 }
 
 export function snapshot(): RunSnapshot {

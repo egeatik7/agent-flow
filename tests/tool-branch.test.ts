@@ -698,6 +698,43 @@ describe('branch: kopya değil, tarif', () => {
     expect(String(onPurpose.message)).not.toContain('İÇERMEZ')
   })
 
+  it('hatadan devam: liste değişmişse aynı sıraya körlemesine devam etmez', async () => {
+    const h = harness()
+    const id = await h.openBranch('Liste sınaması')
+    const box = createNode('loop', 300, 0, 1)
+    box.id = 'list-loop'
+    box.title = 'İki öğe'
+    box.items = ['a', 'b']
+    const inner = createNode('wait', 500, 0, 1)
+    inner.id = 'list-inner'
+    inner.ms = 50
+    box.members = [inner.id]
+    h.book.tabs[0].graph.nodes.push(box, inner)
+    h.book.tabs[0].graph.edges.push({ id: 'li-e1', from: box.id, fromPort: 'next', to: inner.id })
+
+    beginRun(h.book.tabs[0].graph)
+    setDebugRun(true)
+    noteStep({ id: 'list-inner', status: 'error' })
+    const frozen = frozenReport()
+    expect(frozen).not.toBeNull()
+    // Kayıtlı öğe "b" (ikinci sıra) — ama kutunun o sırasında artık başka bir öğe var.
+    ;(frozen as unknown as { loops: unknown[] }).loops = [
+      { id: box.id, title: box.title, index: 1, total: 2, item: 'baska-dosya', vars: {} },
+    ]
+    endRun({ ok: false })
+
+    const refused = await callTool('run.from', { branchId: id, nodeId: 'list-inner', resumeFromFailure: true }, h.ctx)
+    expect(refused.ok).toBe(false)
+    expect(String(refused.message)).toContain('Liste değişmiş')
+    expect(String(refused.message)).toContain('baska-dosya')
+
+    // Kayıt gerçekten o sıradaki öğeyle aynıysa devam eder.
+    ;(frozen as unknown as { loops: { item?: string }[] }).loops[0].item = 'b'
+    const ok = await callTool('run.from', { branchId: id, nodeId: 'list-inner', resumeFromFailure: true }, h.ctx)
+    expect(ok.ok).toBe(true)
+    endRun({ ok: true })
+  })
+
   it('merge iki adımlıdır: önce deneme, sonra pencereye devredilen uygulama', async () => {
     const h = harness()
     const id = await h.openBranch('Remesh düzeltmesi')
