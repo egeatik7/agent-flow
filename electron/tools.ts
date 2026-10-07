@@ -509,6 +509,11 @@ const flowEdit: ToolDef = {
       return failed(flowEdit.name, `Paket bulunamadı: ${targetPath.join(' › ') || '(boş yol)'}. Yolu flow.read’in verdiği packagePath ile ver.`)
     }
     const prefix = where.title ? `[${where.title}] ` : ''
+    // Boş plan: ne değişeceğini söylemeyen bir çağrı "oldu" diyemez. Sessiz başarı, hiçbir şey
+    // yapılmadığını gizler (batarya testinde tam olarak bu görüldü).
+    if (!Array.isArray(args.ops) || args.ops.length === 0) {
+      return failed(flowEdit.name, 'İşlem listesi boş: ne değişeceğini yaz ({ ops: [...] }). Boş plan kabul edilmez.')
+    }
     const check = planOps(where.graph, args.ops, groupPrefix(groupId))
     if (!check.ok) {
       const head = check.errors.slice(0, 3).join(' ')
@@ -1379,7 +1384,7 @@ const actClick: ToolDef = {
   run: async (args, ctx, source) => {
     const denied = writeGate(ctx, source)
     if (denied) return failed(actClick.name, denied)
-    const target = text(args.target)
+    const target = text(args.target)?.trim()
     if (!target) return failed(actClick.name, 'Ne tıklanacağını söyle: { target: "Kaydet" }.')
     return runOneAction(
       actClick.name,
@@ -1398,9 +1403,11 @@ const actType: ToolDef = {
   run: async (args, ctx, source) => {
     const denied = writeGate(ctx, source)
     if (denied) return failed(actType.name, denied)
-    const body = text(args.text)
+    // Kırpılır: yalnız boşluktan oluşan bir "yazı" guard'ı geçip motora ulaşırsa odaktaki pencereye
+    // boşluk yazardı (batarya testinde tam olarak bu oldu).
+    const body = text(args.text)?.trim()
     if (!body) return failed(actType.name, 'Ne yazılacağını söyle: { text: "merhaba" }.')
-    const into = text(args.into)
+    const into = text(args.into)?.trim()
     return runOneAction(
       actType.name,
       {
@@ -1422,7 +1429,7 @@ const actKey: ToolDef = {
   run: async (args, ctx, source) => {
     const denied = writeGate(ctx, source)
     if (denied) return failed(actKey.name, denied)
-    const keys = text(args.keys)
+    const keys = text(args.keys)?.trim()
     if (!keys) return failed(actKey.name, 'Hangi tuş: { keys: "win+r" }.')
     return runOneAction(actKey.name, { kind: 'key', title: `Tuş: ${keys}`, fields: { keys } }, args, ctx)
   },
