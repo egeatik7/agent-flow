@@ -1,3 +1,4 @@
+import { spatialItems, spatialContext } from './spatial-context'
 import type { NodeKind } from './graph-types'
 import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
@@ -305,7 +306,9 @@ export async function chooseScreenTarget(opts: {
 
   const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
 Items (#number type "text" @x,y widthxheight):
-${describeItems(scan.items)}
+${spatialItems(scan)}
+
+${spatialContext(scan)}
 
 Step: ${opts.stepTitle}
 Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`

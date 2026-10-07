@@ -1,3 +1,4 @@
+import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -223,7 +224,8 @@ export function createAgent(ctx: AgentContext) {
    */
   async function pickFrom(node: AgentNode, scan: ScanResult, win: string, allowLlm: boolean, llmOnly = false): Promise<TargetPick | null> {
     const s = getSettings()
-    const items = scan.items
+    const items = asksDesktopShortcut(node.prompt ?? '') ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
+    const scopedScan = { ...scan, items }
     const area = scan.area
     const prompt = node.prompt?.trim() ?? ''
     const explicit = extractTarget(prompt)
@@ -254,7 +256,7 @@ export function createAgent(ctx: AgentContext) {
         model: textModels(s),
         prompt,
         kind: node.kind,
-        scan,
+        scan: scopedScan,
         stepTitle: NODE_SPECS[node.kind].label,
         sendImage: s.sendScreenshot && !!scan.image,
         onImageFallback: (m) => log('warn', m),
@@ -294,7 +296,7 @@ export function createAgent(ctx: AgentContext) {
             model: textModels(s),
             prompt,
             kind: node.kind,
-            scan,
+            scan: scopedScan,
             stepTitle: NODE_SPECS[node.kind].label,
             sendImage: s.sendScreenshot && !!scan.image,
             hint: `${describeMemory(mem)}. Bu tur yazı eşleşmesi #${hit.item.id} “${hit.item.text}” öğesini buldu ama ${why}. Talimata göre doğru öğe hangisi?`,
@@ -341,6 +343,9 @@ export function createAgent(ctx: AgentContext) {
     const order = activeFindOrder(s.findOrder, s.findOff)
     trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey, memory: memoFor(node) })
     const resolved = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved => {
+      if (asksDesktopShortcut(prompt) && winScan && taskbarItem(winScan, { x: target.x, y: target.y, w: 0, h: 0 })) {
+        throw new NotFoundError('Masaüstü kısayolu istendi, ancak hedef görev çubuğunda bulundu; tıklama gönderilmedi.')
+      }
       trace(node, { kind: 'resolved', source, target: { x: target.x, y: target.y, label: target.label }, rect, item })
       return target
     }
@@ -389,12 +394,14 @@ export function createAgent(ctx: AgentContext) {
       const mem = node.templated ? undefined : memoFor(node)
       const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
       const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
-      const hit = matchText(scan.items, text, { anchor, minScore: 100, prefer })
+      const items = asksDesktopShortcut(prompt) ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
+      const hit = matchText(items, text, { anchor, minScore: 100, prefer })
       if (!hit) return null
       return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }
 
     try {
+      if (asksDesktopShortcut(prompt)) await windowsScan()
       for (const stage of order) {
         if (stopped()) throw new StoppedError()
         if (stage === 'chrome') {

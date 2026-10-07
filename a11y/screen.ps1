@@ -812,6 +812,7 @@ function Invoke-Scan($P) {
 
     return [pscustomobject]@{
       area   = $rect
+      regions = (Get-TaskbarRegions)
       items  = $items
       ocr    = $ocrOk
       uiaCount = $uia.Count
@@ -924,4 +925,24 @@ function Invoke-MouseAt([int]$x, [int]$y, [string]$button) {
       [XpNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     }
   }
+}
+
+# Best-effort metadata only: never infer taskbar from a fixed bottom strip.
+function Get-TaskbarRegions {
+  $regions = New-Object System.Collections.ArrayList
+  try { $child = $script:Walker.GetFirstChild([System.Windows.Automation.AutomationElement]::RootElement) }
+  catch { return ,$regions }
+  while ($null -ne $child) {
+    try {
+      $current = $child.Current
+      if (($current.ClassName -eq 'Shell_TrayWnd' -or $current.ClassName -eq 'Shell_SecondaryTrayWnd') -and -not $current.IsOffscreen) {
+        $r = $current.BoundingRectangle
+        if (-not $r.IsEmpty -and $r.Width -gt 0 -and $r.Height -gt 0) {
+          [void]$regions.Add([pscustomobject]@{ kind = 'taskbar'; x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height })
+        }
+      }
+    } catch { }
+    try { $child = $script:Walker.GetNextSibling($child) } catch { break }
+  }
+  return ,$regions
 }

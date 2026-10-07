@@ -14,6 +14,7 @@ export type ScreenItem = {
 }
 
 export type ScanResult = {
+  regions?: { kind: 'taskbar'; x: number; y: number; w: number; h: number }[]
   area: { x: number; y: number; w: number; h: number }
   items: ScreenItem[]
   ocr: boolean
