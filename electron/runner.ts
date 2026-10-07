@@ -122,6 +122,8 @@ export async function runGraph(
     nested?: boolean
     root?: AgentGraph
     resume?: boolean
+    /** Debug koşusu: ilk hatalı adımda durur ve o anın bağlamını saklar. */
+    debug?: boolean
     /** Hatadan devam ederken kayıtlı öğenin kimliği: devam İNDEKSE değil bu öğeye göre yapılır. */
     resumeLoopId?: string
     resumeItem?: string
@@ -384,6 +386,10 @@ export async function runGraph(
    * Runs the box. A full run walks every item from the first.
    * A run that starts inside the box (`startAt`) continues from the ticked item through the end.
    */
+  // YALNIZ debug koşusunda: mevcut kullanıcı akışlarının davranışı korunur (CLAUDE.md öncelik 2).
+  // Ölçüldü: 197 saniyede 114 geçiş, 115 aynı hata — ve araç katmanı "0 hata" görüyordu.
+  const turImzalari = new Map<string, string>()
+
   const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false): Promise<string> => {
     ex.step(loop.id, 'running')
     const first = lapStart(loop)
@@ -411,10 +417,16 @@ export async function runGraph(
     if (hasTemplate(folderRaw)) {
       const resolved = outsideFolder(root, loop)
       if (!resolved) {
+        // Kutu kurulumundaki hata da bir adım hatasıdır: araç katmanı sayacı ve debug
+        // durması yalnız bu olayla çalışır (canlıda 115 hata "0 hata" görünüyordu).
+        ex.step(loop.id, 'error')
         throw new Error(`“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
       } else {
         const found = listDirEntries(resolved)
         if (!found) {
+          // Kutu kurulumundaki hata da bir adım hatasıdır: araç katmanı sayacı ve debug
+          // durması yalnız bu olayla çalışır (canlıda 115 hata "0 hata" görünüyordu).
+          ex.step(loop.id, 'error')
           throw new Error(`“${loop.title}”: klasör yok: ${resolved}`)
         } else {
           fromFolder = found
@@ -474,6 +486,8 @@ export async function runGraph(
           if (isFatal(e)) throw e
           const msg = (e as Error).message || String(e)
           failedItems.push(label)
+          // Tur içi hata: araç katmanının görmesi için adım olayı (sayaç + debug durması).
+          ex.step(loop.id, 'error')
           tally.failed++
           ex.log('error', `${label}: ${msg}`)
           await ex.captureFailure?.(label).catch(() => {})
@@ -491,6 +505,20 @@ export async function runGraph(
       loopNotes.pop()
       ex.setLoop?.(loopNotes.join('   ·   '))
       vars = outer
+    }
+
+    // Aynı hata kümesi ikinci kez görülürse dur: yüzlerce öğeyi boşa geçirmenin önü kesilir.
+    const imza = failedItems.join('|')
+    // Yalnız ÜST DÜZEY kutu: iç kutu, dış öğe başına meşru olarak yeniden çağrılır ve aynı
+    // imzayı üretir (mevcut test bunu doğruluyor). Sonsuz tekrar üst düzey kutuda oluyordu.
+    const ustKutu = (ownerOf(graph, loop.id) as AgentNode | null)?.kind === 'loop'
+    if (imza && !ustKutu && opts.debug === true) {
+      const onceki = turImzalari.get(loop.id)
+      turImzalari.set(loop.id, imza)
+      if (onceki === imza) {
+        ex.log('error', `“${loop.title}”: aynı hata kümesi tekrar etti (${failedItems.length} öğe: ${failedItems.slice(0, 3).join(', ')}). Döngü durdu.`)
+        throw new LoopHalted(`“${loop.title}”: aynı hata kümesi tekrar etti.`)
+      }
     }
 
     const ran = keys.length - from

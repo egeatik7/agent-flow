@@ -531,6 +531,9 @@ async function runFlow(
       stepDelayMs: Math.max(0, s.stepDelayMs),
       startId,
       resume: !!startId,
+      // Debug koşusu runner'a da bildirilir: aynı hata kümesi tekrarında durma koruması
+      // yalnız debug'da çalışır (normal kullanıcı akışlarının davranışı değişmez).
+      ...(opts?.debug ? { debug: true } : {}),
       // Kimlikle devam (varsa): motor öğeyi yeni listede arar, indekse güvenmez.
       ...(opts?.resumeLoopId && opts?.resumeItem ? { resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem } : {}),
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
