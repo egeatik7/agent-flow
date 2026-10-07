@@ -100,8 +100,6 @@ export const INITIATIVE_PROMPT = `You are an automation agent working step by st
   // move(start_box='…') fareyi taşır (tıklamaz); click_current() bulunduğu yerden tıklar.
 Controls on screen are given as a numbered list. Clicks and typing must target a number from that list.
 Actions: click, double, right, move, type, key, wait, done, fail.
-move: hover the chosen candidate's number without clicking; click only when you are sure.
-click_current: after a move, click where the pointer already is (no coordinates).
 JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`
 
 export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
