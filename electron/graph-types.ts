@@ -189,6 +189,26 @@ export type AppSettings = {
   agentPermission: 'off' | 'ask' | 'auto'
   /** Listen on 127.0.0.1 so an outside agent can reach the same tools the panel uses. */
   agentEndpoint: boolean
+  /**
+   * How much the engine looks at the screen after an action (CLAUDE.md §17).
+   *
+   * The decision is that verification runs **log-only** by default, and that the threshold tuning
+   * is not to be tried again. So:
+   *  - `off`: no scan at all - the action is taken at its word, nothing waits, no model runs
+   *  - `log`: look, and say what was seen, but never judge the step and never spend a model call
+   *  - `on`:  look, and let the recovery attempts run too (a closer look, then a plan question)
+   */
+  screenCheck: 'off' | 'log' | 'on'
+}
+
+/**
+ * The verification mode, with the decided default for a flow saved before the setting existed.
+ * Anything unrecognised counts as `log`: a silent `on` would spend model calls nobody asked for,
+ * and a silent `off` would stop reporting what the screen actually showed.
+ */
+export function screenCheckMode(s: { screenCheck?: string } | undefined): 'off' | 'log' | 'on' {
+  const v = s?.screenCheck
+  return v === 'off' || v === 'on' ? v : 'log'
 }
 
 export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } {
@@ -228,6 +248,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   llmPrompts: {},
   agentPermission: 'ask',
   agentEndpoint: false,
+  screenCheck: 'log',
 }
 
 export type StepStatus = 'idle' | 'running' | 'done' | 'error'

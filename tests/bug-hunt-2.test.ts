@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createNode, baseName, itemVars, listItems, loopKeys, loopStartIndex, type AgentGraph, type AgentNode } from '../electron/graph-types'
+import { createNode, baseName, itemVars, listItems, loopKeys, loopStartIndex, screenCheckMode, DEFAULT_SETTINGS, type AgentGraph, type AgentNode } from '../electron/graph-types'
 import { chainOf, contextOf, countEdges, findPlace, walkGraph } from '../electron/tool-context'
 import { extractTarget, matchText, norm, containsTextStrict, type ScreenItem } from '../electron/matcher'
 import { judgeScreen, expectation } from '../electron/confirm'
@@ -287,5 +287,20 @@ describe('derin batarya: giriş noktası ve kesilebilir bekleme', () => {
     await expect(interruptibleSleep(5000, () => true)).rejects.toThrow()
     const gecen = Date.now() - t0
     expect(gecen, 'durdurma uzun beklemede geç kaldı').toBeLessThan(600)
+  })
+})
+
+describe('derin batarya: ekran doğrulama ayarı (CLAUDE.md §17)', () => {
+  it('varsayılan yalnızca günlük; bilinmeyen değer sessizce açılmaz', () => {
+    // §17 kararı: doğrulama varsayılan olarak yalnızca-günlük çalışır ve eşik ayarı denenmez.
+    expect(DEFAULT_SETTINGS.screenCheck).toBe('log')
+    expect(screenCheckMode(DEFAULT_SETTINGS)).toBe('log')
+    expect(screenCheckMode(undefined)).toBe('log')
+    expect(screenCheckMode({})).toBe('log')
+    expect(screenCheckMode({ screenCheck: 'off' })).toBe('off')
+    expect(screenCheckMode({ screenCheck: 'on' })).toBe('on')
+    // Eski bir kayıtta tanınmayan bir değer varsa sessizce "açık" olmaz (model çağrısı harcamaz).
+    expect(screenCheckMode({ screenCheck: 'kapali' })).toBe('log')
+    expect(screenCheckMode({ screenCheck: 'ON' })).toBe('log')
   })
 })

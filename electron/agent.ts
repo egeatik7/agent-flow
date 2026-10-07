@@ -4,7 +4,7 @@ import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { NODE_SPECS, modelChain, renderTemplate, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { NODE_SPECS, modelChain, renderTemplate, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
 import { clickableBy, writableBy } from './target-match'
 import { assertModelKeysAllowed } from './key-guard'
 import {
@@ -774,6 +774,14 @@ export function createAgent(ctx: AgentContext) {
    * Returns whether the reaction was confirmed (only confirmed targets go into memory).
    */
   async function ensureActed(node: AgentNode, ahead: StepAhead | undefined, act: () => Promise<void>): Promise<boolean> {
+      // CLAUDE.md §17: the decision is log-only by default, and "off" means the action is taken
+      // at its word - no screen scans, no waiting and no model calls. This is the answer to the
+      // cost the decision note describes, and why the threshold is not being tuned again.
+      const mode = screenCheckMode(getSettings())
+      if (mode === 'off') {
+        await act()
+        return true
+      }
     // Selecting a field need not change any screen text. The following type
     // operation resolves and verifies that field using this click's point.
     if (node.kind === 'click' && ahead?.next?.kind === 'type' && !ahead.next.prompt?.trim() && !ahead.next.locator) {
@@ -813,12 +821,20 @@ export function createAgent(ctx: AgentContext) {
       log('success', `Emin: ${verdict.reason}.`)
       return true
     }
-    if (expected && (verdict.kind === 'blocked' || verdict.kind === 'unknown')) {
+    // §17: the closer look and the plan question cost model calls, so only "on" asks for them.
+    if (mode === 'on' && expected && (verdict.kind === 'blocked' || verdict.kind === 'unknown')) {
       verdict = await lookCloser(verdict, before, after, node, ahead)
       if (verdict.kind === 'ready') {
         log('success', `Emin: ${verdict.reason}.`)
         return true
       }
+    }
+
+    // Log-only: what was seen is written down in full, but the step is not judged and no model is
+    // asked. The next step looks for its own target, so an unclear reaction costs nothing here.
+    if (mode === 'log') {
+      log('info', `Tepki net değil (${verdict.reason}). Yalnızca günlük modu: adım hata sayılmadı, sıradaki adım kendi hedefini arayacak.`)
+      return false
     }
 
     log('info', `Tepki net değil (${verdict.reason}). Akış bozulmadan sıradaki adım kontrol edilecek.`)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AgentGraph, AgentNode, AppSettings, ToolResult, ToolSpec } from '../types'
+import { screenCheckMode, type AgentGraph, type AgentNode, type AppSettings, type ToolResult, type ToolSpec } from '../types'
 
 const api = typeof window !== 'undefined' ? window.xpAgent : undefined
 
@@ -109,6 +109,23 @@ export default function AgentTab({
           <option value="auto">Otomatik — onay sormaz</option>
         </select>
         <p className="hint">Bu sekmedeki düğmeler sorulmaz: düğmeye basman zaten onayın. Okuma araçları hiç sorulmaz.</p>
+      </div>
+
+      <div className="field">
+        <label>Ekran doğrulaması</label>
+        <select
+          className="xp-input"
+          value={screenCheckMode(settings)}
+          onChange={(e) => onSaveSettings({ screenCheck: e.target.value as 'off' | 'log' | 'on' })}
+        >
+          <option value="off">Kapalı — eylemden sonra ekrana hiç bakılmaz (en hızlı)</option>
+          <option value="log">Yalnızca günlük — bakar ve yazar, adımı hata saymaz, model çağırmaz</option>
+          <option value="on">Açık — bakmazsa yakından bakar ve plan sorar</option>
+        </select>
+        <p className="hint">
+          Varsayılan <b>yalnızca günlük</b>. Eşik ayarı denendi ve sürekli sorun çıkardı; tekrar
+          denenmez (CLAUDE.md §17). Kapalı seçilirse eylem yapıldı sayılır ve hiçbir tarama yapılmaz.
+        </p>
       </div>
 
       <div className="field">
