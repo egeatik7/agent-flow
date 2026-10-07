@@ -287,7 +287,7 @@ const flowSuggest: ToolDef = {
     // Without a plan this answers the other useful question: what may be touched here at all.
     if (args.ops === undefined) {
       const kinds = ADDABLE_KINDS.map((k) => `${k} (${NODE_SPECS[k].label})`).join(', ')
-      const message = `Düzenleme yüzeyi — kök: ${graph.nodes.length} node · ${graph.edges.length} bağlantı (paketlerin içi hariç; flow.read hepsini sayar). Eklenebilen türler: ${kinds}. Değiştirilebilen alanlar: ${EDITABLE_FIELDS.join(', ')}. Hedef kanıtı (locator, simge, hafıza, çapa) ve koşu durumu değiştirilemez; paketlerin içi bu sürümde düzenlenemez.`
+      const message = `Düzenleme yüzeyi — kök: ${graph.nodes.length} node · ${graph.edges.length} bağlantı (paketlerin içi hariç; flow.read hepsini sayar). Eklenebilen türler: ${kinds}. Değiştirilebilen alanlar: ${EDITABLE_FIELDS.join(', ')}. Hedef kanıtı (locator, simge, hafıza, çapa) ve koşu durumu değiştirilemez; paketlerin içi packagePath ile düzenlenebilir ve denetlenebilir.`
       ctx.log('info', `Ajan · öneri · ${message}`)
       return {
         ok: true,
@@ -305,7 +305,14 @@ const flowSuggest: ToolDef = {
       }
     }
 
-    const check = planOps(graph, args.ops)
+    const check = planOps(
+      /* Paket içi planlar da denetlenir: flow.edit paketin içini düzenleyebiliyor, denetleyici de
+         aynı yeri görmeli. Aksi hâlde var olan bir node için "bulunamadı" deniyordu. */
+      (Array.isArray(args.packagePath) && args.packagePath.length
+        ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
+        : graph),
+      args.ops
+    )
     const lines = describePlan(graph, check.plan)
     if (!check.ok) {
       const head = check.errors.slice(0, 3).join(' ')
@@ -322,7 +329,17 @@ const flowSuggest: ToolDef = {
       }
     }
 
-    const diff = diffGraphs(graph, applyPlan(graph, check.plan))
+    const diff = diffGraphs(
+      (Array.isArray(args.packagePath) && args.packagePath.length
+        ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
+        : graph),
+      applyPlan(
+        (Array.isArray(args.packagePath) && args.packagePath.length
+          ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
+          : graph),
+        check.plan
+      )
+    )
     const warn = check.warnings.length ? ` Uyarı: ${check.warnings.join(' ')}` : ''
     const message = `Plan geçerli: ${diff.summary}. Hiçbir şey yazılmadı; uygulamak için flow.edit kullan. Yeni node’ların gerçek id’lerini uygulamadan sonra flow.read ile al.${warn}`
     ctx.log('info', `Ajan · öneri · ${message}`)
