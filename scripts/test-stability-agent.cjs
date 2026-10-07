@@ -156,3 +156,28 @@ test('late visual finished answer after stop cannot be announced as success', as
   await assert.rejects(a.ex.initiative(node('ai', { prompt: 'Open Blender', engine: 'screen' }), 1), StoppedError);
   assert(!a.logs.some(x => x.level === 'success' && /hedefe ulaştı/.test(x.message)));
 });
+
+test('visual initiative accepts finished without a second model judging or restarting the task', async () => {
+  let turns=0, checks=0;
+  const a=agent({models:{guiStep:async()=>{turns++;return {kind:'finished',thought:'Selected profile is open',text:'',raw:'finished()'};},visionCheck:async()=>{checks++;return {answer:false,reason:'Profile picker is no longer visible'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
+  a.scan.image={data:'mock',w:1288,h:728};
+  assert.equal(await a.ex.initiative(node('ai',{prompt:'Select the first profile and finish',engine:'screen',maxActions:8}),1),true);
+  assert.equal(turns,1); assert.equal(checks,0);
+  assert.equal(a.calls.filter(c=>c[0]==='scan').length,1);
+  assert(!a.calls.some(c=>c[0]==='click'));
+  assert(!a.logs.some(l=>/kontrol onaylamadı/.test(l.message)));
+});
+test('profile click followed by finished does not open profile menus after a hypothetical verifier rejection', async () => {
+  let turns=0,checks=0;
+  const a=agent({patchAt:async()=>null,models:{guiStep:async()=>++turns===1?{kind:'click',x:.326,y:.563,thought:'First profile',raw:'click()'}:{kind:'finished',thought:'Chrome is open',text:'',raw:'finished()'},visionCheck:async()=>{checks++;return {answer:false,reason:'Profile picker is gone'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
+  a.scan.image={data:'mock',w:1288,h:728};
+  assert.equal(await a.ex.initiative(node('ai',{prompt:'Select first Chrome profile',engine:'screen',maxActions:8}),1),true);
+  assert.equal(turns,2);assert.equal(checks,0);assert.equal(a.calls.filter(c=>c[0]==='click').length,1,JSON.stringify(a.logs));
+});
+test('a completed recorded initiative path returns without a second completion check', async () => {
+  let turns=0,checks=0;
+  const a=agent({models:{guiStep:async()=>{turns++;throw new Error('Should not resume a completed path');},visionCheck:async()=>{checks++;return {answer:false,reason:'Picker is gone'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
+  a.scan.image={data:'mock',w:1288,h:728};
+  assert.equal(await a.ex.initiative(node('ai',{prompt:'Select profile',engine:'screen',path:[{action:'wait',sig:''}]}),1),true);
+  assert.equal(turns,0);assert.equal(checks,0);
+});

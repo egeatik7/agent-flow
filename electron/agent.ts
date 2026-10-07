@@ -36,7 +36,6 @@ import {
   type GuiTurn,
   chooseTypeField,
   planStall,
-  visionCheck,
   type ReactionVerdict,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
@@ -1433,29 +1432,6 @@ export function createAgent(ctx: AgentContext) {
     }
   }
 
-  /** A second look at the finished screen, by the vision model, before “bitti” is believed. */
-  async function verifyGoal(goal: string, tars: boolean): Promise<{ ok: boolean; reason: string; verified: boolean }> {
-    checkStopped()
-    const s = getSettings()
-    const model = modelChain(s.visionModel, s.visionBackups)
-    if (!s.apiKey || !model.length) return { ok: true, reason: 'kontrol modeli yok', verified: false }
-    try {
-      await pause(800)
-      const shot = await agentShot(tars, 'inisiyatif kontrol')
-      const r = await visionCheck({
-        apiKey: s.apiKey,
-        model,
-        question: `Görev istenen sonuca ulaşmış mı? Bir programı açmak, penceresinin açık ve kullanılabilir olmasıdır. “bitir”, “finish” veya “complete” programı kapatmak değildir. Metinde kapat, çık, quit, exit veya kill yoksa uygulamayı kapatmayı isteme. Görev: ${goal}`,
-        image: shot.img,
-      })
-      return { ok: r.answer, reason: r.reason, verified: true }
-    } catch (e) {
-      if (e instanceof StoppedError) throw e
-      log('warn', `Bitti kontrolü yapılamadı, modelin sözüne güveniliyor: ${(e as Error).message}`)
-      return { ok: true, reason: '', verified: false }
-    }
-  }
-
   /** Replays the last good lap without the model while the screen still looks like it did then. */
   async function replayPath(steps: PathStep[], vars: Record<string, string>, tars: boolean): Promise<{ ok: boolean; done: PathStep[] }> {
     log('info', `Kayıtlı yol deneniyor (${steps.length} adım, model çağrılmadan).`)
@@ -1541,13 +1517,8 @@ export function createAgent(ctx: AgentContext) {
       const r = await replayPath(saved, vars, tars)
       path = [...r.done]
       if (r.ok) {
-        const v = await verifyGoal(goal, tars)
-        if (v.ok) {
-          if (v.verified) log('success', `Kayıtlı yol hedefe ulaştı (${saved.length} adım).`)
-          else log('warn', `Kayıtlı yol bitti ama hedef doğrulanamadı (${v.reason || 'kontrol modeli yok'}); akış “tamam” çıkışından devam ediyor.`)
-          return true
-        }
-        log('info', `Kayıtlı yol bitti ama hedef tamam görünmüyor${v.reason ? ` (${v.reason})` : ''}. Model devam ediyor.`)
+        log('success', `Kayıtlı İnisiyatif yolu tamamlandı (${saved.length} adım).`)
+        return true
       }
       if (r.done.length) {
         history.push({
@@ -1561,7 +1532,6 @@ export function createAgent(ctx: AgentContext) {
     let prev: Shot | null = null
     let still = 0
     let quietWaits = 0
-    let rejected = 0
     let previousClick: (Point & { kind: string }) | undefined
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
@@ -1614,19 +1584,9 @@ export function createAgent(ctx: AgentContext) {
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
       if (a.kind === 'finished') {
-        const v = await verifyGoal(goal, tars)
-        if (v.ok) {
-          savePath(node, path, vars)
-          if (v.verified) log('success', `İnisiyatif hedefe ulaştı (${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
-          else log('warn', `İnisiyatif bitti dedi ama doğrulama yapılamadı (${v.reason || 'kontrol modeli yok'}); başarı olarak bildirilmiyor, akış “tamam” çıkışından devam ediyor.`)
-          return true
-        }
-        rejected++
-        log('warn', `Model “bitti” dedi ama kontrol onaylamadı${v.reason ? `: ${v.reason}` : ''}.`)
-        if (rejected >= 2) return false
-        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: `Kontrol: görev henüz tamamlanmamış görünüyor (${v.reason || 'eksik adım var'}). Eksik kalanı yap. Do not close the application.` })
-        prev = shot
-        continue
+        savePath(node, path, vars)
+        log('success', `İnisiyatif tamamlandı (model “bitti” dedi; ${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
+        return true
       }
       if (a.kind === 'call_user') {
         log('warn', `Model yardım istedi, İnisiyatif duruyor: ${a.thought || 'gerekçe yok'}`)

@@ -268,6 +268,10 @@ Hedef, yalnızca derlenen kod veya etkileyici bir demo değildir. Gerçek kabul 
 
 Bu bölüm, sahibinin denemeler sonunda verdiği kararları kaydeder. Burada yazan, bu belgenin başka yerlerindeki (özellikle §4 ve §16) “doğrulamayı geliştir, eşikleri ölç” yönündeki cümlelerle çelişirse **bu bölüm geçerlidir**. Aşağıdakileri “iyileştirmeye” çalışma.
 
+- **Onarım yaklaşımı (7 Ekim 2026, kullanıcının açık kararı):** normal koşu her eylemden sonra başka bir modele başarı/başarısızlık kararı verdirmeden ilerler. Hata, mevcut eylem sınırı veya durma oluştuğunda harness geçmiş günlükleri ve ekran kanıtlarını inceler; gerekli en küçük onarımı önerir veya onarım gerekmiyorsa uygun noktadan yeniden çalıştırır. Doğru ilerleyen koşuya müdahale etmez.
+
+- **İnisiyatif bitişi (7 Ekim 2026, kullanıcının açık kararı):** görsel ajan `finished` dediğinde ikinci bir modelle son ekranı yargılama yoktur. Node yolu kaydeder ve tamam çıkışından devam eder. Kayıtlı yol bütün adımlarıyla oynatıldıysa da ikinci bir bitiş kontrolü yapılmaz. Bu kontrol yanlış ret üretip tamamlanmış görevi tekrar kurcalattığı için kaldırılmıştır; yeniden ekleme. Günlük, bitişin model kararına/kayıtlı yolun tamamlanmasına dayandığını söyler. Eylem sırasında pencere/odak korumaları ve kullanıcının açık Koşul node'ları ayrı konulardır.
+
 - Sistem başarıyı yargılamaz; şüphede durmaz, tahmin etmez, açıkça raporlar.
 - Ekran doğrulaması varsayılan olarak yalnızca-günlük modda çalışır. Eşik ayarı denendi ve sürekli sorun çıkardı, tekrar denenmesin.
 - Hafızaya yalnızca gerçekten doğrulanmış hedefler yazılır; şüpheli hedefler yazılmaz.
