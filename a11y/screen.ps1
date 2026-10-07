@@ -123,8 +123,11 @@ function Get-ScreenBitmap($rect) {
   $bmp = Copy-Screen $rect
   # BitBlt leaves alpha at 0. A later draw then treats the whole shot as transparent and it comes out gray.
   Set-BitmapOpaque $bmp
-  # İNCELEME DÜZELTMESİ: modelin gördüğü kareye imleci çiz. "Önce oynat" sonrası
-  # model nerede olduğunu görebilsin; hover bir menü açmazsa da nokta görünür.
+  return $bmp
+}
+
+function Add-CursorMarker($bmp, $rect) {
+  # This is called only on the outgoing model image, never the raw OCR/signature frame.
   try {
     $cp = Get-CursorPoint
     $cx = [int]$cp.X; $cy = [int]$cp.Y
@@ -145,7 +148,6 @@ function Get-ScreenBitmap($rect) {
       } finally { $gg.Dispose() }
     }
   } catch { }
-  return $bmp
 }
 
 function Capture-Raw($rect) {
@@ -827,6 +829,7 @@ function Invoke-Scan($P) {
       if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
       $snap = 0
       if ($P.snap) { $snap = [int]$P.snap }
+      if ($P.cursorMarker -eq $true) { Add-CursorMarker $shotBmp $rect }
       $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
       $shotBmp.Dispose()
     }

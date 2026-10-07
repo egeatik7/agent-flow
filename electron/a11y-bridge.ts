@@ -265,6 +265,8 @@ export async function scan(opts: {
   deferOnnx?: boolean
   /** Developer preview: inspect the selected window without bringing it forward. */
   readOnly?: boolean
+  /** Draw a cursor marker only on the image returned to the GUI agent. */
+  cursorMarker?: boolean
 }): Promise<ScanResult & { shot?: string }> {
   if (!IS_WIN) {
     return {
@@ -291,6 +293,7 @@ export async function scan(opts: {
       snap: opts.snap ?? 0,
       fit: opts.fit === true,
       sig: opts.sig === true,
+      cursorMarker: opts.cursorMarker === true,
       tilt: opts.tilt === true,
       valueLo,
       valueHi,

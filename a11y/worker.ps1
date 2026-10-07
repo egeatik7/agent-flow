@@ -1014,9 +1014,14 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ x = [int]$p.X; y = [int]$p.Y }
     }
     'clickCurrentAt' {
+      if (-not $P.hwnd -or [long]$P.hwnd -le 0) { throw 'INPUT_CLICK_STALE: No hover window identity; click not sent' }
       # Fare konumundan tıklama. $P.hwnd, TAŞIMA anındaki penceredir; arada pencere
       # değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAYIZ.
-      $x = [int]$P.x; $y = [int]$P.y
+      # Re-read at execution time too: a cursor read in the caller can already be stale.
+      $cursor = Get-CursorPoint
+      $dx = [double]$cursor.X - [double]$P.x; $dy = [double]$cursor.Y - [double]$P.y
+      if ([Math]::Sqrt($dx * $dx + $dy * $dy) -gt 3) { throw 'INPUT_CLICK_STALE: Cursor moved before input; click not sent' }
+      $x = [int]$cursor.X; $y = [int]$cursor.Y
       $kok = [XpWin]::RootAt($x, $y)
       if ($P.hwnd -and [IntPtr]([long]$P.hwnd) -ne [IntPtr]::Zero -and $kok -ne [IntPtr]([long]$P.hwnd)) {
         throw 'INPUT_CLICK_STALE: Fare noktası artık aynı pencerede değil; tıklama gönderilmedi'
@@ -1035,7 +1040,7 @@ function Invoke-Op([string]$op, $P) {
         [void](Get-BoundWindow $P.target $false)
         if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
       }
-      [void][XpWin]::SetCursorPos([int]$P.x, [int]$P.y)
+      if (-not [XpWin]::SetCursorPos([int]$P.x, [int]$P.y)) { throw 'INPUT_MOVE_FAILED: Cursor movement failed' }
       return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
     }
     'clickAt' {

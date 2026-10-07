@@ -517,7 +517,7 @@ export async function visionDescribe(opts: { apiKey: string; model: string | str
 }
 
 export type AgentAction = {
-  action: 'click' | 'double' | 'right' | 'type' | 'key' | 'wait' | 'done' | 'fail'
+  action: 'click' | 'double' | 'right' | 'move' | 'type' | 'key' | 'wait' | 'done' | 'fail'
   id: number | null
   text: string
   keys: string
@@ -560,9 +560,14 @@ ${opts.listText}`
     if (!(e instanceof ImageUnsupportedError)) throw e
     content = await chat(opts.apiKey, opts.model, [messages[0], { role: 'user', content: text }], false)
   }
+  return parseAgentAction(content)
+}
+
+/** Decode list actions independently of the provider call. */
+export function parseAgentAction(content: string): AgentAction {
   const p = parseJson(content)
   const raw = String(p.action ?? '').toLowerCase()
-  const allowed = ['click', 'double', 'right', 'type', 'key', 'wait', 'done', 'fail'] as const
+  const allowed = ['click', 'double', 'right', 'move', 'type', 'key', 'wait', 'done', 'fail'] as const
   const action = (allowed as readonly string[]).includes(raw) ? (raw as AgentAction['action']) : 'wait'
   const id = num(p.id)
   return {

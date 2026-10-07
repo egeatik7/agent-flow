@@ -53,7 +53,7 @@ function agent(overrides = {}, settings = {}) {
       settings: () => ({ apiKey: '', model: '', findOrder: ['uia'], findOff: [], ...settings }),
     });
   } finally { Module._load = oldLoad; }
-  return { calls, logs, bridge, scan, ex: instance.executor, stop: () => stop = true };
+  return { calls, logs, bridge, scan, ex: instance.executor, beginRun: instance.beginRun, stop: () => stop = true };
 }
 function node(kind, extra = {}) { return { ...createNode(kind, 0, 0), ...extra }; }
 const loc = { name: 'OLD', controlType: 'Button', windowTitle: 'Blender', automationId: 'button' };
@@ -180,4 +180,48 @@ test('a completed recorded initiative path returns without a second completion c
   a.scan.image={data:'mock',w:1288,h:728};
   assert.equal(await a.ex.initiative(node('ai',{prompt:'Select profile',engine:'screen',path:[{action:'wait',sig:''}]}),1),true);
   assert.equal(turns,0);assert.equal(checks,0);
+});
+
+const hover = require(path.join(dist, 'hover.js'));
+
+test('new run clears a hover left by the preceding run', () => {
+  const a=agent(); hover.recordHover({x:100,y:200},42);
+  a.beginRun(); assert.equal(hover.hoverOf(),undefined);
+});
+
+test('list initiative move executes movement without clicking, and records the window', async () => {
+  let turns=0;
+  const a=agent({moveMouse:async(...args)=>{a.calls.push(['move',...args]);return {hwnd:42};}, models:{nextAction:async()=>++turns===1?{action:'move',id:7,reason:''}:{action:'done',id:null,reason:''}}}, {apiKey:'test',model:'model'});
+  a.scan.items=[{id:7,text:'Chrome',type:'Text',src:'ocr',x:100,y:200,w:50,h:20}];
+  assert.equal(await a.ex.initiative(node('ai',{prompt:'Hover Chrome',engine:'list',maxActions:3}),1),true);
+  assert(a.calls.some(x=>x[0]==='move'));
+  assert(!a.calls.some(x=>x[0]==='click')); assert.equal(hover.hoverOf()?.hwnd,42);
+});
+
+test('move node followed by screen click_current uses shared fresh hover and requests a marked frame', async () => {
+  let turns=0;
+  const a=agent({moveMouse:async()=>({hwnd:42}),cursorPos:async()=>({x:50,y:30}),clickCurrentAt:async(...args)=>a.calls.push(['currentClick',...args]),models:{guiStep:async()=>++turns===1?{kind:'clickCurrent',thought:'',raw:'click_current()'}:{kind:'finished',thought:'',raw:'finished()'}}},{apiKey:'test',agentModel:'model'});
+  a.scan.image={data:'fake',w:100,h:100};
+  a.bridge.scan=async(opts)=>{a.calls.push(['scan',opts]);return a.scan};
+  await a.ex.click(node('click',{locator:loc,clickMode:'move'}),1);
+  assert.equal(await a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:3}),1),true);
+  assert(a.calls.some(x=>x[0]==='currentClick'&&x[3]===42));
+  assert(a.calls.some(x=>x[0]==='scan'&&x[1]?.cursorMarker===true));
+  assert.equal(hover.hoverOf(),undefined);
+});
+
+test('stop while cursor is being read cannot send a click_current', async () => {
+  const a=agent({cursorPos:async()=>{a.stop();return {x:100,y:200}},clickCurrentAt:async()=>a.calls.push(['currentClick']),models:{guiStep:async()=>({kind:'clickCurrent',thought:'',raw:'click_current()'})}},{apiKey:'test',agentModel:'model'});
+  a.scan.image={data:'fake',w:100,h:100};hover.recordHover({x:100,y:200},42);
+  await assert.rejects(a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:2}),1),StoppedError);
+  assert(!a.calls.some(x=>x[0]==='currentClick'));
+});
+
+
+test('missing hover window identity cannot authorize click_current', async () => {
+ let turns=0;
+ const a=agent({cursorPos:async()=>({x:100,y:200}),clickCurrentAt:async()=>a.calls.push(['currentClick']),models:{guiStep:async()=>++turns===1?{kind:'clickCurrent',thought:'',raw:'click_current()'}:{kind:'finished',thought:'',raw:'finished()'}}},{apiKey:'test',agentModel:'model'});
+ a.scan.image={data:'fake',w:100,h:100};hover.recordHover({x:100,y:200});
+ await a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:3}),1);
+ assert(!a.calls.some(x=>x[0]==='currentClick'));assert.equal(hover.hoverOf(),undefined);
 });

@@ -177,6 +177,7 @@ export function createAgent(ctx: AgentContext) {
   /** Called when a run starts: forget this run's memory copies. */
   function beginRun(logDir = '') {
     failDir = logDir
+    clearHover()
     runMemo.clear()
     runTrace.clear()
     runPath.clear()
@@ -1026,6 +1027,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function clickInput(point: Point, instruction: string, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
+    clearHover()
     const binding = await inputBinding(point, node, true)
     checkStopped()
     const p = binding?.at || point
@@ -1090,6 +1092,7 @@ export function createAgent(ctx: AgentContext) {
     node?: AgentNode,
     ahead?: StepAhead
   ) {
+    clearHover()
     let binding = await inputBinding(at, node)
     const recoveryTurns: GuiTurn[] = []
     let recoveryCount = 0
@@ -1301,11 +1304,21 @@ export function createAgent(ctx: AgentContext) {
           assertModelKeysAllowed(a.keys)
           checkStopped()
           lastInput = undefined; lastClickPoint = undefined
-    clearHover()
-    clearHover()
+          clearHover()
           await bridge.sendKeys(a.keys)
           history.push(`tuş ${a.keys}`)
           trace.push(`tuş ${a.keys}`)
+        } else if (a.action === 'move') {
+          if (!item) { history.push(`#${a.id} numaralı öğe yok (geçersiz seçim)`); continue }
+          checkStopped()
+          clearHover()
+          const p = center(item)
+          const moved = await bridge.moveMouse(p.x, p.y)
+          checkStopped()
+          recordHover(p, moved?.hwnd)
+          const line = `fareyi oynat “${item.text}” (tıklama yok)`
+          history.push(line)
+          trace.push(line)
         } else if (a.action === 'type') {
           if (item) {
             checkStopped()
@@ -1356,6 +1369,7 @@ export function createAgent(ctx: AgentContext) {
       snap: tars ? 28 : 0,
       fit: true,
       sig: true,
+      cursorMarker: true,
     })
     if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
     rememberShot(res.image.data, label)
@@ -1394,6 +1408,8 @@ export function createAgent(ctx: AgentContext) {
     switch (a.kind) {
       case 'move': {
         await waitUnlocked()
+        checkStopped()
+        clearHover()
         // Koordinat yoksa UYDURMA: merkeze taşımak "hedefe gittim" demek olurdu.
         if (a.x === undefined || a.y === undefined) {
           log('warn', 'Fare oynatma için koordinat yok; imleç oynatılmadı.')
@@ -1401,6 +1417,7 @@ export function createAgent(ctx: AgentContext) {
         }
         const p = at(a.x, a.y)
         const tasima = await bridge.moveMouse(p.x, p.y)
+        checkStopped()
         // İNCELEME DÜZELTMESİ: kayıt tek modülde tutulur ve TAŞIMA anındaki pencereyi de
         // saklar; böylece "Fareyi Oynat node'u → click_current" zinciri de aynı kaydı görür.
         recordHover({ x: p.x, y: p.y }, tasima?.hwnd)
@@ -1410,22 +1427,33 @@ export function createAgent(ctx: AgentContext) {
       }
       case 'clickCurrent': {
         await waitUnlocked()
+        checkStopped()
         // İNCELEME DÜZELTMESİ: bellekteki noktaya değil GERÇEK imlece bakılır. İmleç kayıttan
         // sapmışsa, kayıt bayatsa ya da pencere değiştiyse TIKLANMAZ (uydurma yok).
         const imlec = await bridge.cursorPos()
+        checkStopped()
         const karar = hoverDecision(imlec)
         if (!karar.ok || !karar.point) {
           log('warn', `Fare konumundan tıklanmadı: ${karar.reason}`)
           clearHover()
           break
         }
+        const hoverWindow = hoverOf()?.hwnd
+        if (!hoverWindow || !Number.isFinite(hoverWindow) || hoverWindow <= 0) {
+          log('warn', 'Fare konumundan tıklanmadı: taşıma anındaki pencere kimliği yok.')
+          clearHover()
+          break
+        }
         try {
-          await bridge.clickCurrentAt(karar.point.x, karar.point.y, hoverOf()?.hwnd)
+          checkStopped()
+          await bridge.clickCurrentAt(karar.point.x, karar.point.y, hoverWindow)
         } catch (e) {
+          if (e instanceof StoppedError) throw e
           log('warn', `Fare konumundan tıklanmadı: ${(e as Error).message}`)
           clearHover()
           break
         }
+        checkStopped()
         lastClickPoint = { x: karar.point.x, y: karar.point.y }
         clearHover()
         log('success', `Fare konumundan tıklandı @${Math.round(karar.point.x)},${Math.round(karar.point.y)}`)
@@ -1442,8 +1470,7 @@ export function createAgent(ctx: AgentContext) {
       case 'drag': {
         guiReplace = false
         lastInput = undefined; lastClickPoint = undefined
-    clearHover()
-    clearHover()
+        clearHover()
         const p = at(a.x, a.y)
         const q = at(a.x2, a.y2)
         await bridge.drag(p.x, p.y, q.x, q.y)
@@ -1452,6 +1479,7 @@ export function createAgent(ctx: AgentContext) {
       case 'hotkey':
         if (a.keys?.length) {
           assertModelKeysAllowed(a.keys)
+          clearHover()
           guiReplace = a.keys.join('+') === 'ctrl+a'
           if (a.keys.join('+') !== 'ctrl+a') { lastInput = undefined; lastClickPoint = undefined }
           await bridge.hotkey(a.keys)
@@ -1468,8 +1496,7 @@ export function createAgent(ctx: AgentContext) {
       case 'scroll': {
         guiReplace = false
         lastInput = undefined; lastClickPoint = undefined
-    clearHover()
-    clearHover()
+        clearHover()
         const p = at(a.x, a.y)
         await bridge.scroll(p.x, p.y, a.direction ?? 'down', 5)
         return
@@ -1721,7 +1748,9 @@ export function createAgent(ctx: AgentContext) {
           // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
           // hatırlanır (sonraki adım/ajan o noktadan tıklayabilsin).
           if (mode === 'move') {
+            clearHover()
             const tasima = await bridge.moveMouse(t.x, t.y)
+            checkStopped()
             // İNCELEME DÜZELTMESİ: node'un "Fareyi Oynat" modu kaydı GERÇEKTEN güncellemeli;
             // yoksa "Fareyi Oynat node'u → İnisiyatif'te click_current" zinciri konumu bulamaz.
             recordHover({ x: t.x, y: t.y }, tasima?.hwnd)
@@ -1731,6 +1760,7 @@ export function createAgent(ctx: AgentContext) {
             await noteForeground()
             return
           }
+          clearHover()
           await bridge.clickAt(t.x, t.y, mode)
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
@@ -1772,6 +1802,7 @@ export function createAgent(ctx: AgentContext) {
     },
     key: async (node, ahead) => {
       await waitUnlocked()
+      clearHover()
       const keys = node.keys
       if (!keys) throw new Error(`“${node.title}”: gönderilecek tuş boş.`)
       if (!getSettings().targetWindow) await guardFocus(node)
