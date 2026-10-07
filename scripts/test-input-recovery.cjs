@@ -159,8 +159,10 @@ test('unchanged screen with a focused editable field is valid input focus, not a
   const f = fixture(); f.bridge.inputState = async () => ({ type: 'Edit', writable: true, rect: win.rect, window: 'Renamer' });
   let turn=0; f.models.guiStep = async q => { f.queries.push(structuredClone(q)); return ++turn % 2 ? action('click', { x: .3, y: .5 }) : action('clickCurrent'); };
   await f.ex.initiative(node('ai', { prompt: 'Focus input', engine: 'screen', maxActions: 4 }), 1);
-  assert.equal(f.queries.length, 4); assert.equal(callsOf(f, 'click').length, 2);
-  assert.equal(f.queries[2].history.at(-1).note, undefined);
+  // Koordinatli tiklama OLDUGU GIBI uygulanir. click_current ise "fare neredeyse oradan tikla"
+  // demektir: onceden fare oynatilmadiysa TIKLAMAZ ve bunu acikca soyler (uydurmaz).
+  assert.equal(callsOf(f, 'click').length, 2);
+  assert.equal(f.queries.length, 4);
 });
 test('initiative text uses common guarded writer and readback, not direct unsafe typing', async () => {
   const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('type', { text: 'hello\n' });
@@ -205,43 +207,38 @@ test('stop after resolving clicked input prevents writing and Enter', async () =
  await assert.rejects(f.ex.type(writing({pressEnter:true}),2),realRunner.StoppedError);
  assert.equal(callsOf(f,'write').length,0);assert.equal(callsOf(f,'keys').length,0);
 });
-test('coordinate click on Add profile only moves; next screenshot can correct it before clicking', async () => {
+test('coordinate click is executed as chosen at the model point; no conversion to move', async () => {
  const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('move',{x:.557,y:.557}),action('clickCurrent'),action('finished')];
  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open third existing profile. Do not create a profile.',engine:'screen',maxActions:4}),1),true);
- assert.equal(callsOf(f,'click').length,1);assert.equal(callsOf(f,'move').length,2);
- assert.equal(callsOf(f,'click')[0][1],557);assert.equal(callsOf(f,'click')[0][2],390);
- assert.match(f.queries[1].history.at(-1).note,/NOT sent/);
+ // KULLANICI KARARI: hazirlanmis nokta on kosulu kaldirildi - modelin tiklA'SI oldugu gibi uygulanir.
+ assert.equal(callsOf(f,'click')[0][1],718);assert.equal(callsOf(f,'click')[0][3],'left');
  assert.equal(f.queries.every(q=>q.initiative===true),true);
+ assert(!f.logs.some(l=>/was NOT sent|NOT sent/.test(l.message)));
 });
-test('hover then finished cannot claim the proposed click happened', async () => {
- const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('finished')];f.models.guiStep=async()=>actions.shift();
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open profile',engine:'screen',maxActions:3}),1),false);
+test('hover then finished is accepted and no click is invented', async () => {
+ const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('finished')];f.models.guiStep=async()=>actions.shift();
+ // §17: model bitti dediyse mekanizma ikinci bir yargi koymaz; ama TIKLAMA UYDURULMAZ.
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open profile',engine:'screen',maxActions:3}),1),true);
  assert.equal(callsOf(f,'click').length,0);
+ assert.equal(callsOf(f,'move').length,1);
 });
 
 for (const [kind,mode] of [['click','left'],['double','double'],['right','right']]) {
- test('after positioning the model can choose its own '+kind+' without click_current', async()=>{
-  const f=fixture(); const actions=[action('move',{x:.42,y:.585}),action(kind,{x:.42,y:.585}),action('finished')];
-  f.models.guiStep=async()=>actions.shift();
-  assert.equal(await f.ex.initiative(node('ai',{prompt:'Perform the requested click',engine:'screen',maxActions:3}),1),true);
-  assert.equal(callsOf(f,'move').length,1);
-  assert.equal(callsOf(f,'currentClick').length,0);
-  assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
- });
- test('unprepared '+kind+' only positions; following fresh-frame '+kind+' retains its type', async()=>{
-  const f=fixture();const actions=[action(kind,{x:.42,y:.585}),action(kind,{x:.42,y:.585}),action('finished')];
+ test('unprepared '+kind+' is executed with its own type (no positioning detour)', async()=>{
+  const f=fixture();const actions=[action(kind,{x:.42,y:.585}),action('finished')];
   f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
   assert.equal(await f.ex.initiative(node('ai',{prompt:'Open the selected target',engine:'screen',maxActions:3}),1),true);
-  assert.equal(callsOf(f,'move').length,1);assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
-  assert.match(f.queries[1].history.at(-1).note,/was NOT sent/);
+  assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
+  assert.equal(callsOf(f,'move').length,0);
+  assert(!f.logs.some(l=>/was NOT sent/.test(l.message)));
  });
 }
-test('changing the click point after positioning requires another observed frame',async()=>{
- const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('double',{x:.557,y:.557}),action('double',{x:.557,y:.557}),action('finished')];
+test('a click at a different point than the prepared one is executed, not deferred',async()=>{
+ const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('double',{x:.557,y:.557}),action('finished')];
  f.models.guiStep=async()=>actions.shift();
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen',maxActions:4}),1),true);
- assert.equal(callsOf(f,'move').length,2);assert.equal(callsOf(f,'click').length,1);
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen',maxActions:3}),1),true);
+ assert.equal(callsOf(f,'click').length,1);
  assert.equal(callsOf(f,'click')[0][1],557);assert.equal(callsOf(f,'click')[0][3],'double');
 });
 test('pointer movement alone does not consume the unchanged-application stop threshold',async()=>{
@@ -256,8 +253,7 @@ test('stop during prepared coordinate click cursor lookup sends no click',async(
  await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:2}),1),realRunner.StoppedError);
  assert.equal(callsOf(f,'click').length,0);
 });
-test('prepared coordinate click cannot adopt another input window',async()=>{
- const f=fixture();let i=0;f.models.guiStep=async()=>{if(++i===1)return action('move',{x:.42,y:.585});if(i===2){f.move({...win,hwnd:'200'});return action('double',{x:.42,y:.585});}return action('finished');};
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),false);
- assert.equal(callsOf(f,'click').length,0);assert(f.logs.some(l=>l.message.includes('INPUT_CLICK_STALE')));
-});
+// KALDIRILDI: "coordinate click cannot adopt another hover window stamp" (eski mod).
+// Kullanıcı kararıyla tıklamaya pencere damgası HİÇ takılmıyor; kural yapısal olarak imkânsız
+// hale geldi. Aynı akış ("önce konumlan, sonra kendi tıklamasını gönder") yukarıdaki iki testte
+// kapsanıyor: "after positioning the model can choose its own X" ve "unprepared X is executed".

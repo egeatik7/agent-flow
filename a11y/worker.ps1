@@ -794,10 +794,13 @@ function Assert-KeyWindowActive($win) {
   if ($fg -eq [IntPtr]::Zero) { throw 'INPUT_WINDOW_NOT_ACTIVE: No window is in front; the shortcut was not sent' }
   $h = [IntPtr]$win.Current.NativeWindowHandle
   if ($fg -eq $h) { return }
+  # Kabuk/masaustu hedefi ONPLANA ALINAMAZ; kisayol yine gonderilir - aksi halde masaustu
+  # kisayoluna (ve gorev cubuguna) HICBIR tus gonderilemez. Diger pencerelerde koruma aynen durur.
+  if ((Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) -and (Test-ShellWindow $h)) { return }
   $targetPid = 0
   try { $targetPid = [int]$win.Current.ProcessId } catch { $targetPid = 0 }
   if ($targetPid -gt 0 -and [XpWin]::ProcessOf($fg) -eq $targetPid) { return }
-  throw 'INPUT_WINDOW_NOT_ACTIVE: Another program is in front; the shortcut was not sent'
+  throw ('INPUT_WINDOW_NOT_ACTIVE: Another program is in front; the shortcut was not sent [hedef=0x' + $h.ToString('X') + ' onplan=0x' + $fg.ToString('X') + ' hedefPid=' + $targetPid + ']')
 }
 
 function Get-BoundWindow($target, [bool]$activate = $false) {

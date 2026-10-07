@@ -1690,10 +1690,12 @@ export function createAgent(ctx: AgentContext) {
         const h = hoverOf()
         const cursor = h ? await bridge.cursorPos() : undefined
         checkStopped()
-        const p = { x: shot.area.x + (a.x ?? NaN) * shot.area.w, y: shot.area.y + (a.y ?? NaN) * shot.area.h }
-        const ayniNokta = !!h && !!h.hwnd && h.hwnd > 0 && hoverDecision(cursor).ok
-          && Math.hypot(p.x - h.x, p.y - h.y) <= HOVER_TOLERANCE_PX
-        if (ayniNokta) observedClickWindow = h!.hwnd
+        // KULLANICI KARARI: modelin kendi tıklaması OLDUĞU GİBİ gönderilir. Eski modda buraya
+        // imleç kaydının pencere damgası (hwnd) ekleniyordu; kayıt başka bir pencereye aitse
+        // tıklama "örtülü" sayılıp REDDEDİLİYORDU (ölçüldü: tıklama hiç gitmiyordu). Damga artık
+        // yalnız click_current yolunda kullanılır (orada "nokta değişti mi" güvencesidir).
+        void h
+        void cursor
         proposedClickPending = false
       }
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
