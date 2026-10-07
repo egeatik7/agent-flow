@@ -1146,6 +1146,24 @@ export function createAgent(ctx: AgentContext) {
           + ', direct=' + String(!!guard?.direct) + ', temizle=' + String(!!clearField)
           + ', tiklama=' + JSON.stringify(guard?.at ?? null) + ', bag=' + (binding ? 'var' : 'yok')
           + ', hedefKaydi=' + String(!!binding?.mustRetarget) + '.')
+        // KULLANICI KARARI: "yazı alanı değil" reddi kaldırıldı. Alanı BİZ tıkladıysak
+        // (bağlı bir tıklama noktası var) sınıflandırma başarısız olsa bile YAZILIR: Blender'ın
+        // alanı UIA'da "Window" / native "GHOST_WindowClass" ve caret null gelir; orada
+        // sınıflandırma ASLA başaramaz ama alan gerçekten yazı kabul eder (ölçüldü: 1.9.45 günlüğü).
+        if (!inputWasSent && typed.writeSent !== true && binding?.at) {
+          try {
+            const duz = await bridge.typeText(text, false, false, binding.at, undefined, undefined)
+            checkStopped()
+            inputWasSent = true
+            log('warn', 'Alan sınıflandırılamadı (' + (typed.focusType || d?.native || 'bilinmiyor')
+              + '); tıklanan alana yine de yazıldı. Değer okunamadıysa doğrulanmamış sayılır.')
+            reportTyping(duz)
+            return duz
+          } catch (e) {
+            if (e instanceof StoppedError) throw e
+            log('warn', 'Tıklanan alana düz yazma da gönderilemedi: ' + (e as Error).message.split('\n')[0])
+          }
+        }
         if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
           recoveryCount++
           ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')
@@ -1157,7 +1175,7 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         throw new Error('Odak bir yazı alanı değil (' + (typed.focusType || 'bilinmiyor')
-          + ')' + (typed.where ? ' — ' + typed.where : '') + '. Yazı gönderilmedi; alan kurtarılamadı.')
+          + ')' + (typed.where ? ' — ' + typed.where : '') + '. Yazı gönderilemedi.')
       }
       inputWasSent = inputWasSent || (!typed?.needChoice && (typed?.writeSent !== false || clearField))
       if (binding && typed?.via === 'visual-caret' && typed?.value == null) {

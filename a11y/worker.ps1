@@ -1215,7 +1215,10 @@ function Invoke-Op([string]$op, $P) {
       }
       try { $out.where = [string](Get-TopLevel $focus).Current.Name } catch {}
       $visual = (-not (Test-TextLike $focus)) -and ($direct -or (Test-VisualInput $P.guard))
-      if (-not (Test-TextLike $focus) -and -not $visual) {
+      # KULLANICI KARARI: alanı BIZ tikLADIysak ($P.at var) siniflandirma basarisiz olsa bile YAZILIR.
+      # Blender alani UIA'da "Window" / native "GHOST_WindowClass" ve caret null gelir; orada
+      # siniflandirma ASLA basaramaz ama alan gercekten yazi kabul eder (olculdu: 1.9.45 gunlugu).
+      if (-not (Test-TextLike $focus) -and -not $visual -and -not $P.at) {
         $out.skippedClear = $true
         $out.code = 'INPUT_FOCUS_UNRESOLVED'
         $out.diagnostics = Get-InputDiagnostics
