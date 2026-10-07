@@ -1,3 +1,4 @@
+import { refineWordTarget } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
 import fs from 'fs'
@@ -97,7 +98,8 @@ const ICON_MIN = 0.82
 /** Koşul decides a branch on the picture alone, so it asks for a closer match. */
 const ICON_CHECK_MIN = 0.88
 
-function center(t: { x: number; y: number; w: number; h: number }) {
+function center(t: { x: number; y: number; w: number; h: number; clickPoint?: { x: number; y: number } }) {
+  if (t.clickPoint) return t.clickPoint
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
 }
 
@@ -267,7 +269,9 @@ export function createAgent(ctx: AgentContext) {
       const item = choice.id !== null ? items.find((i) => i.id === choice.id) : undefined
       if (item) {
         log('info', `Seçilen hedef #${item.id}: ${item.src}/${item.type} “${item.text.slice(0, 120)}” @${item.x},${item.y} ${item.w}x${item.h}${scan.window ? ` / ${scan.window}` : ''}`)
-        hit = refineTarget(item, choice.text)
+        hit = choice.wordIndex !== undefined ? refineWordTarget(item, choice.wordIndex) : refineTarget(item, choice.text)
+        if (!hit) return null
+        if (choice.wordIndex !== undefined) log('info', `Seçilen OCR kelimesi #${choice.candidateId ?? '?'}: “${hit.text}” @${hit.x},${hit.y} ${hit.w}x${hit.h}; yalnız bu kelimeye tıklanacak.`)
         how = `LLM${choice.reason ? ` — ${choice.reason}` : ''}`
         byLlm = true
       } else {
@@ -304,9 +308,11 @@ export function createAgent(ctx: AgentContext) {
           })
           trace(node, { kind: 'model', source: win === 'chrome' ? 'chrome' : 'list', value: second })
           const item = second.id !== null ? items.find((i) => i.id === second.id) : undefined
-          if (item && item.id !== hit.item.id) {
+          if (item && (item.id !== hit.item.id || second.wordIndex !== undefined)) {
             log('info', `İkinci bakış başka öğe seçti: #${item.id} “${item.text}”${second.reason ? ` — ${second.reason}` : ''}`)
-            hit = refineTarget(item, second.text)
+            const refined = second.wordIndex !== undefined ? refineWordTarget(item, second.wordIndex) : refineTarget(item, second.text)
+            if (!refined) return null
+            hit = refined
             memo = memoOf(item, area, win)
             how = 'ikinci bakış'
           } else if (item) {

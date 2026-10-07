@@ -28,18 +28,18 @@ describe('kelime listesi aşamasının varsayılanı', () => {
   it('prompt mekânsal/monitör/taskbar kurallarını taşır', () => {
     const p = LIST_PROMPT
     for (const gerekli of [
-      'normalized center position',
-      'nearby-item hints',
-      'clue, not proof',
-      'never invent a combined ID',
-      'measured taskbar boundaries',
-      'Taskbars may be on any screen edge',
-      'not necessarily on the taskbar',
-      'If region information is unavailable, do not invent it',
-      'desktop shortcut is not interchangeable',
-      'return id:null',
+      'individual OCR words',
+      'current-list ID',
+      'normalized screen position',
+      'choose exactly ONE listed word',
+      'not its OCR parent ID',
+      'Never return coordinates or multiple IDs',
+      'text field cannot move the click',
+      'desktop shortcut is not a taskbar button',
+      'bottom position alone is not proof',
+      'NOT selectable',
+      'Do not invent word positions',
       'Turkish suffixes',
-      'do not invent controls',
       'Reply with JSON only',
     ]) {
       expect(p, `prompt şu kuralı taşımıyor: ${gerekli}`).toContain(gerekli)

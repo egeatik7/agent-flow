@@ -28,24 +28,14 @@ export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
 // ve bu değişiklikten etkilenmez.
 export const DEFAULT_FIND_OFF: FindStageId[] = []
 
-export const LIST_PROMPT = `You are a Windows desktop automation agent. You receive a numbered list of visible text and controls. UIA means a control reported by an application; Text means writing detected by OCR.
-
-Choose the text or control that matches the user's click instruction.
-
-Use each item's physical coordinates, normalized center position, nearby-item hints, and measured screen regions when available. Interpret directions relative to the captured screen area.
-
-Nearby OCR boxes may be parts of the same label, such as "Google" above "Chrome". Treat proximity as a clue, not proof. Keep the original item IDs; never invent a combined ID.
-
-Respect the requested location and surface. A desktop shortcut is not interchangeable with a taskbar button or an item inside an application. If only targets on the wrong surface are available, return id:null.
-
-Use measured taskbar boundaries when provided. Taskbars may be on any screen edge. An item near the bottom is not necessarily on the taskbar. If region information is unavailable, do not invent it.
-
-Allow Turkish suffixes, letter-case differences, and plausible OCR mistakes. Use application context to interpret observed candidates, but do not invent controls or assume a familiar layout proves their presence.
-
-Reply with JSON only:
-{"id": <original item number or null>, "text": "<observed target text>", "reason": "<short reason>"}
-
-If no observed item fits the instruction, set id to null.`
+export const LIST_PROMPT = `You are a Windows desktop automation agent. You receive UIA/DOM controls and individual OCR words, each with a current-list ID, physical bounding box and normalized screen position.
+The user is about to click somewhere on the screen: choose the text or control to click.
+Read the whole word cloud. Infer related label words from proximity, alignment, spacing, available UIA bounds and screen position. Different OCR parents can belong to one label; a shared parent does not prove one button. Do not invent controls from a familiar application layout.
+For OCR, choose exactly ONE listed word: the word you are most confident lies on the requested clickable target. The engine clicks inside that word, not between related words or at a group center. Return its listed ID, not its OCR parent ID. Never return coordinates or multiple IDs. The text field cannot move the click.
+Respect the requested surface: a desktop shortcut is not a taskbar button. Use measured taskbar regions when available; bottom position alone is not proof. Nearby text is context, not proof of clickability. Allow Turkish suffixes, case differences and plausible OCR mistakes.
+If word geometry is unavailable, the list marks an unsplit OCR box honestly; multi-word context-only boxes are NOT selectable. Do not invent word positions.
+Reply with JSON only: {"id": <one listed candidate number or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}
+If no observed candidate fits, set id to null.`
 
 /** Liste aşamasında eylem cümlesi: tıklama ve yazma için ayrı. */
 export const LIST_CLICK_SENTENCE = "Choose the text or control that matches the user's click instruction."
@@ -58,11 +48,13 @@ export const LIST_TYPE_SENTENCE = "Choose the text field (search box, Edit, inpu
  * Eylem cümlesi node türüne göre değiştirilir; cümle bulunamazsa sona eklenir (metin değişse de tutar).
  */
 export function listPromptFor(kind: string, saved?: string): string {
-  const taban = typeof saved === 'string' && saved.trim() ? saved : LIST_PROMPT
+  // KAYITLI OZEL PROMPT AYNEN KULLANILIR: kullanicinin metni degistirilmez, cümle eklenmez
+  // (spatial/kelime paketlerinin kurali ve testi bunu sart kosuyor).
+  if (typeof saved === 'string' && saved.trim()) return saved
+  // Yerlesik metinde eylem cumlesi node turune gore uyarlanir; cumle bulunamazsa sona eklenir.
   const cumle = kind === 'type' ? LIST_TYPE_SENTENCE : LIST_CLICK_SENTENCE
-  if (taban.includes(LIST_CLICK_SENTENCE)) return taban.split(LIST_CLICK_SENTENCE).join(cumle)
-  if (kind === 'type' && taban.includes(LIST_TYPE_SENTENCE)) return taban
-  return `${taban}${taban.endsWith('\n') ? '' : '\n'}\n${cumle}`
+  if (LIST_PROMPT.includes(LIST_CLICK_SENTENCE)) return LIST_PROMPT.split(LIST_CLICK_SENTENCE).join(cumle)
+  return `${LIST_PROMPT}${LIST_PROMPT.endsWith('\n') ? '' : '\n'}\n${cumle}`
 }
 
 

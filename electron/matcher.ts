@@ -40,7 +40,7 @@ export type ScanResult = {
   ocrEngine?: 'windows' | 'onnx'
 }
 
-export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem }
+export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem; clickPoint?: { x: number; y: number } }
 
 const CLICKABLE = new Set([
   'Button',

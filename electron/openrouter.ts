@@ -1,6 +1,7 @@
-import { spatialItems, spatialContext } from './spatial-context'
+import { spatialContext } from './spatial-context'
+import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -275,7 +276,7 @@ function parseJson(content: string): Record<string, unknown> {
   return tryParse(content) ?? tryParse(content.match(/\{[\s\S]*\}/)?.[0] ?? '') ?? {}
 }
 
-export type ScreenChoice = { id: number | null; text?: string; reason: string; usedImage: boolean }
+export type ScreenChoice = { id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -292,14 +293,18 @@ export async function chooseScreenTarget(opts: {
   system?: string
 }): Promise<ScreenChoice> {
   const { scan } = opts
-  // Eylem cumlesi ve yerlesik/kayitli secim tek yerde: llm-flow.listPromptFor (saf, test edilir).
+  const candidates = wordCandidates(scan)
+  // Eylem cumlesi + yerlesik/kayitli secim tek yerde (saf, test edilir): listPromptFor.
   const system = listPromptFor(opts.kind, opts.system)
 
   const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
 Items (#number type "text" @x,y widthxheight):
-${spatialItems(scan)}
+${describeWordCandidates(scan, candidates)}
 
 ${spatialContext(scan)}
+
+${WORD_TARGET_RULES}
+Reply with JSON only: {"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}
 
 Step: ${opts.stepTitle}
 Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
@@ -311,7 +316,7 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
       role: 'user',
       content: img
         ? [
-            { type: 'text', text: `${listText}\n\nEkran görüntüsünde her öğenin sol üstünde numarası yazılı (mavi = UIA, turuncu = OCR).` },
+            { type: 'text', text: `${listText}\n\nScreenshot labels may show original phrase/control IDs; use the list coordinates to select an OCR word ID.` },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${scan.image!.data}` } },
           ]
         : listText,
@@ -329,12 +334,15 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
     content = await chat(opts.apiKey, opts.model, build(false), false)
   }
 
-  const parsed = parseJson(content)
+  const decoded = parseJson(content)
+  const parsed = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
   const raw = parsed.id ?? parsed.i ?? parsed.index
-  const id = raw === null || raw === undefined || raw === '' ? null : Number(String(raw).replace('#', ''))
+  const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
+  const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && !c.contextOnly) : undefined
   return {
-    id: id !== null && Number.isFinite(id) ? id : null,
-    text: typeof parsed.text === 'string' ? parsed.text : undefined,
+    id: selected?.parentId ?? null,
+    ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
+    text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
     reason: String(parsed.reason ?? ''),
     usedImage,
   }

@@ -102,3 +102,23 @@ test('no recorded picture either: the recorded position is still not clicked',as
   ]});
   await assert.rejects(replayTrace(b),/bulunamadı/);
 });
+
+test('word-level model choice clicks the selected real word, not the phrase midpoint or returned text', async()=>{
+  const row=item(7,'Run Remesh',100,80,280,20);
+  row.words=[{t:'Run',x:100,y:80,w:40,h:20},{t:'Remesh',x:300,y:80,w:80,h:20}];
+  const b=bundle(['list'],[row],{model:true,node:{prompt:'Click remesh'},events:[{kind:'model',source:'list',value:{id:7,wordIndex:1,candidateId:8,text:'Run Remesh',reason:'Remesh is the intended word'}}]});
+  const r=await replayTrace(b);
+  assert.equal(r.result.x,340); assert.equal(r.result.y,90);
+  assert.notEqual(r.result.x,240); assert.equal(r.inputCalls,0);
+});
+test('invalid word index cannot fall back to the merged phrase center', async()=>{
+  const row=item(7,'Run Remesh',100,80,280,20);
+  row.words=[{t:'Run',x:100,y:80,w:40,h:20},{t:'Remesh',x:300,y:80,w:80,h:20}];
+  const b=bundle(['list'],[row],{model:true,node:{prompt:'Click remesh'},events:[{kind:'model',source:'list',value:{id:7,wordIndex:99,text:'Run Remesh'}}]});
+  await assert.rejects(replayTrace(b),/bulunamadı/);
+});
+test('a one-pixel OCR word stays inside its box after integer click rounding', async()=>{
+  const row=item(7,'X',-10,5,1,1); row.words=[{t:'X',x:-10,y:5,w:1,h:1}];
+  const b=bundle(['list'],[row],{model:true,node:{prompt:'Click X'},events:[{kind:'model',source:'list',value:{id:7,wordIndex:0,text:'X'}}]});
+  const r=await replayTrace(b); assert.equal(r.result.x,-10); assert.equal(r.result.y,5);
+});

@@ -1,6 +1,6 @@
 import { describeItems, type ScanResult, type ScreenItem } from './matcher'
 
-export const SPATIAL_RULES = `Use physical coordinates and normalized positions to interpret the instruction. Nearby OCR boxes may be parts of one label, e.g. Google above Chrome; proximity is a hint, not proof. Select original item IDs, never invented combined IDs. Do not combine labels across a measured taskbar boundary. A desktop shortcut is not a taskbar button. Respect the requested surface; return id:null if only conflicting targets exist. Taskbars may be on any edge. A low y position alone does not prove taskbar membership. Percentages refer to the capture area, not necessarily one monitor.`
+export const SPATIAL_RULES = `Use physical coordinates and normalized positions to interpret the instruction. Nearby OCR boxes may be parts of one label, e.g. Google above Chrome; proximity is a hint, not proof. Select IDs from the current candidate list only, never invented combined IDs. Do not combine labels across a measured taskbar boundary. A desktop shortcut is not a taskbar button. Respect the requested surface; return id:null if only conflicting targets exist. Taskbars may be on any edge. A low y position alone does not prove taskbar membership. Percentages refer to the capture area, not necessarily one monitor.`
 
 export function taskbarItem(scan: ScanResult, item: { x: number; y: number; w: number; h: number }): boolean {
   const x = item.x + item.w / 2, y = item.y + item.h / 2
