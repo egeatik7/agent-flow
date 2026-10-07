@@ -132,9 +132,30 @@ penceresini göremez** ✗ — ajanın çağrıları "girdi" değildir, o yüzde
 koşar. Bu yüzden canlı koşu öncesi ön plan **açıkça** doğrulanmalıdır.
 
 **Elde ne var:** `scripts/dev-raise.ps1 -Show` → şu an önde olan pencereyi `hwnd · pid · süreç ·
-başlık` olarak söyler; `-Title "..."` ile hedef pencereyi öne almaya çalışır. **Ölçüldü:**
-`SetForegroundWindow`, ön planda olmayan bir süreçten çağrıldığında **reddediliyor** ✗ (Windows
-kısıtı) — yani ajan kendi başına ön planı alamaz ✓; doğru davranış, koşuyu **başlatmamaktır** ✓.
+başlık` olarak söyler; `-Title "..."` ile hedef pencereyi öne almaya çalışır. `scripts/dev-minimize.ps1
+-Title "test profili"` → bir pencereyi kapatmadan küçültür.
+
+**Ölçülen doğru kural (düzeltme):** Arka plandaki bir süreç ön planı **başka** bir pencereden
+alamıyor ✗ — ama ön planı **tutan pencere ortadan kalkınca** (kapatılınca) ya da **küçültülünce**
+hedef pencere kendini öne alabiliyor ✓. Bu yüzden canlı koşunun gerçek ön koşulu şudur:
+
+1. Fikstürü/test örneğini değil, **ön planı tutan uygulamayı** küçült ya da kapat.
+2. Test örneği açılırken ön planı alır ✗ → bu yüzden **başlatıcı artık örneği kendisi küçültüyor**
+   (`dev-start-test.cjs` → `dev-minimize.ps1`) ✓.
+3. Koşudan önce **60 saniye** girdi olmamalı (boş-ekran kapısı) ✓ — ve her koşunun kendi girdisi
+   sayacı sıfırlar ✗, bu yüzden koşular arasında beklemek gerekir ✓.
+
+Bu üç madde uygulandığında üç canlı senaryo **geçti** (7 Ekim): `ui-local` **16/16** ✓,
+`package-inner` **12/12** ✓, `region-bounded` **11/11** ✓.
+
+**Ölçülen bir tuzak (kendi aracımda, üründe değil):** Portable exe kendini geçici bir klasöre açıp
+oradan çalışıyor ✗ — süreç adı ürün adı (`Nubbo Agent Studio.exe`), yolu `…\Temp\<rastgele>\…` ✓.
+Bu yüzden ne **ad** ne **yol** tek başına kimlik doğrulamaya yetiyor ✗; süreç **ya da ebeveyni**
+bizim kopya olmalı ✓ (`dev-start-test.cjs`). Ve **isimle toplu öldürme yasak** ✗: bir kez
+`taskkill /IM Nubbo-test.exe` satırı vardı, kaldırıldı ✓; asıl ders daha ağır — ben elle
+`Nubbo-1.9.26-dev` stub'ını ağacıyla kapatırken **sahibinin açık uygulamasını** da kapattım ✗✗
+(veri kaybı olmadı ✓: gerçek depo dosyasına dokunulmadı ✓, ama penceredeki kaydedilmemiş durum
+gitti ✗). Kural: kapatma **yalnız** jetonun gösterdiği pid ile ve kimliği doğrulanarak yapılır ✓.
 
 ## Nasıl yeniden koşulur
 ```powershell

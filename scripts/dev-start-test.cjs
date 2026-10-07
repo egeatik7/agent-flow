@@ -47,18 +47,24 @@ function pidLooksLikeOurStub(pid) {
       [
         '-NoProfile',
         '-Command',
-        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" -ErrorAction SilentlyContinue; if ($p) { "$($p.Name)|$($p.ExecutablePath)" }`,
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" -ErrorAction SilentlyContinue; if ($p) { $par = Get-CimInstance Win32_Process -Filter "ProcessId = $($p.ParentProcessId)" -ErrorAction SilentlyContinue; "$($p.Name)|$($p.ExecutablePath)|$(if ($par) { $par.ExecutablePath } else { '' })" }`,
       ],
       { encoding: 'utf8' }
     ).trim()
     if (!out) return { ok: false, why: 'süreç yok' }
-    const [name, exePath] = out.split('|')
-    const expected = path.join(process.env.USERPROFILE || '', 'Desktop', 'Nubbo-test.exe').toLowerCase()
-    if (String(name).toLowerCase() !== 'nubbo-test.exe') return { ok: false, why: `ad “${name}” beklenen “Nubbo-test.exe” değil` }
-    if (exePath && expected && path.resolve(String(exePath)).toLowerCase() !== expected) {
-      return { ok: false, why: `yol “${exePath}” beklenen “${expected}” değil` }
-    }
-    return { ok: true, why: 'ad ve yol uyuşuyor' }
+    const [name, exePath, parentPath] = out.split('|')
+    // Kimlik ne adla ne de tek başına yolla doğrulanabilir: portable exe kendini geçici bir klasöre
+    // açıp oradan çalışıyor ("…\Temp\<rastgele>\Nubbo Agent Studio.exe"), ürün adıyla görünüyor ve
+    // masaüstündeki kopyanın yolu yalnızca BAŞLATICI stub'ın yolu. Bu yüzden sürecin kendisi ya da
+    // ebeveyni bizim kopya olmalı. Aksi hâlde hiçbir şey kapatılmaz: yanlış süreci öldürmektense
+    // eski örneği kapatmamak yeğdir (uyarı yazılır).
+    const beklenen = exe.toLowerCase()
+    const kendi = exePath ? path.resolve(String(exePath)).toLowerCase() : ''
+    const ebeveyn = parentPath ? path.resolve(String(parentPath)).toLowerCase() : ''
+    if (kendi && kendi === beklenen) return { ok: true, why: `yol uyuşuyor (süreç adı “${name}”)` }
+    if (ebeveyn && ebeveyn === beklenen) return { ok: true, why: `ebeveyn yol uyuşuyor (portable açılım: “${name}”)` }
+    if (!kendi && !ebeveyn) return { ok: false, why: `yol okunamadı; ad “${name}” tek başına yeterli değil` }
+    return { ok: false, why: `ne yol ne ebeveyn bizim kopya (kendi “${kendi || '-'}”, ebeveyn “${ebeveyn || '-'}”)` }
   } catch (e) {
     return { ok: false, why: `kimlik okunamadı: ${e && e.message ? e.message : String(e)}` }
   }
@@ -97,7 +103,10 @@ async function main() {
     console.log('  eski örnek yok')
   }
   // Any leftover app process of this exe would start a second instance on the same profile.
-  spawnSync('taskkill', ['/IM', 'Nubbo-test.exe', '/T', '/F'], { stdio: 'ignore' })
+  // İsimle toplu öldürme YOK. Bir kez "taskkill /IM Nubbo-test.exe" satırı vardı; kaldırıldı.
+  // Ölçülen tehlike: portable exe kendini geçici klasöre açıyor ve süreç adı ürün adı oluyor, bu
+  // yüzden isimle öldürmek, aynı ada/yola benzeyen BAŞKA bir örneği — sahibinin açık uygulamasını —
+  // de götürebiliyor. Kapatma yalnız jetonun gösterdiği pid ile ve kimliği doğrulanarak yapılır.
   if (fs.existsSync(tokenFile)) fs.rmSync(tokenFile, { force: true })
   await sleep(3000)
 
@@ -133,6 +142,21 @@ async function main() {
     if (info?.port && (await health(info.port))) {
       console.log(`  ✓ hazır: port ${info.port} · pid ${info.pid} · sürüm ${info.app || '?'} · build ${info.build || '(damgasız)'} · profil ${info.profile || '?'}`)
       if ((info.build || '') !== build) console.log(`  UYARI: jetonun damgası “${info.build || ''}”, beklenen “${build}” — eski örnek olabilir.`)
+      // Ölçüldü: uygulama açılırken ön planı alır ve arka plandaki bir süreç ondan ALAMAZ; canlı
+      // senaryo ise fikstür penceresinin önde olmasını bekler (yoksa hedefi yanlış pencerede arar
+      // ve haklı olarak bulamaz). Uygulama küçültülünce ön plan serbest kalır ve fikstür kendini öne
+      // alabilir. Kapatılmaz, küçültülür: açık akış ve oturum kaybolmasın.
+      try {
+        const min = spawnSync(
+          'powershell',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'dev-minimize.ps1'), '-Title', 'test profili'],
+          { encoding: 'utf8' }
+        )
+        const son = String(min.stdout || '').trim().split('\n').filter(Boolean).pop()
+        if (son) console.log(`  ${son.trim()}`)
+      } catch (e) {
+        console.log(`  (pencere küçültülemedi: ${e && e.message ? e.message : String(e)})`)
+      }
       process.exit(0)
     }
   }
