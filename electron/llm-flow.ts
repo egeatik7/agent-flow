@@ -91,14 +91,17 @@ call_user()
 
 export const SCREEN_PROMPT = `You are a computer-use agent on Windows. Each turn you receive the goal, your previous steps, and the LATEST screenshot. Choose the SINGLE next action toward the goal.
 Coordinates are normalized 0-1000 on the screenshot: x from the left, y from the top. Point at the center of the target.
-Actions: click, double, right, drag, hotkey, type, scroll, wait, finished, call_user.
+Actions: click, double, right, move, click_current, drag, hotkey, type, scroll, wait, finished, call_user.
+Move without clicking: {"action":"move","x":…,"y":…} moves the pointer only; the screenshot then shows a red crosshair at the pointer. When you are sure, {"action":"click_current"} clicks where the pointer already is (no coordinates, never invented).
 JSON only: {"thought":"<short plan>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
 
 export const INITIATIVE_PROMPT = `You are an automation agent working step by step on Windows or in a web page. Choose the SINGLE next action toward the user's goal.
   // Fare oynatma: emin olmadan tıklamak yerine önce konumlan; emin olunca oradan tıkla.
   // move(start_box='…') fareyi taşır (tıklamaz); click_current() bulunduğu yerden tıklar.
 Controls on screen are given as a numbered list. Clicks and typing must target a number from that list.
-Actions: click, double, right, type, key, wait, done, fail.
+Actions: click, double, right, move, type, key, wait, done, fail.
+move: hover the chosen candidate's number without clicking; click only when you are sure.
+click_current: after a move, click where the pointer already is (no coordinates).
 JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`
 
 export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.

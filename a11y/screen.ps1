@@ -123,6 +123,28 @@ function Get-ScreenBitmap($rect) {
   $bmp = Copy-Screen $rect
   # BitBlt leaves alpha at 0. A later draw then treats the whole shot as transparent and it comes out gray.
   Set-BitmapOpaque $bmp
+  # İNCELEME DÜZELTMESİ: modelin gördüğü kareye imleci çiz. "Önce oynat" sonrası
+  # model nerede olduğunu görebilsin; hover bir menü açmazsa da nokta görünür.
+  try {
+    $cp = Get-CursorPoint
+    $cx = [int]$cp.X; $cy = [int]$cp.Y
+    if ($cx -ge [int]$rect.x -and $cx -lt ([int]$rect.x + [int]$rect.w) -and $cy -ge [int]$rect.y -and $cy -lt ([int]$rect.y + [int]$rect.h)) {
+      $gg = [System.Drawing.Graphics]::FromImage($bmp)
+      try {
+        $kalem = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 255, 0, 0), 2)
+        $golge = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(200, 255, 255, 255), 4)
+        $lx = $cx - [int]$rect.x; $ly = $cy - [int]$rect.y
+        foreach ($p in @($golge, $kalem)) {
+          $gg.DrawLine($p, $lx - 9, $ly, $lx - 3, $ly)
+          $gg.DrawLine($p, $lx + 3, $ly, $lx + 9, $ly)
+          $gg.DrawLine($p, $lx, $ly - 9, $lx, $ly - 3)
+          $gg.DrawLine($p, $lx, $ly + 3, $lx, $ly + 9)
+          $gg.DrawEllipse($p, $lx - 4, $ly - 4, 8, 8)
+        }
+        $golge.Dispose(); $kalem.Dispose()
+      } finally { $gg.Dispose() }
+    }
+  } catch { }
   return $bmp
 }
 

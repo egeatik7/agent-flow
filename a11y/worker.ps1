@@ -1008,6 +1008,26 @@ function Invoke-Op([string]$op, $P) {
       else { [void](Get-BoundWindow $P.target $false) }
       return $true
     }
+    'cursorPos' {
+      # GERÇEK imleç konumu: "oradan tıkla" bellekteki tahmine değil buna bakar.
+      $p = Get-CursorPoint
+      return [pscustomobject]@{ x = [int]$p.X; y = [int]$p.Y }
+    }
+    'clickCurrentAt' {
+      # Fare konumundan tıklama. $P.hwnd, TAŞIMA anındaki penceredir; arada pencere
+      # değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAYIZ.
+      $x = [int]$P.x; $y = [int]$P.y
+      $kok = [XpWin]::RootAt($x, $y)
+      if ($P.hwnd -and [IntPtr]([long]$P.hwnd) -ne [IntPtr]::Zero -and $kok -ne [IntPtr]([long]$P.hwnd)) {
+        throw 'INPUT_CLICK_STALE: Fare noktası artık aynı pencerede değil; tıklama gönderilmedi'
+      }
+      if ($P.target) {
+        [void](Get-BoundWindow $P.target $false)
+        if ($kok -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Target point is covered by another window' }
+      }
+      Invoke-MouseAt $x $y 'left'
+      return $true
+    }
     'moveAt' {
       # YALNIZ imleci taşır: tıklama göndermez. Örtülme kontrolü clickAt ile aynıdır ki
       # görünmeyen bir noktaya "gidildi" denmesin.
@@ -1016,7 +1036,7 @@ function Invoke-Op([string]$op, $P) {
         if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
       }
       [void][XpWin]::SetCursorPos([int]$P.x, [int]$P.y)
-      return $true
+      return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
     }
     'clickAt' {
       if ($P.target) {

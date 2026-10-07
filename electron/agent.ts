@@ -26,6 +26,7 @@ import {
 } from './matcher'
 import { activeFindOrder, promptOf } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
+import { clearHover, hoverDecision, hoverOf, recordHover } from './hover'
 import {
   chooseScreenTarget,
   guiStep,
@@ -1202,7 +1203,6 @@ export function createAgent(ctx: AgentContext) {
   let lastFg: { title: string; pid: number; proc?: string } | null = null
   let lastClickPoint: { x: number; y: number } | undefined
   /** Ajanın fareyi en son taşıdığı nokta: "oradan tıkla" bunu kullanır. */
-  let lastHoverPoint: { x: number; y: number } | undefined
 
   async function noteForeground() {
     if (process.platform !== 'win32') return
@@ -1301,6 +1301,8 @@ export function createAgent(ctx: AgentContext) {
           assertModelKeysAllowed(a.keys)
           checkStopped()
           lastInput = undefined; lastClickPoint = undefined
+    clearHover()
+    clearHover()
           await bridge.sendKeys(a.keys)
           history.push(`tuş ${a.keys}`)
           trace.push(`tuş ${a.keys}`)
@@ -1398,21 +1400,35 @@ export function createAgent(ctx: AgentContext) {
           break
         }
         const p = at(a.x, a.y)
-        await bridge.moveMouse(p.x, p.y)
-        lastHoverPoint = { x: p.x, y: p.y }
-        lastClickPoint = lastHoverPoint
+        const tasima = await bridge.moveMouse(p.x, p.y)
+        // İNCELEME DÜZELTMESİ: kayıt tek modülde tutulur ve TAŞIMA anındaki pencereyi de
+        // saklar; böylece "Fareyi Oynat node'u → click_current" zinciri de aynı kaydı görür.
+        recordHover({ x: p.x, y: p.y }, tasima?.hwnd)
+        lastClickPoint = { x: p.x, y: p.y }
         log('info', `Fare oynatıldı @${Math.round(p.x)},${Math.round(p.y)} (tıklama yok)`)
         break
       }
       case 'clickCurrent': {
         await waitUnlocked()
-        if (!lastHoverPoint) {
-          log('warn', 'Fare konumu bilinmiyor: önce fareyi oynat, sonra “oradan tıkla”. Tıklama gönderilmedi.')
+        // İNCELEME DÜZELTMESİ: bellekteki noktaya değil GERÇEK imlece bakılır. İmleç kayıttan
+        // sapmışsa, kayıt bayatsa ya da pencere değiştiyse TIKLANMAZ (uydurma yok).
+        const imlec = await bridge.cursorPos()
+        const karar = hoverDecision(imlec)
+        if (!karar.ok || !karar.point) {
+          log('warn', `Fare konumundan tıklanmadı: ${karar.reason}`)
+          clearHover()
           break
         }
-        await bridge.clickAt(lastHoverPoint.x, lastHoverPoint.y, 'left')
-        lastClickPoint = lastHoverPoint
-        log('success', `Fare konumundan tıklandı @${Math.round(lastHoverPoint.x)},${Math.round(lastHoverPoint.y)}`)
+        try {
+          await bridge.clickCurrentAt(karar.point.x, karar.point.y, hoverOf()?.hwnd)
+        } catch (e) {
+          log('warn', `Fare konumundan tıklanmadı: ${(e as Error).message}`)
+          clearHover()
+          break
+        }
+        lastClickPoint = { x: karar.point.x, y: karar.point.y }
+        clearHover()
+        log('success', `Fare konumundan tıklandı @${Math.round(karar.point.x)},${Math.round(karar.point.y)}`)
         break
       }
       case 'click':
@@ -1426,6 +1442,8 @@ export function createAgent(ctx: AgentContext) {
       case 'drag': {
         guiReplace = false
         lastInput = undefined; lastClickPoint = undefined
+    clearHover()
+    clearHover()
         const p = at(a.x, a.y)
         const q = at(a.x2, a.y2)
         await bridge.drag(p.x, p.y, q.x, q.y)
@@ -1450,6 +1468,8 @@ export function createAgent(ctx: AgentContext) {
       case 'scroll': {
         guiReplace = false
         lastInput = undefined; lastClickPoint = undefined
+    clearHover()
+    clearHover()
         const p = at(a.x, a.y)
         await bridge.scroll(p.x, p.y, a.direction ?? 'down', 5)
         return
@@ -1701,7 +1721,10 @@ export function createAgent(ctx: AgentContext) {
           // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
           // hatırlanır (sonraki adım/ajan o noktadan tıklayabilsin).
           if (mode === 'move') {
-            await bridge.moveMouse(t.x, t.y)
+            const tasima = await bridge.moveMouse(t.x, t.y)
+            // İNCELEME DÜZELTMESİ: node'un "Fareyi Oynat" modu kaydı GERÇEKTEN güncellemeli;
+            // yoksa "Fareyi Oynat node'u → İnisiyatif'te click_current" zinciri konumu bulamaz.
+            recordHover({ x: t.x, y: t.y }, tasima?.hwnd)
             lastClickPoint = { x: t.x, y: t.y }
             trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
             log('success', `Fare oynatıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)} (tıklama yok)`)

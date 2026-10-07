@@ -399,8 +399,33 @@ export async function clickAt(x: number, y: number, button: ClickMode = 'left', 
  * Fareyi bir noktaya taşır — TIKLAMAZ. İnisiyatif ajanı önce konumlanıp emin olabilsin,
  * sonra "oradan tıkla" diyebilsin diye vardır. Örtülme kontrolü clickAt ile aynıdır.
  */
-export async function moveMouse(x: number, y: number, target?: InputWindow): Promise<void> {
-  await worker.call('moveAt', { x: Math.round(x), y: Math.round(y), target })
+export async function moveMouse(x: number, y: number, target?: InputWindow): Promise<{ hwnd?: number }> {
+  if (!IS_WIN) return {}
+  const r = await worker.call<{ hwnd?: number }>('moveAt', { x: Math.round(x), y: Math.round(y), target })
+  return r && typeof r === 'object' ? r : {}
+}
+
+/**
+ * GERÇEK imleç konumu (bellekteki tahmin değil). "Oradan tıkla" buna bakar; okunamazsa
+ * `undefined` döner ve çağıran TIKLAMAZ.
+ */
+export async function cursorPos(): Promise<{ x: number; y: number } | undefined> {
+  if (!IS_WIN) return undefined
+  try {
+    const r = await worker.call<{ x: number; y: number }>('cursorPos', {})
+    return r && Number.isFinite(r.x) && Number.isFinite(r.y) ? { x: r.x, y: r.y } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Fare konumundan tıklama. `hwnd`, TAŞIMA anındaki penceredir; worker arada pencere
+ * değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAZ (açık hata verir).
+ */
+export async function clickCurrentAt(x: number, y: number, hwnd?: number, target?: InputWindow): Promise<void> {
+  if (!IS_WIN) return
+  await worker.call('clickCurrentAt', { x: Math.round(x), y: Math.round(y), hwnd, target })
 }
 
 export async function locate(

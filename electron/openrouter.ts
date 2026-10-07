@@ -684,7 +684,7 @@ export function parseTars(content: string, imgW: number, imgH: number, absolute:
   }
 }
 
-function parseJsonAction(content: string): GuiAction {
+export function parseJsonAction(content: string): GuiAction {
   const p = parseJson(content)
   const n = (v: unknown) => {
     if (v === undefined || v === null) return undefined
@@ -693,12 +693,14 @@ function parseJsonAction(content: string): GuiAction {
     return x > 1 ? x / 1000 : x
   }
   const a = String(p.action ?? '').toLowerCase()
-  const kinds = ['click', 'double', 'right', 'drag', 'hotkey', 'type', 'scroll', 'wait', 'finished', 'call_user'] as const
-  const kind = ((kinds as readonly string[]).includes(a) ? a : a === 'done' ? 'finished' : a === 'fail' ? 'call_user' : 'wait') as GuiAction['kind']
+  // İNCELEME DÜZELTMESİ: Luna'nın JSON yolu move/click_current'ı tanımıyordu ve 'wait' oluyordu.
+  const kinds = ['click', 'double', 'right', 'move', 'click_current', 'clickcurrent', 'drag', 'hotkey', 'type', 'scroll', 'wait', 'finished', 'call_user'] as const
+  const ham = a === 'click_current' || a === 'clickcurrent' ? 'clickCurrent' : a
+  const kind = ((kinds as readonly string[]).includes(a) ? ham : a === 'done' ? 'finished' : a === 'fail' ? 'call_user' : 'wait') as GuiAction['kind']
   const keys = Array.isArray(p.keys) ? p.keys.map((k) => String(k).toLowerCase()) : typeof p.keys === 'string' ? p.keys.toLowerCase().split(/[\s+]+/) : []
   const d = String(p.direction ?? '').toLowerCase()
   const x = n(p.x), y = n(p.y), x2 = n(p.x2), y2 = n(p.y2)
-  if (['click', 'double', 'right', 'drag'].includes(kind) && (x === undefined || y === undefined)) {
+  if (['click', 'double', 'right', 'drag', 'move'].includes(kind) && (x === undefined || y === undefined)) {
     throw new ModelRejected('GUI tıklama/sürükleme yanıtında başlangıç koordinatları eksik')
   }
   if (kind === 'drag' && (x2 === undefined || y2 === undefined)) {
