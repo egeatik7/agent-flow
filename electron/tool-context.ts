@@ -6,7 +6,7 @@
  * loopStartIndex, itemVars), so what a tool reports about a node cannot drift from what the
  * engine would do with the same node.
  */
-import { itemVars, loopKeys, loopStartIndex, type AgentGraph, type AgentNode } from './graph-types'
+import { itemVars, listItems, loopKeys, loopStartIndex, type AgentGraph, type AgentNode } from './graph-types'
 
 export type NodePlace = {
   node: AgentNode
@@ -95,7 +95,10 @@ export function chainOf(graph: AgentGraph, id: string): LoopContext[] {
   return place.loops.map((box) => {
     const keys = loopKeys(box)
     const index = loopStartIndex(box, keys.length, true)
-    const item = keys[index]
+    // Klasör tabanlı kutu listesini ancak koşarken doldurur; burada "#1" gibi bir öğe göstermek
+    // yanıltıcıdır. Klasör varsa ve liste boşsa öğe bilinmiyor denir (uydurulmaz).
+    const klasorVar = typeof box.folder === 'string' && box.folder.trim() !== ''
+    const item = klasorVar ? undefined : keys[index]
     vars = { ...vars, ...itemVars(item ?? '', index, keys.length) }
     return {
       id: box.id,
