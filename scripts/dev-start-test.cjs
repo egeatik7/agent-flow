@@ -129,8 +129,41 @@ async function main() {
       console.error(`  paketlenmiş exe yok: ${packed} (önce npm run pack:win)`)
       process.exit(2)
     }
-    fs.copyFileSync(packed, exe)
-    console.log(`  exe kopyalandı: ${path.basename(packed)} → ${exe}`)
+    // Kapatma sonrası dosya hemen serbest kalmayabilir (EBUSY): kopya kısa aralıklarla tekrar
+    // denenir. Ölçüldü: beş bataryalık bir turda ikinci yarı tam bu yüzden koşamamıştı.
+      // Jeton eski ya da silinmişse kalan bir test örneği dosyayı kilitli tutabilir; kopya EBUSY ile
+  // düşer. Kapatma ölçütü pencere damgasıdır: test örneğinin başlığında "test profili" yazar,
+  // sahibinin gerçek uygulamasının başlığında yazmaz. Damga yoksa dokunulmaz.
+  try {
+    const bulunan = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-Command', "Get-Process | Where-Object { $_.MainWindowTitle -like '*test profili*' } | ForEach-Object { $_.Id }"],
+      { encoding: 'utf8' }
+    )
+    for (const ham of String(bulunan).split(/\r?\n/)) {
+      const damgaPid = Number(String(ham).trim())
+      if (Number.isFinite(damgaPid) && damgaPid > 0) {
+        spawnSync('taskkill', ['/PID', String(damgaPid), '/T', '/F'], { stdio: 'ignore' })
+        console.log(`  damgası doğrulanmış test örneği kapatıldı: pid ${damgaPid}`)
+        await sleep(600)
+      }
+    }
+  } catch {
+    /* süpürme yapılamadı; kopya yine de denenir */
+  }
+  
+  let kopyaHata = null
+    for (let kopyaDenemesi = 0; kopyaDenemesi < 12; kopyaDenemesi++) {
+      try {
+        fs.copyFileSync(packed, exe)
+        kopyaHata = null
+        break
+      } catch (e) {
+        kopyaHata = e
+        await sleep(500)
+      }
+    }
+    if (kopyaHata) throw kopyaHata
   }
   if (!fs.existsSync(exe)) {
     console.error(`  test exe yok: ${exe}`)
