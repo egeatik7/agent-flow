@@ -494,7 +494,7 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if ((stage === 'windows' || stage === 'onnx') && !quoted) {
-          if (stage === 'windows') log('info', 'Tırnak içi yazı yok, yerel OCR atlanıyor.')
+          if (stage === 'windows') log('info', 'Tırnak içi kesin metin yok; doğrudan OCR metin eşleştirmesi atlanıyor. Ekran taraması ve modelle seçim devam eder.')
           continue
         }
         if (stage === 'windows' && quoted) {
@@ -529,13 +529,13 @@ export function createAgent(ctx: AgentContext) {
           if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
         }
         if (stage === 'tars' && s.apiKey && (hasText || loc?.icon)) {
-          ctx.setMethod?.('UI-TARS')
+          ctx.setMethod?.('Görsel hedefleme')
           try {
-            log('info', 'UI-TARS ekran görüntüsüne bakıyor.')
+            log('info', 'Görsel model ekran görüntüsüne bakıyor.')
             return await locateWithTars(node, wide, readOnly)
           } catch (e) {
             if (e instanceof NotFoundError) log('warn', e.message)
-            else log('warn', `UI-TARS atlandı: ${(e as Error).message}`)
+            else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
           }
         }
         if (stage === 'offset' && loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
@@ -583,7 +583,7 @@ export function createAgent(ctx: AgentContext) {
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
   async function locateWithTars(node: AgentNode, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
-    if (!s.apiKey) throw new NotFoundError('UI-TARS için API anahtarı yok.')
+    if (!s.apiKey) throw new NotFoundError('Görsel hedefleme için API anahtarı yok.')
     const model = agentModels(s)
     const prompt = visionPrompt(node)
     const res = await bridge.scan({
@@ -599,7 +599,7 @@ export function createAgent(ctx: AgentContext) {
     })
     trace(node, { kind: 'observation', source: 'tars', scan: res })
     warnMissingWindow(res)
-    if (!res.image) throw new NotFoundError('UI-TARS için ekran görüntüsü alınamadı.')
+    if (!res.image) throw new NotFoundError('Görsel hedefleme için ekran görüntüsü alınamadı.')
     const action = await guiStep({
       apiKey: s.apiKey,
       model,
@@ -647,7 +647,7 @@ export function createAgent(ctx: AgentContext) {
             })
             trace(node, { kind: 'model', source: 'tars', value: again })
             const ok2 = (again.kind === 'click' || again.kind === 'double' || again.kind === 'right') && typeof again.x === 'number' && typeof again.y === 'number'
-            log('info', `[UI-TARS] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
+            log('info', `[Görsel model] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
             if (ok2) {
               pointed = true
               a = crop.area
@@ -657,19 +657,19 @@ export function createAgent(ctx: AgentContext) {
             }
           }
         } catch (e) {
-          log('warn', `[UI-TARS] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
+          log('warn', `[Görsel model] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
         }
       }
     }
-    if (!pointed) throw new NotFoundError(`UI-TARS hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
+    if (!pointed) throw new NotFoundError(`Görsel model hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
     const x = a.x + action.x! * a.w
     const y = a.y + action.y! * a.h
-    trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[UI-TARS] ekran görüntüsü' } })
-    log('info', `[UI-TARS] ${thought || action.raw}`)
+    trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[Görsel model] ekran görüntüsü' } })
+    log('info', `[Görsel model] ${thought || action.raw}`)
     return {
       x,
       y,
-      label: '[UI-TARS] ekran görüntüsü',
+      label: '[Görsel model] ekran görüntüsü',
       memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
     }
   }
@@ -1133,7 +1133,8 @@ export function createAgent(ctx: AgentContext) {
         log('warn', 'Yazı gönderilmedi: ' + (typed.code || 'INPUT_FOCUS_UNRESOLVED')
           + '; UIA=' + (d?.type || typed.focusType || '?') + ', native=' + (d?.native || '?')
           + ', pencere=' + (d?.window || typed.where || '?') + ', HWND=' + (d?.hwnd || '?')
-          + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + (d?.caret ? 'var' : 'yok') + '.')
+          + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + JSON.stringify(d?.caret ?? null)
+          + ', odak kutusu=' + JSON.stringify(d?.rect ?? null) + ', ret=' + (d?.inputRejection || typed.code || '?') + '.')
         if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
           recoveryCount++
           ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')

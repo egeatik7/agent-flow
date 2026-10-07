@@ -886,22 +886,42 @@ function Test-RectPoint($rect, [double]$x, [double]$y) {
 
 # Custom fields require a fresh visual focus request AND independent native
 # evidence. A Pane, a window title or TextPattern alone never authorizes input.
+# Geometry checks are separate so Tk container/caret cases can be tested without
+# injecting keyboard input. An empty reason means the geometry is acceptable.
+function Get-VisualInputGeometryRejection($d, $guard) {
+  if ($d.readOnly -eq $true) { return 'READ_ONLY' }
+  if (-not $d.focusHwnd -or -not $d.caret -or $d.caret.h -le 0) { return 'NO_NATIVE_CARET' }
+  if (@('Button','CheckBox','RadioButton','MenuItem','Hyperlink','Text') -contains $d.type) { return 'NON_INPUT_CONTROL' }
+  if (-not (Test-RectPoint $d.rect $guard.at.x $guard.at.y)) { return 'CLICK_OUTSIDE_FOCUS' }
+  if (-not (Test-RectPoint $d.rect ($d.caret.x + $d.caret.w / 2) ($d.caret.y + $d.caret.h / 2))) { return 'CARET_OUTSIDE_FOCUS' }
+  if ($d.rect.w -gt $guard.window.rect.w) { return 'FOCUS_TOO_WIDE' }
+  if ($d.native -eq 'TkChild') {
+    # Tk can report the whole container as Pane. Do not whitelist the class:
+    # require its own native caret on the clicked text line, plus all window
+    # identity checks in Test-VisualInput. A distant caret cannot authorize input.
+    if ([string]$d.caret.hwnd -ne [string]$d.focusHwnd) { return 'TK_CARET_NOT_FOCUSED_CHILD' }
+    if ($d.caret.h -gt 80 -or $d.caret.w -gt 8 -or $d.caret.w -lt 0) { return 'TK_INVALID_CARET' }
+    $pad = [Math]::Max(4, [Math]::Min(12, $d.caret.h / 2))
+    if ($guard.at.y -lt ($d.caret.y - $pad) -or $guard.at.y -gt ($d.caret.y + $d.caret.h + $pad)) { return 'TK_CLICK_NOT_ON_CARET_LINE' }
+  } elseif ($d.rect.h -gt 180) { return 'FOCUS_TOO_TALL' }
+  return ''
+}
+
 function Test-VisualInput($guard) {
-  if (-not $guard -or -not $guard.visual -or -not $guard.at) { return $false }
+  $script:VisualInputRejection = ''
+  if (-not $guard -or -not $guard.visual -or -not $guard.at) { $script:VisualInputRejection = 'VISUAL_FOCUS_REQUIRED'; return $false }
   try {
     [void](Get-BoundWindow $guard.window $false)
     $d = Get-InputDiagnostics
-    if ($d.readOnly -eq $true -or -not $d.focusHwnd -or -not $d.caret -or $d.caret.h -le 0) { return $false }
+    $reason = Get-VisualInputGeometryRejection $d $guard
+    if ($reason) { $script:VisualInputRejection = $reason; return $false }
     $fh = [IntPtr]([long]$d.focusHwnd)
     $ch = [IntPtr]([long]$d.caret.hwnd)
     $wh = [IntPtr]([long]$guard.window.hwnd)
-    if ([XpWin]::RootOf($fh) -ne $wh -or [XpWin]::RootOf($ch) -ne $wh -or -not [XpWin]::IsWindowEnabled($fh)) { return $false }
-    if ($d.rect.w -gt $guard.window.rect.w -or $d.rect.h -gt 180) { return $false }
-    if (-not (Test-RectPoint $d.rect $guard.at.x $guard.at.y)) { return $false }
-    if (-not (Test-RectPoint $d.rect ($d.caret.x + $d.caret.w / 2) ($d.caret.y + $d.caret.h / 2))) { return $false }
-    if (@('Button','CheckBox','RadioButton','MenuItem','Hyperlink','Text') -contains $d.type) { return $false }
+    if ([XpWin]::RootOf($fh) -ne $wh -or [XpWin]::RootOf($ch) -ne $wh) { $script:VisualInputRejection = 'WRONG_WINDOW'; return $false }
+    if (-not [XpWin]::IsWindowEnabled($fh)) { $script:VisualInputRejection = 'FOCUS_DISABLED'; return $false }
     return $true
-  } catch { return $false }
+  } catch { $script:VisualInputRejection = 'WINDOW_CHECK_FAILED: ' + $_.Exception.Message; return $false }
 }
 
 function Assert-TypeFocus($field, $guard, [string]$nativeFocus) {
@@ -1107,6 +1127,7 @@ function Invoke-Op([string]$op, $P) {
         $out.skippedClear = $true
         $out.code = 'INPUT_FOCUS_UNRESOLVED'
         $out.diagnostics = Get-InputDiagnostics
+        $out.diagnostics | Add-Member -NotePropertyName inputRejection -NotePropertyValue $script:VisualInputRejection
         return [pscustomobject]$out
       }
       if ($P.guard -and $P.guard.at -and -not $visual -and $null -eq $picked -and -not (Test-PointInside $focus $atX $atY)) {

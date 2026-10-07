@@ -5,7 +5,7 @@ export type InputWindow = { hwnd: string; pid: number; title: string; rect: Rect
 export type InputGuard = { window: InputWindow; at?: Point; visual?: boolean }
 export type InputState = {
   type: string; writable: boolean; name: string; window: string
-  native?: string; hwnd?: string; pid?: number; focusHwnd?: string
+  inputRejection?: string; native?: string; hwnd?: string; pid?: number; focusHwnd?: string
   rect?: Rect | null; caret?: (Rect & { hwnd: string }) | null; readOnly?: boolean | null
 }
 

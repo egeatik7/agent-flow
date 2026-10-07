@@ -348,7 +348,7 @@ export async function runGraph(
         }
         ex.step(node.id, 'done')
         if (port === 'end') {
-          if (opts.nested) ex.log('success', `“${node.title}” bu katmanı bitirdi.`)
+          if (opts.nested) ex.log('success', `Bitiş node’una ulaşıldı: “${node.title}”. Bu başlık, önceki adımların doğrulanmış sonucu değildir.`)
           else ex.log(...closing(`“${node.title}” ile akış bitti (${tally.n} adım).`))
           throw new EndFlow()
         }

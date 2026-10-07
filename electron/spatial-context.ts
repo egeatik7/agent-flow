@@ -8,7 +8,7 @@ export function taskbarItem(scan: ScanResult, item: { x: number; y: number; w: n
 }
 
 export function asksDesktopShortcut(prompt: string): boolean {
-  return /masaüst[üu]|desktop/i.test(prompt) && /simge|ikon|k[ıi]sayol|icon|shortcut/i.test(prompt)
+  return /masaüst[üu]|desktop/i.test(prompt) && (/simge|ikon|k[ıi]sayol|icon|shortcut/i.test(prompt) || /masaüst[üu]nde(?:ki)?\b|on\s+(?:the\s+)?desktop\b/i.test(prompt))
 }
 
 export function spatialItems(scan: ScanResult, limit = 400): string {

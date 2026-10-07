@@ -25,6 +25,10 @@ describe('spatial context', () => {
    expect(asksDesktopShortcut('Masaüstündeki Chrome simgesine tıkla')).toBe(true)
    expect(asksDesktopShortcut('desktop Chrome shortcut')).toBe(true)
    expect(asksDesktopShortcut('masaüstü uygulamasını aç')).toBe(false)
+   expect(asksDesktopShortcut('masaüstündeki google chromeye tıkla')).toBe(true)
+   expect(asksDesktopShortcut('masaüstünde Chrome yazan yere tıkla')).toBe(true)
+   expect(asksDesktopShortcut('click Chrome on the desktop')).toBe(true)
+   expect(asksDesktopShortcut('desktop application settings')).toBe(false)
  })
  it('does not relate text across taskbar boundaries', () => {
    const result = spatialItems({ ...scan, items: [ { ...scan.items[0], y: 1010 }, { ...scan.items[1], y: 1032 } ] })
