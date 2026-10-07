@@ -5,7 +5,7 @@ import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
-import { isTestProfile, storeCwd } from './profile'
+import { isTestProfile, storeCwd, testToolsEnabled } from './profile'
 import { bayatCikarmaKlasorleri, geciciGirdileriTopla } from './temp-sweep'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource } from './tools'
@@ -39,7 +39,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { branchesOf, toolLayerSave, windowSave } from './tool-branch'
+import { toolLayerSave, windowSave } from './tool-branch'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -86,9 +86,6 @@ function getSettings(): AppSettings {
   bridge.setOcrEngine(s.ocrEngine)
   return s
 }
-
-/** How long the window has to apply a merge and confirm it was saved. */
-const MERGE_TIMEOUT_MS = 10_000
 
 /** True while a branch is being tested: that run is not the flow on screen. */
 let derivedRun = false
@@ -700,8 +697,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return true
   })
 
-  // The tool layer an outside agent drives. The Ajan tab calls these same tools, so limits,
-  // permissions and logging live in one place (electron/tools.ts) instead of per caller.
+  // Developer/test tool layer; ordinary agent settings do not call these tools.
   const toolContext = {
     getGraph: () => normalizeGraph(store.get('graph')),
     getSettings,
@@ -754,12 +750,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     saveCanvases: (book: CanvasBook) => {
       store.set('canvases', toolLayerSave(loadCanvases(), book.branches ?? []))
     },
-    applyMerge: (
-      payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
-      opts?: { snapshot?: boolean }
-    ) => applyMergeInWindow(payload, opts),
-    showBranch: (payload: { branchId: string; branchName: string }, opts?: { timeoutMs?: number }) =>
-      showBranchInWindow(payload, opts),
+    // Suggestions are no longer displayed or merged through the user window.
+    // Keep explicit failure replies so legacy test callers do not hang or report success.
+    applyMerge: async () => ({ ok: false, error: 'Öneri merge arayüzü kaldırıldı; hiçbir akış değiştirilmedi.' }),
+    showBranch: async () => ({ ok: false, error: 'Öneri inceleme arayüzü kaldırıldı; tuval değiştirilmedi.' }),
     // One action at a time may step aside from the desktop, exactly like a run does.
     hideApp: () => hideSelf(),
     showApp: async (opts?: { focus?: boolean }) => {
@@ -772,32 +766,21 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       return true
     },
     takeMergeUndo: undefined,
-    // Reading the undo does not consume it: a window that never answers must leave the right to
-    // try again, and must not have the recipe put back while the merge is still in the flow.
-    peekMergeUndo: () => (lastMerge ? { tabId: lastMerge.tabId, graph: lastMerge.graph } : null),
-    commitMergeUndo: () => {
-      const snap = lastMerge
-      lastMerge = null
-      if (!snap) return false
-      // The recipe was dropped when it was merged; put it back with the flow it was based on.
-      if (snap.branch) {
-        const book = loadCanvases()
-        store.set('canvases', toolLayerSave(book, [...branchesOf(book), snap.branch]))
-      }
-      return true
-    },
+    peekMergeUndo: () => null,
+    commitMergeUndo: () => false,
   }
-  ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) =>
-    callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
-  )
-  ipcMain.handle('tools:list', () => toolList())
+  const toolsEnabled = testToolsEnabled(process.env.NUBBO_PROFILE, process.env.NUBBO_TEST_TOOLS)
+  ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) => {
+    if (!toolsEnabled) return { ok: false, tool: name, outcome: 'hata', message: 'Geliştirme araçları yalnız ayrı test oturumunda kullanılabilir.' }
+    return callTool(name, args, toolContext, source === 'agent' ? 'agent' : 'panel')
+  })
+  ipcMain.handle('tools:list', () => toolsEnabled ? toolList() : [])
 
-  // The local door an outside agent uses. It exists only while the Ajan tab asks for it, and
-  // every call it carries goes through the same gate as the panel (source 'agent'), so the
-  // permission setting, the limits and the logging are the ones already written down.
+  // Test-only local endpoint. The user's saved endpoint setting is preserved,
+  // but cannot enable tools in a normal session.
   const endpointFile = path.join(app.getPath('userData'), 'tool-endpoint.json')
   async function syncEndpoint() {
-    const want = getSettings().agentEndpoint
+    const want = toolsEnabled
     const live = endpointInfo()
     if (want && !live) {
       try {
@@ -818,9 +801,6 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       log('info', 'Ajan uç noktası kapatıldı.')
     }
   }
-  // Asking for the endpoint also makes sure it is really there: the setting can be on while the
-  // door is shut (an older instance's token file, a failed start), and then the panel would say
-  // "Açılıyor…" forever. Opening the Ajan tab is enough to put it right.
   ipcMain.handle('tools:endpoint', async () => {
     await syncEndpoint()
     return endpointInfo()
@@ -836,106 +816,6 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const saved = store.get('canvases') as CanvasBook | undefined
     if (saved?.tabs?.length) return normalizeCanvasBook(saved)
     return normalizeCanvasBook(undefined, normalizeGraph(store.get('graph')))
-  }
-
-  // A merge is handed to the window, because the window owns the canvas book and saves it on
-  // every change: writing it from here could be undone by a save the window already had queued.
-  // Without an answer from the window, nothing is written anywhere.
-  let mergePending: {
-    requestId: string
-    resolve: (a: { ok: boolean; error?: string }) => void
-    timer: ReturnType<typeof setTimeout>
-  } | null = null
-
-  // The flow as it was just before the last merge, so a merge can be taken back once. Kept in
-  // memory on purpose: it is a safety net for a wrong click, not a version history.
-  let lastMerge: { tabId: string; graph: AgentGraph; branch: unknown; at: number } | null = null
-
-  ipcMain.handle('canvas:mergeAnswer', (_e, answer: unknown) => {
-    const pending = mergePending
-    if (!pending) return false
-    const a = answer as { ok?: unknown; error?: unknown; requestId?: unknown } | null
-    // A late answer from an earlier question must never pass for the one being asked now.
-    if (typeof a?.requestId !== 'string' || a.requestId !== pending.requestId) {
-      log('warn', 'Ajan · merge · eşleşmeyen pencere cevabı yok sayıldı.')
-      return false
-    }
-    mergePending = null
-    clearTimeout(pending.timer)
-    pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
-    return true
-  })
-
-  let inspectPending: { requestId: string; resolve: (a: { ok: boolean; error?: string }) => void; timer: ReturnType<typeof setTimeout> } | null = null
-
-  ipcMain.handle('canvas:inspectAnswer', (_e, answer: unknown) => {
-    const pending = inspectPending
-    if (!pending) return false
-    const a = answer as { ok?: unknown; error?: unknown; requestId?: unknown } | null
-    if (typeof a?.requestId !== 'string' || a.requestId !== pending.requestId) return false
-    inspectPending = null
-    clearTimeout(pending.timer)
-    pending.resolve({ ok: a?.ok === true, error: typeof a?.error === 'string' ? a.error : undefined })
-    return true
-  })
-
-  /**
-   * Asks the window to show a branch on the canvas, or to close the one it is showing - the same
-   * move the person makes with Incele. The window owns the canvas, so the request goes there and
-   * is answered there; nothing about the flow is written either way.
-   */
-  function showBranchInWindow(
-    payload: { branchId: string; branchName: string },
-    opts?: { timeoutMs?: number }
-  ): Promise<{ ok: boolean; error?: string }> {
-    if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ ok: false, error: 'pencere yok' })
-    if (inspectPending) return Promise.resolve({ ok: false, error: 'başka bir gösterme isteği sürüyor' })
-    const requestId = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const lifespan = opts?.timeoutMs ?? 10_000
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        if (inspectPending && inspectPending.resolve === resolve) {
-          inspectPending = null
-          resolve({ ok: false, error: `pencere ${Math.round(lifespan / 1000)} sn içinde yanıt vermedi` })
-        }
-      }, lifespan)
-      inspectPending = { requestId, resolve, timer }
-      mainWindow?.webContents.send('canvas:inspect', { ...payload, requestId })
-    })
-  }
-
-  function applyMergeInWindow(
-    payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
-    opts?: { snapshot?: boolean }
-  ): Promise<{ ok: boolean; error?: string }> {
-    if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ ok: false, error: 'pencere yok' })
-    if (mergePending) return Promise.resolve({ ok: false, error: 'başka bir merge sürüyor' })
-    if (opts?.snapshot !== false) {
-      const cur = loadCanvases()
-      const tab = cur.tabs.find((t) => t.id === payload.tabId)
-      const branch = (cur.branches ?? []).find((b) => (b as { id?: string }).id === payload.branchId) ?? null
-      lastMerge = tab ? { tabId: payload.tabId, graph: structuredClone(tab.graph), branch, at: Date.now() } : null
-    }
-    // Every question carries its own id and its own deadline: the answer must match, and a window
-    // that was busy for longer than the deadline applies nothing rather than applying it late.
-    const requestId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const expiresAt = Date.now() + MERGE_TIMEOUT_MS
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        if (mergePending && mergePending.resolve === resolve) {
-          mergePending = null
-          // Nothing confirmed: say so honestly instead of claiming the flow is untouched. The
-          // caller keeps the recipe and the undo right, so this is recoverable either way.
-          resolve({
-            ok: false,
-            error: `pencere ${Math.round(MERGE_TIMEOUT_MS / 1000)} sn içinde yanıt vermedi (uygulanmış olabilir); tarif ve geri alma hakkı korundu`,
-          })
-        }
-      }, MERGE_TIMEOUT_MS)
-      mergePending = { requestId, resolve, timer }
-      log('info', `Ajan · merge · pencereye soruldu: “${payload.branchName}” (${requestId}).`)
-      mainWindow?.webContents.send('canvas:merge', { ...payload, requestId, expiresAt })
-    })
   }
 
   ipcMain.handle('canvases:get', () => loadCanvases())

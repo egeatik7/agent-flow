@@ -53,24 +53,6 @@ export type XpAgentApi = {
   toolList: () => Promise<ToolSpec[]>
   toolEndpoint: () => Promise<{ port: number; file: string; startedAt: number } | null>
   toolEndpointOpen: () => Promise<string | null>
-  /** The window is asked to apply a merged flow, and answers so the tool layer knows it landed. */
-  onMergeCanvas: (
-    cb: (payload: {
-      tabId: string
-      graph: unknown
-      branchId: string
-      branchName: string
-      reason?: 'merge' | 'undo'
-      /** Echoed back with the answer so a late reply cannot pass for a newer question. */
-      requestId: string
-      /** After this moment the window must not apply the change at all. */
-      expiresAt: number
-    }) => void
-  ) => () => void
-  mergeCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => Promise<boolean>
-  /** The agent asking the window to show a branch, or to close the one on screen. */
-  onCanvasInspect: (cb: (payload: { branchId: string; branchName: string; requestId: string }) => void) => () => void
-  inspectCanvasAnswer: (answer: { ok: boolean; error?: string; requestId?: string }) => Promise<boolean>
   openLogs: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>

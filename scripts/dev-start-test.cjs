@@ -249,7 +249,7 @@ async function main() {
     console.error(`  test exe yok: ${exe}`)
     process.exit(2)
   }
-  const env = { ...process.env, NUBBO_PROFILE: profile, NUBBO_BUILD: build }
+  const env = { ...process.env, NUBBO_PROFILE: profile, NUBBO_TEST_TOOLS: '1', NUBBO_BUILD: build }
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawnSync('cmd', ['/c', 'start', '', exe], { env, stdio: 'ignore' })
   void child

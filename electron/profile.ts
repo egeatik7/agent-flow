@@ -42,3 +42,9 @@ export function isTestProfile(profile: string | undefined): boolean {
 export function storeCwd(profile: string | undefined, userData: string): string | undefined {
   return isTestProfile(profile) ? userData : undefined
 }
+
+/** Developer tools require both an isolated profile and an explicit launch flag.
+ * Persisted agentEndpoint settings never open tools in an ordinary user session. */
+export function testToolsEnabled(profile: string | undefined, flag: string | undefined): boolean {
+  return isTestProfile(profile) && flag === '1'
+}

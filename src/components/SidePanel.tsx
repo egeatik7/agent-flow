@@ -1011,7 +1011,7 @@ export default function SidePanel(p: Props) {
         {p.tab === 'node' && <NodeInspector {...p} />}
         {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
         {p.tab === 'settings' && <Settings {...p} />}
-        {p.tab === 'agent' && <AgentTab selected={p.selected} graph={p.graph} settings={p.settings} onSaveSettings={p.onSaveSettings} />}
+        {p.tab === 'agent' && <AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} />}
       </div>
     </aside>
   )

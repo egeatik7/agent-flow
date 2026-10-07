@@ -542,59 +542,6 @@ body {
   z-index: 9;
 }
 
-/* Ajan tavsiyeleri: the agent's branches, on the canvas instead of buried in a side tab. */
-.branch-panel {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  z-index: 12;
-  max-width: 560px;
-  max-height: 60%;
-  display: flex;
-  flex-direction: column;
-  background: var(--xp-face, #ece9d8);
-  border: 1px solid var(--xp-border-mid, #aca899);
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.22);
-  font-size: 12px;
-}
-
-.branch-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  background: linear-gradient(180deg, #3f7fd4 0%, #1d5fbf 100%);
-  color: #fff;
-  padding: 2px 3px;
-}
-
-.branch-panel-toggle {
-  flex: 1;
-  text-align: left;
-  font: inherit;
-  font-weight: bold;
-  color: #fff;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.branch-panel-mini {
-  font: inherit;
-  color: #fff;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  cursor: pointer;
-  padding: 0 5px;
-  line-height: 16px;
-}
-
-.branch-panel-body {
-  overflow: auto;
-  padding: 4px 6px 6px;
-}
-
 /* A test instance says so, in the title bar, loudly. */
 .titlebar-test {
   margin-left: 10px;
@@ -604,59 +551,6 @@ body {
   color: #fff;
   background: #c00000;
   border: 1px solid #7d0000;
-}
-
-.branch-panel-answer {  margin-top: 4px;
-  padding: 3px 5px;
-  border: 1px solid #aca899;
-  background: #fff;
-  max-height: 74px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-
-/* The branch being looked at: what it touches, and where it adds a connection. */
-.branch-banner {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  z-index: 11;
-  padding: 3px 6px;
-  font-size: 12px;
-  background: #f3ecfb;
-  border: 1px dashed #6a3fa0;
-  color: #3b2159;
-}
-
-.agent-node.node-branch {
-  outline: 2px dashed #6a3fa0;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(106, 63, 160, 0.10);
-}
-
-.agent-node.node-dim {
-  opacity: 0.45;
-}
-
-/* The node (or the package node) the branch was written on: how the region is found. */
-.agent-node.node-anchor {
-  box-shadow: 0 0 0 3px rgba(176, 48, 106, 0.55);
-}
-
-.agent-node.node-anchor::after {
-  content: '⚑ öneri';
-  position: absolute;
-  top: -14px;
-  right: -2px;
-  z-index: 3;
-  padding: 0 4px;
-  font-size: 10px;
-  line-height: 14px;
-  color: #fff;
-  background: #b0306a;
-  border: 1px solid #7d1f49;
-  white-space: nowrap;
 }
 
 .enter-pkg {

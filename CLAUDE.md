@@ -307,3 +307,12 @@ Bu bölüm, ürünü geliştirirken kullanılan **kendi kendini denetleyen döng
 
 
 
+
+
+## Kullanıcı kararı — 7 Ekim 2026: sade ürün, test için CLI
+
+Bu karar, önceki öneri/inceleme/merge arayüzü hedeflerinin yerine geçer. Nubbo'nun amacı, basit node komutlarıyla güvenilir otomasyondur. Kullanıcı arayüzünde Ajan sekmesi kalır; Ajan tavsiyeleri paneli, öneri inceleme tuvali, değişiklik işaretleri, merge/undo paneli ve CLI araç/jeton/izin arayüzü kaldırılır. Yeniden ekleme.
+
+Mevcut node'lar, kullanıcı akışları, OCR/hedef bulma, tuş/yazma motoru ve döngü hata politikası değiştirilmez. Kayıtlı eski branch verileri topluca silinmez. Branch'in bellek/düzenleme kodu, mevcut test senaryolarını bozmamak için test katmanında kalabilir; kullanıcı tuvalini gösterme/merge transportu yoktur ve eski çağrılar açık ret alır.
+
+CLI/HTTP araçları yalnız `NUBBO_PROFILE` ile ayrı profil açılmış VE `NUBBO_TEST_TOOLS=1` verilmiş oturumda kullanılabilir. Normal kullanıcı oturumunda eski `agentEndpoint=true` ayarı kapıyı açamaz. Test araçlarının mevcut izin, token, durdurma ve odak korumaları korunur. `scripts/dev-start-test.cjs` gerekli test bayrağını verir. Kapsamlı sağlamlaştırma testleri sonraki iştir; bu değişikliğe otomatik onarım yöneticisi veya yeni node mimarisi ekleme.

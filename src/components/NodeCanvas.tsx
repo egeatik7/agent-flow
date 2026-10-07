@@ -40,7 +40,6 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 type Props = {
   graph: AgentGraph
   /** When a branch is being looked at: the nodes it touches and the connections it adds. */
-  marks?: { nodes: string[]; edges: string[]; anchors?: string[] }
   /** Ask the canvas to bring this node into view (used to find a branch's region). */
   focus?: { nodeId: string; at: number }
   selectedNodeId: string | null
@@ -141,8 +140,6 @@ export default function NodeCanvas(p: Props) {
   graphRef.current = p.graph
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
-  /** Marked nodes and connections when a branch is being looked at; nothing is marked otherwise. */
-  const marks = p.marks && (p.marks.nodes.length || p.marks.edges.length) ? p.marks : null
   const hasStart = p.graph.nodes.some((n) => n.kind === 'start')
   const addableKinds = NODE_KINDS.filter((k) => k !== 'package' && k !== 'browser' && k !== 'waitFile' && k !== 'moveFile' && (k !== 'start' || !hasStart))
 
@@ -648,10 +645,7 @@ export default function NodeCanvas(p: Props) {
             const t = edgeTarget(b)
             const { d, mx, my } = edgePath(s.x + 7, s.y, t.x - 7, t.y)
             const sel = p.selectedEdgeId === e.id
-            // A connection the branch adds is drawn, but only as a suggestion: dashed, and it is
-            // not part of the flow until the branch is merged.
-            const marked = marks ? marks.edges.includes(`${e.from}|${e.fromPort}|${e.to}`) : false
-            const color = marked ? '#6a3fa0' : sel ? '#e05a00' : portColor(e.fromPort)
+            const color = sel ? '#e05a00' : portColor(e.fromPort)
             const label = e.fromPort !== 'next' ? portLabel(a.kind, e.fromPort) : null
             return (
               <g key={e.id} className="edge">
@@ -669,7 +663,6 @@ export default function NodeCanvas(p: Props) {
                   d={d}
                   stroke={color}
                   strokeWidth={sel ? 3 : 2}
-                  strokeDasharray={marked ? '7 5' : undefined}
                   fill="none"
                   markerEnd={`url(#${sel ? 'arrow-sel' : `arrow-${PORT_COLORS[e.fromPort] ? e.fromPort : 'next'}`})`}
                   className={p.running ? 'edge-line flowing' : 'edge-line'}
@@ -703,10 +696,6 @@ export default function NodeCanvas(p: Props) {
             p.selectedIds.includes(n.id) ? 'selected' : '',
             hoverTarget === n.id ? 'drop-target' : '',
             st !== 'idle' ? st : '',
-            // A branch being looked at: its own nodes get a dashed frame, the rest step back, and
-            // the nodes it was written *on* carry a badge so the region can be found.
-            marks ? (marks.nodes.includes(n.id) ? 'node-branch' : 'node-dim') : '',
-            marks?.anchors?.includes(n.id) ? 'node-anchor' : '',
           ]
             .filter(Boolean)
             .join(' ')
