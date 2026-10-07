@@ -122,7 +122,12 @@ async function main() {
         // "İç hata: işlem çöktü" gibi cevaplar başarı DEĞİLDİR; beklenti ya koşunun başlaması ya da
         // listenin değiştiğinin açıkça söylenmesidir.
         if (/İç hata|iç hata|çöktü|uncaught|yakalanmamış/i.test(m)) return false
-        return r.ok === true || /Liste değişmiş|aynı öğeden|hatadan devam/i.test(m)
+        // Üç MEŞRU sonuç vardır: koşu başladı, liste değiştiği için reddedildi, ya da donmuş
+        // hatada kutu/öğe olmadığı için dürüstçe "devam edilecek öğe yok" denildi.
+        if (r.ok === true) return true
+        if (/Liste değişmiş|aynı öğeden|hatadan devam/i.test(m)) return true
+        if (/kutu yok|öğe de yok|devam edilecek öğe/i.test(m)) return true
+        return false
       })
     await call(inf, 'run.wait', { timeoutMs: 120000 })
     void rf
