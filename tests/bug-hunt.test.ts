@@ -103,28 +103,28 @@ describe('bug bataryası: argümanlar', () => {
     expect(bosPlan.ok, 'işlemsiz düzenleme kabul edildi').toBe(false)
   })
 
-  // BİLİNEN HATA (ölçüldü, düzeltilmedi): flow.suggest bir planı DENETLEMESİ gerekirken
-  // patchNode içindeki `locator` alanını kabul ediyor; oysa flow.edit aynı alanı
-  // EDITABLE_FIELDS denetimiyle reddediyor (tool-edit.ts:129). Düzelene kadar bu test kırmızıdır.
-  it.fails('flow.suggest yasak alanı reddetmeli (BİLİNEN HATA)', async () => {
+  // Sözleşme: bir plan reddi "ok:false" değil, "ok:true + outcome:plan-gecersiz" olarak bildirilir
+  // (araç cevap verdi; plan geçersiz). Bu test önce yanlış sözleşmeyi beklediği için "hata" sanmıştı.
+  it('flow.suggest yasak alanı plan-gecersiz olarak bildirir', async () => {
     const { graph, click } = fixture()
     const h = ctx(graph)
     const r = await callTool('flow.suggest', { ops: [{ op: 'patchNode', id: click.id, fields: { locator: { x: 1, y: 2 } } }] }, h.ctx)
-    expect(r.ok, 'flow.suggest hedef kanıtı alanını kabul etti').toBe(false)
+    expect(r.outcome).toBe('plan-gecersiz')
+    expect(r.data?.valid).toBe(false)
+    expect(String(r.message)).toContain('locator')
   })
 })
 
 describe('bug bataryası: sınırlar ve dolu çıkışlar', () => {
-  // BİLİNEN HATA (ölçüldü, düzeltilmedi): dolu çıkış denetimi (tool-edit.ts:240-248) branch
-  // bağlamında yalnız branch'in kendi eklemelerini görüyor; temel akışta o çıkış zaten dolu olsa
-  // bile `addNode.connectFrom` kabul ediliyor. Motor bir çıkışta ilk oku izlediği için bu, "eklenen
-  // node hiç çalışmaz" demektir. Düzelene kadar kırmızı.
-  it.fails('dolu çıkışa ikinci bağlantı reddedilmeli (BİLİNEN HATA)', async () => {
+  // Aynı sözleşme: dolu çıkış denetimi branch bağlamında DA çalışıyor (önce yanlış beklenti yüzünden
+  // "hata" sanılmıştı). Reddin metni ve outcome'u kontrol edilir.
+  it('dolu çıkışa ikinci bağlantı branch’te de plan-gecersiz', async () => {
     const { graph, root } = fixture()
     const h = ctx(graph)
     const id = String((await callTool('branch.create', { name: 'B' }, h.ctx)).data?.branchId)
     const dolu = await callTool('flow.edit', { branchId: id, ops: [{ op: 'addNode', key: 'w', kind: 'wait', fields: { ms: 100 }, connectFrom: root.id }] }, h.ctx)
-    expect(dolu.ok, 'dolu çıkışa ikinci bağlantı kabul edildi').toBe(false)
+    expect(dolu.outcome, `kabul edildi: ${dolu.message}`).toBe('plan-gecersiz')
+    expect(String(dolu.message)).toContain('zaten bir bağlantı var')
   })
 
   it('tek planda kopar-bağla çalışır', async () => {

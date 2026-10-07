@@ -14,6 +14,8 @@ Sınıflar ayrı tutulur: her satır ya **ölçülmüş bir davranış** ya da *
 
 ## Bulunan **gerçek** hatalar
 
+(Yalnız iki tanesi gerçek çıktı; ikisi de düzeltildi ve biri canlı doğrulandı.)
+
 ### H1 — Boşluktan oluşan argüman korumayı geçiyordu (DÜZELTİLDİ ✓, canlı doğrulandı ✓)
 `act.type { text: "   " }` ve `act.key { keys: "  " }` **guard'ı geçiyor** ve motora ulaşıyordu.
 Canlı ölçüm: *"Araç çalıştırılamadı: Odak bir yazı alanı değil (Window)"* — yani motor **yazmayı
