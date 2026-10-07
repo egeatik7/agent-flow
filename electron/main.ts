@@ -480,7 +480,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean; fast?: boolean }
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -531,6 +531,8 @@ async function runFlow(
       stepDelayMs: Math.max(0, s.stepDelayMs),
       startId,
       resume: !!startId,
+      // Kimlikle devam (varsa): motor öğeyi yeni listede arar, indekse güvenmez.
+      ...(opts?.resumeLoopId && opts?.resumeItem ? { resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem } : {}),
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
     })
     // A run that went through every step but had loop items end on an error is not a success.

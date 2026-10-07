@@ -120,7 +120,7 @@ export type ToolContext = {
     graph: AgentGraph,
     startId?: string,
     packagePath?: string[],
-    opts?: { derived?: boolean; debug?: boolean; fast?: boolean }
+    opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string }
   ) => Promise<{ ok: boolean; failed?: number; stopped?: boolean }>
   /** The canvas book: the flows of the app plus the agent branches that sit over them. */
   getCanvases: () => CanvasBook
@@ -1198,6 +1198,8 @@ const runFrom: ToolDef = {
     // known from the frozen report, and setting them back in the graph is what keeps a lap from
     // starting its list over. It only ever happens on a branch copy, never on the saved flow.
     let resumeNote = ''
+    // Kimlikle devam için ayrılan yer: resume bloğu doldurur, startRun kullanır.
+    let devamKimlik = { loopId: '', item: '' }
     if (args.resumeFromFailure === true) {
       if (!derived) {
         return failed(runFrom.name, 'Hatadan devam yalnız bir branch koşusunda yapılır; kayıtlı akışta işaretler değiştirilmez.')
@@ -1205,6 +1207,10 @@ const runFrom: ToolDef = {
       const report = frozenReport(text(args.resumeRunId) || undefined)
       if (!report) return failed(runFrom.name, 'Devam edilecek donmuş hata yok; önce debug: true ile koş.')
       if (!report.loops.length) return failed(runFrom.name, 'Donmuş hatada kutu yok; devam edilecek öğe de yok.')
+      // Motor, klasörü koşu sırasında yeniden okur; indeks o zaman başka dosyayı gösterir.
+      // Bu yüzden en iç kutunun KİMLİĞİ ve ÖĞESİ motora taşınır (kimlikle devam).
+      const icKutu = report.loops[report.loops.length - 1]
+      devamKimlik = { loopId: icKutu?.id ?? '', item: typeof icKutu?.item === 'string' ? icKutu.item : '' }
       const missing: string[] = []
       for (const box of report.loops) {
         // The box may be inside a package, so it is looked up through the tree, not in the root list.
@@ -1259,6 +1265,8 @@ const runFrom: ToolDef = {
         ...(derived ? { derived: true } : {}),
         ...(args.debug === true ? { debug: true } : {}),
         ...(args.fast === true ? { fast: true } : {}),
+        // Kimlikle devam: kayıtlı öğe yeni listede bulunup ondan devam edilir.
+        ...(devamKimlik.item ? { resumeLoopId: devamKimlik.loopId, resumeItem: devamKimlik.item } : {})
       })
       .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
     // The boundary is set after the run starts, because beginRun clears it: it belongs to this run.

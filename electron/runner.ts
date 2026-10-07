@@ -122,6 +122,9 @@ export async function runGraph(
     nested?: boolean
     root?: AgentGraph
     resume?: boolean
+    /** Hatadan devam ederken kayıtlı öğenin kimliği: devam İNDEKSE değil bu öğeye göre yapılır. */
+    resumeLoopId?: string
+    resumeItem?: string
     packagePath?: string[]
     /** This node already finished. Continue from its sonraki step, then climb out of the boxes around it. */
     afterNodeId?: string
@@ -354,6 +357,10 @@ export async function runGraph(
       if (waitedOut) port = 'false'
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {
+        // Bağlanmamış başarısızlık çıkışı da bir node hatasıdır: araç katmanı hatayı yalnız bu olayla
+        // öğrenir. Yoksa node "done" görünür, debug koşusu durmaz ve donmuş kayıt oluşmaz (ölçüldü:
+        // node iki turda da "done" bildirildi, hiç "error" gönderilmedi).
+        if (FAIL_PORTS.has(port) || waitedOut) ex.step(node.id, 'error')
         if (waitedOut) throw new StepFailedError(`“${node.title}”: beklenen öğe süresi içinde görünmedi ve “yok” çıkışı bağlı değil.`)
         if (FAIL_PORTS.has(port)) {
           throw new StepFailedError(`“${node.title}”: ${portLabel(node.kind, port)}. Bu çıkış bir yere bağlı değil.`)
@@ -419,7 +426,16 @@ export async function runGraph(
     const keys = fromFolder ?? loopKeys(loop)
     const isList = fromFolder != null || listItems(loop).length > 0
     const fromBase = loopStartIndex(loop, keys.length, !!opts.resume)
-    const from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
+    let from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
+    // Devam KİMLİKLE yapılır: klasör/liste yeniden okununca indeks başka dosyayı gösterir.
+    // Ölçüldü: kayıtlı öğe "b.glb" iken liste başına "a.glb" eklenince koşu a.glb ile başlıyordu.
+    if (opts.resume && opts.resumeItem && opts.resumeLoopId === loop.id) {
+      const kimlik = keys.indexOf(opts.resumeItem)
+      if (kimlik < 0) {
+        throw new Error(`“${loop.title}”: kayıtlı öğe (“${opts.resumeItem}”) yeni listede yok; aynı dosyadan devam edilemez.`)
+      }
+      from = skipItem ? Math.min(keys.length, kimlik + 1) : kimlik
+    }
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'
     if (!keys.length) {
@@ -530,11 +546,27 @@ export async function runGraph(
         ex.log('info', `“${done.title}” sonrası bağlı bir adım yok.`)
       }
     } else if (entry) {
-      const owner = ownerOf(graph, entry.id)
-      if (owner) {
-        ex.log('info', `“${entry.title}”, “${owner.title}” kutusunun içinde. Kutu bu node’dan başlıyor.`)
-        await runLoop(owner, ownerOf(graph, owner.id) ?? null, entry)
-        await continueAfter(owner)
+      // Kutular DIŞTAN İÇE açılır. Ölçülen kusur: koşu bir node'dan başlarken yalnız en içteki
+      // kutuya giriliyordu; dış kutunun değişkenleri ({{öğe}}) hiç kurulmuyor, iç kutunun sayısal
+      // öğesi metne yazılıyor ve dış kutunun kalan öğeleri (ikinci dosya) hiç çalışmıyordu.
+      const zincir: AgentNode[] = []
+      let sahip = ownerOf(graph, entry.id)
+      while (sahip) {
+        zincir.unshift(sahip)
+        sahip = ownerOf(graph, sahip.id)
+      }
+      const owner = zincir[zincir.length - 1]
+      if (zincir.length > 0) {
+        const disKutu = zincir[0]
+        const baslangic = zincir.length > 1 ? zincir[1] : entry
+        ex.log(
+          'info',
+          zincir.length > 1
+            ? `“${entry.title}” ${zincir.length} kutu içinde. Kutular dıştan içe açılıyor: “${disKutu.title}” → “${zincir[1].title}”.`
+            : `“${entry.title}”, “${owner?.title}” kutusunun içinde. Kutu bu node'dan başlıyor.`
+        )
+        await runLoop(disKutu, ownerOf(graph, disKutu.id) ?? null, baslangic)
+        await continueAfter(disKutu)
       } else {
         await runChain(entry, null)
       }
