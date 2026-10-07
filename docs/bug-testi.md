@@ -113,6 +113,29 @@ dersi). Buna karşılık 24 beklentimin **5'i yanlıştı** ve ölçümle düzel
 **Hâlâ kapsam dışı** ✗: yürütücünün masaüstüne dokunan kısmı (tıklama/yazma/döngü, gerçek
 uygulamaya karşı) ve **saatler süren** kaynak/gecikme eşikleri (§16).
 
+## Canlı koşunun **ön koşulu**: hedef pencere önde olmalı (ölçüldü, 7 Ekim)
+
+Canlı senaryolar (fikstür penceresine yazan/yazanı doğrulayan koşular) **hedef pencerenin önde
+olmasını** bekler. Ölçülen iki durum:
+
+- Önde **Blender** varken (dün gece açık kalan oturum): senaryo "Kaynak klasör"ü Blender'ın içinde
+  aradı, bulamadı ve **KALDI** yazdı. Ekran okumasında `Rendering`, `Compositing`, `Geometry Nodes`
+  görünüyordu.
+- Önde **arayüz penceresi** varken (sohbet penceresi): aynı senaryo bu kez `New session`, `deepseek`
+  gibi yazılar gördü ve yine **KALDI** yazdı.
+
+İkisi de **ürün hatası değil** ✗: motor hedefi bulamadı ve **körlemesine yazmadı** ✓ (§6'ya uygun).
+Ama bu durumda senaryonun kararı **ürünü sınamaz** ✗; "KALDI" kaydı yanıltıcı olur.
+
+**Ölçülen ek kısıt:** §18'deki boş-ekran kapısı (`GetLastInputInfo`) döngüyü yürüten ajanın **kendi
+penceresini göremez** ✗ — ajanın çağrıları "girdi" değildir, o yüzden kapı açık kalır ve senaryo
+koşar. Bu yüzden canlı koşu öncesi ön plan **açıkça** doğrulanmalıdır.
+
+**Elde ne var:** `scripts/dev-raise.ps1 -Show` → şu an önde olan pencereyi `hwnd · pid · süreç ·
+başlık` olarak söyler; `-Title "..."` ile hedef pencereyi öne almaya çalışır. **Ölçüldü:**
+`SetForegroundWindow`, ön planda olmayan bir süreçten çağrıldığında **reddediliyor** ✗ (Windows
+kısıtı) — yani ajan kendi başına ön planı alamaz ✓; doğru davranış, koşuyu **başlatmamaktır** ✓.
+
 ## Nasıl yeniden koşulur
 ```powershell
 npm run typecheck
