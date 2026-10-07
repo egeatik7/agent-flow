@@ -65,6 +65,7 @@ const CLICK_MODES: { key: ClickMode; label: string }[] = [
   { key: 'left', label: 'Tek tık' },
   { key: 'double', label: 'Çift tık' },
   { key: 'right', label: 'Sağ tık' },
+  { key: 'move', label: 'Fareyi Oynat' },
 ]
 
 function ModelChain(props: {
@@ -332,6 +333,8 @@ function pathLabel(st: PathStep): string {
       return `çift tıkla${pt}`
     case 'right':
       return `sağ tıkla${pt}`
+    case 'move':
+      return `fareyi oynat${pt}`
     case 'drag':
       return `sürükle${pt}`
     case 'hotkey':

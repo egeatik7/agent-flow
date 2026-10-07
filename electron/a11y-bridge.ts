@@ -395,6 +395,13 @@ export async function clickAt(x: number, y: number, button: ClickMode = 'left', 
   if (!IS_WIN) return
   await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target })
 }
+/**
+ * Fareyi bir noktaya taşır — TIKLAMAZ. İnisiyatif ajanı önce konumlanıp emin olabilsin,
+ * sonra "oradan tıkla" diyebilsin diye vardır. Örtülme kontrolü clickAt ile aynıdır.
+ */
+export async function moveMouse(x: number, y: number, target?: InputWindow): Promise<void> {
+  await worker.call('moveAt', { x: Math.round(x), y: Math.round(y), target })
+}
 
 export async function locate(
   locator: Locator,

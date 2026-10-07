@@ -69,6 +69,8 @@ Action: ...
 ## Action Space
 
 click(start_box='<|box_start|>(x1,y1)<|box_end|>')
+move(start_box='<|box_start|>(x1,y1)<|box_end|>')
+click_current()   # fareyi oynattıktan sonra: BULUNDUĞU yerden tıkla (koordinat verme)
 left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
 right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
 drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
@@ -93,6 +95,8 @@ Actions: click, double, right, drag, hotkey, type, scroll, wait, finished, call_
 JSON only: {"thought":"<short plan>","action":"click","x":0,"y":0,"x2":null,"y2":null,"keys":[],"text":"","direction":""}`
 
 export const INITIATIVE_PROMPT = `You are an automation agent working step by step on Windows or in a web page. Choose the SINGLE next action toward the user's goal.
+  // Fare oynatma: emin olmadan tıklamak yerine önce konumlan; emin olunca oradan tıkla.
+  // move(start_box='…') fareyi taşır (tıklamaz); click_current() bulunduğu yerden tıklar.
 Controls on screen are given as a numbered list. Clicks and typing must target a number from that list.
 Actions: click, double, right, type, key, wait, done, fail.
 JSON only: {"action":"...","id":null,"text":"","keys":"","seconds":0,"enter":false,"reason":"<short reason>"}`

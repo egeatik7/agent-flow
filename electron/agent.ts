@@ -1201,6 +1201,8 @@ export function createAgent(ctx: AgentContext) {
   const FOCUS_THIEVES = /^(MusNotification(Ux)?|SecurityHealth(Host|Systray)|ShellExperienceHost|SearchHost|SearchApp|StartMenuExperienceHost|LockApp|Teams|ms-teams|Slack|Discord|OneDrive|XP Agent Studio|XP-Agent-Studio|Nubbo|Nubbo Agent Studio|electron)$/i
   let lastFg: { title: string; pid: number; proc?: string } | null = null
   let lastClickPoint: { x: number; y: number } | undefined
+  /** Ajanın fareyi en son taşıdığı nokta: "oradan tıkla" bunu kullanır. */
+  let lastHoverPoint: { x: number; y: number } | undefined
 
   async function noteForeground() {
     if (process.platform !== 'win32') return
@@ -1388,6 +1390,31 @@ export function createAgent(ctx: AgentContext) {
     checkStopped()
     const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
     switch (a.kind) {
+      case 'move': {
+        await waitUnlocked()
+        // Koordinat yoksa UYDURMA: merkeze taşımak "hedefe gittim" demek olurdu.
+        if (a.x === undefined || a.y === undefined) {
+          log('warn', 'Fare oynatma için koordinat yok; imleç oynatılmadı.')
+          break
+        }
+        const p = at(a.x, a.y)
+        await bridge.moveMouse(p.x, p.y)
+        lastHoverPoint = { x: p.x, y: p.y }
+        lastClickPoint = lastHoverPoint
+        log('info', `Fare oynatıldı @${Math.round(p.x)},${Math.round(p.y)} (tıklama yok)`)
+        break
+      }
+      case 'clickCurrent': {
+        await waitUnlocked()
+        if (!lastHoverPoint) {
+          log('warn', 'Fare konumu bilinmiyor: önce fareyi oynat, sonra “oradan tıkla”. Tıklama gönderilmedi.')
+          break
+        }
+        await bridge.clickAt(lastHoverPoint.x, lastHoverPoint.y, 'left')
+        lastClickPoint = lastHoverPoint
+        log('success', `Fare konumundan tıklandı @${Math.round(lastHoverPoint.x)},${Math.round(lastHoverPoint.y)}`)
+        break
+      }
       case 'click':
       case 'double':
       case 'right': {
@@ -1671,6 +1698,16 @@ export function createAgent(ctx: AgentContext) {
         if (mode === 'left' && ahead?.next?.kind === 'type') await clickInput(t, node.prompt || t.label, node)
         else {
           lastInput = undefined
+          // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
+          // hatırlanır (sonraki adım/ajan o noktadan tıklayabilsin).
+          if (mode === 'move') {
+            await bridge.moveMouse(t.x, t.y)
+            lastClickPoint = { x: t.x, y: t.y }
+            trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
+            log('success', `Fare oynatıldı: ${t.label} @${Math.round(t.x)},${Math.round(t.y)} (tıklama yok)`)
+            await noteForeground()
+            return
+          }
           await bridge.clickAt(t.x, t.y, mode)
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })

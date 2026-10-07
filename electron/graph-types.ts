@@ -34,7 +34,7 @@ export type Locator = {
 
 /** One step of an İnisiyatif run that reached its goal; replayed first on the next lap. */
 export type PathStep = {
-  action: 'click' | 'double' | 'right' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait'
+  action: 'click' | 'double' | 'right' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait' | 'move' | 'clickCurrent'
   /** Point as a fraction of the screen (0–1). */
   rx?: number
   ry?: number
@@ -50,7 +50,7 @@ export type PathStep = {
   patch?: string
 }
 
-export type ClickMode = 'left' | 'double' | 'right'
+export type ClickMode = 'left' | 'double' | 'right' | 'move'
 
 /** What a target looked like on a lap that worked. A hint for the next lap, never an answer. */
 export type TargetMemo = {
@@ -472,7 +472,7 @@ export function summarize(n: AgentNode): string {
     case 'start':
       return 'Akış buradan başlar.'
     case 'click': {
-      const mode = n.clickMode === 'double' ? ' (çift tık)' : n.clickMode === 'right' ? ' (sağ tık)' : ''
+      const mode = n.clickMode === 'double' ? ' (çift tık)' : n.clickMode === 'right' ? ' (sağ tık)' : n.clickMode === 'move' ? ' (fareyi oynat)' : ''
       const label = n.locator?.text || n.locator?.name
       const body =
         n.prompt?.trim() ||

@@ -580,7 +580,7 @@ ${opts.listText}`
 
 export type GuiAction = {
   thought: string
-  kind: 'click' | 'double' | 'right' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait' | 'finished' | 'call_user'
+  kind: 'click' | 'double' | 'right' | 'move' | 'clickCurrent' | 'drag' | 'hotkey' | 'type' | 'scroll' | 'wait' | 'finished' | 'call_user'
   /** Points as fractions of the screenshot (0–1). */
   x?: number
   y?: number
@@ -642,7 +642,17 @@ export function parseTars(content: string, imgW: number, imgH: number, absolute:
   switch (name) {
     case 'click':
     case 'left_single':
-      return start ? { ...base, kind: 'click', x: start[0], y: start[1] } : { ...base, kind: 'wait' }
+      // Koordinatsız click(): "fare neredeyse ORADAN tıkla". Konum bilinmiyorsa
+      // yürütücü tıklamaz (uydurmaz) — bkz. clickCurrent.
+      return start ? { ...base, kind: 'click', x: start[0], y: start[1] } : { ...base, kind: 'clickCurrent' }
+    case 'move':
+    case 'mouse_move':
+    case 'hover':
+      return start ? { ...base, kind: 'move', x: start[0], y: start[1] } : { ...base, kind: 'wait' }
+    case 'click_current':
+    case 'click_here':
+    case 'current_click':
+      return { ...base, kind: 'clickCurrent' }
     case 'left_double':
     case 'double_click':
       return start ? { ...base, kind: 'double', x: start[0], y: start[1] } : { ...base, kind: 'wait' }

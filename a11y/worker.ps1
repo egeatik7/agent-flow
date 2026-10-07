@@ -1008,6 +1008,16 @@ function Invoke-Op([string]$op, $P) {
       else { [void](Get-BoundWindow $P.target $false) }
       return $true
     }
+    'moveAt' {
+      # YALNIZ imleci taşır: tıklama göndermez. Örtülme kontrolü clickAt ile aynıdır ki
+      # görünmeyen bir noktaya "gidildi" denmesin.
+      if ($P.target) {
+        [void](Get-BoundWindow $P.target $false)
+        if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
+      }
+      [void][XpWin]::SetCursorPos([int]$P.x, [int]$P.y)
+      return $true
+    }
     'clickAt' {
       if ($P.target) {
         [void](Get-BoundWindow $P.target $false)
