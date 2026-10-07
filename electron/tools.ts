@@ -671,7 +671,7 @@ const branchMerge: ToolDef = {
       const would = preview.removed.length ? ` · yerini aldığı ${preview.removed.length} node silinecek (${preview.removed.join(', ')})` : ''
       const kept = preview.keptBack.length ? ` · ${preview.keptBack.length} node erişilemez kalacak ama silinmeyecek (paket/kutu)` : ''
       const unclear = preview.ambiguous ? ` · eski kol belirsiz (${preview.ambiguous}): silme yapılmayacak` : ''
-      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} · “${base?.name ?? '—'}” tuvaline yazılacak.${shape}${would}${kept}${unclear}${tail} Uygulamak için apply: true.`
+      const message = `Merge denemesi (uygulanmadı): ${view.diff?.summary ?? '—'} (${branch.groups.length} düzenleme · ${branchOps(branch).length} işlem) · “${base?.name ?? '—'}” tuvaline yazılacak.${shape}${would}${kept}${unclear}${tail} Uygulamak için apply: true.`
       ctx.log('info', `Ajan · merge · ${message}`)
       return {
         ok: true,
