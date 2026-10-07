@@ -26,7 +26,7 @@ import {
 } from './matcher'
 import { activeFindOrder, promptOf } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
-import { clearHover, hoverDecision, hoverOf, recordHover } from './hover'
+import { clearHover, hoverDecision, hoverOf, recordHover, HOVER_TOLERANCE_PX } from './hover'
 import {
   chooseScreenTarget,
   guiStep,
@@ -1026,10 +1026,11 @@ export function createAgent(ctx: AgentContext) {
     checkStopped()
   }
 
-  async function clickInput(point: Point, instruction: string, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
+  async function clickInput(point: Point, instruction: string, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left', observedWindow?: number) {
     clearHover()
     const binding = await inputBinding(point, node, true)
     checkStopped()
+    if (observedWindow !== undefined && (!binding || binding.mustRetarget || binding.window.hwnd !== String(observedWindow))) throw new Error('INPUT_CLICK_STALE: Hedef, konum belirleme anındaki pencereyle aynı değil; tıklama gönderilmedi.')
     const p = binding?.at || point
     if (binding && !inside(binding.window.rect, p)) throw new Error('INPUT_TARGET_INVALID: Alan noktası hedef pencerenin dışında.')
     await bridge.clickAt(p.x, p.y, mode, binding?.window)
@@ -1403,7 +1404,7 @@ export function createAgent(ctx: AgentContext) {
     }
   }
 
-  async function doGui(a: Doable, area: Shot['area'], node?: AgentNode) {
+  async function doGui(a: Doable, area: Shot['area'], node?: AgentNode, observedWindow?: number) {
     checkStopped()
     const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
     switch (a.kind) {
@@ -1466,7 +1467,7 @@ export function createAgent(ctx: AgentContext) {
       case 'right': {
         guiReplace = false
         const p = at(a.x, a.y)
-        await clickInput(p, node?.prompt || 'The input clicked in the current GUI task', node, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left')
+        await clickInput(p, node?.prompt || 'The input clicked in the current GUI task', node, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left', observedWindow)
         return
       }
       case 'drag': {
@@ -1590,7 +1591,7 @@ export function createAgent(ctx: AgentContext) {
     const saved = runPath.get(node.id) ?? node.path
     if (saved?.length && node.templated) {
       log('info', 'Hedefte her tur değişen bir değer ({{öğe}} gibi) var; geçen turun kayıtlı yolu bu tura uymayabileceği için oynatılmıyor, model ekrana bakarak yapacak.')
-    } else if (saved?.some(st => ['click', 'move', 'clickCurrent'].includes(st.action))) {
+    } else if (saved?.some(st => ['click', 'double', 'right', 'move', 'clickCurrent'].includes(st.action))) {
       log('info', 'Kayıtlı görsel tıklamalar yeni karede fare konumu değerlendirilmeden oynatılmıyor; model mevcut hedefi yeniden görecek.')
     } else if (saved?.length) {
       const r = await replayPath(saved, vars, tars)
@@ -1613,6 +1614,7 @@ export function createAgent(ctx: AgentContext) {
     let quietWaits = 0
     let previousClick: (Point & { kind: string }) | undefined
     let proposedClickPending = false
+    let previousCountedAction = false
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
       ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
@@ -1620,8 +1622,11 @@ export function createAgent(ctx: AgentContext) {
       await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)
       const unchanged = !!prev && sigDiff(prev.sig, shot.sig) < STILL_DIFF
-      if (unchanged) still++
-      else still = 0
+      // Pointer preparation does not change the application. Count actual non-move
+      // actions only, while maxActions still bounds every model turn.
+      if (unchanged && previousCountedAction) still++
+      else if (!unchanged) still = 0
+      previousCountedAction = false
       if (still >= 6) {
         log('warn', 'Ekran 6 eylemdir değişmiyor. İnisiyatif burada duruyor.')
         return false
@@ -1648,7 +1653,12 @@ export function createAgent(ctx: AgentContext) {
         initiative: true,
       })
       checkStopped()
-      if (unresolvedClick && repeatedClick(a, shot.area, unresolvedClick)) {
+      const repeated = (candidate: GuiAction) => {
+        const h = candidate.kind === 'clickCurrent' ? hoverOf() : undefined
+        const pointed = h ? { ...candidate, kind: 'click' as const, x: (h.x - shot.area.x) / shot.area.w, y: (h.y - shot.area.y) / shot.area.h } : candidate
+        return !!unresolvedClick && repeatedClick(pointed, shot.area, unresolvedClick)
+      }
+      if (unresolvedClick && repeated(a)) {
         log('warn', 'Model aynı sonuçsuz tıklama noktasını tekrar seçti; ikinci tıklama gönderilmedi.')
         history.push({ thought: a.thought, raw: a.raw, note: 'Bu tekrar yürütülmedi. ' + clickFeedback(goal, unresolvedClick, shot.area, null) })
         a = await guiStep({
@@ -1657,24 +1667,38 @@ export function createAgent(ctx: AgentContext) {
           initiative: true,
         })
         checkStopped()
-        if (repeatedClick(a, shot.area, unresolvedClick)) {
+        if (repeated(a)) {
           log('warn', 'Model hedefi yeniden bulamadı; aynı noktaya körlemesine tıklanmadan İnisiyatif duruyor.')
           return false
         }
       }
       checkStopped()
       let moveNote: string | undefined
-      if (proposedClickPending && ['type', 'hotkey', 'drag', 'double', 'right', 'scroll'].includes(a.kind)) {
-        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: 'This action was NOT sent: the proposed target was only hovered, not clicked. Inspect the current pointer and use click_current on the correct target, move elsewhere, or call_user. Do not bypass confirmation with another action.' })
+      if (proposedClickPending && ['type', 'hotkey', 'drag', 'scroll'].includes(a.kind)) {
+        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: 'This action was NOT sent: the proposed target was only hovered, not clicked. Inspect the current pointer and choose click, double or right on the prepared target (click_current is optional), move elsewhere, or call_user. Do not bypass target preparation with another action.' })
         log('warn', 'Önerilen hedef henüz tıklanmadı; başka bir eylemle onay atlanmadı.')
         prev = shot
         continue
       }
-      if (a.kind === 'click') {
-        a = { ...a, kind: 'move', raw: JSON.stringify({ action: 'move', x: a.x === undefined ? null : a.x * 1000, y: a.y === undefined ? null : a.y * 1000 }) }
-        proposedClickPending = true
-        moveNote = 'The proposed coordinate click was NOT sent. Only the pointer was moved. Inspect the NEXT screenshot at the marked pointer. If this is the requested target, use click_current. If it is Add/New/Create while the goal requires an existing item, move away; do not create anything.'
-        log('info', 'İnisiyatif tıklama önerisi önce fare hareketine çevrildi; yeni görüntüde hedef görülmeden tıklanmayacak.')
+      let observedClickWindow: number | undefined
+      if (['click', 'double', 'right'].includes(a.kind)) {
+        const h = hoverOf()
+        const cursor = h ? await bridge.cursorPos() : undefined
+        checkStopped()
+        const decision = hoverDecision(cursor)
+        const p = { x: shot.area.x + (a.x ?? NaN) * shot.area.w, y: shot.area.y + (a.y ?? NaN) * shot.area.h }
+        const prepared = proposedClickPending && h && h.hwnd && h.hwnd > 0 && decision.ok
+          && Math.hypot(p.x - h.x, p.y - h.y) <= HOVER_TOLERANCE_PX
+        if (prepared) {
+          // The model inspected a fresh frame and chose its OWN click type.
+          observedClickWindow = h.hwnd
+        } else {
+          const proposed = a.kind
+          a = { ...a, kind: 'move', raw: JSON.stringify({ action: 'move', x: a.x === undefined ? null : a.x * 1000, y: a.y === undefined ? null : a.y * 1000 }) }
+          proposedClickPending = true
+          moveNote = 'The proposed ' + proposed + ' was NOT sent. Only the pointer was moved. Inspect the NEXT screenshot. On the correct target choose your own normal click, double or right with coordinates; click_current is only an optional single click. If the target is wrong, move elsewhere. The executor never chooses a click type for you.'
+          log('info', 'Önce hedef konumu belirleniyor; tıklama türünü model sonraki görüntüde seçecek.')
+        }
       } else if (a.kind === 'move') proposedClickPending = true
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
@@ -1721,11 +1745,16 @@ export function createAgent(ctx: AgentContext) {
         }
         const h = a.kind === 'clickCurrent' ? hoverOf() : undefined
         const hovered = h ? { x: h.x, y: h.y } : undefined
-        const sent = await doGui(a, shot.area, node)
+        const sent = await doGui(a, shot.area, node, observedClickWindow)
         if (a.kind === 'clickCurrent') {
           if (sent !== true) throw new Error('INPUT_CLICK_NOT_SENT: Fare konumundan tıklama gönderilmedi; adım kaydedilmedi.')
           proposedClickPending = false
         }
+        if (['click', 'double', 'right'].includes(a.kind)) {
+          proposedClickPending = false
+          log('info', 'Modelin seçtiği tıklama yürütüldü: ' + describeGui(a))
+        }
+        previousCountedAction = a.kind !== 'move' && sent !== false
         previousClick = ['click', 'double', 'right'].includes(a.kind) && a.x !== undefined && a.y !== undefined
           ? { x: shot.area.x + a.x * shot.area.w, y: shot.area.y + a.y * shot.area.h, kind: a.kind }
           : hovered ? { ...hovered, kind: 'click' } : undefined

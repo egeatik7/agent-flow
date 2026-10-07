@@ -152,7 +152,7 @@ test('initiative repeated click gets physical/normalized feedback and avoids a b
 });
 test('initiative can intentionally double click after selection; there is no automatic double click', async () => {
   const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('double', { x: .3, y: .5 });
-  await f.ex.initiative(node('ai', { prompt: 'Open profile', engine: 'screen', maxActions: 3 }), 1);
+  await f.ex.initiative(node('ai', { prompt: 'Open profile', engine: 'screen', maxActions: 4 }), 1);
   assert.deepEqual(callsOf(f, 'click').map(c => c[3]), ['left', 'double']);
 });
 test('unchanged screen with a focused editable field is valid input focus, not a failed click', async () => {
@@ -218,4 +218,46 @@ test('hover then finished cannot claim the proposed click happened', async () =>
  const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('finished')];f.models.guiStep=async()=>actions.shift();
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open profile',engine:'screen',maxActions:3}),1),false);
  assert.equal(callsOf(f,'click').length,0);
+});
+
+for (const [kind,mode] of [['click','left'],['double','double'],['right','right']]) {
+ test('after positioning the model can choose its own '+kind+' without click_current', async()=>{
+  const f=fixture(); const actions=[action('move',{x:.42,y:.585}),action(kind,{x:.42,y:.585}),action('finished')];
+  f.models.guiStep=async()=>actions.shift();
+  assert.equal(await f.ex.initiative(node('ai',{prompt:'Perform the requested click',engine:'screen',maxActions:3}),1),true);
+  assert.equal(callsOf(f,'move').length,1);
+  assert.equal(callsOf(f,'currentClick').length,0);
+  assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
+ });
+ test('unprepared '+kind+' only positions; following fresh-frame '+kind+' retains its type', async()=>{
+  const f=fixture();const actions=[action(kind,{x:.42,y:.585}),action(kind,{x:.42,y:.585}),action('finished')];
+  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
+  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open the selected target',engine:'screen',maxActions:3}),1),true);
+  assert.equal(callsOf(f,'move').length,1);assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
+  assert.match(f.queries[1].history.at(-1).note,/was NOT sent/);
+ });
+}
+test('changing the click point after positioning requires another observed frame',async()=>{
+ const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('double',{x:.557,y:.557}),action('double',{x:.557,y:.557}),action('finished')];
+ f.models.guiStep=async()=>actions.shift();
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen',maxActions:4}),1),true);
+ assert.equal(callsOf(f,'move').length,2);assert.equal(callsOf(f,'click').length,1);
+ assert.equal(callsOf(f,'click')[0][1],557);assert.equal(callsOf(f,'click')[0][3],'double');
+});
+test('pointer movement alone does not consume the unchanged-application stop threshold',async()=>{
+ const f=fixture();let i=0;f.models.guiStep=async()=>++i<=8?action('move',{x:.42,y:.585}):i===9?action('double',{x:.42,y:.585}):action('finished');
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:10}),1),true);
+ assert.equal(callsOf(f,'move').length,8);assert.equal(callsOf(f,'click').length,1);
+ assert(!f.logs.some(l=>l.message.includes('6 eylemdir')));
+});
+test('stop during prepared coordinate click cursor lookup sends no click',async()=>{
+ const f=fixture();const actions=[action('move',{x:.42,y:.585}),action('double',{x:.42,y:.585})];
+ f.models.guiStep=async()=>actions.shift();f.bridge.cursorPos=async()=>{f.stop();return {x:420,y:410};};
+ await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:2}),1),realRunner.StoppedError);
+ assert.equal(callsOf(f,'click').length,0);
+});
+test('prepared coordinate click cannot adopt another input window',async()=>{
+ const f=fixture();let i=0;f.models.guiStep=async()=>{if(++i===1)return action('move',{x:.42,y:.585});if(i===2){f.move({...win,hwnd:'200'});return action('double',{x:.42,y:.585});}return action('finished');};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),false);
+ assert.equal(callsOf(f,'click').length,0);assert(f.logs.some(l=>l.message.includes('INPUT_CLICK_STALE')));
 });
