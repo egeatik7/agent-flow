@@ -14,12 +14,32 @@ const crypto = require('crypto')
 
 const APPDATA = process.env.APPDATA || ''
 const TOKEN = path.join(APPDATA, 'xp-agent-studio-test', 'tool-endpoint.json')
-const REAL = path.join(APPDATA, 'electron-store-nodejs', 'Config', 'config.json')
+const ADAYLAR = [
+  path.join(APPDATA, 'electron-store-nodejs', 'Config', 'config.json'),
+  path.join(APPDATA, 'xp-agent-studio', 'config.json'),
+  path.join(APPDATA, 'xp-agent-studio', 'xp-agent-studio.json'),
+]
+
+/** Uygulamanın anahtarlarını taşıyan dosya gerçek depodur; hiçbiri yoksa ölçüm yoktur (null). */
+function gercekDepo() {
+  for (const aday of ADAYLAR) {
+    try {
+      const j = JSON.parse(fs.readFileSync(aday, 'utf8'))
+      if (j && typeof j === 'object' && ('graph' in j || 'canvases' in j || 'settings' in j)) return aday
+    } catch {
+      /* aday değil ya da okunamadı */
+    }
+  }
+  return null
+}
+
+const REAL = gercekDepo()
+
 const hash = (p) => {
   try {
     return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16)
   } catch {
-    return '(yok)'
+    return null
   }
 }
 function info() {
@@ -56,7 +76,7 @@ async function main() {
   const h1 = hash(REAL)
   const inf = info()
   console.log(`uç nokta: port ${inf.port} · build ${inf.build || '?'} · profil ${inf.profile || '?'}`)
-  console.log(`gerçek depo önce: ${h1}\n`)
+  console.log(`ölçülen depo: ${REAL || '(bulunamadı)'}\n  gerçek depo önce: ${h1}\n`)
   const R = []
   const puan = (ad, ok, not) => {
     R.push({ ad, ok, not })
@@ -66,7 +86,7 @@ async function main() {
   const read0 = await call(inf, 'flow.read', {})
   const pkgs = read0.data?.packages ?? []
   const pkg = pkgs[0]
-  console.log(`paket: ${pkg ? `${pkg.id} · “${pkg.title}”` : '(yok)'}\n`)
+  console.log(`paket: ${pkg ? `${pkg.id} · “${pkg.title}”` : null}\n`)
   if (!pkg) {
     console.error('✗ fikstürde paket yok; önce: node scripts/dev-seed-fixture.cjs test package')
     process.exit(2)

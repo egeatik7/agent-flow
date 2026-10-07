@@ -18,13 +18,33 @@ const crypto = require('crypto')
 
 const APPDATA = process.env.APPDATA || ''
 const TOKEN = path.join(APPDATA, 'xp-agent-studio-test', 'tool-endpoint.json')
-const REAL = path.join(APPDATA, 'electron-store-nodejs', 'Config', 'config.json')
+const ADAYLAR = [
+  path.join(APPDATA, 'electron-store-nodejs', 'Config', 'config.json'),
+  path.join(APPDATA, 'xp-agent-studio', 'config.json'),
+  path.join(APPDATA, 'xp-agent-studio', 'xp-agent-studio.json'),
+]
+
+/** Uygulamanın anahtarlarını taşıyan dosya gerçek depodur; hiçbiri yoksa ölçüm yoktur (null). */
+function gercekDepo() {
+  for (const aday of ADAYLAR) {
+    try {
+      const j = JSON.parse(fs.readFileSync(aday, 'utf8'))
+      if (j && typeof j === 'object' && ('graph' in j || 'canvases' in j || 'settings' in j)) return aday
+    } catch {
+      /* aday değil ya da okunamadı */
+    }
+  }
+  return null
+}
+
+const REAL = gercekDepo()
+
 
 function hash(p) {
   try {
     return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16)
   } catch {
-    return '(okunamadı)'
+    return null
   }
 }
 function info() {
@@ -112,12 +132,21 @@ async function main() {
   const reddeden = satirlar.filter((s) => !s.ok).length
   console.log(`\nözet: ${satirlar.length} araç · ${cevapVeren} ok:true · ${reddeden} red/uyarı`)
   console.log(`gerçek depo (sonra): ${sonHash} · DEĞİŞMEDİ: ${sonHash === onceHash}`)
+  // Depo okunamadıysa ölçüm yoktur: batarya başarısız olur.
+  if (onceHash === null || sonHash === null) {
+    console.log('✗ gerçek profil deposu okunamadı; "değişmedi" DENEMEZ')
+    process.exit(1)
+  }
+  // Beklenen sonuçlar tek tek doğrulanır: hepsi başarısız olsa da yeşil dönemez.
+  const beklenenOk = new Set(['flow.suggest', 'branch.create', 'branch.list', 'branch.diff', 'flow.edit', 'flow.undo', 'branch.drop', 'branch.merge', 'merge.undo', 'flow.read', 'target.preview', 'flow.context', 'step.run', 'run.from', 'screen.read', 'run.report', 'run.wait', 'branch.show', 'run.stop', 'run.state'])
+  const uymayan = satirlar.filter((x) => beklenenOk.has(x.name) !== !!x.ok).map((x) => `${x.name}:${x.ok ? 'ok' : 'red'} (beklenen ${beklenenOk.has(x.name) ? 'ok' : 'red'})`)
+  if (uymayan.length) console.log(`✗ beklenmeyen sonuç: ${uymayan.join(', ')}`)
   const eksik = ['flow.suggest', 'branch.create', 'branch.list', 'branch.diff', 'flow.edit', 'flow.undo', 'branch.drop', 'branch.merge', 'merge.undo', 'flow.read', 'target.preview', 'flow.context', 'step.run', 'run.from', 'act.click', 'act.type', 'act.key', 'act.wait', 'screen.read', 'run.report', 'run.wait', 'branch.show', 'run.stop', 'run.state'].filter(
     (n) => !satirlar.some((s) => s.name === n)
   )
   if (eksik.length) console.log(`✗ çağrılmayan araç: ${eksik.join(', ')}`)
   fs.writeFileSync(path.join(__dirname, '..', 'test-artifacts', 'tool-battery.json'), JSON.stringify({ at: new Date().toISOString(), satirlar, onceHash, sonHash }, null, 2), 'utf8')
-  process.exit(sonHash === onceHash && !eksik.length ? 0 : 1)
+  process.exit(sonHash === onceHash && !eksik.length && !uymayan.length ? 0 : 1)
 }
 
 main().catch((e) => {

@@ -446,6 +446,24 @@ export function applyPlan(graph: AgentGraph, plan: Plan): AgentGraph {
     const uyeler = kutu ? ((kutu as { members?: string[] }).members as string[]) : null
     if (uyeler && !uyeler.includes(add.node.id)) uyeler.push(add.node.id)
   }
+  // Aynı yapı AYRI komutlarla da kurulabilir (önce addNode, sonra iki connect). Ölçüldü: yalnız
+  // connectFrom'a bakan kontrol, bu biçimde eklenen node'u üyeliğe almıyordu ve kutu onu çalıştırmıyordu.
+  // Bu yüzden bağlantı komutlarıyla kurulan yapı da taranır: hedefi bir kutunun içinde olan node
+  // (kutunun üyesine bağlı) o kutunun üyesi sayılır.
+  for (const dugum of next.nodes) {
+    if (dugum.kind !== 'loop') continue
+    const uyeler = (dugum as { members?: string[] }).members
+    if (!Array.isArray(uyeler)) continue
+    let buyudu = true
+    while (buyudu) {
+      buyudu = false
+      for (const e of next.edges) {
+        if (!uyeler.includes(e.from) || uyeler.includes(e.to)) continue
+        uyeler.push(e.to)
+        buyudu = true
+      }
+    }
+  }
 
   for (const add of plan.adds) {
     if (add.fromId) next.edges.push({ id: newId(), from: add.fromId, fromPort: add.fromPort ?? 'next', to: add.node.id })
