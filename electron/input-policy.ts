@@ -41,3 +41,22 @@ export function clickFeedback(goal: string, p: Point, area: Rect, state: InputSt
     + ' Henüz gerçekleşmediyse hedefi yeniden bul; aynı noktayı körlemesine tekrarlama.'
     + ' Yüklenme varsa kısa bekle. Sırf ekran değişsin diye ilgisiz menü açma, Esc gönderme veya uygulamayı kapatma.'
 }
+
+/**
+ * Yazma koruması: alan BİZİM tarafımızdan tıklandıysa (binding.at var, hedef kaymamış) **ve**
+ * temizleme istenmişse "doğrudan" yol kullanılır — UIA sınıflandırması (Pane/TkChild/Window)
+ * yazmayı engellemez. Ölçülen sorun (223 gerçek günlük): "Odaktaki öğe bir yazı alanı değil
+ * (Window)" 14× ve "Odak bir yazı alanı değil (Pane). Yazı gönderilmedi." 9× — sınıflandırma
+ * yüzünden yazma reddediliyordu.
+ *
+ * Temizleme istenmiyorsa doğrudan yol **kapalıdır**: worker o yolda silme yetkisi ister ve
+ * istenmeyen bir silme asla yapılmamalıdır (`scripts/test-input-recovery.ps1` bunu şart koşar).
+ */
+export function inputGuardFor(
+  binding: { window: InputWindow; at?: Point; mustRetarget?: boolean } | undefined,
+  opts: { visual: boolean; clear: boolean }
+): InputGuard | undefined {
+  if (!binding) return undefined
+  const tiklamaKaniti = !!binding.at && !binding.mustRetarget
+  return { window: binding.window, at: binding.at, visual: opts.visual, direct: tiklamaKaniti && !!opts.clear }
+}

@@ -1068,7 +1068,19 @@ function Invoke-Op([string]$op, $P) {
         [void](Get-BoundWindow $P.target $false)
         if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
       }
-      if (-not [XpNative]::SetCursorPos([int]$P.x, [int]$P.y)) { throw 'INPUT_MOVE_FAILED: Cursor movement failed' }
+      # Taşımayı DOĞRULA: SetCursorPos true dönse bile imleç hedefte olmayabilir. Test
+      # iskeletlerinde Get-CursorPoint yüklü olmayabilir; o durumda doğrulama atlanır.
+      $dogrula = $null -ne (Get-Command Get-CursorPoint -ErrorAction SilentlyContinue)
+      $ulasti = $false
+      for ($deneme = 1; $deneme -le 2; $deneme++) {
+        if (-not [XpNative]::SetCursorPos([int]$P.x, [int]$P.y)) { throw 'INPUT_MOVE_FAILED: Cursor movement failed' }
+        if (-not $dogrula) { $ulasti = $true; break }
+        Start-Sleep -Milliseconds 30
+        $cp = Get-CursorPoint
+        $sapma = [Math]::Sqrt([Math]::Pow([double]$cp.X - [int]$P.x, 2) + [Math]::Pow([double]$cp.Y - [int]$P.y, 2))
+        if ($sapma -le 2) { $ulasti = $true; break }
+      }
+      if (-not $ulasti) { throw 'INPUT_MOVE_FAILED: Cursor did not reach the target point' }
       return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
     }
     'clickAt' {

@@ -40,7 +40,7 @@ import {
   type ReactionVerdict,
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
-import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, type InputGuard, type InputWindow, type Point } from './input-policy'
+import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, inputGuardFor, type InputGuard, type InputWindow, type Point } from './input-policy'
 import { rememberShot } from './shots'
 import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
 import type { FindStageId } from './llm-flow'
@@ -1102,7 +1102,9 @@ export function createAgent(ctx: AgentContext) {
     const write = async (clearField = clear): Promise<bridge.TypeResult | null> => {
       // Enter belongs to this function, after readback, never to the worker.
       checkStopped()
-      const guard: InputGuard | undefined = binding ? { window: binding.window, at: binding.at, visual, direct: !!clearField && !!binding.at && !binding.mustRetarget } : undefined
+      // İÖ: kapı tek kaynaktan (inputGuardFor) — aynı kuralın iki yerde hesaplanması
+      // geçmişte tekrar tekrar hataya yol açtı; tıklama kanıtı + temizleme isteği aranır.
+      const guard: InputGuard | undefined = inputGuardFor(binding, { visual, clear: clearField })
       let typed: bridge.TypeResult | null = binding?.mustRetarget
         ? { cleared: false, pasted: false, focusType: '', skippedClear: true, writeSent: false, code: 'INPUT_LAYOUT_CHANGED', diagnostics: await bridge.inputState() || undefined }
         : await bridge.typeText(text, false, clearField, binding ? binding.at : at, undefined, guard)
@@ -1139,7 +1141,11 @@ export function createAgent(ctx: AgentContext) {
           + '; UIA=' + (d?.type || typed.focusType || '?') + ', native=' + (d?.native || '?')
           + ', pencere=' + (d?.window || typed.where || '?') + ', HWND=' + (d?.hwnd || '?')
           + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + JSON.stringify(d?.caret ?? null)
-          + ', odak kutusu=' + JSON.stringify(d?.rect ?? null) + ', ret=' + (d?.inputRejection || typed.code || '?') + '.')
+          + ', odak kutusu=' + JSON.stringify(d?.rect ?? null) + ', ret=' + (d?.inputRejection || typed.code || '?')
+          // Ölçüm: reddin nedeni tahmin edilmesin. Bu dört alan hangi kapının kapandığını söyler.
+          + ', direct=' + String(!!guard?.direct) + ', temizle=' + String(!!clearField)
+          + ', tiklama=' + JSON.stringify(guard?.at ?? null) + ', bag=' + (binding ? 'var' : 'yok')
+          + ', hedefKaydi=' + String(!!binding?.mustRetarget) + '.')
         if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
           recoveryCount++
           ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')
