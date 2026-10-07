@@ -43,13 +43,13 @@ describe('flow.read kutu öğesi dürüstlüğü', () => {
     const bid = String((await callTool('branch.create', { name: 'K' }, h)).data?.branchId)
 
     const r1 = await callTool('flow.read', { branchId: bid }, h)
-    const l1 = (r1.data?.loops ?? [])[0] as { item?: string; folder?: string } | undefined
+    const l1 = ((r1.data as { loops?: { item?: string; folder?: string }[] } | undefined)?.loops ?? [])[0]
     expect(l1?.item, 'liste tabanlı kutuda öğe gösterilmiyor').toBe('bir')
 
     await callTool('flow.edit', { branchId: bid, ops: [{ op: 'patchNode', id: f.loop.id, fields: { folder: 'C:\\nubbo-yok' } }] }, h)
 
     const r2 = await callTool('flow.read', { branchId: bid }, h)
-    const l2 = (r2.data?.loops ?? [])[0] as { item?: string; folder?: string } | undefined
+    const l2 = ((r2.data as { loops?: { item?: string; folder?: string }[] } | undefined)?.loops ?? [])[0]
     // Klasörlü kutuda koşucu klasörü üstün tutar ve listeyi ancak koşarken doldurur; burada "#1"
     // ya da "bir" göstermek koşunun kullanmayacağı bir öğeyi bildirmek olurdu.
     expect(l2?.item, `klasörlü kutuda öğe uyduruldu: ${l2?.item}`).toBeUndefined()
