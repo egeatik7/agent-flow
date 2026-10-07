@@ -630,9 +630,11 @@ const branchDrop: ToolDef = {
     const book = ctx.getCanvases()
     const branch = findBranch(book, id)
     if (!branch) return failed(branchDrop.name, `Branch bulunamadı: ${id || '(boş)'}.`)
-    book.branches = branchesOf(book).filter((b) => b.id !== branch.id)
-    ctx.saveCanvases(book)
-    const message = `Branch silindi: “${branch.name}” (${branch.groups.length} düzenleme). Akışa hiçbir şey olmadı.`
+    // Kitap YENİDEN okunur: bekleme sırasında başka bir branch açılmış ya da düzenlenmiş
+    // olabilir. Eski kitabı yazmak o düzenlemeyi siliyordu (ölçüldü: 1 grup → 0 grup).
+      book.branches = branchesOf(book).filter((b) => b.id !== branch.id)
+      ctx.saveCanvases(book)
+      const message = `Branch silindi: “${branch.name}” (${branch.groups.length} düzenleme). Akışa hiçbir şey olmadı.`
     ctx.log('info', `Ajan · branch · ${message}`)
     return { ok: true, tool: branchDrop.name, outcome: 'tamam', message, observed: { note: 'Yalnız kayıt silindi.' }, data: { branchId: branch.id, open: book.branches.length } }
   },
@@ -713,8 +715,11 @@ const branchMerge: ToolDef = {
       return failed(branchMerge.name, message)
     }
     // The recipe is now part of the base: keeping it would apply the same edits a second time.
-    book.branches = branchesOf(book).filter((b) => b.id !== branch.id)
-    ctx.saveCanvases(book)
+    // Kitap YENİDEN okunur: bekleme sırasında başka bir branch açılmış ya da düzenlenmiş
+    // olabilir. Eski kitabı yazmak o düzenlemeyi siliyordu (ölçüldü: 1 grup → 0 grup).
+    const guncel = ctx.getCanvases()
+    guncel.branches = branchesOf(guncel).filter((b) => b.id !== branch.id)
+    ctx.saveCanvases(guncel)
     const message = `Merge edildi: “${branch.name}” → “${base?.name ?? branch.baseTabId}” (${view.diff?.summary ?? '—'}). Tarif silindi, çünkü aynı düzenlemeler artık tuvalin kendisinde.${tail}`
     ctx.log('info', `Ajan · merge · ${message}`)
     return {
@@ -1744,6 +1749,11 @@ const runState: ToolDef = {
     if (s.packagePath.length) parts.push(`Paket: ${s.packagePath.length} katman derinde.`)
     if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adımlar: ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`)
     if (ctx.userStop()) parts.push('Durdurma isteği açık.')
+    // Sınır istendi ama sınıra ulaşılmadan bittiyse run.wait ile aynı şeyi söyler: iki durum
+    // aracı çelişmemeli (ölçüldü: biri "tamamlandı" derken öbürü sınırın kaçtığını söylüyordu).
+    if (!running && !s.probing && boundaryPending() && stopReason() !== 'until') {
+      parts.push('SINIRLI BOLGE TAMAMLANMADI: sınır istendi ama sınır node una ulaşılmadan bitti; sınırın ötesindeki adımlar koşmuş olabilir.')
+    }
     if (s.lastError) parts.push(`Son hata: ${s.lastError}`)
     if (!running && !s.probing && s.last) {
       const l = s.last

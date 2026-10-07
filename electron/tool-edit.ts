@@ -436,6 +436,10 @@ export function applyPlan(graph: AgentGraph, plan: Plan): AgentGraph {
       (e) => !plan.cuts.some((c) => c.from === e.from && c.fromPort === e.fromPort && (!c.to || c.to === e.to))
     )
   }
+  for (const add of plan.adds) {
+    if (add.fromId) next.edges.push({ id: newId(), from: add.fromId, fromPort: add.fromPort ?? 'next', to: add.node.id })
+  }
+  for (const edge of plan.edges) next.edges.push({ id: newId(), from: edge.from, fromPort: edge.fromPort, to: edge.to })
   // Döngü üyeliği: kutunun içine eklenen node, kutu onu çalıştırsın diye kutu üyeliğine de
   // yazılır. Ölçüldü: yalnız bağlantı eklenince node akışta görünüyor ama kutu yalnız
   // members listesindeki node'ları çalıştırdığı için o düzeltme hiç koşmuyordu.
@@ -465,10 +469,6 @@ export function applyPlan(graph: AgentGraph, plan: Plan): AgentGraph {
     }
   }
 
-  for (const add of plan.adds) {
-    if (add.fromId) next.edges.push({ id: newId(), from: add.fromId, fromPort: add.fromPort ?? 'next', to: add.node.id })
-  }
-  for (const edge of plan.edges) next.edges.push({ id: newId(), from: edge.from, fromPort: edge.fromPort, to: edge.to })
   return next
 }
 

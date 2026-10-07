@@ -117,7 +117,13 @@ async function main() {
     const f = rep.data?.frozen || {}
     console.log(`    donmuş: node “${f.nodeTitle}” · hata: ${kisa(f.error, 70)} · görüntü: ${f.shot ? 'var' : 'yok'}`)
     // 4) Aynı düğümden devam: donmuş hatanın öğesi yoksa dürüstçe söylemeli, uydurmamalı
-    await step('run.from resume (aynı düğüm)', 'run.from', { branchId: bid, nodeId: hedef.id, resumeFromFailure: true, fast: true }, (r) => r.ok || /devam|Donmuş|öğe|hata/i.test(String(r.message)))
+    await step('run.from resume (aynı düğüm)', 'run.from', { branchId: bid, nodeId: hedef.id, resumeFromFailure: true, fast: true }, (r) => {
+        const m = String(r.message)
+        // "İç hata: işlem çöktü" gibi cevaplar başarı DEĞİLDİR; beklenti ya koşunun başlaması ya da
+        // listenin değiştiğinin açıkça söylenmesidir.
+        if (/İç hata|iç hata|çöktü|uncaught|yakalanmamış/i.test(m)) return false
+        return r.ok === true || /Liste değişmiş|aynı öğeden|hatadan devam/i.test(m)
+      })
     await call(inf, 'run.wait', { timeoutMs: 120000 })
     void rf
   }
@@ -166,10 +172,10 @@ async function main() {
   const h2 = hash(REAL)
   const gecen = R.filter((x) => x.ok).length
   console.log(`\nözet: ${R.length} kontrol · ${gecen} ✓ · ${R.length - gecen} ✗`)
-  console.log(`gerçek depo: ${h1} → ${h2} · DEĞİŞMEDİ: ${h1 === h2}`)
+  console.log(`gerçek depo: ${h1} → ${h2} · DEĞİŞMEDİ: ${h1 !== null && h2 !== null && h1 === h2}${h1 === null || h2 === null ? ' (ÖLÇÜM YOK: depo okunamadı)' : ''}`)
   console.log(`kök node sayısı (ilk okuma): ${(read.data?.nodes || []).length}`)
   fs.writeFileSync(path.join(__dirname, '..', 'test-artifacts', 'repair-battery.json'), JSON.stringify({ at: new Date().toISOString(), R, h1, h2 }, null, 2), 'utf8')
-  process.exit(h1 === h2 && gecen === R.length ? 0 : 1)
+  process.exit(h1 !== null && h2 !== null && h1 === h2 && gecen === R.length ? 0 : 1)
 }
 
 main().catch((e) => {

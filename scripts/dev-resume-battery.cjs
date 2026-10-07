@@ -134,9 +134,9 @@ async function main() {
   const h2 = hash(REAL)
   const gecen = R.filter((x) => x.ok).length
   console.log(`\nözet: ${R.length} kontrol · ${gecen} ✓ · ${R.length - gecen} ✗`)
-  console.log(`gerçek depo: ${h1} → ${h2} · DEĞİŞMEDİ: ${h1 === h2}`)
+  console.log(`gerçek depo: ${h1} → ${h2} · DEĞİŞMEDİ: ${h1 !== null && h2 !== null && h1 === h2}${h1 === null || h2 === null ? ' (ÖLÇÜM YOK: depo okunamadı)' : ''}`)
   fs.writeFileSync(path.join(__dirname, '..', 'test-artifacts', 'resume-battery.json'), JSON.stringify({ at: new Date().toISOString(), R, h1, h2 }, null, 2), 'utf8')
-  process.exit(h1 === h2 && gecen === R.length ? 0 : 1)
+  process.exit(h1 !== null && h2 !== null && h1 === h2 && gecen === R.length ? 0 : 1)
 }
 
 main().catch((e) => {

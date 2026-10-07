@@ -114,4 +114,57 @@ describe('inceleme düzeltmeleri', () => {
     expect(stopReason()).toBe('user')
     endRun({ ok: true })
   })
+
+  it('#1b AYRI connect komutlarıyla kurulan onarım da kutu üyeliğine girer (incelemenin senaryosu)', async () => {
+    const f = loopFixture()
+    const h = ctx(f.graph)
+    const bid = String((await callTool('branch.create', { name: 'Onarım 2' }, h)).data?.branchId)
+    // connectFrom KULLANILMAZ: önce node, sonra iki ayrı connect komutu.
+    const ed = await callTool(
+      'flow.edit',
+      {
+        branchId: bid,
+        ops: [
+          { op: 'addNode', key: 'fix', kind: 'wait', fields: { ms: 40, title: 'AyriOnarim' } },
+          { op: 'disconnect', from: f.a.id },
+          { op: 'connect', from: f.a.id, to: 'fix' },
+          { op: 'connect', from: 'fix', to: f.b.id },
+        ],
+      },
+      h
+    )
+    expect(ed.outcome, `düzenleme reddedildi: ${ed.message}`).toBe('tamam')
+    const read = await callTool('flow.read', { branchId: bid }, h)
+    const d = read.data as { loops?: { id: string; members?: { id: string }[] }[]; nodes?: { id: string; title: string }[] }
+    const kutu = (d.loops ?? []).find((l) => l.id === f.loop.id)
+    const yeni = (d.nodes ?? []).find((x) => String(x.title).includes('AyriOnarim'))
+    expect(yeni, 'eklenen node okunamadı').toBeTruthy()
+    const uyeler = (kutu?.members ?? []).map((m) => m.id)
+    expect(uyeler, `ayrı connect komutlarıyla kurulan onarım üyeliğe girmemiş: ${JSON.stringify(uyeler)}`).toContain(String(yeni?.id))
+  })
+
+  it('#7 merge sürerken başka branch’e eklenen düzenleme kaybolmaz', async () => {
+    const f = loopFixture()
+    // Kendi kitabımızı tutuyoruz ki merge beklemesi sırasında "pencere" ona yazabilsin.
+    let book: CanvasBook = { activeId: 'c1', tabs: [{ id: 'c1', name: 'Tuval', graph: f.graph }] }
+    const h = ctx(f.graph, {
+      getCanvases: () => structuredClone(book),
+      saveCanvases: (next) => {
+        book = structuredClone(next)
+      },
+      applyMerge: async () => {
+        // Bekleme sırasında başka bir branch açıldı (pencere kendi yarısını yazar).
+        const b = book as CanvasBook & { branches?: { id: string; name: string; baseTabId: string; baseFingerprint: string; groups: unknown[] }[] }
+        b.branches = [...(b.branches ?? []), { id: 'baska-branch', name: 'Başka', baseTabId: 'c1', baseFingerprint: '', groups: [] }]
+        return { ok: true }
+      },
+    })
+    const bid = String((await callTool('branch.create', { name: 'Merge edilecek' }, h)).data?.branchId)
+    await callTool('flow.edit', { branchId: bid, ops: [{ op: 'addNode', key: 'w', kind: 'wait', fields: { ms: 10 } }] }, h)
+    const r = await callTool('branch.merge', { branchId: bid, apply: true }, h, 'panel')
+    expect(r.ok, `merge uygulanamadı: ${r.message}`).toBe(true)
+    const kalan = ((book as CanvasBook & { branches?: { id: string }[] }).branches ?? []).map((x: { id: string }) => x.id)
+    expect(kalan, 'merge sırasında eklenen branch kayboldu (eski kitap yazıldı)').toContain('baska-branch')
+    expect(kalan, 'merge edilen branch silinmedi').not.toContain(bid)
+  })
 })
