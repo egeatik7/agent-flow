@@ -687,7 +687,12 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     // One action at a time may step aside from the desktop, exactly like a run does.
     hideApp: () => hideSelf(),
     showApp: async (opts?: { focus?: boolean }) => {
-      showSelf(opts?.focus !== false)
+      // focus:false means "do not take the foreground back", and on Windows there is no way to
+      // restore a minimised window without activating it - restore() alone brings it to the front.
+      // So the honest reading of "bring it back without stealing focus" is: leave it minimised. It
+      // comes back when asked for, which is what a run does at its end.
+      if (opts?.focus === false) return true
+      showSelf(true)
       return true
     },
     takeMergeUndo: undefined,
