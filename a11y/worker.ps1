@@ -807,7 +807,13 @@ function Get-BoundWindow($target, [bool]$activate = $false) {
   $el = $script:AE::FromHandle($h)
   if ($null -eq $el) { throw 'INPUT_TARGET_INVALID: Target window cannot be inspected' }
   if ($activate) { Enter-Window $el }
-  if ([XpWin]::GetForegroundWindow() -ne $h) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus' }
+  # Masaustu/kabuk pencereleri onplana ALINAMAZ (SetForegroundWindow onlari onplan yapmaz).
+  # Tolerans yalniz aktivasyon istenen yolda taninir; digerinde eski siki kontrol aynen kalir.
+  if ($activate -and (Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) -and (Test-ShellWindow $h)) {
+    # kabuk penceresi: onplan sarti aranmaz, tiklamanin kendisi kisayolu acar
+  } elseif ([XpWin]::GetForegroundWindow() -ne $h) {
+    throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus'
+  }
   if (-not $activate -and $target.rect) {
     $r = $el.Current.BoundingRectangle
     if ([int]$r.X -ne $target.rect.x -or [int]$r.Y -ne $target.rect.y -or [int]$r.Width -ne $target.rect.w -or [int]$r.Height -ne $target.rect.h) {
@@ -842,7 +848,12 @@ function Get-InputTarget($P) {
   $h = [IntPtr]$el.Current.NativeWindowHandle
   $targetPid = [int]$el.Current.ProcessId
   if ($P.ownPid -and $targetPid -eq [int]$P.ownPid) { throw 'INPUT_TARGET_INVALID: Nubbo cannot be its own input target' }
-  if ($h -eq [IntPtr]::Zero -or [XpWin]::GetForegroundWindow() -ne $h) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus' }
+  if ($h -eq [IntPtr]::Zero) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window has no handle' }
+  # Kabuk pencereleri onplana alinamaz: masaustu kisayoluna tiklamayi engellemesin.
+  # Yardimci yuklu degilse kabuk SAYILMAZ (siki kontrol korunur).
+  $kabuk = $false
+  if (Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) { $kabuk = Test-ShellWindow $h }
+  if ([XpWin]::GetForegroundWindow() -ne $h -and -not $kabuk) { throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus' }
   $r = $el.Current.BoundingRectangle
   if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { throw 'INPUT_TARGET_INVALID: Target window has no visible bounds' }
   return [pscustomobject]@{ hwnd = [string]$h; pid = $targetPid; title = [string]$el.Current.Name; rect = [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height } }

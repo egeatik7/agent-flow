@@ -21,6 +21,7 @@ public static class XpNative {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
@@ -449,6 +450,20 @@ function Enter-Window($win) {
       Start-Sleep -Milliseconds 150
     }
   } catch {}
+}
+
+# Masaustu ve gorev cubugu pencereleri onplana ALINAMAZ: SetForegroundWindow onlari onplan
+# yapmaz. Bu yuzden "hedef onplanda mi" kontrolu bu siniflarda ARANMAZ; aransa masaustu
+# kisayoluna cift tiklamak hic yapilamaz (olculdu: 1.9.40 gunlugu, INPUT_WINDOW_NOT_ACTIVE).
+function Test-ShellWindow($hwnd) {
+  try {
+    if ([IntPtr]([long]$hwnd) -eq [IntPtr]::Zero) { return $false }
+    # Natif sinif eksikse (test taklidi) hata uretmeyiz: kabuk SAYILMAZ, siki davranis korunur.
+    if (-not [XpNative].GetMethod('GetClassName')) { return $false }
+    $sb = New-Object System.Text.StringBuilder 256
+    [void][XpNative]::GetClassName([IntPtr]([long]$hwnd), $sb, 256)
+    return @('Progman','WorkerW','Shell_TrayWnd','Shell_SecondaryTrayWnd','SHELLDLL_DefView','SysListView32') -contains $sb.ToString()
+  } catch { return $false }
 }
 
 function Get-TopLevel($el) {
