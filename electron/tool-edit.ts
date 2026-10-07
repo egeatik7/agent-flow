@@ -436,6 +436,17 @@ export function applyPlan(graph: AgentGraph, plan: Plan): AgentGraph {
       (e) => !plan.cuts.some((c) => c.from === e.from && c.fromPort === e.fromPort && (!c.to || c.to === e.to))
     )
   }
+  // Döngü üyeliği: kutunun içine eklenen node, kutu onu çalıştırsın diye kutu üyeliğine de
+  // yazılır. Ölçüldü: yalnız bağlantı eklenince node akışta görünüyor ama kutu yalnız
+  // members listesindeki node'ları çalıştırdığı için o düzeltme hiç koşmuyordu.
+  for (const add of plan.adds) {
+    const capa = (add as { fromId?: string }).fromId
+    if (!capa) continue
+    const kutu = next.nodes.find((x) => x.kind === 'loop' && Array.isArray((x as { members?: string[] }).members) && ((x as { members?: string[] }).members as string[]).includes(capa))
+    const uyeler = kutu ? ((kutu as { members?: string[] }).members as string[]) : null
+    if (uyeler && !uyeler.includes(add.node.id)) uyeler.push(add.node.id)
+  }
+
   for (const add of plan.adds) {
     if (add.fromId) next.edges.push({ id: newId(), from: add.fromId, fromPort: add.fromPort ?? 'next', to: add.node.id })
   }

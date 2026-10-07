@@ -705,7 +705,10 @@ const branchMerge: ToolDef = {
 
     const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: pruned.graph, branchId: branch.id, branchName: branch.name })
     if (!answer.ok) {
-      const message = `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Kullanıcının akışına hiçbir şey yazılmadı.`
+      const belirsiz = /yanıt vermedi|zaman aşım|timeout|uygulanmış olabilir/i.test(String(answer.error ?? ''))
+      const message = belirsiz
+        ? `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Bu bir ZAMAN AŞIMI: değişiklik uygulanmış OLABİLİR, durum bilinmiyor. Nubbo penceresinden kontrol et; kesinleşmeden yeniden uygulama.`
+        : `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Kullanıcının akışına hiçbir şey yazılmadı.`
       ctx.log('warn', `Ajan · merge · ${message}`)
       return failed(branchMerge.name, message)
     }
@@ -796,7 +799,8 @@ const flowRead: ToolDef = {
           title: node.title,
           total: keys.length,
           // Klasör varsa koşucu klasörü üstün tutar (fromFolder ?? loopKeys); burada öğe uydurulmaz.
-            item: typeof node.folder === 'string' && node.folder.trim() !== '' && listItems(node).length === 0 ? undefined : keys[tick],
+            // Sayısal kutuda motor "1" kullanır; okuma da aynı değeri göstermeli.
+            item: (typeof node.folder === 'string' && node.folder.trim() !== '') ? (listItems(node).length === 0 ? undefined : keys[tick]) : (listItems(node).length === 0 ? String(tick + 1) : keys[tick]),
           index: tick,
           packagePath,
           memberIds: [...(node.members ?? [])],
@@ -1229,6 +1233,28 @@ const runFrom: ToolDef = {
     }
     const untilId = text(args.untilNodeId)
     const untilPlace = untilId ? findPlace(graph, untilId) : null
+
+    // Sınır yalnız VAR değil, başlangıçtan ERİŞİLEBİLİR de olmalı: erişilemeyen bir sınır, motoru
+    // hiç durdurmaz ve sınırlı bölge sanılan koşu ilerideki üretim adımlarını çalıştırır.
+    if (untilId && nodeId) {
+      const gorulen = new Set<string>()
+      const kuyruk = [nodeId]
+      while (kuyruk.length) {
+        const su = kuyruk.shift() as string
+        if (gorulen.has(su)) continue
+        gorulen.add(su)
+        for (const e of graph.edges) if (e.from === su) kuyruk.push(e.to)
+        const dugum = graph.nodes.find((x) => x.id === su)
+        const uyeler = dugum && (dugum as { members?: string[] }).members
+        if (Array.isArray(uyeler)) for (const u of uyeler) if (!gorulen.has(u)) kuyruk.push(u)
+        if (dugum && (dugum as { inner?: { nodes?: { id: string }[] } }).inner) {
+          for (const ic of (dugum as { inner?: { nodes?: { id: string }[] } }).inner?.nodes ?? []) kuyruk.push(ic.id)
+        }
+      }
+      if (!gorulen.has(untilId)) {
+        return failed(runFrom.name, `Sınıra ulaşılamıyor: “${untilPlace?.node.title ?? untilId}” başlangıçtan (${place?.node.title ?? nodeId}) erişilemiyor. Böyle bir sınır motoru durdurmaz; akış sınırı görmeden ilerler.`)
+      }
+    }
     if (untilId && !untilPlace) return failed(runFrom.name, `Duracak node bulunamadı: ${untilId}${branchNote}`)
     if (untilId && !nodeId) {
       return failed(runFrom.name, 'Sınırlı test için başlangıç node’u da gerekir (nodeId); bölge iki ucuyla belirtilir.')
@@ -1369,7 +1395,7 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
     if (r.status === 'done') {
       // "Gönderildi" ile "oldu" arasındaki fark: moturun kendi uyarısı varsa bu adım doğrulanmış
       // sayılmaz. Sessizce "tamam" demek, ekranda hiçbir şey olmamışken başarı raporlamak olur.
-      const unclear = logs.some((l) => /Tepki net değil|Akış bozulmadan sıradaki adım/.test(l))
+      const unclear = logs.some((l) => /Tepki net değil|Akış bozulmadan sıradaki adım|doğrulanmış sayılmıyor|değeri okunamadı/.test(l))
       if (unclear) {
         const message = `${spec.title} gönderildi ama tepkisi net değil; ekranda beklenen sonuç doğrulanmadı, bakılmalı (${r.ms} ms). ${where}`
         ctx.log('warn', `Ajan · eylem · ${message}`)
@@ -1440,8 +1466,11 @@ const actType: ToolDef = {
     if (denied) return failed(actType.name, denied)
     // Kırpılır: yalnız boşluktan oluşan bir "yazı" guard'ı geçip motora ulaşırsa odaktaki pencereye
     // boşluk yazardı (batarya testinde tam olarak bu oldu).
-    const body = text(args.text)?.trim()
-    if (!body) return failed(actType.name, 'Ne yazılacağını söyle: { text: "merhaba" }.')
+    // Boşluk denetimi yapılır ama GÖNDERİLEN metin kırpılmaz: baştaki/sondaki boşluk ve satır
+    // sonları kullanıcının yazdığı metnin parçası olabilir (ölçüldü: "  abc\n  " → "abc" oluyordu).
+    const hamMetin = text(args.text) ?? ''
+    if (!hamMetin || !hamMetin.trim()) return failed(actType.name, 'Ne yazılacağını söyle: { text: "merhaba" }.')
+    const body = hamMetin
     const into = text(args.into)?.trim()
     return runOneAction(
       actType.name,
@@ -1704,7 +1733,9 @@ const runStop: ToolDef = {
     const kosuyor = ctx.isRunning()
     ctx.requestStop()
     // Said out loud so a stop by the person is never read as a debug failure or a finished region.
-    noteUserStop()
+    // Yalnız GERÇEKTEN durdurulan bir koşu için: koşu yokken bu çağrı önceki koşunun durma
+    // nedenini ("hata sonrası durdu") "kullanıcı durdurdu" diye değiştiriyordu.
+    if (kosuyor) noteUserStop()
     const message = kosuyor
       ? 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
       : 'Şu an koşu yok; durdurulacak bir koşu bulunmadı. İstek yine de kaydedildi (bir sonraki koşu temiz başlar).'

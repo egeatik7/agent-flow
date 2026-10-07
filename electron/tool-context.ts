@@ -98,7 +98,10 @@ export function chainOf(graph: AgentGraph, id: string): LoopContext[] {
     // Klasör tabanlı kutu listesini ancak koşarken doldurur; burada "#1" gibi bir öğe göstermek
     // yanıltıcıdır. Klasör varsa ve liste boşsa öğe bilinmiyor denir (uydurulmaz).
     const klasorVar = typeof box.folder === 'string' && box.folder.trim() !== ''
-    const item = klasorVar && listItems(box).length === 0 ? undefined : keys[index]
+    // Sayısal (liste/klasör değil) kutuda motor {{öğe}} için "1" kullanır — kare işareti yok.
+    // Araç katmanı da aynı değeri göstermeli, yoksa ajanın gördüğü ile çalışan farklı olur.
+    const sayisal = !klasorVar && listItems(box).length === 0
+    const item = klasorVar && listItems(box).length === 0 ? undefined : sayisal ? String(index + 1) : keys[index]
     vars = { ...vars, ...itemVars(item ?? '', index, keys.length) }
     return {
       id: box.id,
