@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode, type AppSettings, type CanvasBook } from '../electron/graph-types'
 import { callTool, type ToolContext } from '../electron/tools'
-import { beginRun, endRun, noteUserStop, stopReason } from '../electron/tool-state'
+import { beginRun, endRun, setStopAt, noteUserStop, stopReason } from '../electron/tool-state'
 
 let seq = 0
 const edge = (from: AgentNode, fromPort: string, to: AgentNode) => ({ id: `rv${++seq}`, from: from.id, fromPort, to: to.id })
@@ -75,16 +75,19 @@ describe('inceleme düzeltmeleri', () => {
     expect(uyeler, `eklenen node kutu üyeliğinde yok (kutu onu çalıştırmaz): ${JSON.stringify(uyeler)}`).toContain(String(yeni?.id))
   })
 
-  it('#4 erişilemeyen sınır baştan reddedilir', async () => {
+  it('#4 sınır ulaşılmadan bittiyse sonuç "sınırlı bölge tamamlandı" DEMEZ', async () => {
     const f = loopFixture()
-    // Akıştan kopuk bir node: sınır olarak verilirse motor onu hiç görmez.
     const kopuk = createNode('wait', 1200, 300)
     kopuk.title = 'Kopuk'
     f.graph.nodes.push(kopuk)
     const h = ctx(f.graph)
-    const r = await callTool('run.from', { nodeId: f.a.id, untilNodeId: kopuk.id }, h)
-    expect(r.ok, 'erişilemeyen sınır kabul edildi (motor sınırı görmeden ilerler)').toBe(false)
-    expect(String(r.message)).toContain('ulaşılamıyor')
+    beginRun(f.graph)
+    // Sınır istendi ama hiçbir zaman ulaşılmadı (erişilemeyen sınır).
+    setStopAt(kopuk.id)
+    endRun({ ok: true, steps: 3 })
+    const r = await callTool('run.wait', {}, h)
+    expect(String(r.message), 'sınır ulaşılmadan bitti ama sonuç bunu söylemiyor').toContain('TAMAMLANMADI')
+    setStopAt(null)
   })
 
   it('#6 merge zaman aşımında "hiçbir şey yazılmadı" denmez', async () => {

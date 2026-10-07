@@ -332,6 +332,11 @@ export function setStopAt(nodeId: string | null): void {
   stopAt = nodeId ? String(nodeId) : null
 }
 
+/** Sınırlı bölge testi istendi mi: sınır node'u hâlâ bekliyor mu (ulaşılmadıysa dolu kalır). */
+export function boundaryPending(): boolean {
+  return stopAt !== null
+}
+
 export function stopReason(): 'user' | 'debug-error' | 'until' | null {
   return stoppedBy
 }

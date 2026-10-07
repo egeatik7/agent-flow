@@ -45,7 +45,7 @@ import {
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { actionGraph, runAction, type ActSpec } from './tool-act'
-import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, reviewCount, lastReviewLine, setStopAt, snapshot, stopReason, actPointWithin, noteActPoint } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, reviewCount, lastReviewLine, setStopAt, snapshot, stopReason, boundaryPending, actPointWithin, noteActPoint } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -1234,27 +1234,6 @@ const runFrom: ToolDef = {
     const untilId = text(args.untilNodeId)
     const untilPlace = untilId ? findPlace(graph, untilId) : null
 
-    // Sınır yalnız VAR değil, başlangıçtan ERİŞİLEBİLİR de olmalı: erişilemeyen bir sınır, motoru
-    // hiç durdurmaz ve sınırlı bölge sanılan koşu ilerideki üretim adımlarını çalıştırır.
-    if (untilId && nodeId) {
-      const gorulen = new Set<string>()
-      const kuyruk = [nodeId]
-      while (kuyruk.length) {
-        const su = kuyruk.shift() as string
-        if (gorulen.has(su)) continue
-        gorulen.add(su)
-        for (const e of graph.edges) if (e.from === su) kuyruk.push(e.to)
-        const dugum = graph.nodes.find((x) => x.id === su)
-        const uyeler = dugum && (dugum as { members?: string[] }).members
-        if (Array.isArray(uyeler)) for (const u of uyeler) if (!gorulen.has(u)) kuyruk.push(u)
-        if (dugum && (dugum as { inner?: { nodes?: { id: string }[] } }).inner) {
-          for (const ic of (dugum as { inner?: { nodes?: { id: string }[] } }).inner?.nodes ?? []) kuyruk.push(ic.id)
-        }
-      }
-      if (!gorulen.has(untilId)) {
-        return failed(runFrom.name, `Sınıra ulaşılamıyor: “${untilPlace?.node.title ?? untilId}” başlangıçtan (${place?.node.title ?? nodeId}) erişilemiyor. Böyle bir sınır motoru durdurmaz; akış sınırı görmeden ilerler.`)
-      }
-    }
     if (untilId && !untilPlace) return failed(runFrom.name, `Duracak node bulunamadı: ${untilId}${branchNote}`)
     if (untilId && !nodeId) {
       return failed(runFrom.name, 'Sınırlı test için başlangıç node’u da gerekir (nodeId); bölge iki ucuyla belirtilir.')
@@ -1663,10 +1642,14 @@ const runWait: ToolDef = {
           : stopReason() === 'debug-error'
             ? ' (hata sonrası durdu)'
             : ''
+            // Sınır istendi ama sınıra ulaşılmadan bittiyse bu "sınırlı bölge tamamlandı" değildir:
+            // o zaman sınırın ötesindeki adımlar da koşmuş olabilir.
+            const sinirKacti = boundaryPending() && stopReason() !== 'until'
+            const sinirNotu = sinirKacti ? ' · SINIRLI BOLGE TAMAMLANMADI: sinir istenmisti ama sinir node una ulasilmadan bitti; sinirin otesindeki adimlar kosmus olabilir.' : ''
     const message = wasRunning
-      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu${s.lastError ? ` · son hata: ${s.lastError}` : ''}${s.review ? ` · ${s.review} adım BAKILMALI (tepkisi net değildi, gönderildi ama doğrulanamadı${s.lastReview ? `: ${s.lastReview.slice(0, 80)}` : ''})` : ''}.`
+      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${sinirNotu}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu${s.lastError ? ` · son hata: ${s.lastError}` : ''}${s.review ? ` · ${s.review} adım BAKILMALI (tepkisi net değildi, gönderildi ama doğrulanamadı${s.lastReview ? `: ${s.lastReview.slice(0, 80)}` : ''})` : ''}.`
       : s.last
-        ? `Şu an koşu yok. Son koşu (${s.last.runId || '—'}): ${s.last.ok ? 'tamamlandı' : s.last.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${s.last.steps !== undefined ? ` · ${s.last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`
+        ? `Şu an koşu yok. Son koşu (${s.last.runId || '—'}): ${s.last.ok ? 'tamamlandı' : s.last.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${sinirNotu}${s.last.steps !== undefined ? ` · ${s.last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`
         : 'Beklenecek bir koşu yok.'
     ctx.log('info', `Ajan · bekle · ${message}`)
     return {
