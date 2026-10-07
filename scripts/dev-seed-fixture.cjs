@@ -29,13 +29,28 @@ const tokenFile = path.join(appDir, 'tool-endpoint.json')
 try {
   const token = JSON.parse(fs.readFileSync(tokenFile, 'utf8'))
   if (token?.pid) {
-    spawnSync('taskkill', ['/PID', String(token.pid), '/T', '/F'], { stdio: 'ignore' })
-    console.log(`  örnek kapatıldı: pid ${token.pid}`)
+    // Kimlik doğrulaması: pencere başlığı test profili damgası taşımalı, yoksa hiç kapatılmaz.
+    let baslik = ''
+    try {
+      baslik = String(
+        spawnSync('powershell.exe', ['-NoProfile', '-Command', `(Get-Process -Id ${Number(token.pid)} -ErrorAction SilentlyContinue).MainWindowTitle`], { encoding: 'utf8' }).stdout || ''
+      ).trim()
+    } catch {
+      /* okunamadı */
+    }
+    if (/test profili/i.test(baslik)) {
+      spawnSync('taskkill', ['/PID', String(token.pid), '/T', '/F'], { stdio: 'ignore' })
+      console.log(`  örnek kapatıldı: pid ${token.pid} · “${baslik}”`)
+    } else {
+      console.log(`  örnek KAPATILMADI (pid ${token.pid}: başlıkta test profili damgası yok) — jeton eski olabilir`)
+    }
   }
 } catch {
   console.log('  açık örnek yok')
 }
-spawnSync('taskkill', ['/IM', 'Nubbo-test.exe', '/T', '/F'], { stdio: 'ignore' })
+// İsimle toplu öldürme YOK (kaldırıldı): portable exe kendini geçici klasöre açtığı için isimle
+// öldürmek, aynı ada benzeyen başka bir örneği de götürebilir. Kapatma yalnız jetonun pid'i ile ve
+// kimliği doğrulanarak yapılır: pencere başlığında "test profili" damgası olmalı.
 if (fs.existsSync(tokenFile)) fs.rmSync(tokenFile, { force: true })
 
 // 2) Build the fixture with the app's own node factory, so the graph is valid by construction.

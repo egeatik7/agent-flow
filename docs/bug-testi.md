@@ -157,6 +157,27 @@ bizim kopya olmalı ✓ (`dev-start-test.cjs`). Ve **isimle toplu öldürme yasa
 (veri kaybı olmadı ✓: gerçek depo dosyasına dokunulmadı ✓, ama penceredeki kaydedilmemiş durum
 gitti ✗). Kural: kapatma **yalnız** jetonun gösterdiği pid ile ve kimliği doğrulanarak yapılır ✓.
 
+**Ölçülen ek sınır (küçültmek yetmiyor):** Bir pencereyi **küçültmek** ön planı **bırakmıyor** ✗ —
+iki Nubbo penceresi de küçültüldüğü hâlde `GetForegroundWindow` hâlâ sahibinin uygulamasını
+gösterdi ve fikstür ön planı alamadı ✓ (ölçüldü, varsayılmadı). Ön planı **tutan pencere yok
+edilmedikçe** (kapatılmadıkça) `host-foreground` geçmiyor ✗. Bu yüzden:
+
+- `ui-local` gibi **fikstürün önde olmasına bağlı** senaryolar, sahibinin uygulaması açıkken
+  koşamaz ✗ — bu bir **ürün hatası değil**, ortam koşuludur ✓ ve motorun cevabı da doğrudur
+  (`INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus` ✓ = yanlış pencereye
+  yazmaktansa durmak ✓).
+- `package-inner` ve `region-bounded` bu bağımlılığı **taşımıyor** ✓: temiz build'le ikisi de
+  **geçti** (12/12 ✓ ve 11/11 ✓).
+- Sahibinin uygulaması **kapatılmaz ve küçültülmez de** zorlanmaz ✗; istenirse sahibi kapatır,
+  sonra `ui-local` koşar ✓.
+
+**Kimlik düzeltmesi (bu turda ölçüldü):** Portable exe'de stub çıktıktan sonra sürecin ebeveyni
+ölür ve sürecin kendi yolu geçici bir klasördür ✗ → ne ad ne yol ne ebeveyn uyuşur ve eski örnek
+**hiç kapatılamaz** ✗ (iki örnek yan yana kalır, jeton hangisine denk gelirse ona bağlanılır ✗).
+Kalan tek güvenilir işaret **pencerenin profil damgasıdır**: test örneğinin başlığında
+“test profili” yazar ✓, sahibinin gerçek uygulamasında yazmaz ✓. Başlatıcı ve seed aracı artık
+bu damgayı arar ✓; isimle toplu öldürme iki araçtan da kaldırıldı ✓.
+
 ## Nasıl yeniden koşulur
 ```powershell
 npm run typecheck

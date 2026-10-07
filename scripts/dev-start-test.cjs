@@ -47,12 +47,12 @@ function pidLooksLikeOurStub(pid) {
       [
         '-NoProfile',
         '-Command',
-        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" -ErrorAction SilentlyContinue; if ($p) { $par = Get-CimInstance Win32_Process -Filter "ProcessId = $($p.ParentProcessId)" -ErrorAction SilentlyContinue; "$($p.Name)|$($p.ExecutablePath)|$(if ($par) { $par.ExecutablePath } else { '' })" }`,
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" -ErrorAction SilentlyContinue; if ($p) { $par = Get-CimInstance Win32_Process -Filter "ProcessId = $($p.ParentProcessId)" -ErrorAction SilentlyContinue; $b = (Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).MainWindowTitle; "$($p.Name)|$($p.ExecutablePath)|$(if ($par) { $par.ExecutablePath } else { '' })|$b" }`,
       ],
       { encoding: 'utf8' }
     ).trim()
     if (!out) return { ok: false, why: 'süreç yok' }
-    const [name, exePath, parentPath] = out.split('|')
+    const [name, exePath, parentPath, baslik] = out.split('|')
     // Kimlik ne adla ne de tek başına yolla doğrulanabilir: portable exe kendini geçici bir klasöre
     // açıp oradan çalışıyor ("…\Temp\<rastgele>\Nubbo Agent Studio.exe"), ürün adıyla görünüyor ve
     // masaüstündeki kopyanın yolu yalnızca BAŞLATICI stub'ın yolu. Bu yüzden sürecin kendisi ya da
@@ -63,6 +63,12 @@ function pidLooksLikeOurStub(pid) {
     const ebeveyn = parentPath ? path.resolve(String(parentPath)).toLowerCase() : ''
     if (kendi && kendi === beklenen) return { ok: true, why: `yol uyuşuyor (süreç adı “${name}”)` }
     if (ebeveyn && ebeveyn === beklenen) return { ok: true, why: `ebeveyn yol uyuşuyor (portable açılım: “${name}”)` }
+    // Ölçüldü: portable exe'de stub çıktıktan sonra ebeveyn ölür ve sürecin kendi yolu geçici bir
+    // klasördür; o zaman ne ad ne yol ne ebeveyn uyuşur ve eski örnek HİÇ kapatılamaz — iki örnek
+    // yan yana kalır, jeton hangisine denk gelirse ona bağlanılır. Kalan tek güvenilir işaret,
+    // pencerenin profil damgasıdır: test örneğinin başlığında "test profili" yazar, sahibinin
+    // gerçek uygulamasında yazmaz.
+    if (baslik && /test profili/i.test(baslik)) return { ok: true, why: `pencere başlığı test profili (“${baslik}”)` }
     if (!kendi && !ebeveyn) return { ok: false, why: `yol okunamadı; ad “${name}” tek başına yeterli değil` }
     return { ok: false, why: `ne yol ne ebeveyn bizim kopya (kendi “${kendi || '-'}”, ebeveyn “${ebeveyn || '-'}”)` }
   } catch (e) {
@@ -146,16 +152,27 @@ async function main() {
       // senaryo ise fikstür penceresinin önde olmasını bekler (yoksa hedefi yanlış pencerede arar
       // ve haklı olarak bulamaz). Uygulama küçültülünce ön plan serbest kalır ve fikstür kendini öne
       // alabilir. Kapatılmaz, küçültülür: açık akış ve oturum kaybolmasın.
-      try {
-        const min = spawnSync(
-          'powershell',
-          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'dev-minimize.ps1'), '-Title', 'test profili'],
-          { encoding: 'utf8' }
-        )
-        const son = String(min.stdout || '').trim().split('\n').filter(Boolean).pop()
-        if (son) console.log(`  ${son.trim()}`)
-      } catch (e) {
-        console.log(`  (pencere küçültülemedi: ${e && e.message ? e.message : String(e)})`)
+      // Pencere hemen hazır olmayabilir: /health cevap verdiğinde pencere henüz oluşmamışsa
+      // küçültme boşa gider ve uygulama birazdan ön planı alır — canlı senaryo da hedefi kendi
+      // penceresinde arar ve haklı olarak bulamaz. Canlı koşuların dalgalanmasının kökü buydu:
+      // bu yüzden pencere görünene kadar kısa aralıklarla denenir.
+      for (let i = 0; i < 10; i++) {
+        try {
+          const min = spawnSync(
+            'powershell',
+            ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'dev-minimize.ps1'), '-Title', 'test profili'],
+            { encoding: 'utf8' }
+          )
+          const son = String(min.stdout || '').trim().split('\n').filter(Boolean).pop() || ''
+          if (/küçültüldü/.test(son)) {
+            console.log(`  ${son.trim()}`)
+            break
+          }
+          if (i === 9) console.log(`  (pencere küçültülemedi: ${son.trim()})`)
+        } catch (e) {
+          if (i === 9) console.log(`  (pencere küçültülemedi: ${e && e.message ? e.message : String(e)})`)
+        }
+        await sleep(1500)
       }
       process.exit(0)
     }
