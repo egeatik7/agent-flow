@@ -1670,7 +1670,10 @@ export function createAgent(ctx: AgentContext) {
     setLoop: (text) => ctx.setLoop?.(text),
     click: async (node, stepNo, ahead) => {
       await waitUnlocked()
-      if (ahead?.next?.kind === 'type') await activateInputWindow(node)
+      // A click on a window that is not active only activates it - Windows eats the first click, and
+      // a menu that should have opened does not. Written commands have no saved element to fall back
+      // on, so they get the same window activation the typing path already does.
+      if (ahead?.next?.kind === 'type' || !node.locator) await activateInputWindow(node)
       const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
       const confirmed = await ensureActed(node, ahead, async () => {

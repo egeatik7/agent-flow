@@ -214,6 +214,34 @@ if (mode === 'ui') {
   }
   canvasName = 'Blender'
   summary = 'Başlangıç → win+d (masaüstünü aç) → win+r → yaz(başlat komutu + Enter) → 9 sn → Bitir'
+} else if (mode === 'coords') {
+  // Koordinat ölçümü: ekranda GÖRÜNEN ve büyük dört yazıya tıklama node'u. Okuyucunun verdiği
+  // konumla görsel modelin işaret ettiği konum aynı mı diye karşılaştırmak için (salt okunur ölçüm).
+  const hedefler = [
+    ['c-file', 'File', 200],
+    ['c-edit', 'Edit', 420],
+    ['c-layout', 'Layout', 640],
+    ['c-modeling', 'Modeling', 860],
+  ]
+  const nodes = [start]
+  const edges = []
+  let prev = start.id
+  for (const [id, yazi, x] of hedefler) {
+    const n = createNode('click', x, 0, 1)
+    n.id = id
+    n.title = `Ölçüm · “${yazi}”`
+    n.prompt = yazi
+    nodes.push(n)
+    edges.push({ id: `${id}-e`, from: prev, fromPort: 'next', to: id })
+    prev = id
+  }
+  const end = createNode('end', 1080, 0)
+  end.id = 'c-end'
+  nodes.push(end)
+  edges.push({ id: 'c-e-end', from: prev, fromPort: 'next', to: end.id })
+  graph = { nodes, edges }
+  canvasName = 'Ölçüm'
+  summary = 'Başlangıç → File → Edit → Layout → Modeling → Bitir (yalnız ölçüm; tıklanmaz)'
 } else if (mode === 'redsuzanne') {
   // TAM GOREV, YALNIZ ARAYUZ: Blender'i ac, menuden Suzanne'i koy, Material sekmesinden yeni
   // materyal olustur, Base Color kutusunu ac, Hex alanina FF0000 yaz. Betik yok, Python yok.
