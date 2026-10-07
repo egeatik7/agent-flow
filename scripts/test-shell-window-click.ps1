@@ -46,16 +46,26 @@ if (Test-ShellWindow ([IntPtr]12345)) { throw 'Rastgele tanıtıcı kabuk sayıl
 
 # 4) Üretim sözleşmesi: tolerans yalnız AKTİVASYON yolunda ve yardımcı yoksa SIKI davranış
 $src = Get-Content -Raw (Join-Path $PSScriptRoot '../a11y/worker.ps1')
+# Yorumları ayıkla: sözleşme KODA bakmalı, geçmişi anlatan yoruma değil.
+$kodSatirlari = @(Get-Content (Join-Path $PSScriptRoot '../a11y/worker.ps1') | Where-Object { $_.Trim() -notlike '#*' })
+$kod = $kodSatirlari -join "`n"
 # 4a) eski (toleranssız) biçim kalmamalı
-$eski = ([regex]::Matches($src, [regex]::Escape('if ([XpWin]::GetForegroundWindow() -ne $h) { throw'))).Count
+$eski = ([regex]::Matches($kod, [regex]::Escape('if ([XpWin]::GetForegroundWindow() -ne $h) { throw'))).Count
 if ($eski -ne 0) { throw "Eski (toleranssız) önplan kontrolü kaldı: $eski" }
 # 4b) kabuk toleransı iki yerde de olmalı
-$tolerans = ([regex]::Matches($src, [regex]::Escape('Test-ShellWindow $h'))).Count
+$tolerans = ([regex]::Matches($kod, [regex]::Escape('Test-ShellWindow $h'))).Count
 if ($tolerans -lt 2) { throw "Kabuk toleransı eksik (bulunan: $tolerans, beklenen en az 2)" }
 # 4c) her çağrı Get-Command ile korunmalı: yardımcı yüklenmemişse kabuk SAYILMAZ (sıkı davranış)
-$koruma = ([regex]::Matches($src, [regex]::Escape("Get-Command Test-ShellWindow -ErrorAction SilentlyContinue"))).Count
+$koruma = ([regex]::Matches($kod, [regex]::Escape("Get-Command Test-ShellWindow -ErrorAction SilentlyContinue"))).Count
 if ($koruma -lt 2) { throw "Test-ShellWindow çağrıları korumasız (bulunan: $koruma, beklenen en az 2)" }
-# 4d) tolerans yalnız aktivasyon istenen yolda tanınmalı
-if ($src -notmatch [regex]::Escape('if ($activate -and (Get-Command Test-ShellWindow')) { throw 'Tolerans aktivasyon koşuluna bağlı değil' }
+# 4d) Tolerans AKTİVASYONDAN BAĞIMSIZ olmalı. 1.9.41'de yanlışlıkla `$activate` koşuluna
+# bağlanmıştı; tıklama yolu bu fonksiyonu $activate=$false ile çağırdığı için masaüstü
+# kısayoluna tıklama YİNE engellendi (ölçüldü: 1.9.42 günlüğü, 5× INPUT_WINDOW_NOT_ACTIVE).
+$yanlis = ([regex]::Matches($kod, [regex]::Escape('$activate -and (Get-Command Test-ShellWindow'))).Count
+if ($yanlis -ne 0) { throw "Tolerans yine aktivasyon kosuluna bagli (bulunan: $yanlis); tikLAMA yolu bu yuzden engellenir" }
+$bagimsiz = ([regex]::Matches($kod, [regex]::Escape('if ((Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) -and (Test-ShellWindow $h))'))).Count
+if ($bagimsiz -lt 1) { throw "Aktivasyondan bağımsız tolerans yok (bulunan: $bagimsiz)" }
+# 4e) Reddin tanısı olmalı: hangi pencere beklendi, hangisi önplanda
+if ($kod -notmatch [regex]::Escape("' onplan=0x'")) { throw 'Red mesajında pencere tanısı yok' }
 
-Write-Output "PASS: masaüstü kısayolu tıklaması artık engellenmiyor ($sinandi gerçek kabuk penceresi doğrulandı, $tolerans toleranslı çağrı, $koruma korumalı, $eski eski kontrol; masaüstüne girdi gönderilmedi)"
+Write-Output "PASS: masaüstü kısayolu tıklaması artık engellenmiyor ($sinandi gerçek kabuk penceresi doğrulandı, $tolerans toleranslı çağrı, $koruma korumalı, $eski eski kontrol, $yanlis aktivasyona bağlı kontrol, $bagimsiz bağımsız tolerans; masaüstüne girdi gönderilmedi)"

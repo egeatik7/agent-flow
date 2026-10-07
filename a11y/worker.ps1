@@ -808,11 +808,20 @@ function Get-BoundWindow($target, [bool]$activate = $false) {
   if ($null -eq $el) { throw 'INPUT_TARGET_INVALID: Target window cannot be inspected' }
   if ($activate) { Enter-Window $el }
   # Masaustu/kabuk pencereleri onplana ALINAMAZ (SetForegroundWindow onlari onplan yapmaz).
-  # Tolerans yalniz aktivasyon istenen yolda taninir; digerinde eski siki kontrol aynen kalir.
-  if ($activate -and (Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) -and (Test-ShellWindow $h)) {
-    # kabuk penceresi: onplan sarti aranmaz, tiklamanin kendisi kisayolu acar
+  # 1.9.41'de bu tolerans YANLISLIKLA yalniz aktivasyon yoluna konmustu; TIKLAMA yolu bu fonksiyonu
+  # $activate=$false ile cagirdigi icin masaustu kisayoluna tiklamak yine engelleniyordu
+  # (olculdu: 1.9.42 gercek gunlugu, 5x INPUT_WINDOW_NOT_ACTIVE). Tolerans artik aktivasyondan
+  # BAGIMSIZ: hedef kabuk penceresiyse onplan sarti aranmaz. Diger pencerelerde siki kontrol
+  # aynen durur; yardimci yuklu degilse kabuk SAYILMAZ (test iskeletleri bozulmaz).
+  if ((Get-Command Test-ShellWindow -ErrorAction SilentlyContinue) -and (Test-ShellWindow $h)) {
+    # kabuk penceresi: onplan sarti aranmaz, tiklamanin kendisi isi yapar
   } elseif ([XpWin]::GetForegroundWindow() -ne $h) {
-    throw 'INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus'
+    # Teshis: hangi pencere beklendi, hangisi onplanda. Tahmin etmeyelim.
+    $noktaTag = '-'
+    if ($target.rect) {
+      try { $noktaTag = '0x' + ([XpWin]::RootAt([int]$target.rect.x, [int]$target.rect.y)).ToString('X') } catch { $noktaTag = '-' }
+    }
+    throw ('INPUT_WINDOW_NOT_ACTIVE: Target window did not take foreground focus [hedef=0x' + $h.ToString('X') + ' onplan=0x' + ([XpWin]::GetForegroundWindow()).ToString('X') + ' nokta=' + $noktaTag + ']')
   }
   if (-not $activate -and $target.rect) {
     $r = $el.Current.BoundingRectangle
