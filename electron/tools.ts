@@ -1548,7 +1548,7 @@ const runReport: ToolDef = {
         ok: true,
         tool: runReport.name,
         outcome: 'tamam',
-        message: `Donmuş hata yok${ctx.isRunning() ? ' (koşu sürüyor)' : ''}${asked ? ` (runId ${asked} bulunamadı)` : ''}. Şu an: ${s.nodeTitle ?? '—'} · gözlenen ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.${older.length ? ` Saklanan ${older.length} eski rapor var: ${older.map((r) => r.runId).join(', ')}.` : ''}`,
+        message: `Donmuş hata yok${ctx.isRunning() ? ' (koşu sürüyor)' : ''}${asked ? ` (runId ${asked} bulunamadı)` : ''}. Şu an: ${s.nodeTitle ?? '—'} · gözlenen ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu${s.lastError ? ` · son hata: ${s.lastError}` : ''}.${older.length ? ` Saklanan ${older.length} eski rapor var: ${older.map((r) => r.runId).join(', ')}.` : ''}`,
         observed: {
           note: 'Debug koşusu (run.from · debug: true) ilk hata anında durur ve o anın bağlamını saklar; normal koşuda motor kendi hata politikasını uygular. Kullanıcının Durdur eylemi hata sayılmaz.',
         },
@@ -1595,7 +1595,7 @@ const runWait: ToolDef = {
     const s = snapshot()
     const waited = Math.round((Date.now() - started) / 1000)
     if (ctx.isRunning()) {
-      const message = `Koşu hâlâ sürüyor (${waited} sn beklendi, sınır ${Math.round(limit / 1000)} sn): “${s.nodeTitle ?? s.nodeId ?? '—'}” · ${s.observed.done} tamam, ${s.observed.errors} hata.`
+      const message = `Koşu hâlâ sürüyor (${waited} sn beklendi, sınır ${Math.round(limit / 1000)} sn): “${s.nodeTitle ?? s.nodeId ?? '—'}” · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`
       ctx.log('info', `Ajan · bekle · ${message}`)
       return { ok: true, tool: runWait.name, outcome: 'tamam', message, observed: { note: 'Süre doldu, koşu bitmedi.' }, data: { running: true, snapshot: s, waitedMs: Date.now() - started } }
     }
@@ -1617,8 +1617,10 @@ const runWait: ToolDef = {
             ? ' (hata sonrası durdu)'
             : ''
     const message = wasRunning
-      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}${s.review ? ` · ${s.review} adım BAKILMALI (tepkisi net değildi, gönderildi ama doğrulanamadı${s.lastReview ? `: ${s.lastReview.slice(0, 80)}` : ''})` : ''}.`
-      : 'Beklenecek bir koşu yok.'
+      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu${s.lastError ? ` · son hata: ${s.lastError}` : ''}${s.review ? ` · ${s.review} adım BAKILMALI (tepkisi net değildi, gönderildi ama doğrulanamadı${s.lastReview ? `: ${s.lastReview.slice(0, 80)}` : ''})` : ''}.`
+      : s.last
+        ? `Şu an koşu yok. Son koşu (${s.last.runId || '—'}): ${s.last.ok ? 'tamamlandı' : s.last.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${s.last.steps !== undefined ? ` · ${s.last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`
+        : 'Beklenecek bir koşu yok.'
     ctx.log('info', `Ajan · bekle · ${message}`)
     return {
       ok: true,
@@ -1708,7 +1710,7 @@ const runState: ToolDef = {
     else parts.push('Şu an koşu yok.')
     if (chain.length) parts.push(`Kutular: ${chain.join(' › ')}.`)
     if (s.packagePath.length) parts.push(`Paket: ${s.packagePath.length} katman derinde.`)
-    if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adımlar: ${s.observed.done} tamam, ${s.observed.errors} hata.`)
+    if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adımlar: ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`)
     if (ctx.userStop()) parts.push('Durdurma isteği açık.')
     if (s.lastError) parts.push(`Son hata: ${s.lastError}`)
     if (!running && !s.probing && s.last) {
@@ -1735,6 +1737,7 @@ const runState: ToolDef = {
         nodeTitle: s.nodeTitle,
         packagePath: s.packagePath,
         observed: s.observed,
+      stopped: s.stopped,
         last: s.last,
         lastError: s.lastError,
         startedAt: s.startedAt,

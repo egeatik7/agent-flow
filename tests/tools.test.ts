@@ -298,7 +298,10 @@ describe('araç katmanı', () => {
     const c = ctx(graph, { isRunning: () => false })
     const r = await callTool('run.wait', { timeoutMs: 1000 }, c)
     expect(r.ok).toBe(true)
-    expect(r.message).toContain('Beklenecek bir koşu yok')
+    // Koşu yokken elde sonuç varsa o sonuç söylenir: eskiden yalnız "beklenecek koşu yok" deniyordu
+    // ve az önce biten koşunun resmî sonucu gizli kalıyordu (canlı koşuda ölçüldü).
+    expect(r.message).toContain('Son koşu')
+    expect(r.message).toContain('tamamlandı')
     expect(r.data?.running).toBe(false)
     expect((r.data?.last as { ok?: boolean } | null)?.ok).toBe(true)
   })

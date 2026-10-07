@@ -51,6 +51,8 @@ export type RunSnapshot = {
   /** Steps that were sent but whose reaction was not clear: they need a look. */
   review?: number
   lastReview?: string
+  /** Steps a person stopped. Counted apart from errors: a stop is not a failure. */
+  stopped?: number
 }
 
 let run: { graph: AgentGraph; at: number; id: string; startId?: string } | null = null
@@ -75,6 +77,8 @@ let stoppedBy: 'user' | 'debug-error' | 'until' | null = null
 let stopAt: string | null = null
 let stopAtHook: (() => void) | null = null
 let frozen: FrozenReport | null = null
+/** Steps a person stopped, counted apart from errors: a stop is not a failure (CLAUDE.md §4). */
+let stoppedSteps = 0
 /** Steps whose reaction was not clear: sent, but nothing confirmed. They need a look. */
 let review = 0
 let lastReview = ''
@@ -131,6 +135,7 @@ export function beginRun(graph: AgentGraph, startId?: string): string {
   stopAt = null
   stoppedBy = null
   review = 0
+  stoppedSteps = 0
   lastReview = ''
   return id
 }
@@ -188,7 +193,8 @@ export function noteStep(payload: unknown): void {
     done++
     if (current === p.id) current = undefined
   }
-  if (p.status === 'error') errors++
+  if (p.status === 'error') if (stopReason() === 'user') stoppedSteps++
+    else errors++
   steps.push({ id: p.id, status, at: Date.now() })
   if (steps.length > STEP_RING) steps.splice(0, steps.length - STEP_RING)
   // A bounded region test stops once the node it was told to stop after has finished, so nothing
@@ -388,6 +394,8 @@ export function snapshot(): RunSnapshot {
     last,
     /** Steps whose reaction was unclear: sent, but unconfirmed. "0 hata" alone would mislead. */
     review,
+    /** Steps a person stopped. Kept out of `errors` on purpose. */
+    stopped: stoppedSteps,
     lastReview: lastReview || undefined,
   }
 }
