@@ -53,3 +53,5 @@ if ((Test-VisualInput $guard) -or $script:VisualInputRejection -ne 'FOCUS_DISABL
 [XpWin]::Enabled=$true; $guard.visual=$false
 if ((Test-VisualInput $guard) -or $script:VisualInputRejection -ne 'VISUAL_FOCUS_REQUIRED') { throw 'Unverified visual focus accepted' }; $checks++
 Write-Output "PASS: $checks production checks (native APIs mocked; no desktop input)."
+
+$d=Evidence; $d.caret.h=1; $d.caret.w=1; Check $d 'TK_INVALID_CARET'

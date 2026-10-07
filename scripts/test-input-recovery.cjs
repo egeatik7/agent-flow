@@ -17,14 +17,19 @@ function fixture(settings = {}) {
   let stopping = false;
   const calls = [], logs = [], queries = [], queue = [];
   let current = structuredClone(win);
+  let cursor = {x:0,y:0};
   const scan = { area: { ...win.rect }, items: [{ id: 1, text: 'Kaynak klasör', type: 'Text', src: 'ocr', x: 200, y: 500, w: 200, h: 30 }], image: { data: 'mock', w: 1000, h: 700 }, sig: Buffer.alloc(576).toString('base64'), window: 'Renamer', uiaCount: 0, ocrCount: 1 };
   const bridge = {
     isLocked: async () => false, scan: async () => scan, discardShot: () => {},
+    probeInput: async () => ({reason:'NO_COPY'}),
     inputTarget: async opts => { calls.push(['target', structuredClone(opts)]); return structuredClone(current); },
     assertInputTarget: async (...args) => calls.push(['assert', ...args]),
     inputState: async () => ({ type: 'Pane', writable: false, window: 'Renamer' }),
     foreground: async () => ({ title: 'Renamer', pid: 10, hwnd: '100' }),
     clickAt: async (...args) => calls.push(['click', ...args]),
+    moveMouse: async (x,y) => {cursor={x,y};calls.push(['move',x,y]);return {hwnd:100};},
+    cursorPos: async () => cursor,
+    clickCurrentAt: async (x,y,hwnd) => {calls.push(['click',x,y,'left']);calls.push(['currentClick',x,y,hwnd]);},
     typeText: async (...args) => { calls.push(['write', ...args]); return queue.length ? queue.shift() : { value: 'hello', writeSent: true, focusHwnd: '110' }; },
     focusedValue: async () => null,
     sendKeys: async (...args) => calls.push(['keys', ...args]),
@@ -140,34 +145,34 @@ test('Enter focus loss is fatal, no key sent', async () => {
 });
 test('initiative repeated click gets physical/normalized feedback and avoids a blind duplicate', async () => {
   const f = fixture(); let i = 0;
-  f.models.guiStep = async q => { f.queries.push(structuredClone(q)); return ++i <= 2 ? action('click', { x: .3, y: .5 }) : action('click', { x: .7, y: .5 }); };
-  await f.ex.initiative(node('ai', { prompt: 'Select profile', engine: 'screen', maxActions: 2 }), 1);
-  assert.equal(callsOf(f, 'click').length, 2); assert.equal(f.queries.length, 3);
-  assert.match(f.queries[1].history.at(-1).note, /@300,350/); assert.match(f.queries[1].history.at(-1).note, /başarısızlık kanıtı değildir/);
+  f.models.guiStep = async q => { f.queries.push(structuredClone(q)); ++i; return i===1 || i===3 ? action('click',{x:.3,y:.5}) : i===2 || i===5 ? action('clickCurrent') : action('click',{x:.7,y:.5}); };
+  await f.ex.initiative(node('ai', { prompt: 'Select profile', engine: 'screen', maxActions: 4 }), 1);
+  assert.equal(callsOf(f, 'click').length, 2); assert.equal(f.queries.length, 5);
+  assert.match(f.queries[2].history.at(-1).note, /@300,350/); assert.match(f.queries[2].history.at(-1).note, /başarısızlık kanıtı değildir/);
   assert.equal(callsOf(f, 'click')[1][1], 700);
 });
 test('initiative can intentionally double click after selection; there is no automatic double click', async () => {
-  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : action('double', { x: .3, y: .5 });
-  await f.ex.initiative(node('ai', { prompt: 'Open profile', engine: 'screen', maxActions: 2 }), 1);
+  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('double', { x: .3, y: .5 });
+  await f.ex.initiative(node('ai', { prompt: 'Open profile', engine: 'screen', maxActions: 3 }), 1);
   assert.deepEqual(callsOf(f, 'click').map(c => c[3]), ['left', 'double']);
 });
 test('unchanged screen with a focused editable field is valid input focus, not a failed click', async () => {
   const f = fixture(); f.bridge.inputState = async () => ({ type: 'Edit', writable: true, rect: win.rect, window: 'Renamer' });
-  f.models.guiStep = async q => { f.queries.push(structuredClone(q)); return action('click', { x: .3, y: .5 }); };
-  await f.ex.initiative(node('ai', { prompt: 'Focus input', engine: 'screen', maxActions: 2 }), 1);
-  assert.equal(f.queries.length, 2); assert.equal(callsOf(f, 'click').length, 2);
-  assert.equal(f.queries[1].history.at(-1).note, undefined);
+  let turn=0; f.models.guiStep = async q => { f.queries.push(structuredClone(q)); return ++turn % 2 ? action('click', { x: .3, y: .5 }) : action('clickCurrent'); };
+  await f.ex.initiative(node('ai', { prompt: 'Focus input', engine: 'screen', maxActions: 4 }), 1);
+  assert.equal(f.queries.length, 4); assert.equal(callsOf(f, 'click').length, 2);
+  assert.equal(f.queries[2].history.at(-1).note, undefined);
 });
 test('initiative text uses common guarded writer and readback, not direct unsafe typing', async () => {
-  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : action('type', { text: 'hello\n' });
-  await f.ex.initiative(node('ai', { prompt: 'Fill field', engine: 'screen', maxActions: 2 }), 1);
+  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('type', { text: 'hello\n' });
+  await f.ex.initiative(node('ai', { prompt: 'Fill field', engine: 'screen', maxActions: 3 }), 1);
   assert.equal(callsOf(f, 'write')[0][2], false); assert.equal(callsOf(f, 'write')[0][6].window.hwnd, '100');
   assert.equal(callsOf(f, 'keys').filter(c => c[1] === '{ENTER}').length, 1);
 });
 test('initiative Ctrl+A replacement retains input identity', async () => {
-  const f = fixture(); const actions = [action('click', { x: .3, y: .5 }), action('hotkey', { keys: ['ctrl', 'a'] }), action('type', { text: 'hello' })];
+  const f = fixture(); const actions = [action('click', { x: .3, y: .5 }), action('clickCurrent'), action('hotkey', { keys: ['ctrl', 'a'] }), action('type', { text: 'hello' })];
   f.models.guiStep = async () => actions.shift();
-  await f.ex.initiative(node('ai', { prompt: 'Replace field', engine: 'screen', maxActions: 3 }), 1);
+  await f.ex.initiative(node('ai', { prompt: 'Replace field', engine: 'screen', maxActions: 4 }), 1);
   assert.equal(callsOf(f, 'write')[0][3], true); assert.equal(callsOf(f, 'write')[0][6].window.hwnd, '100');
 });
 test('coordinate policy rejects resized/invalid points, preserves negative monitor origin', () => {
@@ -176,4 +181,41 @@ test('coordinate policy rejects resized/invalid points, preserves negative monit
   const area = { x: -1000, y: 20, w: 1000, h: 700 };
   assert.equal(policy.repeatedClick(action('click', { x: .3, y: .5 }), area, { x: -700, y: 370, kind: 'click' }), true);
   assert.equal(policy.repeatedClick(action('double', { x: .3, y: .5 }), area, { x: -700, y: 370, kind: 'click' }), false);
+});
+
+test('logged Tk dummy caret is recovered by fresh OCR/copy proof without another guessed click', async () => {
+ const f=fixture(); await clickField(f);
+ f.scan.items=[{id:9,text:'C:YUser$/ASUS TUF/Ccwnlcad5/Medievel',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
+ f.queue.push(missed,{value:'hello',via:'visual-copy',writeSent:true,focusHwnd:'110'});
+ f.bridge.probeInput=async guard=>{f.calls.push(['probe',guard]);return {token:'opaque',value:'C:\\Users\\ASUS TUF\\Downloads\\Medieval'};};
+ await f.ex.type(writing({pressEnter:true}),2);
+ assert.equal(f.queries.length,0);assert.equal(callsOf(f,'click').length,1);
+ assert.equal(callsOf(f,'write')[1][6].copyToken,'opaque');assert.equal(callsOf(f,'keys').length,1);
+});
+test('unrelated copied field text does not authorize a write', async () => {
+ const f=fixture();await clickField(f);f.scan.items=[{id:9,text:'C:\\Users\\ASUS TUF\\Downloads\\Medieval',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
+ f.queue.push(missed);f.bridge.probeInput=async()=>({token:'opaque',value:'other-key-other-field'});
+ f.models.guiStep=async()=>action('call_user');
+ await assert.rejects(f.ex.type(writing(),2),/alan kurtarılamadı/);
+ assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'keys').length,0);
+});
+test('stop during copy probe prevents delete/write/Enter', async () => {
+ const f=fixture();await clickField(f);f.scan.items=[{id:9,text:'C:\\Users\\ASUS TUF\\Downloads\\Medieval',src:'ocr',type:'Text',x:200,y:505,w:400,h:20}];
+ f.queue.push(missed);f.bridge.probeInput=async()=>{f.stop();return {token:'opaque',value:'C:\\Users\\ASUS TUF\\Downloads\\Medieval'};};
+ await assert.rejects(f.ex.type(writing({pressEnter:true}),2),realRunner.StoppedError);
+ assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'keys').length,0);
+});
+test('coordinate click on Add profile only moves; next screenshot can correct it before clicking', async () => {
+ const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('move',{x:.557,y:.557}),action('clickCurrent'),action('finished')];
+ f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open third existing profile. Do not create a profile.',engine:'screen',maxActions:4}),1),true);
+ assert.equal(callsOf(f,'click').length,1);assert.equal(callsOf(f,'move').length,2);
+ assert.equal(callsOf(f,'click')[0][1],557);assert.equal(callsOf(f,'click')[0][2],390);
+ assert.match(f.queries[1].history.at(-1).note,/NOT sent/);
+ assert.equal(f.queries.every(q=>q.initiative===true),true);
+});
+test('hover then finished cannot claim the proposed click happened', async () => {
+ const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('finished')];f.models.guiStep=async()=>actions.shift();
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open profile',engine:'screen',maxActions:3}),1),false);
+ assert.equal(callsOf(f,'click').length,0);
 });

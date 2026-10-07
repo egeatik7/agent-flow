@@ -1,7 +1,7 @@
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -212,7 +212,7 @@ async function chatOnce(
       const message = `OpenRouter ${res.status}: ${res.text.slice(0, 200)}`
       throw [400, 404, 422].includes(res.status) ? new ModelRejected(message) : new ModelFailed(message)
     }
-    let data: { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
+    let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; error?: { message?: string } }
     try {
       data = JSON.parse(res.text)
     } catch {
@@ -227,6 +227,7 @@ async function chatOnce(
     }
     const content = data.choices?.[0]?.message?.content ?? ''
     reportIn(content)
+    if (data.choices?.[0]?.finish_reason === 'length') throw new ModelRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
     const said = modelSaid(model, content)
     if (said) voiceLogger?.(said)
     return content
@@ -245,7 +246,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; maxTokens?: number } = {},
+  opts: { json?: boolean; maxTokens?: number; validate?: (text: string) => void } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -253,6 +254,7 @@ async function chat(
     try {
       const text = await chatOnce(apiKey, name, messages, hasImage, opts)
       if (!text.trim()) throw new ModelRejected('boş yanıt')
+      opts.validate?.(text)
       return text
     } catch (e) {
       if (!(e instanceof ImageUnsupportedError)) throw e
@@ -260,6 +262,7 @@ async function chat(
       chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
       const text = await chatOnce(apiKey, name, withoutImage, false, opts)
       if (!text.trim()) throw new ModelRejected('boş yanıt')
+      opts.validate?.(text)
       return text
     }
   })
@@ -274,6 +277,15 @@ function parseJson(content: string): Record<string, unknown> {
     }
   }
   return tryParse(content) ?? tryParse(content.match(/\{[\s\S]*\}/)?.[0] ?? '') ?? {}
+}
+
+/** Invalid/truncated output is a model failure, not an observed absent target. */
+export function validateTargetReply(content: string): void {
+  if (content.trim() === 'null') return // legacy explicit no-match
+  const parsed = parseJson(content)
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'id') && !Object.prototype.hasOwnProperty.call(parsed, 'i') && !Object.prototype.hasOwnProperty.call(parsed, 'index')) {
+    throw new ModelRejected('MODEL_TARGET_JSON_INVALID: Geçerli hedef JSON yanıtı alınamadı; hedef bulunamadı sayılmadı')
+  }
 }
 
 export type ScreenChoice = { id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number }
@@ -326,12 +338,12 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
   let content: string
   let usedImage = withImage
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, {}, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateTargetReply }, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
-    content = await chat(opts.apiKey, opts.model, build(false), false)
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateTargetReply })
   }
 
   const decoded = parseJson(content)
@@ -540,7 +552,7 @@ export async function nextAction(opts: {
   system?: string
 }): Promise<AgentAction> {
   const system = opts.system?.trim() || INITIATIVE_PROMPT
-  const text = `Hedef: ${opts.goal}
+  const text = `${INITIATIVE_SCOPE_RULES}\n\nHedef: ${opts.goal}
 Adım: ${opts.stepTitle}
 ${opts.next ? `Bu hedeften sonra akış şuna geçecek: ${opts.next}\n` : ''}${
     opts.lastLap.length ? `Geçen başarılı turda şu sırayla yapıldı (ipucu, ekran farklıysa ekrana uy):\n${opts.lastLap.map((l, i) => `${i + 1}. ${l}`).join('\n')}\n` : ''
@@ -738,13 +750,14 @@ export async function guiStep(opts: {
   keepImages?: number
   tarsPrompt?: string
   jsonPrompt?: string
+  initiative?: boolean
 }): Promise<GuiAction> {
   const keep = Math.max(1, opts.keepImages ?? 4)
   const recent = opts.history.slice(-keep + 1)
   const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
   return runModelChain(asModelChain(opts.model), async (model) => {
     if (isTarsModel(model)) {
-      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt) }]
+      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt) + (opts.initiative ? '\n\n' + INITIATIVE_RULES : '') }]
       for (const t of older) {
         messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
         if (t.note) messages.push({ role: 'user', content: t.note })
@@ -760,7 +773,7 @@ export async function guiStep(opts: {
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
     const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
-    const text = `Hedef: ${opts.goal}
+    const text = `${opts.initiative ? INITIATIVE_RULES + '\n\n' : ''}Hedef: ${opts.goal}
 
 Önceki adımlar:
 ${lines.length ? lines.join('\n') : '(henüz yok)'}

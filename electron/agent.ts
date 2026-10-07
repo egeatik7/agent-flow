@@ -41,6 +41,7 @@ import {
 } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { inside, movedPoint, focusAt, repeatedClick, clickFeedback, type InputGuard, type InputWindow, type Point } from './input-policy'
+import { observedInput, matchesObservedInput } from './custom-input'
 import { rememberShot } from './shots'
 import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
 import type { FindStageId } from './llm-flow'
@@ -1139,6 +1140,28 @@ export function createAgent(ctx: AgentContext) {
           + ', pencere=' + (d?.window || typed.where || '?') + ', HWND=' + (d?.hwnd || '?')
           + ', odak HWND=' + (d?.focusHwnd || '?') + ', caret=' + JSON.stringify(d?.caret ?? null)
           + ', odak kutusu=' + JSON.stringify(d?.rect ?? null) + ', ret=' + (d?.inputRejection || typed.code || '?') + '.')
+        if (!inputWasSent && typed.writeSent !== true && clearField && binding?.at && !binding.mustRetarget && d?.native === 'TkChild' && guard && bridge.probeInput) {
+          // Fresh OCR and actual copied value must agree before ANY destructive input.
+          const scan = await bridge.scan({ image: 'none', fresh: true, uia: false, tilt: false, deferOnnx: true })
+          bridge.discardShot(scan.shot)
+          checkStopped()
+          const observation = observedInput(scan, binding.window, binding.at)
+          if (observation) {
+            const probeGuard = { ...guard, observation }
+            const probe = await bridge.probeInput(probeGuard)
+            checkStopped()
+            if (probe.token && typeof probe.value === 'string' && matchesObservedInput(observation.text, probe.value)) {
+              log('info', 'Tk alanı: yeni OCR satırı ve alandan kopyalanan değer eşleşti; tek kullanımlık odak kanıtıyla yazılıyor.')
+              const result = await bridge.typeText(text, false, clearField, binding.at, undefined, { ...probeGuard, copyToken: probe.token })
+              checkStopped()
+              if (result?.skippedClear || result?.writeSent !== true || result.value == null) throw new Error('INPUT_COPY_WRITE_FAILED: Kopyayla doğrulanan alan yazılamadı; Enter gönderilmedi.')
+              inputWasSent = true
+              reportTyping(result)
+              return result
+            }
+            log('warn', 'Tk alanı kopya kanıtı alınamadı veya OCR metniyle eşleşmedi; silme ve yazma gönderilmedi.' + (probe.reason ? ' ' + probe.reason : ''))
+          }
+        }
         if (!inputWasSent && typed.writeSent !== true && binding && recoveryCount < 2) {
           recoveryCount++
           ctx.setMethod?.('Yazı alanı kurtarma ' + recoveryCount + '/2')
@@ -1153,7 +1176,7 @@ export function createAgent(ctx: AgentContext) {
           + ')' + (typed.where ? ' — ' + typed.where : '') + '. Yazı gönderilmedi; alan kurtarılamadı.')
       }
       inputWasSent = inputWasSent || (!typed?.needChoice && (typed?.writeSent !== false || clearField))
-      if (binding && typed?.via === 'visual-caret' && typed.value == null) {
+      if (binding && ['visual-caret', 'visual-copy'].includes(typed?.via || '') && typed?.value == null) {
         throw new Error('INPUT_READBACK_UNAVAILABLE: Görsel alanın değeri doğrulanamadı; Enter gönderilmedi.')
       }
       reportTyping(typed)
@@ -1436,13 +1459,13 @@ export function createAgent(ctx: AgentContext) {
         if (!karar.ok || !karar.point) {
           log('warn', `Fare konumundan tıklanmadı: ${karar.reason}`)
           clearHover()
-          break
+          return false
         }
         const hoverWindow = hoverOf()?.hwnd
         if (!hoverWindow || !Number.isFinite(hoverWindow) || hoverWindow <= 0) {
           log('warn', 'Fare konumundan tıklanmadı: taşıma anındaki pencere kimliği yok.')
           clearHover()
-          break
+          return false
         }
         try {
           checkStopped()
@@ -1451,13 +1474,14 @@ export function createAgent(ctx: AgentContext) {
           if (e instanceof StoppedError) throw e
           log('warn', `Fare konumundan tıklanmadı: ${(e as Error).message}`)
           clearHover()
-          break
+          return false
         }
         checkStopped()
         lastClickPoint = { x: karar.point.x, y: karar.point.y }
+        lastInput = undefined
         clearHover()
         log('success', `Fare konumundan tıklandı @${Math.round(karar.point.x)},${Math.round(karar.point.y)}`)
-        break
+        return true
       }
       case 'click':
       case 'double':
@@ -1588,6 +1612,8 @@ export function createAgent(ctx: AgentContext) {
     const saved = runPath.get(node.id) ?? node.path
     if (saved?.length && node.templated) {
       log('info', 'Hedefte her tur değişen bir değer ({{öğe}} gibi) var; geçen turun kayıtlı yolu bu tura uymayabileceği için oynatılmıyor, model ekrana bakarak yapacak.')
+    } else if (saved?.some(st => ['click', 'move', 'clickCurrent'].includes(st.action))) {
+      log('info', 'Kayıtlı görsel tıklamalar yeni karede fare konumu değerlendirilmeden oynatılmıyor; model mevcut hedefi yeniden görecek.')
     } else if (saved?.length) {
       const r = await replayPath(saved, vars, tars)
       path = [...r.done]
@@ -1608,6 +1634,7 @@ export function createAgent(ctx: AgentContext) {
     let still = 0
     let quietWaits = 0
     let previousClick: (Point & { kind: string }) | undefined
+    let proposedClickPending = false
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
       ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
@@ -1640,6 +1667,7 @@ export function createAgent(ctx: AgentContext) {
         screen: shot.img,
         tarsPrompt: promptOf(s.llmPrompts, 'tars'),
         jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+        initiative: true,
       })
       checkStopped()
       if (unresolvedClick && repeatedClick(a, shot.area, unresolvedClick)) {
@@ -1648,6 +1676,7 @@ export function createAgent(ctx: AgentContext) {
         a = await guiStep({
           apiKey: s.apiKey, model, goal, history, screen: shot.img,
           tarsPrompt: promptOf(s.llmPrompts, 'tars'), jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+          initiative: true,
         })
         checkStopped()
         if (repeatedClick(a, shot.area, unresolvedClick)) {
@@ -1656,9 +1685,26 @@ export function createAgent(ctx: AgentContext) {
         }
       }
       checkStopped()
+      let moveNote: string | undefined
+      if (proposedClickPending && ['type', 'hotkey', 'drag', 'double', 'right', 'scroll'].includes(a.kind)) {
+        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: 'This action was NOT sent: the proposed target was only hovered, not clicked. Inspect the current pointer and use click_current on the correct target, move elsewhere, or call_user. Do not bypass confirmation with another action.' })
+        log('warn', 'Önerilen hedef henüz tıklanmadı; başka bir eylemle onay atlanmadı.')
+        prev = shot
+        continue
+      }
+      if (a.kind === 'click') {
+        a = { ...a, kind: 'move', raw: JSON.stringify({ action: 'move', x: a.x === undefined ? null : a.x * 1000, y: a.y === undefined ? null : a.y * 1000 }) }
+        proposedClickPending = true
+        moveNote = 'The proposed coordinate click was NOT sent. Only the pointer was moved. Inspect the NEXT screenshot at the marked pointer. If this is the requested target, use click_current. If it is Add/New/Create while the goal requires an existing item, move away; do not create anything.'
+        log('info', 'İnisiyatif tıklama önerisi önce fare hareketine çevrildi; yeni görüntüde hedef görülmeden tıklanmayacak.')
+      } else if (a.kind === 'move') proposedClickPending = true
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
       if (a.kind === 'finished') {
+        if (proposedClickPending) {
+          log('warn', 'Model bitti dedi ama önerilen tıklama gönderilmedi; yalnız fare oynatıldı. İnisiyatif tamamlandı sayılmadı.')
+          return false
+        }
         savePath(node, path, vars)
         log('success', `İnisiyatif tamamlandı (model “bitti” dedi; ${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
         return true
@@ -1687,7 +1733,7 @@ export function createAgent(ctx: AgentContext) {
         }
       } else if (a.kind !== 'wait') quietWaits = 0
 
-      const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img }
+      const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img, ...(moveNote ? { note: moveNote } : {}) }
       try {
         let patch: string | undefined
         if (['click', 'double', 'right', 'drag'].includes(a.kind) && a.x !== undefined && a.y !== undefined) {
@@ -1695,9 +1741,16 @@ export function createAgent(ctx: AgentContext) {
           const py = shot.area.y + a.y * shot.area.h
           patch = (await bridge.patchAt(px, py, 64))?.data
         }
-        await doGui(a, shot.area, node)
+        const h = a.kind === 'clickCurrent' ? hoverOf() : undefined
+        const hovered = h ? { x: h.x, y: h.y } : undefined
+        const sent = await doGui(a, shot.area, node)
+        if (a.kind === 'clickCurrent') {
+          if (sent !== true) throw new Error('INPUT_CLICK_NOT_SENT: Fare konumundan tıklama gönderilmedi; adım kaydedilmedi.')
+          proposedClickPending = false
+        }
         previousClick = ['click', 'double', 'right'].includes(a.kind) && a.x !== undefined && a.y !== undefined
-          ? { x: shot.area.x + a.x * shot.area.w, y: shot.area.y + a.y * shot.area.h, kind: a.kind } : undefined
+          ? { x: shot.area.x + a.x * shot.area.w, y: shot.area.y + a.y * shot.area.h, kind: a.kind }
+          : hovered ? { ...hovered, kind: 'click' } : undefined
         path.push({
           patch,
           action: a.kind as PathStep['action'],
@@ -1714,6 +1767,7 @@ export function createAgent(ctx: AgentContext) {
       } catch (e) {
         if (e instanceof StoppedError) throw e
         turn.note = `Bu eylem yapılamadı: ${(e as Error).message.split('\n')[0]}`
+        if (a.kind === 'clickCurrent') proposedClickPending = true
         log('warn', turn.note)
       }
       history.push(turn)

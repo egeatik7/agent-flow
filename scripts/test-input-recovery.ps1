@@ -20,7 +20,7 @@ public class MockAE {
 }
 public static class XpWin {
  public static long Foreground=100, Focus=110, UnderPoint=100;
- public static bool Live=true, Enabled=true, HasCaret=true;
+ public static bool Live=true, Enabled=true, HasCaret=true, DummyCaret=false;
  public static int TargetPid=10;
  public static IntPtr GetForegroundWindow(){return new IntPtr(Foreground);}
  public static IntPtr FocusHandle(){return new IntPtr(Focus);}
@@ -35,8 +35,8 @@ public static class XpWin {
  public class INFO { public IntPtr hwndFocus,hwndCaret; }
  public static INFO FocusData(){return new INFO { hwndFocus=new IntPtr(Focus), hwndCaret=HasCaret ? new IntPtr(Focus) : IntPtr.Zero };}
  public class RECT { public int left,top,right,bottom; }
- public static RECT BoundsOf(IntPtr h){return new RECT { left=100,top=400,right=600,bottom=430 };}
- public static RECT CaretBounds(INFO i){return new RECT { left=300,top=405,right=301,bottom=425 };}
+ public static RECT BoundsOf(IntPtr h){return DummyCaret ? new RECT { left=0,top=0,right=1000,bottom=700 } : new RECT { left=100,top=400,right=600,bottom=430 };}
+ public static RECT CaretBounds(INFO i){return DummyCaret ? new RECT { left=444,top=369,right=445,bottom=370 } : new RECT { left=300,top=405,right=301,bottom=425 };}
 }
 public static class XpText { public static bool Direct=true; public static bool CanType(string t){return Direct;} public static bool ClipboardHas(string t){ return System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText()==t; } }
 namespace System.Windows.Forms {
@@ -182,3 +182,46 @@ Throws {Invoke-Op 'typeText' @{text=$unicode;clearFirst=$true;guard=$guard;x=300
 $sentAfter = @([System.Windows.Forms.SendKeys]::Sent | Select-Object -Skip $sentBefore)
 Check ($sentAfter -notcontains '^v') 'No paste was sent after the clipboard check failed'
 Write-Host "PASS: $script:Checks total recovery worker checks including Unicode clipboard path."
+
+# Real worker copy proof with the logged Tk 1x1 dummy caret, no native caret bypass.
+[XpWin]::DummyCaret=$true; [XpText]::Direct=$true
+$guard=@{window=$target;at=@{x=662;y=462};observation=@{text='C:\Users\ASUS TUF\Downloads\Medieval';rect=@{x=232;y=456;w=280;h=13}}}
+[System.Windows.Forms.SendKeys]::Sent.Clear();[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
+$r=Invoke-Op 'probeInput' @{guard=$guard}
+Check ($r.token -and $r.value -eq $guard.observation.text) 'Dummy caret allows non-destructive copy evidence, not blind write'
+Check (@([System.Windows.Forms.SendKeys]::Sent | Where-Object {$_ -ne '^a' -and $_ -ne '^c'}).Count -eq 0) 'Probe sends selection/copy only, no delete, paste, type or Enter'
+Check ([System.Windows.Forms.Clipboard]::GetText() -eq 'old clipboard') 'Probe restores clipboard text'
+Check ([System.Windows.Forms.Clipboard]::Current.GetData('Binary',$false).Length -eq 3) 'Probe restores binary clipboard'
+$guard.copyToken=$r.token
+$r=Invoke-Op 'typeText' @{text='hello';clearFirst=$true;guard=$guard;x=662;y=462;pressEnter=$false}
+Check ($r.value -eq 'hello' -and $r.via -eq 'visual-copy' -and $r.writeSent) 'One-use copied value authorizes actual replacement with dummy caret'
+$before=[System.Windows.Forms.SendKeys]::Sent.Count
+Throws {Invoke-Op 'typeText' @{text='again';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_PROOF_STALE' 'Consumed token cannot authorize a second write'
+Check ([System.Windows.Forms.SendKeys]::Sent.Count -eq $before) 'Stale proof sends no input'
+$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
+$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
+[System.Windows.Forms.SendKeys]::FieldText='other value';[System.Windows.Forms.SendKeys]::Sent.Clear()
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_VALUE_CHANGED' 'Changed field value rejects deletion'
+Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('{DEL}')) 'Changed text was not deleted'
+$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
+$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
+$script:CopyInputProof.created=[DateTime]::UtcNow.AddSeconds(-20)
+$before=[System.Windows.Forms.SendKeys]::Sent.Count
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_COPY_PROOF_STALE' 'Expired proof rejects input'
+Check ([System.Windows.Forms.SendKeys]::Sent.Count -eq $before) 'Expired proof sends no keys'
+$guard.Remove('copyToken');[System.Windows.Forms.SendKeys]::FieldText=$guard.observation.text
+$p=Invoke-Op 'probeInput' @{guard=$guard};$guard.copyToken=$p.token
+[XpWin]::Focus=210
+Throws {Invoke-Op 'typeText' @{text='bad';clearFirst=$true;guard=$guard;x=662;y=462}} 'INPUT_FOCUS_CHANGED' 'Focus loss invalidates copy proof before deletion'
+[XpWin]::Focus=110;$guard.Remove('copyToken')
+[System.Windows.Forms.SendKeys]::Sent.Clear();[System.Windows.Forms.Clipboard]::FailCopy=$true
+$p=Invoke-Op 'probeInput' @{guard=$guard}
+Check ($p.reason -eq 'INPUT_COPY_UNAVAILABLE' -and -not $p.token) 'Failed copy grants no proof'
+Check (-not [System.Windows.Forms.SendKeys]::Sent.Contains('{DEL}')) 'Failed copy did not delete'
+[System.Windows.Forms.Clipboard]::FailCopy=$false
+[System.Windows.Forms.SendKeys]::FieldText='';$p=Invoke-Op 'probeInput' @{guard=$guard}
+Check (-not $p.token) 'Empty dummy-caret field cannot be silently authorized'
+$guard.observation.rect.y=300;[System.Windows.Forms.SendKeys]::Sent.Clear()
+$p=Invoke-Op 'probeInput' @{guard=$guard}
+Check ($p.reason -eq 'OBSERVATION_NOT_AT_CLICK' -and [System.Windows.Forms.SendKeys]::Sent.Count -eq 0) 'Unrelated OCR row sends no probe keys'
+Write-Host "PASS: $script:Checks total recovery worker checks including dummy-caret copy proof."
