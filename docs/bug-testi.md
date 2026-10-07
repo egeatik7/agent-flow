@@ -12,9 +12,7 @@ Sınıflar ayrı tutulur: her satır ya **ölçülmüş bir davranış** ya da *
 | **2. Canlı batarya** (`nubbo call …`) | Aynı reddetme yolları **çalışan uygulamaya** karşı | **9 çağrı** | Yalnız **reddetme** yolları: ekrana girdi **gitmez** |
 | **3. Değişmez ölçümü** | Gerçek profilin deposu **bayt bayt** aynı mı | 3 ölçüm (hash · boyut · apiKey) | Salt okuma |
 
-## Bulunan **gerçek** hatalar
-
-(Yalnız iki tanesi gerçek çıktı; ikisi de düzeltildi ve biri canlı doğrulandı.)
+## Bulunan **gerçek** hatalar (iki tane; ikisi de düzeltildi)
 
 ### H1 — Boşluktan oluşan argüman korumayı geçiyordu (DÜZELTİLDİ ✓, canlı doğrulandı ✓)
 `act.type { text: "   " }` ve `act.key { keys: "  " }` **guard'ı geçiyor** ve motora ulaşıyordu.
@@ -28,19 +26,28 @@ denedi**; odak bir metin alanı olsaydı pencereye **boşluk yazacaktı**.
 değişmeden "değişti" demek. **Düzeltme:** boş plan reddedilir
 (*"İşlem listesi boş: ne değişeceğini yaz"*).
 
-### H3 — `flow.suggest` yasak alanı kabul ediyor (AÇIK ✗ — `it.fails` olarak kayıtlı)
-`flow.edit`, `EDITABLE_FIELDS` denetimiyle (`electron/tool-edit.ts:129`) `locator` alanını
-reddeder; **`flow.suggest` aynı denetimi çalıştırmıyor** ve hedef kanıtı alanını kabul ediyor.
-Yani "planı denetle" diyen araç, düzenlemenin reddedeceği bir planı onaylıyor.
-Kabul ölçütü: `flow.suggest` `locator`/`icon`/`memory`/`anchor`/`path`/`trace` alanlarını reddetsin.
+## Geri çekilen bulgular ✗✓ — hata değil, **testimin sözleşme hatası**
 
-### H4 — Dolu çıkış denetimi branch'te temel akışı görmüyor (AÇIK ✗ — `it.fails` olarak kayıtlı)
-Kural `electron/tool-edit.ts:240-248`'de **var** ve düz akışta çalışıyor; ama bir **branch**
-içinde `addNode.connectFrom` çağrıldığında denetim yalnız branch'in kendi eklemelerini görüyor,
-**temel akışta o çıkış zaten dolu olsa bile** kabul ediliyor.
-Sonucu ağırdır: motor bir çıkışta **ilk oku** izler → eklenen node **hiç çalışmaz** ve akış
-sessizce eksik kalır (ürünün §9 "bir öğenin hatası bütün liste tamamlanmış gibi raporlanmasın"
-kuralının akrabası). Kabul ölçütü: branch bağlamında da temel grafiğin dolu çıkışı reddedilsin.
+İlk koşuda "yasak alan kabul edildi" (H3) ve "branch'te dolu çıkış kabul edildi" (H4) diye iki bulgu
+yazmıştım. **Yanlıştı.** İkisi de aracın **kendi sözleşmesini** yanlış okumaktan çıktı:
+
+> Bir **plan** reddi `ok: false` değil, **`ok: true` + `outcome: "plan-gecersiz"`** olarak bildirilir
+> ("araç cevap verdi; plan geçersiz"). `ok: false` ise "araç çalıştırılamadı" demektir.
+
+Sözleşme doğru okunarak sınandığında ikisi de **doğru çalışıyor** ✓:
+- `flow.suggest` `locator` alanını **reddediyor** ✓ (`outcome: plan-gecersiz`, `data.valid: false`, mesajda `locator` ✓)
+- Branch bağlamında dolu çıkışa `addNode.connectFrom` **reddediliyor** ✓ (*"…çıkışında zaten bir bağlantı var"* ✓)
+
+**Ders:** bir kusuru "buldum" demeden önce **aracın sözleşmesini** doğrula. Bu batarya tam da bunu
+yapmadığı için iki yanlış bulgu üretti; ikisi de geri çekildi ve testler doğru sözleşmeye çevrildi.
+
+## Gerçek ve **açık** kalan küçük bulgu ✗ — iki farklı reddetme sözleşmesi
+Araç katmanı bir reddi iki ayrı biçimde bildiriyor ve çağıran hangisini okuyacağını **bilmek zorunda**:
+- `flow.suggest`, `flow.edit` → `ok: true` + `outcome: "plan-gecersiz"` (plan reddi)
+- `run.from`, `branch.show`, `branch.drop`, `target.preview`, `flow.context` → `ok: false` (çağrı reddi)
+
+Bu tutarsızlık bataryayı da yanılttı. Davranışı değiştirmek mevcut çağıranları bozacağı için
+**düzeltilmedi, kayda geçirildi**; tek sözleşmeye alınacaksa sürüm notuyla yapılmalı.
 
 ## Doğru çıkan davranışlar (ölçüldü ✓)
 
@@ -49,13 +56,13 @@ kuralının akrabası). Kabul ölçütü: branch bağlamında da temel grafiğin
 - **Onaysız baştan koşu** ve **sınır = başlangıç** → reddedilir ✓ · **sınırsız başlangıç** → reddedilir ✓
 - **Bilinmeyen koşu kimliği** (`run.report`) → uydurmaz, *"bulunamadı"* der ✓
 - **Sınırlar**: 4. branch reddedilir ✓ · 40 düzenlemede tarif **dolar** ve **mevcut gruplar silinmez** ✓
-- **Yasak alanlar**: `flow.edit` `locator` alanını reddeder ✓ (H3: `suggest` etmiyor ✗)
-- **Dolu çıkış**: düz akışta reddedilir ✓ (H4: branch'te değil ✗) · **tek planda kopar-bağla** çalışır ✓
+- **Yasak alanlar**: `flow.suggest` ve `flow.edit` `locator` alanını **reddeder** ✓
+- **Dolu çıkış**: düz akışta ve **branch bağlamında** reddedilir ✓ · **tek planda kopar-bağla** çalışır ✓
 - **Merge**: deneme her zaman serbest ✓ · **uygulama yalnız panelden** ✓ · geri alma hakkı **bir kez** ✓
 - **Eşzamanlılık**: koşu sürerken `act.click`/`act.type`/`act.key`/`run.from`/`act.wait` **başlamaz** ✓
 - **Hedef aramayan node'lar** (bekleme, bitir, kutu, başlangıç) için `preview` *"bulamadım"* demez ✓
 - **Debug kapanı + arşiv**: üst üste koşular önceki kanıtı **silmez** ✓
-- **Değişmez (en güçlü kontrol)**: bataryadan sonra araç katmanı yalnız `branches` yazar;
+- **Değişmez (en güçlü kontrol)** ✓✓: bataryadan sonra araç katmanı yalnız `branches` yazar;
   **tuvaller bayt bayt aynı** kalır ✓ — ve **gerçek profilin deposu** hash/boyut/apiKey olarak
   **birebir aynı** ✓✓ (canlı batarya dahil)
 
