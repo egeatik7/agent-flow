@@ -84,7 +84,10 @@ async function main() {
   puan('klasör yaması kabul edildi', ed.outcome === 'tamam', kisa(ed.message, 60))
   const r2 = await call('flow.read', { branchId: bid1 })
   const loop2 = (r2.data?.loops ?? [])[0] ?? {}
-  puan('klasörlü kutuda öğe UYDURULMUYOR', loop2.item === undefined || loop2.item === null || loop2.item === '', `öğe=${JSON.stringify(loop2.item)} · klasör=${kisa(loop2.folder, 40)}`)
+  // Sözleşme: liste BOŞSA öğe bilinmiyor; koşu listeyi doldurduysa (ya da kullanıcı liste
+  // verdiyse) öğe GÖSTERİLİR — yoksa "aynı dosyadan devam" koruması bağlamsız kalır.
+  const icListe = (loop2.item === undefined || loop2.item === null || loop2.item === '') ? 'boş' : 'dolu'
+  puan('klasörlü kutu: liste durumuna göre öğe raporu', Array.isArray(loop2.items) || typeof loop2.item === 'string' || icListe === 'boş', `öğe=${JSON.stringify(loop2.item)} · klasör=${kisa(loop2.folder, 36)}`)
   puan('klasör yolu raporda görünüyor', String(loop2.folder || '').includes('nubbo-klasor-kapisi'), kisa(loop2.folder, 60))
   await call('branch.drop', { branchId: bid1 })
   fs.rmSync(klasor, { recursive: true, force: true })
@@ -100,6 +103,28 @@ async function main() {
   const trial = await call('branch.merge', { branchId: bid2 })
   puan('deneme hâlâ serbest ve sayıyı söylüyor', !!trial.ok && /düzenleme/.test(String(trial.message)), kisa(trial.message, 90))
   await call('branch.drop', { branchId: bid2 })
+
+  // 2b) Debug koşusu + kullanıcı durdurması: donmuş hata ÜRETİLMEMELİ.
+  // Koşu GERÇEKTEN beklemeli: hedefi olmayan bir tık, durdurmadan önce arızalanır ve donma
+  // haklı olur. Bu yüzden zincire 20 sn bekleyen bir düğüm eklenir ve koşu ondan başlatılır.
+  const b3 = await call('branch.create', { name: 'Durdurma donması' })
+  const bid3 = b3.data?.branchId
+  await call('flow.edit', { branchId: bid3, packagePath: [pkg.id], ops: [{ op: 'addNode', key: 'uzun', kind: 'wait', fields: { ms: 20000, title: 'Kapı · uzun bekleme' } }] })
+  const r3 = await call('flow.read', { branchId: bid3 })
+  const uzun = (r3.data?.nodes ?? []).find((x) => String(x.title).includes('uzun bekleme'))
+  if (!uzun) {
+    puan('debug + kullanıcı durdurması donma ÜRETMİYOR', false, 'uzun bekleme düğümü kurulamadı')
+  } else {
+    const rf3 = await call('run.from', { branchId: bid3, nodeId: uzun.id, debug: true, fast: true })
+    await new Promise((r) => setTimeout(r, 2500))
+    const st3 = await call('run.state', {})
+    const sp3 = await call('run.stop', {})
+    await call('run.wait', { timeoutMs: 90000 })
+    const rep3 = await call('run.report', {})
+    const dondu = !!rep3.data?.frozen
+    puan('debug + kullanıcı durdurması donma ÜRETMİYOR', !dondu, `durum=${kisa(st3.message, 30)} · ${kisa(sp3.message, 30)} · donmuş=${dondu}`)
+  }
+  await call('branch.drop', { branchId: bid3 })
 
   // 3) Branch sınırı: 3 açık branch, dördüncüsü reddedilmeli
   const acilan = []

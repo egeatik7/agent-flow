@@ -11,6 +11,7 @@
  */
 import {
   NODE_SPECS,
+  listItems,
   loopKeys,
   loopStartIndex,
   normalizeGraph,
@@ -795,7 +796,7 @@ const flowRead: ToolDef = {
           title: node.title,
           total: keys.length,
           // Klasör varsa koşucu klasörü üstün tutar (fromFolder ?? loopKeys); burada öğe uydurulmaz.
-            item: typeof node.folder === 'string' && node.folder.trim() !== '' ? undefined : keys[tick],
+            item: typeof node.folder === 'string' && node.folder.trim() !== '' && listItems(node).length === 0 ? undefined : keys[tick],
           index: tick,
           packagePath,
           memberIds: [...(node.members ?? [])],
@@ -1315,8 +1316,10 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
     // The previous action's target is a hint, not an answer: it only helps tell two same-named
     // controls apart, and only while it is recent.
     const near = actPointWithin(60_000)
-    if (near && !spec.fields.locator && spec.kind !== 'wait' && spec.kind !== 'key') {
-      spec.fields.locator = { x: near.x, y: near.y }
+    // Konum ipucu `anchor` olarak taşınır: `locator` verilseydi UIA aşaması
+    // (stage === 'uia' && !loc) devre dışı kalırdı; anchor yalnız beraberlik bozar.
+    if (near && !spec.fields.anchor && spec.kind !== 'wait' && spec.kind !== 'key') {
+      spec.fields.anchor = { x: near.x, y: near.y }
     }
     const agent = createAgent({
       log: (level, message) => {

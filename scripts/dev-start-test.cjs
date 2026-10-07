@@ -131,39 +131,50 @@ async function main() {
     }
     // Kapatma sonrası dosya hemen serbest kalmayabilir (EBUSY): kopya kısa aralıklarla tekrar
     // denenir. Ölçüldü: beş bataryalık bir turda ikinci yarı tam bu yüzden koşamamıştı.
-      // Jeton eski ya da silinmişse kalan bir test örneği dosyayı kilitli tutabilir; kopya EBUSY ile
-  // düşer. Kapatma ölçütü pencere damgasıdır: test örneğinin başlığında "test profili" yazar,
-  // sahibinin gerçek uygulamasının başlığında yazmaz. Damga yoksa dokunulmaz.
-  try {
-    const bulunan = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-Command', "Get-Process | Where-Object { $_.MainWindowTitle -like '*test profili*' } | ForEach-Object { $_.Id }"],
-      { encoding: 'utf8' }
-    )
-    for (const ham of String(bulunan).split(/\r?\n/)) {
-      const damgaPid = Number(String(ham).trim())
-      if (Number.isFinite(damgaPid) && damgaPid > 0) {
-        spawnSync('taskkill', ['/PID', String(damgaPid), '/T', '/F'], { stdio: 'ignore' })
-        console.log(`  damgası doğrulanmış test örneği kapatıldı: pid ${damgaPid}`)
-        await sleep(600)
-      }
-    }
-  } catch {
-    /* süpürme yapılamadı; kopya yine de denenir */
-  }
-  
   let kopyaHata = null
-    for (let kopyaDenemesi = 0; kopyaDenemesi < 12; kopyaDenemesi++) {
+    for (let kopyaDenemesi = 0; kopyaDenemesi < 20; kopyaDenemesi++) {
+      // Kopya kilitliyse (EBUSY) kilidi tutan test örneğini BİR KEZ süpür. Normal yolda hiçbir
+      // süreç kapatılmaz. Kimlik dar doğrulanır: başlık "TEST · " ile başlamalı VE süreç ya
+      // Nubbo Agent Studio.exe olmalı ya da ebeveyni Nubbo-test.exe (bizim kopya) olmalı.
+      if (kopyaDenemesi === 1) {
+        try {
+          const bulunan = execFileSync(
+            'powershell.exe',
+            ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'dev-sweep-test.ps1')],
+            { encoding: 'utf8' }
+          )
+          for (const satir of String(bulunan).split(/\r?\n/)) {
+            const [hamPid, ad, ebeveyn, baslik] = String(satir).split('|')
+            const damgaPid = Number(String(hamPid).trim())
+            const bizimKopya = String(ebeveyn || '').toLowerCase().endsWith('nubbo-test.exe')
+            const nubboApp = String(ad || '').trim().toLowerCase() === 'nubbo agent studio.exe'
+            const damga = String(baslik || '').includes('test profili')
+            if (Number.isFinite(damgaPid) && damgaPid > 0 && damga && (nubboApp || bizimKopya)) {
+              spawnSync('taskkill', ['/PID', String(damgaPid), '/T', '/F'], { stdio: 'ignore' })
+              console.log(`  kopyayı kilitleyen test örneği kapatıldı: pid ${damgaPid} · “${baslik}”`)
+              await sleep(600)
+            }
+          }
+        } catch {
+          /* süpürme yapılamadı; kopya yine denenir */
+      }
+          }
       try {
         fs.copyFileSync(packed, exe)
         kopyaHata = null
         break
       } catch (e) {
         kopyaHata = e
-        await sleep(500)
+        await sleep(1000)
       }
     }
-    if (kopyaHata) throw kopyaHata
+    if (kopyaHata) {
+    // Ham EBUSY yığını yerine ne olduğunu söyle: kilit genelde yeni yazılan exe'yi tarayan
+    // savunma yazılımıdır ya da kapanmakta olan bir örnektir.
+    console.error(`  Kopya 20 saniyede başarılamadı: ${exe}`)
+    console.error(`  Dosya kilitli (${kopyaHata.code || kopyaHata.message}). Kilidi tutan süreç kapanınca yeniden dene.`)
+    process.exit(3)
+  }
   }
   if (!fs.existsSync(exe)) {
     console.error(`  test exe yok: ${exe}`)

@@ -219,6 +219,9 @@ export function noteStep(payload: unknown): void {
  */
 function openFailure(nodeId: string, kind: 'step' | 'run', message?: string): void {
   if (frozen || !run) return
+  // Yorumun söylediği kural burada uygulanır: kullanıcının Durdur'u asla kayıt açmaz.
+  // Adım olayı yolu da buradan geçer, o yüzden koruma tek yerde durur.
+  if (stopReason() === 'user') return
   const snap = snapshot()
   frozen = {
     runId: run.id,
@@ -252,6 +255,8 @@ export function completeFailure(message: string): void {
 /** A runner-level failure that never produced a step event (a broken output, a thrown error). */
 export function noteRunFailed(message: string): void {
   if (!debugRun) return
+  // Kullanıcı durdurduysa bu bir arıza değildir: donmuş hata oluşturulmaz (CLAUDE.md §4).
+  if (stopReason() === 'user') return
   if (frozen) {
     completeFailure(message)
     return
