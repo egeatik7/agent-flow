@@ -767,7 +767,21 @@ const flowRead: ToolDef = {
   sendsInput: false,
   ready: true,
   run: async (args, ctx) => {
-    const graph = graphOf(args, ctx)
+    // Bir branch, TÜRETİLMİŞ grafiğiyle okunur: flow.edit'in eklediği node'ların gerçek id'leri
+    // ancak böyle öğrenilebilir. flow.suggest bunu açıkça söylüyor ("yeni node'ların gerçek
+    // id'lerini uygulamadan sonra flow.read ile al"), ama flow.read branchId'yi yok sayıyordu ve
+    // eklenen node listede görünmüyordu — canlı bataryada ölçüldü.
+    let graph = graphOf(args, ctx)
+    let branchNote = ''
+    const askBranch = branchArg(args)
+    if (askBranch.asked) {
+      if (!askBranch.id) return failed(flowRead.name, EMPTY_BRANCH)
+      const picked = pickBranch(args, ctx)
+      if ('error' in picked) return failed(flowRead.name, picked.error)
+      graph = picked.view.derived as AgentGraph
+      branchNote = ` · branch “${picked.branch.name}”`
+      if (picked.view.failed.length) branchNote += ` (${picked.view.failed.length} grup uymuyor)`
+    }
     const nodes: (NodeRef & { summary: string })[] = []
     const loops: (LoopRef & { packagePath: string[]; memberIds: string[] })[] = []
     const packages: { id: string; title: string; packagePath: string[]; nodes: number }[] = []
@@ -804,7 +818,7 @@ const flowRead: ToolDef = {
     const book = ctx.getCanvases?.() ?? null
     const active = book ? book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0] : null
     const where = active ? ` · tuval: “${active.name}”${book && book.tabs.length > 1 ? ` (${book.tabs.length} tuval)` : ''}` : ''
-    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü · ${edges} bağlantı (paketlerin içi dahil)${where}.`
+    const message = `${nodes.length} node · ${packages.length} paket · ${loops.length} döngü · ${edges} bağlantı (paketlerin içi dahil)${where}${branchNote}.`
     ctx.log('info', `Ajan · akışı oku · ${message}`)
     return {
       ok: true,
