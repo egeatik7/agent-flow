@@ -794,7 +794,8 @@ const flowRead: ToolDef = {
           id: node.id,
           title: node.title,
           total: keys.length,
-          item: keys[tick],
+          // Klasör varsa koşucu klasörü üstün tutar (fromFolder ?? loopKeys); burada öğe uydurulmaz.
+            item: typeof node.folder === 'string' && node.folder.trim() !== '' ? undefined : keys[tick],
           index: tick,
           packagePath,
           memberIds: [...(node.members ?? [])],
