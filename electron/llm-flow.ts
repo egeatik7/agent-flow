@@ -23,13 +23,48 @@ export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
   { id: 'stall', title: 'Takılma', note: 'Hedef bulunamazsa akış bu prompt ile bekler, sürer ya da durur.' },
 ]
 
-export const DEFAULT_FIND_OFF: FindStageId[] = ['list']
+// Hiçbir aşama varsayılan olarak kapalı değil: "Kelime listesi → yazı modeli" (OCR listesinin
+// yazı modeline gittiği aşama) varsayılan olarak AÇIK. "Kayıtlı konum" (offset) aşaması ayrıdır
+// ve bu değişiklikten etkilenmez.
+export const DEFAULT_FIND_OFF: FindStageId[] = []
 
-export const LIST_PROMPT = `You are a Windows desktop automation agent. You receive a numbered list of the text and controls visible on the screen (UIA = a control the application reported, Text = writing read from the screenshot by OCR).
-The user is about to click somewhere on the screen: choose the text or control to click.
-The name in the instruction may not match the on-screen text exactly (Turkish suffixes, letter case, OCR mistakes): choose the item that fits the meaning. Judge location phrases (at the top, on the right, at the bottom) from the coordinates. Also consider the application name, picture its layout, and decide which area should be clicked.
-Reply with JSON only: {"id": <number or null>, "text": "<the text to click>", "reason": "<short reason>"}
-If no item fits, set id to null.`
+export const LIST_PROMPT = `You are a Windows desktop automation agent. You receive a numbered list of visible text and controls. UIA means a control reported by an application; Text means writing detected by OCR.
+
+Choose the text or control that matches the user's click instruction.
+
+Use each item's physical coordinates, normalized center position, nearby-item hints, and measured screen regions when available. Interpret directions relative to the captured screen area.
+
+Nearby OCR boxes may be parts of the same label, such as "Google" above "Chrome". Treat proximity as a clue, not proof. Keep the original item IDs; never invent a combined ID.
+
+Respect the requested location and surface. A desktop shortcut is not interchangeable with a taskbar button or an item inside an application. If only targets on the wrong surface are available, return id:null.
+
+Use measured taskbar boundaries when provided. Taskbars may be on any screen edge. An item near the bottom is not necessarily on the taskbar. If region information is unavailable, do not invent it.
+
+Allow Turkish suffixes, letter-case differences, and plausible OCR mistakes. Use application context to interpret observed candidates, but do not invent controls or assume a familiar layout proves their presence.
+
+Reply with JSON only:
+{"id": <original item number or null>, "text": "<observed target text>", "reason": "<short reason>"}
+
+If no observed item fits the instruction, set id to null.`
+
+/** Liste aşamasında eylem cümlesi: tıklama ve yazma için ayrı. */
+export const LIST_CLICK_SENTENCE = "Choose the text or control that matches the user's click instruction."
+export const LIST_TYPE_SENTENCE = "Choose the text field (search box, Edit, input) that matches the user's typing instruction."
+
+/**
+ * "Kelime listesi → yazı modeli" aşamasının sistem promptu.
+ *
+ * Kayıtlı metin varsa o kullanılır (kullanıcının özel promptu korunur); yoksa yerleşik LIST_PROMPT.
+ * Eylem cümlesi node türüne göre değiştirilir; cümle bulunamazsa sona eklenir (metin değişse de tutar).
+ */
+export function listPromptFor(kind: string, saved?: string): string {
+  const taban = typeof saved === 'string' && saved.trim() ? saved : LIST_PROMPT
+  const cumle = kind === 'type' ? LIST_TYPE_SENTENCE : LIST_CLICK_SENTENCE
+  if (taban.includes(LIST_CLICK_SENTENCE)) return taban.split(LIST_CLICK_SENTENCE).join(cumle)
+  if (kind === 'type' && taban.includes(LIST_TYPE_SENTENCE)) return taban
+  return `${taban}${taban.endsWith('\n') ? '' : '\n'}\n${cumle}`
+}
+
 
 export const TARS_TEMPLATE = `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
 

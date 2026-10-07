@@ -1,6 +1,6 @@
 import { spatialItems, spatialContext } from './spatial-context'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -292,17 +292,8 @@ export async function chooseScreenTarget(opts: {
   system?: string
 }): Promise<ScreenChoice> {
   const { scan } = opts
-  const action =
-    opts.kind === 'type'
-      ? 'The user is about to type into a text field: choose the FIELD to type into (search box, Edit, input).'
-      : 'The user is about to click somewhere on the screen: choose the text or control to click.'
-
-  const system =
-    opts.system?.trim() ||
-    LIST_PROMPT.replace(
-      'The user is about to click somewhere on the screen: choose the text or control to click.',
-      action
-    )
+  // Eylem cumlesi ve yerlesik/kayitli secim tek yerde: llm-flow.listPromptFor (saf, test edilir).
+  const system = listPromptFor(opts.kind, opts.system)
 
   const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
 Items (#number type "text" @x,y widthxheight):

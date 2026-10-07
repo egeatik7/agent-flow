@@ -41,7 +41,7 @@ import {
 } from './graph-types'
 import { branchesOf, toolLayerSave, windowSave } from './tool-branch'
 import { listDirEntries } from './list-dir'
-import { normalizeFind, normalizePrompts } from './llm-flow'
+import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 /** How long an approval question waits before the caller is told "no". */
@@ -76,7 +76,7 @@ function getSettings(): AppSettings {
   s.valueLo = ramp.lo
   s.valueHi = ramp.hi
   bridge.setValueRamp(ramp.lo, ramp.hi)
-  const find = normalizeFind(s.findOrder, s.findOff === undefined ? ['list'] : s.findOff)
+  const find = normalizeFind(s.findOrder, s.findOff === undefined ? DEFAULT_FIND_OFF : s.findOff)
   s.findOrder = find.order
   s.findOff = find.off
   s.llmPrompts = normalizePrompts(s.llmPrompts)
