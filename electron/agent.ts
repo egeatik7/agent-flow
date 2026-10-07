@@ -1680,39 +1680,27 @@ export function createAgent(ctx: AgentContext) {
       }
       checkStopped()
       let moveNote: string | undefined
-      if (proposedClickPending && ['type', 'hotkey', 'drag', 'scroll'].includes(a.kind)) {
-        history.push({ thought: a.thought, raw: a.raw, image: shot.img, note: 'This action was NOT sent: the proposed target was only hovered, not clicked. Inspect the current pointer and choose click, double or right on the prepared target (click_current is optional), move elsewhere, or call_user. Do not bypass target preparation with another action.' })
-        log('warn', 'Önerilen hedef henüz tıklanmadı; başka bir eylemle onay atlanmadı.')
-        prev = shot
-        continue
-      }
       let observedClickWindow: number | undefined
       if (['click', 'double', 'right'].includes(a.kind)) {
+        // KULLANICI KARARI: tıklama türünü LLM seçer ve **istediği gibi tıklar**. "Hazırlanmış
+        // nokta" ön koşulu ve tıklamayı harekete çeviren eski mod kaldırıldı; model üzerine
+        // getirip nişan almayı bitirdikten sonra kendi click/double/right'ını gönderir.
+        // Pencere damgası yalnız imleç kaydı bu noktayla uyuşuyorsa verilir; örtülme ve kabuk
+        // kontrolünü worker kendi içinde yapar (masaüstü kısayolu dahil).
         const h = hoverOf()
         const cursor = h ? await bridge.cursorPos() : undefined
         checkStopped()
-        const decision = hoverDecision(cursor)
         const p = { x: shot.area.x + (a.x ?? NaN) * shot.area.w, y: shot.area.y + (a.y ?? NaN) * shot.area.h }
-        const prepared = proposedClickPending && h && h.hwnd && h.hwnd > 0 && decision.ok
+        const ayniNokta = !!h && !!h.hwnd && h.hwnd > 0 && hoverDecision(cursor).ok
           && Math.hypot(p.x - h.x, p.y - h.y) <= HOVER_TOLERANCE_PX
-        if (prepared) {
-          // The model inspected a fresh frame and chose its OWN click type.
-          observedClickWindow = h.hwnd
-        } else {
-          const proposed = a.kind
-          a = { ...a, kind: 'move', raw: JSON.stringify({ action: 'move', x: a.x === undefined ? null : a.x * 1000, y: a.y === undefined ? null : a.y * 1000 }) }
-          proposedClickPending = true
-          moveNote = 'The proposed ' + proposed + ' was NOT sent. Only the pointer was moved. Inspect the NEXT screenshot. On the correct target choose your own normal click, double or right with coordinates; click_current is only an optional single click. If the target is wrong, move elsewhere. The executor never chooses a click type for you.'
-          log('info', 'Önce hedef konumu belirleniyor; tıklama türünü model sonraki görüntüde seçecek.')
-        }
-      } else if (a.kind === 'move') proposedClickPending = true
+        if (ayniNokta) observedClickWindow = h!.hwnd
+        proposedClickPending = false
+      }
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
 
       if (a.kind === 'finished') {
-        if (proposedClickPending) {
-          log('warn', 'Model bitti dedi ama önerilen tıklama gönderilmedi; yalnız fare oynatıldı. İnisiyatif tamamlandı sayılmadı.')
-          return false
-        }
+        // §17: model "bitti" dediğinde mekanizma ikinci bir yargı koymaz; eski "önerilen tıklama
+        // gönderilmedi" reddi kaldırıldı (kullanıcı kararı).
         savePath(node, path, vars)
         log('success', `İnisiyatif tamamlandı (model “bitti” dedi; ${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
         return true

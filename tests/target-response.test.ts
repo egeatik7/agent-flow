@@ -36,7 +36,10 @@ describe('target response failures', () => {
     expect(req.messages[0].content).toBe('SAVED CUSTOM')
     expect(req.messages[1].content[0].text).toContain('return finished/done immediately')
     expect(req.messages[1].content[0].text).toContain('Add/New/Create')
-    expect(req.messages[1].content[0].text).toContain('choose the ordinary click, double or right')
+    // Kullanıcı kararı: tıklama türünü LLM seçer ve executor onu OLDUĞU GİBİ uygular;
+    // eski "hazırlanmış nokta yoksa tıklama harekete çevrilir" sözleşmesi kaldırıldı.
+    expect(req.messages[1].content[0].text).toContain('The click is YOUR choice')
+    expect(req.messages[1].content[0].text).toContain('never turns your click into a move')
     expect(req.messages[1].content[0].text).toContain('click_current is optional')
     expect(req.messages[1].content[0].text).toContain('On the NEXT screenshot')
   })
