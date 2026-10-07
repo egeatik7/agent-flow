@@ -48,6 +48,9 @@ export type RunSnapshot = {
   probing: boolean
   /** How the previous run ended, kept after it is over. */
   last: RunResult | null
+  /** Steps that were sent but whose reaction was not clear: they need a look. */
+  review?: number
+  lastReview?: string
 }
 
 let run: { graph: AgentGraph; at: number; id: string; startId?: string } | null = null
@@ -72,6 +75,9 @@ let stoppedBy: 'user' | 'debug-error' | 'until' | null = null
 let stopAt: string | null = null
 let stopAtHook: (() => void) | null = null
 let frozen: FrozenReport | null = null
+/** Steps whose reaction was not clear: sent, but nothing confirmed. They need a look. */
+let review = 0
+let lastReview = ''
 /** Reports of earlier runs, newest first: a new run must not erase what the last one found. */
 let archive: FrozenReport[] = []
 const ARCHIVE_MAX = 3
@@ -124,6 +130,8 @@ export function beginRun(graph: AgentGraph, startId?: string): string {
   // A bounded test belongs to one run: the boundary and the reason start clean every time.
   stopAt = null
   stoppedBy = null
+  review = 0
+  lastReview = ''
   return id
 }
 
@@ -283,6 +291,27 @@ export function setErrorStopHook(fn: (() => void) | null): void {
   stopOnError = fn
 }
 
+/**
+ * "Bakılması gereken" adımlar.
+ *
+ * Motor, tepkisi net olmayan bir eylemden sonra akışı bozmaz: uyarır ve devam eder. Bu doğru bir
+ * politika, ama sonuç "0 hata" diye okununca yalan söylenmiş olur — bir kez bizzat yaşandı: tıklama
+ * ıskaladı, akış devam etti, sonuç temiz göründü, ekranda ise hiçbir şey olmamıştı. Bu yüzden bu
+ * satırlar sayılır ve sonuç "bakılmalı" diye söylenir.
+ */
+export function noteReview(message: string): void {
+  review += 1
+  lastReview = message
+}
+
+export function reviewCount(): number {
+  return review
+}
+
+export function lastReviewLine(): string {
+  return lastReview
+}
+
 /** Called when a bounded region test reaches the node it was told to stop after. */
 export function setStopAtHook(fn: (() => void) | null): void {
   stopAtHook = fn
@@ -357,5 +386,8 @@ export function snapshot(): RunSnapshot {
     packagePath: context?.packagePath ?? [],
     probing: !!probe,
     last,
+    /** Steps whose reaction was unclear: sent, but unconfirmed. "0 hata" alone would mislead. */
+    review,
+    lastReview: lastReview || undefined,
   }
 }

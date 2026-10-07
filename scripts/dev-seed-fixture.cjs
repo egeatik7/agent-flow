@@ -214,6 +214,78 @@ if (mode === 'ui') {
   }
   canvasName = 'Blender'
   summary = 'Başlangıç → win+d (masaüstünü aç) → win+r → yaz(başlat komutu + Enter) → 9 sn → Bitir'
+} else if (mode === 'redsuzanne') {
+  // TAM GOREV, YALNIZ ARAYUZ: Blender'i ac, menuden Suzanne'i koy, Material sekmesinden yeni
+  // materyal olustur, Base Color kutusunu ac, Hex alanina FF0000 yaz. Betik yok, Python yok.
+  const w = (id, ms, x) => {
+    const n = createNode('wait', x, 0, 1)
+    n.id = id
+    n.title = `Kırmızı Suzanne · ${ms / 1000} sn`
+    n.ms = ms
+    return n
+  }
+  const clk = (id, title, prompt, x) => {
+    const n = createNode('click', x, 0, 1)
+    n.id = id
+    n.title = title
+    n.prompt = prompt
+    return n
+  }
+  const key = createNode('key', 200, 0, 1)
+  key.id = 'rs2-run'
+  key.title = 'Blender · Çalıştır'
+  key.keys = 'win+r'
+  const w1 = w('rs2-w1', 900, 320)
+  const type = createNode('type', 440, 0, 1)
+  type.id = 'rs2-type'
+  type.title = 'Blender · başlat komutunu yaz'
+  type.text = '"C:\\Users\\ASUS TUF\\AppData\\Local\\Temp\\nubbo-blender-open.cmd"'
+  type.pressEnter = true
+  type.clearFirst = true
+  const w2 = w('rs2-w2', 15000, 560)
+  const add = clk('rs2-add', 'Menü · “Add”', 'Add', 680)
+  const w3 = w('rs2-w3', 1200, 800)
+  const mesh = clk('rs2-mesh', 'Menü · “Mesh”', 'Mesh', 920)
+  const w4 = w('rs2-w4', 1200, 1040)
+  const monkey = clk('rs2-monkey', 'Menü · “Monkey”', 'Monkey', 1160)
+  const w5 = w('rs2-w5', 1500, 1280)
+  const tab = clk(
+    'rs2-tab',
+    'Material Properties sekmesi',
+    'Properties panel header: the Material tab icon (red-and-white sphere), right side of the header',
+    1400
+  )
+  const w6 = w('rs2-w6', 1500, 1520)
+  const neu = clk(
+    'rs2-new',
+    '“New” düğmesi (materyal paneli)',
+    'the New button inside the Material properties panel: the button labelled exactly New that sits on the same row as the words Material Properties',
+    1640
+  )
+  const w7 = w('rs2-w7', 1800, 1760)
+  const swatch = clk(
+    'rs2-swatch',
+    'Base Color kutusu',
+    'the colour swatch: the only colour patch in the row of the label Base Color, a short vertical rectangle immediately to the LEFT of that label',
+    1880
+  )
+  const w8 = w('rs2-w8', 1500, 2000)
+  const hex = clk('rs2-hex', 'Hex alanı', 'the Hex text field at the bottom of the colour picker dialog', 2120)
+  const w9 = w('rs2-w9', 1200, 2240)
+  const val = createNode('type', 2360, 0, 1)
+  val.id = 'rs2-val'
+  val.title = 'Kırmızı · FF0000 yaz'
+  val.text = 'FF0000'
+  val.pressEnter = true
+  val.clearFirst = true
+  const w10 = w('rs2-w10', 1500, 2480)
+  const end = createNode('end', 2600, 0)
+  end.id = 'rs2-end'
+  const nodes = [start, key, w1, type, w2, add, w3, mesh, w4, monkey, w5, tab, w6, neu, w7, swatch, w8, hex, w9, val, w10, end]
+  const edges = nodes.slice(0, -1).map((n, i) => ({ id: `rs2-e${i}`, from: n.id, fromPort: 'next', to: nodes[i + 1].id }))
+  graph = { nodes, edges }
+  canvasName = 'Kırmızı Suzanne'
+  summary = 'Başlangıç → Blender aç → Add/Mesh/Monkey → Material sekmesi → New → Base Color → Hex → FF0000 (yalnız arayüz)'
 } else if (mode === 'suzannered') {
   // Suzanne duruyor; simdi YALNIZ arayuzle kirmizi materyal: Material sekmesi -> New -> Base Color
   // -> renk secicinin Hex alanina FF0000. Simge/kutu oldugu icin gorsel basamak gosterir.
@@ -236,7 +308,7 @@ if (mode === 'ui') {
   const swatch = createNode('click', 1180, 0, 1)
   swatch.id = 'sr-swatch'
   swatch.title = 'Kırmızı · Base Color kutusu'
-  swatch.prompt = 'the small colour swatch (a dark grey rectangle) immediately to the LEFT of the words Base Color, at the left end of that same row'
+  swatch.prompt = 'the colour swatch: the only colour patch in the row of the label Base Color, a short vertical rectangle immediately to the LEFT of that label in the Material properties panel'
   const w3 = createNode('wait', 1400, 0, 1)
   w3.id = 'sr-w3'
   w3.title = 'Kırmızı · 1,5 sn'

@@ -11,11 +11,13 @@ import {
   noteRunFailed,
   noteStep,
   noteUserStop,
+  noteReview,
   recentReports,
   setDebugRun,
   setErrorStopHook,
   setStopAt,
   setStopAtHook,
+  snapshot,
   stopReason,
 } from '../electron/tool-state'
 
@@ -186,6 +188,20 @@ describe('koşu raporu', () => {
     // yerinde duruyor. (Eskiden setDebugRun onu siliyordu.)
     expect(frozenReport(first)?.error).toBe('ilk hata')
     expect(recentReports().some((r) => r.runId === first)).toBe(true)
+  })
+
+  it('tepkisi net olmayan adımlar sayılır: "0 hata" tek başına yeterli değil', () => {
+    const g = flow()
+    beginRun(g)
+    expect(snapshot().review).toBe(0)
+    noteReview('Tepki net değil (ekran değişmedi, tuş tepki vermemiş olabilir). Akış bozulmadan sıradaki adım kontrol edilecek.')
+    noteReview('Tepki net değil (ekran değişti; beklenen sonuç belirtilmediği için eylem doğrulanamadı).')
+    expect(snapshot().review).toBe(2)
+    expect(String(snapshot().lastReview)).toContain('doğrulanamadı')
+    // Yeni koşu sayacı sıfırlar.
+    endRun({ ok: true })
+    beginRun(g)
+    expect(snapshot().review).toBe(0)
   })
 
   it('yeni koşu günlük kuyruğunu temizler', () => {

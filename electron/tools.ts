@@ -44,7 +44,7 @@ import {
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { actionGraph, runAction, type ActSpec } from './tool-act'
-import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, setStopAt, snapshot, stopReason, actPointWithin, noteActPoint } from './tool-state'
+import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, reviewCount, lastReviewLine, setStopAt, snapshot, stopReason, actPointWithin, noteActPoint } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -1327,6 +1327,22 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
       return { ok: false, tool: name, outcome: 'hata', message, data: { logs: logs.slice(-16), status: r.status, ms: r.ms, stages: t.stages } }
     }
     if (r.status === 'done') {
+      // "Gönderildi" ile "oldu" arasındaki fark: moturun kendi uyarısı varsa bu adım doğrulanmış
+      // sayılmaz. Sessizce "tamam" demek, ekranda hiçbir şey olmamışken başarı raporlamak olur.
+      const unclear = logs.some((l) => /Tepki net değil|Akış bozulmadan sıradaki adım/.test(l))
+      if (unclear) {
+        const message = `${spec.title} gönderildi ama tepkisi net değil; ekranda beklenen sonuç doğrulanmadı, bakılmalı (${r.ms} ms). ${where}`
+        ctx.log('warn', `Ajan · eylem · ${message}`)
+        return {
+          ok: true,
+          tool: name,
+          outcome: 'eylem-belirsiz',
+          message,
+          action: { kind: spec.kind, sent: true },
+          observed: { note: 'Girdi gönderildi; sonuç doğrulanamadı. Başarı sayılmaz.' },
+          data: { logs: logs.slice(-16), status: 'done-unclear', ms: r.ms, stages: t.stages },
+        }
+      }
       const message = `${spec.title} yapıldı (${r.ms} ms). ${where}`
       ctx.log('info', `Ajan · eylem · ${message}`)
       return { ok: true, tool: name, outcome: 'tamam', message, action: { kind: spec.kind, sent: true }, data: { logs: logs.slice(-16), status: 'done', ms: r.ms, stages: t.stages } }
@@ -1577,7 +1593,7 @@ const runWait: ToolDef = {
             ? ' (hata sonrası durdu)'
             : ''
     const message = wasRunning
-      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}.`
+      ? `Koşu bitti (${waited} sn beklendi): ${last?.ok ? 'tamamlandı' : last?.stopped ? 'durduruldu' : 'hata ile bitti'}${why}${tail}${last?.steps !== undefined ? ` · ${last.steps} adım` : ''} · ${s.observed.done} tamam, ${s.observed.errors} hata${s.lastError ? ` · son hata: ${s.lastError}` : ''}${s.review ? ` · ${s.review} adım BAKILMALI (tepkisi net değildi, gönderildi ama doğrulanamadı${s.lastReview ? `: ${s.lastReview.slice(0, 80)}` : ''})` : ''}.`
       : 'Beklenecek bir koşu yok.'
     ctx.log('info', `Ajan · bekle · ${message}`)
     return {

@@ -598,13 +598,62 @@ export function createAgent(ctx: AgentContext) {
       jsonPrompt: promptOf(s.llmPrompts, 'screen'),
     })
     trace(node, { kind: 'model', source: 'tars', value: action })
-    const pointed = (action.kind === 'click' || action.kind === 'double' || action.kind === 'right') && typeof action.x === 'number' && typeof action.y === 'number'
+    let pointed = (action.kind === 'click' || action.kind === 'double' || action.kind === 'right') && typeof action.x === 'number' && typeof action.y === 'number'
+    let a = res.area
+    let thought = action.thought
+    // A small, wordless target - a colour swatch, a tiny icon - is easy to miss on a whole screen and
+    // easy to point at inside a small frame. If the first look found nothing and we know roughly
+    // where to look (the point just clicked, or a recorded hint), the same question is asked again
+    // about a crop around that point, and the answer is mapped back onto the screen. A crop is not
+    // new detail, but it removes everything else the model was looking at.
+    if (!pointed) {
+      const anchor =
+        node.locator?.x !== undefined && node.locator?.y !== undefined
+          ? { x: node.locator.x, y: node.locator.y }
+          : lastClickPoint
+      if (anchor) {
+        const zoomW = 420
+        const zoomH = 240
+        const rect = {
+          x: Math.max(0, Math.round(anchor.x - zoomW / 2)),
+          y: Math.max(0, Math.round(anchor.y - zoomH / 2)),
+          w: zoomW,
+          h: zoomH,
+        }
+        try {
+          const crop = await bridge.crop(rect, 1080, true, isTarsModel(model[0] || '') ? 28 : 0)
+          trace(node, { kind: 'observation', source: 'tars', scan: { ...crop, zoomed: rect } as unknown as ScanResult })
+          if (crop.image) {
+            const again = await guiStep({
+              apiKey: s.apiKey,
+              model,
+              goal: `This is a ZOOMED-IN crop of one part of the screen, ${crop.area.w}x${crop.area.h} pixels of it. Find this inside the crop and click it once: ${prompt}. Do nothing else.`,
+              history: [],
+              screen: crop.image,
+              tarsPrompt: promptOf(s.llmPrompts, 'tars'),
+              jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+            })
+            trace(node, { kind: 'model', source: 'tars', value: again })
+            const ok2 = (again.kind === 'click' || again.kind === 'double' || again.kind === 'right') && typeof again.x === 'number' && typeof again.y === 'number'
+            log('info', `[UI-TARS] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
+            if (ok2) {
+              pointed = true
+              a = crop.area
+              thought = again.thought
+              action.x = again.x
+              action.y = again.y
+            }
+          }
+        } catch (e) {
+          log('warn', `[UI-TARS] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
+        }
+      }
+    }
     if (!pointed) throw new NotFoundError(`UI-TARS hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
-    const a = res.area
     const x = a.x + action.x! * a.w
     const y = a.y + action.y! * a.h
     trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[UI-TARS] ekran görüntüsü' } })
-    log('info', `[UI-TARS] ${action.thought || action.raw}`)
+    log('info', `[UI-TARS] ${thought || action.raw}`)
     return {
       x,
       y,

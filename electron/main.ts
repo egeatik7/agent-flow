@@ -16,6 +16,7 @@ import {
   noteError,
   noteFailureShot,
   noteLogLine,
+  noteReview,
   noteRunFailed,
   noteStep,
   probing,
@@ -176,6 +177,10 @@ function log(level: LogLevel, message: string, forceHud = false) {
   // Kept in memory too: a report of a broken run can quote the engine's own lines without the
   // caller having to find and read a log file.
   noteLogLine(level, message)
+  // A sent action whose reaction was not clear is not a failure - the engine says so and carries
+  // on - but it is not a confirmed success either. Counting those lines is what keeps a clean
+  // "0 hata" from being read as "everything happened", which it once was not.
+  if (/Tepki net değil|hedefi göstermedi|Akış bozulmadan sıradaki adım/.test(message)) noteReview(message)
   send('agent:log', { level, message })
   const held = !forceHud && Date.now() < voiceHoldUntil && level !== 'error' && level !== 'warn'
   if (!held) pushHud(level, message)
