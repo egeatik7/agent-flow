@@ -36,10 +36,12 @@ describe('target response failures', () => {
     expect(req.messages[0].content).toBe('SAVED CUSTOM')
     expect(req.messages[1].content[0].text).toContain('return finished/done immediately')
     expect(req.messages[1].content[0].text).toContain('Add/New/Create')
-    // Kullanıcı kararı: tıklama türünü LLM seçer ve executor onu OLDUĞU GİBİ uygular;
-    // eski "hazırlanmış nokta yoksa tıklama harekete çevrilir" sözleşmesi kaldırıldı.
+    // Nubbo_Direct_Actions_Fix sözleşmesi: ilk hazırlanmamış tıklama önerisi YALNIZ konumlandırır;
+    // sonraki karede model KENDİ tıklama türünü seçer ve executor o türü OLDUĞU GİBİ uygular.
+    // (Eski "hazırlanmış nokta yoksa tıklama harekete çevrilir" cümlesi artık geçerli değil.)
+    expect(req.messages[1].content[0].text).toContain('The first unprepared click proposal positions the pointer ONLY')
     expect(req.messages[1].content[0].text).toContain('The click is YOUR choice')
-    expect(req.messages[1].content[0].text).toContain('never turns your click into a move')
+    expect(req.messages[1].content[0].text).toContain('never picks a click type for you')
     expect(req.messages[1].content[0].text).toContain('click_current is optional')
     expect(req.messages[1].content[0].text).toContain('On the NEXT screenshot')
   })

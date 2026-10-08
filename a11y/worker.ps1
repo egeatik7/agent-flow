@@ -789,6 +789,14 @@ function Test-SendKeysSystemOnly([string]$keys) {
 # must not be sent while another program holds the foreground. A window of the same process
 # counts as the same application: Blender's save window is still Blender, and a shortcut
 # meant for Blender belongs there.
+# An explicitly supplied native identity is a fact, unlike UIA field/foreground guesses.
+function Assert-KnownWindowIdentity($target) {
+  if (-not $target) { return }
+  if (-not $target.hwnd -or -not $target.pid) { throw 'INPUT_TARGET_INVALID: Explicit window identity is incomplete' }
+  $h = [IntPtr]([long]$target.hwnd)
+  if (-not [XpWin]::IsWindow($h) -or [XpWin]::ProcessOf($h) -ne [int]$target.pid) { throw 'INPUT_WINDOW_CLOSED: Explicit target closed or belongs to another process' }
+}
+
 function Assert-KeyWindowActive($win) {
   $fg = [XpWin]::GetForegroundWindow()
   if ($fg -eq [IntPtr]::Zero) { throw 'INPUT_WINDOW_NOT_ACTIVE: No window is in front; the shortcut was not sent' }
@@ -1074,12 +1082,10 @@ function Invoke-Op([string]$op, $P) {
       return $true
     }
     'moveAt' {
-      # YALNIZ imleci taşır: tıklama göndermez. Örtülme kontrolü clickAt ile aynıdır ki
-      # görünmeyen bir noktaya "gidildi" denmesin.
-      if ($P.target) {
-        [void](Get-BoundWindow $P.target $false)
-        if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_MOVE_OCCLUDED: Target point is covered by another window' }
-      }
+      # Yalnız imleci taşır. Bilinen kapalı/PID değiştirmiş hedef gerçek hatadır;
+      # konum sapması ise sonraki kare için nottur, otomatik tıklama gönderilmez.
+      if ($P.target) { Assert-KnownWindowIdentity $P.target }
+      $uyari = ''
       # Taşımayı DOĞRULA: SetCursorPos true dönse bile imleç hedefte olmayabilir. Test
       # iskeletlerinde Get-CursorPoint yüklü olmayabilir; o durumda doğrulama atlanır.
       $dogrula = $null -ne (Get-Command Get-CursorPoint -ErrorAction SilentlyContinue)
@@ -1092,10 +1098,12 @@ function Invoke-Op([string]$op, $P) {
         $sapma = [Math]::Sqrt([Math]::Pow([double]$cp.X - [int]$P.x, 2) + [Math]::Pow([double]$cp.Y - [int]$P.y, 2))
         if ($sapma -le 2) { $ulasti = $true; break }
       }
-      if (-not $ulasti) { throw 'INPUT_MOVE_FAILED: Cursor did not reach the target point' }
-      return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
+      if (-not $ulasti) { $uyari = 'İmleç ölçümde istenen noktadan farklı; güncel karede yeniden değerlendirilecek.' }
+      return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)); warning = $uyari }
     }
     'clickAt' {
+      if ($P.target) { Assert-KnownWindowIdentity $P.target }
+      if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::RootAt([int]$P.x, [int]$P.y)) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine tiklamaz.' }
       # KULLANICI KURALI: "yap, devam et". Örtülme/kimlik uyuşmazlığı artık TIKLAMAYI ENGELLEMİYOR;
       # yalnız not düşülür. Tutmazsa sıradaki adım zaten ilerleyemez (tren doğal olarak durur).
       $uyari = ''
@@ -1150,6 +1158,45 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height }
     }
     'typeText' {
+      # Explicit flow/model input: UIA/caret/content classification does not veto the action.
+      # Legacy guarded calls remain available to diagnostic tools; the public bridge uses keyboard=true.
+      if ($P.keyboard) {
+        if ($P.guard -and $P.guard.window) { Assert-KnownWindowIdentity $P.guard.window }
+        if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine yazmaz.' }
+        $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; writeSent = $false; focusType = ''; focusHwnd = ''; via = 'keyboard'; value = $null }
+        if ($P.clearFirst) {
+          Start-Sleep -Milliseconds 120
+          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          $out.writeSent = $true
+          Start-Sleep -Milliseconds 280
+          [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+          Start-Sleep -Milliseconds 200
+          $out.cleared = $true
+        }
+        $text = [string]$P.text
+        if ($text.Length -gt 0) {
+          if ([XpText]::CanType($text)) {
+            Send-TextPaced $text 20
+          } else {
+            $old = Get-ClipboardSnapshot
+            try {
+              [System.Windows.Forms.Clipboard]::SetText($text)
+              Start-Sleep -Milliseconds 80
+              if (-not [XpText]::ClipboardHas($text)) { throw 'CLIPBOARD_SET_FAILED: Pano yaziyi kabul etmedi; eski pano yapistirilmadi.' }
+              [System.Windows.Forms.SendKeys]::SendWait('^v')
+              Start-Sleep -Milliseconds 250
+            } finally { [System.Windows.Forms.Clipboard]::SetDataObject($old, $true) }
+            $out.pasted = $true
+          }
+          $out.writeSent = $true
+        }
+        if ($P.pressEnter) {
+          Start-Sleep -Milliseconds 240
+          [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+          $out.writeSent = $true
+        }
+        return [pscustomobject]$out
+      }
       # Click, select, delete, type and Enter each get a gap so the field can catch up.
       $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; focusType = ''; focusHwnd = ''; writeSent = $false; code = ''; diagnostics = $null; rescued = $false; where = ''; via = ''; needChoice = $false; choices = @(); value = $null }
       $script:LastTypeFocus = $null
@@ -1345,6 +1392,13 @@ function Invoke-Op([string]$op, $P) {
       return (Get-PatchAt ([int]$P.x) ([int]$P.y) $size)
     }
     'keys' {
+      if ($P.direct) {
+        if ($P.target) { Assert-KnownWindowIdentity $P.target }
+        if ($P.windowTitle) { try { Enter-Window (Find-Window ([string]$P.windowTitle)) } catch {} }
+        if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine tus gondermez.' }
+        Send-KeyString ([string]$P.keys)
+        return $true
+      }
       if ($P.target) {
         if ($P.focusHwnd) { Assert-LastTypeFocus $P.target ([string]$P.focusHwnd) }
         else { [void](Get-BoundWindow $P.target $false) }
@@ -1437,6 +1491,7 @@ function Invoke-Op([string]$op, $P) {
       return $true
     }
     'hotkey' {
+      if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine kisayol gondermez.' }
       $names = @($P.keys | ForEach-Object { [string]$_ })
       $err = [XpInput]::Combo($names)
       if ($err) { throw $err }

@@ -24,7 +24,7 @@ function agent(overrides = {}, settings = {}) {
     moveMouse: async (x,y) => {cursor={x,y};calls.push(['move',x,y]);return {hwnd:1};},
     cursorPos: async () => cursor,
     clickCurrentAt: async (x,y,hwnd) => {calls.push(['click',x,y,'left']);calls.push(['currentClick',x,y,hwnd]);},
-    typeText: async (...args) => { calls.push(['write', ...args]); return { value: 'hello' }; },
+    typeText: async (...args) => { calls.push(['write', ...args]); return { value: 'hello', writeSent: true }; },
     inputTarget: async () => ({ hwnd: '1', pid: 10, title: 'Blender', rect: { x: 0, y: 0, w: 1920, h: 1080 } }),
     assertInputTarget: async () => {},
     focusedValue: async () => null,
@@ -105,16 +105,16 @@ test('stop during locator lookup prevents the later click', async () => {
 
 test('stop during typing prevents the final Enter', async () => {
   const a = agent();
-  a.bridge.typeText = async (...args) => { a.calls.push(['write', ...args]); a.stop(); return { value: 'hello' }; };
+  a.bridge.typeText = async (...args) => { a.calls.push(['write', ...args]); a.stop(); return { value: 'hello', writeSent: true }; };
   await assert.rejects(a.ex.type(node('type', { text: 'hello', pressEnter: true }), 1, nextCondition), StoppedError);
   assert.equal(a.calls.filter(x => x[0] === 'write').length, 1);
   assert(!a.calls.some(x => x[0] === 'keys'));
 });
 
-test('stop during key focus inspection prevents sending the key', async () => {
+test('user Stop before key dispatch prevents sending the key', async () => {
   const a = agent();
   await a.ex.click(node('click', { locator: loc }), 1, nextCondition);
-  a.bridge.foreground = async () => { a.stop(); return { title: 'Blender', pid: 10 }; };
+  a.stop();
   await assert.rejects(a.ex.key(node('key', { keys: 'win+r' }), nextCondition), StoppedError);
   assert(!a.calls.some(x => x[0] === 'keys'));
 });
@@ -127,23 +127,23 @@ test('stop during the post-click focus wait prevents typing', async () => {
   assert(!a.calls.some(x => x[0] === 'write'));
 });
 
-test('failed append readback never clears or blindly appends again', async () => {
-  const a = agent({ typeText: async (...args) => { a.calls.push(['write', ...args]); return { value: 'prefix only' }; } });
-  await assert.rejects(a.ex.type(node('type', { text: 'hello', clearFirst: false, pressEnter: true }), 1, nextCondition), /Ekleme yazımı doğrulanamadı/);
+test('real unsent append never clears or blindly appends again', async () => {
+  const a = agent({ typeText: async (...args) => { a.calls.push(['write', ...args]); return { writeSent: false, value: null }; } });
+  await assert.rejects(a.ex.type(node('type', { text: 'hello', clearFirst: false, pressEnter: true }), 1, nextCondition), /INPUT_NOT_SENT/);
   const writes = a.calls.filter(x => x[0] === 'write');
   assert.equal(writes.length, 1);
   assert.equal(writes[0][3], false);
   assert(!a.calls.some(x => x[0] === 'keys'));
 });
 
-test('valid append and replacement retry remain supported; normal Enter occurs once', async () => {
-  const a = agent({ typeText: async (...args) => { a.calls.push(['write', ...args]); return { value: 'prefix hello' }; } });
+test('append and replacement are sent once; normal Enter occurs once', async () => {
+  const a = agent({ typeText: async (...args) => { a.calls.push(['write', ...args]); return { writeSent: true, value: null }; } });
   await a.ex.type(node('type', { text: 'hello', clearFirst: false }), 1);
   assert.equal(a.calls.filter(x => x[0] === 'write').length, 1);
   const b = agent(); let writes = 0;
-  b.bridge.typeText = async (...args) => { b.calls.push(['write', ...args]); return { value: ++writes === 1 ? 'wrong' : 'hello' }; };
+  b.bridge.typeText = async (...args) => { b.calls.push(['write', ...args]); writes++;return { writeSent: true, value: null }; };
   await b.ex.type(node('type', { text: 'hello', pressEnter: true }), 1, nextCondition);
-  assert.deepEqual(b.calls.filter(x => x[0] === 'write').map(x => x[3]), [true, true]);
+  assert.deepEqual(b.calls.filter(x => x[0] === 'write').map(x => x[3]), [true]);
   assert.equal(b.calls.filter(x => x[0] === 'keys' && x[1] === '{ENTER}').length, 1);
 });
 
@@ -209,7 +209,7 @@ test('move node followed by screen click_current uses shared fresh hover and req
   a.bridge.scan=async(opts)=>{a.calls.push(['scan',opts]);return a.scan};
   await a.ex.click(node('click',{locator:loc,clickMode:'move'}),1);
   assert.equal(await a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:3}),1),true);
-  assert(a.calls.some(x=>x[0]==='currentClick'&&x[3]===42));
+  assert(a.calls.some(x=>x[0]==='click'&&x[1]===50&&x[2]===30&&x[3]==='left'));
   assert(a.calls.some(x=>x[0]==='scan'&&x[1]?.cursorMarker===true));
   assert.equal(hover.hoverOf(),undefined);
 });
@@ -222,10 +222,10 @@ test('stop while cursor is being read cannot send a click_current', async () => 
 });
 
 
-test('missing hover window identity cannot authorize click_current', async () => {
+test('click_current uses actual pointer without a hover-window gate', async () => {
  let turns=0;
  const a=agent({cursorPos:async()=>({x:100,y:200}),clickCurrentAt:async()=>a.calls.push(['currentClick']),models:{guiStep:async()=>++turns===1?{kind:'clickCurrent',thought:'',raw:'click_current()'}:{kind:'finished',thought:'',raw:'finished()'}}},{apiKey:'test',agentModel:'model'});
  a.scan.image={data:'fake',w:100,h:100};hover.recordHover({x:100,y:200});
  await a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:3}),1);
- assert(!a.calls.some(x=>x[0]==='currentClick'));assert.equal(hover.hoverOf(),undefined);
+ assert(a.calls.some(x=>x[0]==='click'&&x[1]===100&&x[2]===200));assert.equal(hover.hoverOf(),undefined);
 });

@@ -396,15 +396,15 @@ export async function crop(rect: { x: number; y: number; w: number; h: number },
 
 export async function clickAt(x: number, y: number, button: ClickMode = 'left', target?: InputWindow): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target })
+  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target, ownPid: process.pid })
 }
 /**
  * Fareyi bir noktaya taşır — TIKLAMAZ. İnisiyatif ajanı önce konumlanıp emin olabilsin,
- * sonra "oradan tıkla" diyebilsin diye vardır. Örtülme kontrolü clickAt ile aynıdır.
+ * sonra model kendi tıklamasını seçebilsin diye vardır. Konum sapması not edilir.
  */
-export async function moveMouse(x: number, y: number, target?: InputWindow): Promise<{ hwnd?: number }> {
+export async function moveMouse(x: number, y: number, target?: InputWindow): Promise<{ hwnd?: number; warning?: string }> {
   if (!IS_WIN) return {}
-  const r = await worker.call<{ hwnd?: number }>('moveAt', { x: Math.round(x), y: Math.round(y), target })
+  const r = await worker.call<{ hwnd?: number; warning?: string }>('moveAt', { x: Math.round(x), y: Math.round(y), target })
   return r && typeof r === 'object' ? r : {}
 }
 
@@ -499,6 +499,7 @@ export async function typeText(
   const budgetMs = Math.min(300000, 15000 + text.length * 60)
   return worker.call<TypeResult>('typeText', {
     text,
+    keyboard: true,
     pressEnter,
     clearFirst,
     x: at ? Math.round(at.x) : 0,
@@ -555,7 +556,7 @@ export async function patchAt(x: number, y: number, size = 64): Promise<{ data: 
 
 export async function sendKeys(keys: string, windowTitle?: string, target?: InputWindow, focusHwnd?: string): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('keys', { keys, windowTitle: windowTitle || '', target, focusHwnd })
+  await worker.call('keys', { keys, ownPid: process.pid, direct: true, windowTitle: windowTitle || '', target, focusHwnd })
 }
 
 /** The element under a scanner box, with a picture of the box. */
@@ -587,7 +588,7 @@ export async function scroll(x: number, y: number, direction: 'up' | 'down' | 'l
 /** Real key combination (keybd_event), e.g. ['ctrl','shift','a'] or ['win']. */
 export async function hotkey(keys: string[]): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('hotkey', { keys })
+  await worker.call('hotkey', { keys, ownPid: process.pid })
 }
 
 export async function foreground(): Promise<{ title: string; pid: number; proc?: string; hwnd?: string } | null> {

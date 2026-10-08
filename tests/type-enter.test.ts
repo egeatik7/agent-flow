@@ -28,16 +28,6 @@ vi.mock('../electron/a11y-bridge', () => ({
   typeText: async (_text: string, pressEnter: boolean, _clear: boolean, _at?: unknown, fieldToken?: string) => {
     fake.typeCalls.push({ pressEnter, fieldToken })
     if (pressEnter) fake.enterByWorker++
-    // İlk çağrı (alan seçilmeden): öndeki pencerede iki yazı kutusu var, seçim gerekiyor.
-    if (fieldToken === undefined) {
-      return {
-        needChoice: true,
-        choices: [
-          { id: 7, token: 'token-a', window: 'Pencere A', type: 'Edit', name: 'Kaynak klasör' },
-          { id: 8, token: 'token-b', window: 'Pencere A', type: 'Edit', name: 'Ara' },
-        ],
-      }
-    }
     return fake.secondResult
   },
   clickAt: async () => {},
@@ -73,12 +63,12 @@ function conditionAhead() {
   return { next: createNode('condition', 0, 0) }
 }
 
-describe('Yazı Yaz: birden fazla pencerede yazı kutusu varken Enter', () => {
+describe('Yazı Yaz: doğrudan klavye yolunda tek Enter', () => {
   beforeEach(() => {
     fake.enterByWorker = 0
     fake.enterByAgent = 0
     fake.typeCalls = []
-    fake.secondResult = {}
+    fake.secondResult = { writeSent: true, value: null, via: 'keyboard' }
     fake.fieldValue = 'C:\\Resimler'
   })
 
@@ -87,20 +77,20 @@ describe('Yazı Yaz: birden fazla pencerede yazı kutusu varken Enter', () => {
     const node = createNode('type', 0, 0)
     node.text = 'C:\\Resimler'
     node.pressEnter = true
-    fake.secondResult = {}
+    fake.secondResult = { writeSent: true, value: null, via: 'keyboard' }
     await executor.type(node, 1, conditionAhead())
-    expect(fake.typeCalls.length).toBe(2)
-    // Seçilen alan, numarayla değil worker'ın verdiği anahtarla (token) çağrılır; worker Enter basmaz.
-    expect(fake.typeCalls[1]).toEqual({ pressEnter: false, fieldToken: 'token-a' })
+    expect(fake.typeCalls.length).toBe(1)
+    // Alan seçimi/readback yapılmaz; worker Enter basmaz.
+    expect(fake.typeCalls[0]).toEqual({ pressEnter: false, fieldToken: undefined })
     expect(fake.enterByWorker + fake.enterByAgent).toBe(1)
   })
 
-  it('değer doğrudan yazıldığında (via: value) Enter yalnızca bir kez basılır', async () => {
+  it('alan değeri okunamadığında Enter yalnızca bir kez basılır', async () => {
     const { executor } = makeAgent()
     const node = createNode('type', 0, 0)
     node.text = 'C:\\Resimler'
     node.pressEnter = true
-    fake.secondResult = { via: 'value', where: 'Pencere A' }
+    fake.secondResult = { writeSent: true, via: 'keyboard', value: null }
     await executor.type(node, 1, conditionAhead())
     expect(fake.enterByWorker + fake.enterByAgent).toBe(1)
   })
@@ -110,7 +100,7 @@ describe('Yazı Yaz: birden fazla pencerede yazı kutusu varken Enter', () => {
     const node = createNode('type', 0, 0)
     node.text = 'C:\\Resimler'
     node.pressEnter = false
-    fake.secondResult = { via: 'value' }
+    fake.secondResult = { writeSent: true, via: 'keyboard', value: null }
     await executor.type(node, 1, conditionAhead())
     expect(fake.enterByWorker + fake.enterByAgent).toBe(0)
   })

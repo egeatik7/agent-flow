@@ -113,9 +113,10 @@ $script:AllowActivation=$false;[XpWin]::Foreground=200;Throws {Get-InputTarget @
 [XpWin]::TargetPid=11;Throws {Get-InputTarget @{target=$target}} 'INPUT_WINDOW_CLOSED' 'Reused HWND with different PID is rejected';[XpWin]::TargetPid=10
 [XpWin]::Live=$false;Throws {Get-InputTarget @{target=$target}} 'INPUT_WINDOW_CLOSED' 'Closed target is rejected';[XpWin]::Live=$true
 Throws {Get-InputTarget @{target=$target;ownPid=10}} 'INPUT_TARGET_INVALID' 'Nubbo cannot type into its own process'
-$script:Window.Current.BoundingRectangle.Width=900;Throws {Invoke-Op 'clickAt' @{target=$target;x=300;y=415;button='left'}} 'INPUT_LAYOUT_CHANGED' 'Window resize rejects stale click';$script:Window.Current.BoundingRectangle.Width=1000
-[XpWin]::UnderPoint=200;Throws {Invoke-Op 'clickAt' @{target=$target;x=300;y=415;button='left'}} 'INPUT_CLICK_OCCLUDED' 'Overlapping other window rejects click';[XpWin]::UnderPoint=100
-Check ($script:Mouse.Count -eq 0) 'No mouse action during all guard failures'
+Check ($script:Mouse.Count -eq 0) 'Actual identity and activation failures injected no mouse input'
+$script:Window.Current.BoundingRectangle.Width=900;$before=$script:Mouse.Count;$r=Invoke-Op 'clickAt' @{target=$target;x=300;y=415;button='left'};Check ($script:Mouse.Count -eq $before+1 -and $r.warning) 'Layout guess is noted but selected click is sent';$script:Window.Current.BoundingRectangle.Width=1000
+[XpWin]::UnderPoint=200;$before=$script:Mouse.Count;$r=Invoke-Op 'clickAt' @{target=$target;x=300;y=415;button='left'};Check ($script:Mouse.Count -eq $before+1 -and $r.warning) 'Overlap guess is noted but selected click is sent';[XpWin]::UnderPoint=100
+Check ($script:Mouse.Count -eq 2) 'Only the two explicitly requested warning-case clicks were sent'
 [XpWin]::Foreground=101;$t=Get-InputTarget @{target=$target;followOwnedDialog=$true};Check ($t.hwnd -eq '101') 'Actual owned modal dialog may be followed'
 [XpWin]::Foreground=200;$t=Get-InputTarget @{target=$target;followOwnedDialog=$true};Check ($t.hwnd -eq '100') 'Unrelated foreground window is not adopted as a dialog'
 # One unrelated discoverable field must require an explicit choice, not be overwritten.

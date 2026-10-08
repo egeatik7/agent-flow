@@ -57,203 +57,93 @@ test.after(() => Object.defineProperty(process, 'platform', originalPlatform));
 async function clickField(f) { await f.ex.click(node('click', { prompt: '“Kaynak klasör”' }), 1, { next: writing() }); }
 const callsOf = (f, op) => f.calls.filter(c => c[0] === op);
 
-test('normal targeted writing stays on the fast path, binds HWND/PID and guards final Enter', async () => {
-  const f = fixture(); await clickField(f); await f.ex.type(writing({ pressEnter: true }), 2);
-  const write = callsOf(f, 'write')[0];
-  assert.equal(write[2], false); assert.equal(write[6].window.hwnd, '100'); assert.equal(write[6].window.pid, 10);
-  assert.equal(f.queries.length, 0); assert.equal(callsOf(f, 'crop').length, 0);
-  assert(callsOf(f, 'target').some(c => c[1].target?.hwnd === '100'));
-  const key = callsOf(f, 'keys')[0]; assert.equal(key[1], '{ENTER}'); assert.equal(key[3].hwnd, '100'); assert.equal(key[4], '110');
-});
-test('inactive target activation failure sends neither click nor write', async () => {
-  const f = fixture(); f.bridge.inputTarget = async () => { throw new Error('INPUT_WINDOW_NOT_ACTIVE'); };
-  await assert.rejects(clickField(f), /INPUT_WINDOW_NOT_ACTIVE/);
-  assert.equal(callsOf(f, 'click').length + callsOf(f, 'write').length, 0);
-});
-test('recovery crops only the target window, locates a field then delegates writing and Enter', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed, { value: 'hello', via: 'visual-caret', writeSent: true, focusHwnd: '110' });
-  await f.ex.type(writing({ pressEnter: true }), 2);
-  assert.equal(f.queries.length, 1); assert.match(f.queries[0].goal, /ONLY restore keyboard focus/); assert.match(f.queries[0].goal, /Kaynak klasör/);
-  assert.deepEqual(callsOf(f, 'crop')[0][1], win.rect);
-  const writes = callsOf(f, 'write'); assert.deepEqual(writes[1][4], { x: 650, y: 504 }); assert.equal(writes[1][6].visual, true);
-  assert.equal(callsOf(f, 'keys').length, 1);
-});
-test('bounded recovery never sends a third focus click', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed, missed, missed);
-  let turn = 0; f.models.guiStep = async q => { f.queries.push(q); return action('click', { x: 0.6 + ++turn / 10, y: 0.72 }); };
-  await assert.rejects(f.ex.type(writing({ pressEnter: true }), 2), /alan kurtarılamadı/);
-  assert.equal(f.queries.length, 2); assert.equal(callsOf(f, 'click').length, 3); assert.equal(callsOf(f, 'keys').length, 0);
-});
-test('same failed recovery point is not clicked twice', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed, missed);
-  await assert.rejects(f.ex.type(writing(), 2), /alan kurtarılamadı/);
-  assert.equal(f.queries.length, 2); assert.equal(callsOf(f, 'click').length, 2);
-});
-for (const kind of ['type', 'hotkey', 'double', 'right', 'drag', 'call_user']) {
-  test('focus recovery rejects model action ' + kind, async () => {
-    const f = fixture(); await clickField(f); f.queue.push(missed); f.models.guiStep = async () => action(kind, { x: 0.6, y: 0.7, text: 'BAD', keys: ['enter'] });
-    await assert.rejects(f.ex.type(writing({ pressEnter: true }), 2), /alan kurtarılamadı/);
-    assert.equal(callsOf(f, 'write').length, 1); assert.equal(callsOf(f, 'click').length, 1); assert.equal(callsOf(f, 'keys').length, 0);
-  });
-}
-test('model finished claim does not bypass real focus verification', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed, missed, missed); f.models.guiStep = async () => action('finished');
-  await assert.rejects(f.ex.type(writing({ pressEnter: true }), 2), /alan kurtarılamadı/);
-  assert.equal(callsOf(f, 'click').length, 1); assert.equal(callsOf(f, 'keys').length, 0);
-});
-test('late recovery answer after user stop cannot click or type', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed); f.models.guiStep = async () => { f.stop(); return action('click', { x: .6, y: .7 }); };
-  await assert.rejects(f.ex.type(writing(), 2), realRunner.StoppedError);
-  assert.equal(callsOf(f, 'click').length, 1); assert.equal(callsOf(f, 'write').length, 1);
-});
-test('layout/focus loss after model call prevents its click', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed); f.bridge.assertInputTarget = async () => { throw new Error('INPUT_LAYOUT_CHANGED'); };
-  await assert.rejects(f.ex.type(writing(), 2), /INPUT_LAYOUT_CHANGED/); assert.equal(callsOf(f, 'click').length, 1);
-});
-test('unknown custom readback never submits Enter', async () => {
-  const f = fixture(); await clickField(f); f.queue.push(missed, { via: 'visual-caret', value: null, writeSent: true });
-  await assert.rejects(f.ex.type(writing({ pressEnter: true }), 2), /INPUT_READBACK_UNAVAILABLE/);
-  assert.equal(callsOf(f, 'keys').length, 0);
-});
-test('no model recovery is permitted after destructive input has already been sent', async () => {
-  const f = fixture(); await clickField(f); f.queue.push({ value: 'wrong', writeSent: true }, missed);
-  await assert.rejects(f.ex.type(writing(), 2), /alan kurtarılamadı/); assert.equal(f.queries.length, 0);
-});
-test('window translation rebases the old field point; exact target survives another active app', async () => {
-  const f = fixture(); await clickField(f); f.move({ ...win, rect: { ...win.rect, x: -500, y: 100 } });
-  await f.ex.type(writing(), 2);
-  assert.deepEqual(callsOf(f, 'write')[0][4], { x: -200, y: 615 });
-  assert.equal(callsOf(f, 'target').at(-1)[1].target.hwnd, '100');
-});
-for (const change of ['resize', 'owned dialog']) {
-  test(change + ' discards stale field coordinates before any write', async () => {
-    const f = fixture(); await clickField(f);
-    f.move({ ...win, hwnd: change === 'owned dialog' ? '101' : '100', rect: { ...win.rect, w: 1200 } });
-    await f.ex.type(writing(), 2);
-    assert.equal(f.queries.length, 1); assert.equal(callsOf(f, 'write').length, 1);
-    assert.notDeepEqual(callsOf(f, 'write')[0][4], { x: 300, y: 515 });
-  });
-}
-test('no API key never grants a Pane typing permission', async () => {
-  const f = fixture({ apiKey: '' }); await clickField(f); f.queue.push(missed);
-  await assert.rejects(f.ex.type(writing(), 2), /alan kurtarılamadı/); assert.equal(f.queries.length, 0);
-});
-test('Enter focus loss is fatal, no key sent', async () => {
-  const f = fixture(); await clickField(f); f.bridge.assertInputTarget = async () => { throw new Error('INPUT_FOCUS_CHANGED'); };
-  await assert.rejects(f.ex.type(writing({ pressEnter: true }), 2), /INPUT_FOCUS_CHANGED/); assert.equal(callsOf(f, 'keys').length, 0);
-});
-test('initiative repeated click gets physical/normalized feedback and avoids a blind duplicate', async () => {
-  const f = fixture(); let i = 0;
-  f.models.guiStep = async q => { f.queries.push(structuredClone(q)); ++i; return i===1 || i===3 ? action('click',{x:.3,y:.5}) : i===2 || i===5 ? action('clickCurrent') : action('click',{x:.7,y:.5}); };
-  await f.ex.initiative(node('ai', { prompt: 'Select profile', engine: 'screen', maxActions: 4 }), 1);
-  assert.equal(callsOf(f, 'click').length, 2); assert.equal(f.queries.length, 5);
-  assert.match(f.queries[2].history.at(-1).note, /@300,350/); assert.match(f.queries[2].history.at(-1).note, /başarısızlık kanıtı değildir/);
-  assert.equal(callsOf(f, 'click')[1][1], 700);
-});
-test('initiative can intentionally double click after selection; there is no automatic double click', async () => {
-  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('double', { x: .3, y: .5 });
-  await f.ex.initiative(node('ai', { prompt: 'Open profile', engine: 'screen', maxActions: 4 }), 1);
-  assert.deepEqual(callsOf(f, 'click').map(c => c[3]), ['left', 'double']);
-});
-test('unchanged screen with a focused editable field is valid input focus, not a failed click', async () => {
-  const f = fixture(); f.bridge.inputState = async () => ({ type: 'Edit', writable: true, rect: win.rect, window: 'Renamer' });
-  let turn=0; f.models.guiStep = async q => { f.queries.push(structuredClone(q)); return ++turn % 2 ? action('click', { x: .3, y: .5 }) : action('clickCurrent'); };
-  await f.ex.initiative(node('ai', { prompt: 'Focus input', engine: 'screen', maxActions: 4 }), 1);
-  // Koordinatli tiklama OLDUGU GIBI uygulanir. click_current ise "fare neredeyse oradan tikla"
-  // demektir: onceden fare oynatilmadiysa TIKLAMAZ ve bunu acikca soyler (uydurmaz).
-  assert.equal(callsOf(f, 'click').length, 2);
-  assert.equal(f.queries.length, 4);
-});
-test('initiative text uses common guarded writer and readback, not direct unsafe typing', async () => {
-  const f = fixture(); let i = 0; f.models.guiStep = async () => ++i === 1 ? action('click', { x: .3, y: .5 }) : i===2 ? action('clickCurrent') : action('type', { text: 'hello\n' });
-  await f.ex.initiative(node('ai', { prompt: 'Fill field', engine: 'screen', maxActions: 3 }), 1);
-  assert.equal(callsOf(f, 'write')[0][2], false); assert.equal(callsOf(f, 'write')[0][6].window.hwnd, '100');
-  assert.equal(callsOf(f, 'keys').filter(c => c[1] === '{ENTER}').length, 1);
-});
-test('initiative Ctrl+A replacement retains input identity', async () => {
-  const f = fixture(); const actions = [action('click', { x: .3, y: .5 }), action('clickCurrent'), action('hotkey', { keys: ['ctrl', 'a'] }), action('type', { text: 'hello' })];
-  f.models.guiStep = async () => actions.shift();
-  await f.ex.initiative(node('ai', { prompt: 'Replace field', engine: 'screen', maxActions: 4 }), 1);
-  assert.equal(callsOf(f, 'write')[0][3], true); assert.equal(callsOf(f, 'write')[0][6].window.hwnd, '100');
-});
-test('coordinate policy rejects resized/invalid points, preserves negative monitor origin', () => {
-  assert.equal(policy.inside(win.rect, { x: NaN, y: 0 }), false);
-  assert.equal(policy.movedPoint(win.rect, { ...win.rect, w: 999 }, { x: 10, y: 10 }), undefined);
-  const area = { x: -1000, y: 20, w: 1000, h: 700 };
-  assert.equal(policy.repeatedClick(action('click', { x: .3, y: .5 }), area, { x: -700, y: 370, kind: 'click' }), true);
-  assert.equal(policy.repeatedClick(action('double', { x: .3, y: .5 }), area, { x: -700, y: 370, kind: 'click' }), false);
-});
 
-test('clicked input replacement does not scan old contents or copy them', async () => {
- const f=fixture({screenCheck:'off'});await clickField(f);
- f.scan.items=[];
- f.bridge.scan=async()=>{throw new Error('No OCR while replacing the clicked field');};
- f.queue.push({value:null,via:'clicked-input',writeSent:true,focusHwnd:'110'});
+
+test('explicit clicked typing uses one dispatch, no input binding/readback, one final Enter',async()=>{
+ const f=fixture({screenCheck:'off'});f.bridge.inputTarget=async()=>{throw new Error('Unexpected UIA input binding');};
+ await clickField(f);f.bridge.focusedValue=async()=>{throw new Error('Unexpected field readback');};
+ f.queue.push({writeSent:true,value:null,via:'keyboard'});
  await f.ex.type(writing({pressEnter:true}),2);
- const w=callsOf(f,'write');assert.equal(w.length,1);assert.equal(w[0][6].direct,true);
- assert.equal(f.queries.length,0);assert.equal(callsOf(f,'click').length,1);
- assert.equal(callsOf(f,'keys').length,1);
- assert(f.logs.some(l=>l.message.includes('OCR/içerik eşleştirmesi yapılmadı')));
+ const w=callsOf(f,'write');assert.equal(w.length,1);assert.equal(w[0][3],true);assert.equal(w[0][6],undefined);
+ assert.equal(callsOf(f,'keys').length,1);assert.equal(f.queries.length,0);
+ assert(!f.logs.some(l=>/Alan doğrulandı|yine de yazıldı/.test(l.message)));
 });
-test('append and a type node without a clicked point do not request forced replacement', async () => {
- const f=fixture();await f.ex.type(writing(),1);
- assert.equal(callsOf(f,'write')[0][6].direct,false);
- const g=fixture();await clickField(g);await g.ex.type(writing({clearFirst:false}),2);
- assert.equal(callsOf(g,'write')[0][6].direct,false);
+test('explicit append preserves clear=false, even with unreadable custom focus',async()=>{
+ const f=fixture({screenCheck:'off'});await clickField(f);f.queue.push({writeSent:true,value:null});
+ await f.ex.type(writing({clearFirst:false}),2);assert.equal(callsOf(f,'write')[0][3],false);
+ assert.equal(callsOf(f,'write').length,1);assert.equal(f.queries.length,0);
 });
-test('stop after resolving clicked input prevents writing and Enter', async () => {
- const f=fixture();await clickField(f);
- f.bridge.inputTarget=async()=>{f.stop();return structuredClone(win);};
- await assert.rejects(f.ex.type(writing({pressEnter:true}),2),realRunner.StoppedError);
- assert.equal(callsOf(f,'write').length,0);assert.equal(callsOf(f,'keys').length,0);
+test('typing without a prior click sends requested input, without guessing/selecting another field',async()=>{
+ const f=fixture({screenCheck:'off'});f.bridge.inputTarget=async()=>{throw new Error('Unexpected UIA');};
+ await f.ex.type(writing(),1);assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'write')[0][6],undefined);
 });
-test('coordinate click is executed as chosen at the model point; no conversion to move', async () => {
- const f=fixture();const actions=[action('click',{x:.718,y:.555}),action('move',{x:.557,y:.557}),action('clickCurrent'),action('finished')];
- f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open third existing profile. Do not create a profile.',engine:'screen',maxActions:4}),1),true);
- // KULLANICI KARARI: hazirlanmis nokta on kosulu kaldirildi - modelin tiklA'SI oldugu gibi uygulanir.
- assert.equal(callsOf(f,'click')[0][1],718);assert.equal(callsOf(f,'click')[0][3],'left');
- assert.equal(f.queries.every(q=>q.initiative===true),true);
- assert(!f.logs.some(l=>/was NOT sent|NOT sent/.test(l.message)));
-});
-test('hover then finished is accepted and no click is invented', async () => {
- const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('finished')];f.models.guiStep=async()=>actions.shift();
- // §17: model bitti dediyse mekanizma ikinci bir yargi koymaz; ama TIKLAMA UYDURULMAZ.
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open profile',engine:'screen',maxActions:3}),1),true);
- assert.equal(callsOf(f,'click').length,0);
- assert.equal(callsOf(f,'move').length,1);
-});
-
-for (const [kind,mode] of [['click','left'],['double','double'],['right','right']]) {
- test('unprepared '+kind+' is executed with its own type (no positioning detour)', async()=>{
-  const f=fixture();const actions=[action(kind,{x:.42,y:.585}),action('finished')];
-  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
-  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open the selected target',engine:'screen',maxActions:3}),1),true);
-  assert.deepEqual(callsOf(f,'click').map(c=>c[3]),[mode]);
-  assert.equal(callsOf(f,'move').length,0);
-  assert(!f.logs.some(l=>/was NOT sent/.test(l.message)));
+for (const failure of [missed,{writeSent:false},{needChoice:true,choices:[{id:1}]}]) {
+ test('a real unsent worker result cannot submit Enter '+JSON.stringify(failure),async()=>{
+  const f=fixture({screenCheck:'off'});f.queue.push(failure);
+  await assert.rejects(f.ex.type(writing({pressEnter:true}),1),/INPUT_NOT_SENT/);
+  assert.equal(callsOf(f,'write').length,1);assert.equal(callsOf(f,'keys').length,0);assert.equal(f.queries.length,0);
  });
 }
-test('a click at a different point than the prepared one is executed, not deferred',async()=>{
- const f=fixture();const actions=[action('move',{x:.718,y:.555}),action('double',{x:.557,y:.557}),action('finished')];
- f.models.guiStep=async()=>actions.shift();
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen',maxActions:3}),1),true);
- assert.equal(callsOf(f,'click').length,1);
- assert.equal(callsOf(f,'click')[0][1],557);assert.equal(callsOf(f,'click')[0][3],'double');
+test('dispatch exception is propagated without retyping or Enter',async()=>{
+ const f=fixture({screenCheck:'off'});f.bridge.typeText=async()=>{throw new Error('KEY_SEND_FAILED');};
+ await assert.rejects(f.ex.type(writing({pressEnter:true}),1),/KEY_SEND_FAILED/);assert.equal(callsOf(f,'keys').length,0);
 });
-test('pointer movement alone does not consume the unchanged-application stop threshold',async()=>{
- const f=fixture();let i=0;f.models.guiStep=async()=>++i<=8?action('move',{x:.42,y:.585}):i===9?action('double',{x:.42,y:.585}):action('finished');
- assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:10}),1),true);
- assert.equal(callsOf(f,'move').length,8);assert.equal(callsOf(f,'click').length,1);
- assert(!f.logs.some(l=>l.message.includes('6 eylemdir')));
+test('late completion after Stop cannot submit Enter',async()=>{
+ const f=fixture({screenCheck:'off'});f.bridge.typeText=async()=>{f.stop();return {writeSent:true,value:null};};
+ await assert.rejects(f.ex.type(writing({pressEnter:true}),1),realRunner.StoppedError);assert.equal(callsOf(f,'keys').length,0);
 });
-test('stop during prepared coordinate click cursor lookup sends no click',async()=>{
- const f=fixture();const actions=[action('move',{x:.42,y:.585}),action('double',{x:.42,y:.585})];
- f.models.guiStep=async()=>actions.shift();f.bridge.cursorPos=async()=>{f.stop();return {x:420,y:410};};
- await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:2}),1),realRunner.StoppedError);
- assert.equal(callsOf(f,'click').length,0);
+for(const [kind,mode] of [['click','left'],['double','double'],['right','right']]) {
+ test('position then model '+kind+' uses original coordinates/mode without HWND/UIA gate',async()=>{
+  const f=fixture();f.bridge.inputTarget=async()=>{throw new Error('Unexpected input binding');};
+  f.bridge.inputState=async()=>{throw new Error('Unexpected focus verdict');};f.bridge.cursorPos=async()=>{throw new Error('Unused pointer query');};
+  const actions=[action('move',{x:.42,y:.58}),action(kind,{x:.43,y:.59}),action('finished')];f.models.guiStep=async()=>actions.shift();
+  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:4}),1),true);
+  assert.equal(callsOf(f,'move').length,1);const clicks=callsOf(f,'click');assert.equal(clicks.length,1);
+  assert.deepEqual(clicks[0].slice(1),[430,413,mode]);
+ });
+}
+test('an unprepared double-click proposal moves only; next model turn sends its own double-click',async()=>{
+ const f=fixture();const actions=[action('double',{x:.5,y:.5}),action('double',{x:.5,y:.5}),action('finished')];
+ f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),true);
+ assert.equal(callsOf(f,'move').length,1);assert.equal(callsOf(f,'click').length,1);assert.equal(callsOf(f,'click')[0][3],'double');
+ assert.match(f.queries[1].history[0].note,/NOT sent/);assert.equal(f.queries[1].history[0].raw,'double()');
 });
-// KALDIRILDI: "coordinate click cannot adopt another hover window stamp" (eski mod).
-// Kullanıcı kararıyla tıklamaya pencere damgası HİÇ takılmıyor; kural yapısal olarak imkânsız
-// hale geldi. Aynı akış ("önce konumlan, sonra kendi tıklamasını gönder") yukarıdaki iki testte
-// kapsanıyor: "after positioning the model can choose its own X" ve "unprepared X is executed".
+test('repeated valid clicks and more than six unchanged actions are not vetoed',async()=>{
+ const f=fixture({screenCheck:'off'});f.bridge.inputState=async()=>{throw new Error('Unexpected focus verdict');};
+ const actions=[];for(let i=0;i<7;i++)actions.push(action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}));actions.push(action('finished'));
+ f.models.guiStep=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Increment seven times',engine:'screen',maxActions:16}),1),true);
+ assert.equal(callsOf(f,'click').length,7);
+});
+test('repeated waits consume only configured action budget, not hidden quiet-wait veto',async()=>{
+ const f=fixture();f.models.guiStep=async q=>{f.queries.push(q);return action('wait');};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Wait for loading',engine:'screen',maxActions:8}),1),false);
+ assert.equal(f.queries.length,8);assert(!f.logs.some(l=>/Bekleme ekranı açmadı|6 eylemdir/.test(l.message)));
+});
+test('model Ctrl+A and Delete are both sent, then typing appends into the cleared current field',async()=>{
+ const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('hotkey',{keys:['ctrl','a']}),action('hotkey',{keys:['delete']}),action('type',{text:'hello'}),action('finished')];
+ f.models.guiStep=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Replace input',engine:'screen',maxActions:7}),1),true);
+ assert.deepEqual(callsOf(f,'hotkey').map(c=>c[1]),[['ctrl','a'],['delete']]);assert.equal(callsOf(f,'write')[0][3],false);
+ assert(!f.logs.some(l=>/engellendi/.test(l.message)));
+});
+test('equivalent control+a keeps replacement intent',async()=>{
+ const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('hotkey',{keys:['control','a']}),action('type',{text:'hello'}),action('finished')];
+ f.models.guiStep=async()=>actions.shift();await f.ex.initiative(node('ai',{prompt:'Replace input',engine:'screen',maxActions:6}),1);
+ assert.equal(callsOf(f,'write')[0][3],true);
+});
+test('list engine also positions first and sends selected click without binding',async()=>{
+ const f=fixture();f.bridge.inputTarget=async()=>{throw new Error('Unexpected UIA binding');};
+ const actions=[{action:'double',id:1,reason:'open'},{action:'double',id:1,reason:'open'},{action:'done',id:null,reason:'done'}];
+ f.models.nextAction=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'list',maxActions:4}),1),true);
+ assert.equal(callsOf(f,'move').length,1);assert.equal(callsOf(f,'click')[0][3],'double');
+});
+test('Stop after model response prevents movement/click dispatch',async()=>{
+ const f=fixture();f.models.guiStep=async()=>{f.stop();return action('click',{x:.5,y:.5});};
+ await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),realRunner.StoppedError);
+ assert.equal(callsOf(f,'move').length+callsOf(f,'click').length,0);
+});
+
+test('empty text plus Enter sends only the requested Enter',async()=>{
+ const f=fixture({screenCheck:'off'});await f.ex.type(writing({text:'',clearFirst:false,pressEnter:true}),1);
+ assert.equal(callsOf(f,'write').length,0);assert.deepEqual(callsOf(f,'keys').map(c=>c[1]),['{ENTER}']);
+});

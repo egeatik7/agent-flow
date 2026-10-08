@@ -168,3 +168,18 @@ test('input identity, geometry, focus and crop options survive the real worker b
     await checkRequest(() => bridge.crop(target.rect, 1008, true, 28), { op: 'crop', payload: { ...target.rect, maxW: 1008, fit: true, snap: 28 }, result: { area: target.rect, image: { data: 'mock', w: 1008, h: 700 } } });
   });
 });
+
+test('public input bridge selects explicit keyboard/direct-key paths and carries self PID',async()=>{
+ await fakeBridge(async ({bridge,spawned})=>{
+  const write=bridge.typeText('hello',false,true,{x:662,y:462});await flush();spawned[0].say('READY');await flush();
+  let parts=spawned[0].input.trim().split('\n').at(-1).split('\t');let p=JSON.parse(Buffer.from(parts[2],'base64').toString());
+  assert.equal(p.keyboard,true);assert.equal(p.clearFirst,true);assert.equal(p.ownPid,process.pid);
+  spawned[0].answer(parts[0],{writeSent:true,value:null});await write;
+  const key=bridge.sendKeys('win+r');await flush();parts=spawned[0].input.trim().split('\n').at(-1).split('\t');p=JSON.parse(Buffer.from(parts[2],'base64').toString());
+  assert.equal(p.direct,true);assert.equal(p.keys,'win+r');assert.equal(p.ownPid,process.pid);spawned[0].answer(parts[0],true);await key;
+  const hotkey=bridge.hotkey(['ctrl','a']);await flush();parts=spawned[0].input.trim().split('\n').at(-1).split('\t');p=JSON.parse(Buffer.from(parts[2],'base64').toString());
+  assert.equal(p.ownPid,process.pid);assert.deepEqual(p.keys,['ctrl','a']);spawned[0].answer(parts[0],true);await hotkey;
+  const click=bridge.clickAt(20,30,'double');await flush();parts=spawned[0].input.trim().split('\n').at(-1).split('\t');p=JSON.parse(Buffer.from(parts[2],'base64').toString());
+  assert.equal(p.ownPid,process.pid);assert.equal(p.button,'double');assert.equal(p.target,undefined);spawned[0].answer(parts[0],true);await click;
+ });
+});
