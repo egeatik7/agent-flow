@@ -23,7 +23,7 @@ import {
   type ScreenItem,
   type Target,
 } from './matcher'
-import { activeFindOrder, promptOf } from './llm-flow'
+import { activeFindOrder, promptOf, initiativeDecisionModels } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
 import {
@@ -1360,7 +1360,9 @@ export function createAgent(ctx: AgentContext) {
   async function initiativeScreen(node: AgentNode, _stepNo: number, _ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
     const s = getSettings()
     if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
-    const model = agentModels(s)
+    const configured = agentModels(s)
+    const model = initiativeDecisionModels(configured)
+    if (model[0] !== configured[0]) log('info', `İnisiyatif görev kararı için yapılandırılmış görsel model öne alındı: ${model[0]}. UI-TARS yedekte; normal hedef bulma sırası değiştirilmedi.`)
     const tars = model.some((name) => isTarsModel(name))
     const goal = node.prompt!.trim()
     const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
@@ -1375,8 +1377,8 @@ export function createAgent(ctx: AgentContext) {
       }
     }
     let path: PathStep[] = []
-    ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
-    log('info', `İnisiyatif (${model.join(' → ')}${tars ? ', UI-TARS sırada' : ''}): ${goal}`)
+    ctx.setMethod?.(isTarsModel(model[0] || '') ? 'UI-TARS' : 'İnisiyatif')
+    log('info', `İnisiyatif (${model.join(' → ')}${tars && !isTarsModel(model[0] || '') ? ', UI-TARS yedek' : ''}): ${goal}`)
     if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
 
     const saved = runPath.get(node.id) ?? node.path
@@ -1403,7 +1405,7 @@ export function createAgent(ctx: AgentContext) {
     let pointerPrepared = false
     for (let i = 1; i <= max; i++) {
       if (stopped()) throw new StoppedError()
-      ctx.setMethod?.(tars ? 'UI-TARS' : 'İnisiyatif')
+      ctx.setMethod?.(isTarsModel(model[0] || '') ? 'UI-TARS' : 'İnisiyatif')
       keepRecentImages()
       await waitUnlocked()
       const shot = await agentShot(tars, `inisiyatif ${i}`)

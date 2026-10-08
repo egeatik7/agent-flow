@@ -1,7 +1,7 @@
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -637,7 +637,10 @@ function tarsAbsolute(model: string) {
   return /ui-?tars-?1\.5|ui-?tars-1_5/i.test(model) && !/doubao/i.test(model)
 }
 
-const TARS_PROMPT = (goal: string, custom?: string) => fillGoal(custom?.trim() || TARS_TEMPLATE, goal)
+const TARS_PROMPT = (goal: string, custom?: string, initiative = false) => fillGoal(
+  initiative && (!custom?.trim() || custom === TARS_TEMPLATE) ? INITIATIVE_TARS_TEMPLATE : custom?.trim() || TARS_TEMPLATE,
+  goal,
+)
 
 function unescape(s: string) {
   return s.replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\')
@@ -773,7 +776,7 @@ export async function guiStep(opts: {
   const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
   return runModelChain(asModelChain(opts.model), async (model) => {
     if (isTarsModel(model)) {
-      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt) + (opts.initiative ? '\n\n' + INITIATIVE_RULES : '') }]
+      const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt, opts.initiative) + (opts.initiative ? '\n\n' + INITIATIVE_RULES : '') }]
       for (const t of older) {
         if (opts.initiative) { messages.push({ role: 'user', content: initiativeHistoryRecord(t) }); continue }
         messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
@@ -798,7 +801,7 @@ ${lines.length ? lines.join('\n') : '(henüz yok)'}
 
 ${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''}Son ekran görüntüsü ektedir.`
     const messages: Message[] = [
-      { role: 'system', content: opts.jsonPrompt?.trim() || SCREEN_PROMPT },
+      { role: 'system', content: opts.initiative && (!opts.jsonPrompt?.trim() || opts.jsonPrompt === SCREEN_PROMPT) ? INITIATIVE_SCREEN_PROMPT : opts.jsonPrompt?.trim() || SCREEN_PROMPT },
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
     ]
     const content = await chatOnce(opts.apiKey, model, messages, true)

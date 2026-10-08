@@ -152,6 +152,14 @@ test('Stop after model response prevents movement/click dispatch',async()=>{
  await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),realRunner.StoppedError);
  assert.equal(callsOf(f,'move').length+callsOf(f,'click').length,0);
 });
+test('initiative routes to the configured decision model in one request, retaining TARS as fallback',async()=>{
+ const f=fixture({agentModel:'bytedance/ui-tars-1.5-7b',agentBackups:['~openai/gpt-luna-latest','other-vision']});
+ f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return action('finished');};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen'}),1),true);
+ assert.equal(f.queries.length,1);assert.deepEqual(f.queries[0].model,['~openai/gpt-luna-latest','other-vision','bytedance/ui-tars-1.5-7b']);
+ assert(f.logs.some(l=>/görsel model öne alındı/.test(l.message)));
+ assert.equal(callsOf(f,'click').length,0);
+});
 
 test('empty text plus Enter sends only the requested Enter',async()=>{
  const f=fixture({screenCheck:'off'});await f.ex.type(writing({text:'',clearFirst:false,pressEnter:true}),1);

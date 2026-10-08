@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { guiStep, nextAction, setStopCheck, type GuiTurn } from '../electron/openrouter'
+import { TARS_TEMPLATE, SCREEN_PROMPT, INITIATIVE_PROMPT, initiativeDecisionModels } from '../electron/llm-flow'
 
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false) })
 const goal = 'Open the second existing profile. Leave the other windows open. Do not create a profile.'
@@ -19,6 +20,32 @@ function capture(reply: (model: string) => string) {
   return requests
 }
 describe('bounded initiative requests', () => {
+  it('uses a bounded native prompt instead of requesting a broad future plan', async () => {
+    const requests = capture(() => 'Thought: The requested item is open.\nAction: finished()')
+    await guiStep({ apiKey: 'fake', model: 'bytedance/ui-tars-1.5-7b', goal, initiative: true, tarsPrompt: TARS_TEMPLATE, history: [], screen })
+    const initial = requests[0].messages[0].content
+    expect(initial).toContain('ONE bounded automation node')
+    expect(initial).not.toContain('Write a small plan')
+    expect(initial).toContain('Write exactly one short sentence')
+    expect(initial).toContain('"Yeni profil oluşturma" means "DO NOT create a new profile"')
+  })
+  it('uses the bounded embedded screenshot prompt while keeping genuine custom prompts', async () => {
+    const requests = capture(() => '{"action":"finished"}')
+    await guiStep({ apiKey: 'fake', model: 'json-model', goal, initiative: true, jsonPrompt: SCREEN_PROMPT, history: [], screen })
+    expect(requests[0].messages[0].content).toContain('This is ONE bounded node')
+    expect(requests[0].messages[0].content).not.toContain('<short plan>')
+    await guiStep({ apiKey: 'fake', model: 'bytedance/ui-tars-1.5-7b', goal, initiative: true, tarsPrompt: 'CUSTOM TARS {{hedef}}', history: [], screen })
+    expect(requests[1].messages[0].content).toContain('CUSTOM TARS ' + goal)
+    expect(requests[1].messages[0].content).not.toContain('ONE bounded automation node')
+    expect(INITIATIVE_PROMPT).toContain('A prohibition is never a to-do item')
+  })
+  it('only reorders configured models for bounded task decisions without mutating settings', () => {
+    const configured = ['bytedance/ui-tars-1.5-7b', '~openai/gpt-luna-latest', 'deepseek/vision']
+    expect(initiativeDecisionModels(configured)).toEqual(['~openai/gpt-luna-latest', 'deepseek/vision', 'bytedance/ui-tars-1.5-7b'])
+    expect(configured[0]).toBe('bytedance/ui-tars-1.5-7b')
+    expect(initiativeDecisionModels(['bytedance/ui-tars-1.5-7b'])).toEqual(['bytedance/ui-tars-1.5-7b'])
+    expect(initiativeDecisionModels(['custom-vision', 'other-vision'])).toEqual(['custom-vision', 'other-vision'])
+  })
   it('native UI-TARS gets factual move/click history and the current goal beside its latest screenshot', async () => {
     const requests = capture(() => "Thought: The requested profile is open.\nAction: finished(content='Opened')")
     const result = await guiStep({ apiKey: 'fake', model: 'bytedance/ui-tars-1.5-7b', goal, initiative: true, history, screen })
