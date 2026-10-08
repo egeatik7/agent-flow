@@ -46,8 +46,8 @@ export type XpAgentApi = {
     startId?: string,
     packagePath?: string[],
     /** `derived`: this graph is a branch being tried, not the saved flow; do not store it. */
-    opts?: { derived?: boolean }
-  ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number }>
+    opts?: { derived?: boolean; requireEnd?: boolean }
+  ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number; reachedEnd?: boolean }>
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
   toolList: () => Promise<ToolSpec[]>

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
+import CanvasLibraryPanel from './components/CanvasLibrary'
+import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameAutomation, deleteAutomation, editAutomationCanvas, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
+import { CanvasSequence } from './lib/canvas-sequence'
 import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
@@ -20,6 +23,7 @@ import {
   type AgentNode,
   type AppSettings,
   type CanvasBook,
+  type SavedCanvas,
   type Locator,
   type LogEntry,
   type LogLevel,
@@ -79,7 +83,7 @@ function initialGraph(): AgentGraph {
 
 function emptyBook(): CanvasBook {
   const id = newId()
-  return { activeId: id, tabs: [{ id, name: 'Tuval 1', graph: initialGraph() }] }
+  return normalizeCanvasBook({ activeId: id, tabs: [{ id, name: 'Tuval 1', graph: initialGraph() }] })
 }
 
 function nextCanvasName(tabs: { name: string }[]): string {
@@ -151,6 +155,11 @@ export default function App() {
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [library, setLibrary] = useState(() => libraryOf(book0))
+  const [libraryBusy, setLibraryBusy] = useState(false)
+  const libraryBusyRef = useRef(false)
+  const sequenceRef = useRef(new CanvasSequence())
+  const [sequenceLabel, setSequenceLabel] = useState('')
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
 
@@ -194,7 +203,11 @@ export default function App() {
   }, [])
 
   const patchNode = useCallback((id: string, patch: Partial<AgentNode>) => {
-    setGraph((g) => mapNodes(g, (n) => (n.id === id ? { ...n, ...patch } : n)))
+    // Agent events arrive before runAgent resolves: retain their changes synchronously
+    // before a sequence switches the editor to the next canvas.
+    const next = mapNodes(graphRef.current, n => n.id === id ? { ...n, ...patch } : n)
+    graphRef.current = next
+    setGraph(next)
   }, [])
 
   const refreshWindows = useCallback(async () => {
@@ -209,32 +222,20 @@ export default function App() {
     }
   }, [pushLog])
 
-  const rememberBook = useCallback(
-    (book: CanvasBook): Promise<boolean> => {
-      bookRef.current = book
-      activeIdRef.current = book.activeId
-      setActiveId(book.activeId)
-      setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
-      if (api) {
-        // The answer says whether the disk really took it; merge waits for this before it says
-        // "saved" and before the recipe is thrown away.
-        return api
-          .saveCanvases(book)
-          .then(() => true)
-          .catch((e) => {
-            pushLog('error', errText(e))
-            return false
-          })
-      }
-      try {
-        localStorage.setItem(LOCAL_BOOK, JSON.stringify(book))
-        return Promise.resolve(true)
-      } catch {
-        return Promise.resolve(false)
-      }
-    },
-    [pushLog]
-  )
+  const adoptBook = useCallback((book: CanvasBook) => {
+    bookRef.current = book
+    activeIdRef.current = book.activeId
+    setActiveId(book.activeId)
+    setTabList(book.tabs.map(t => ({ id: t.id, name: t.name })))
+    setLibrary(libraryOf(book))
+  }, [])
+
+  const rememberBook = useCallback((book: CanvasBook): Promise<boolean> => {
+    adoptBook(book)
+    if (api) return api.saveCanvases(book).then(ok => ok !== false).catch(e => { pushLog('error', errText(e)); return false })
+    try { localStorage.setItem(LOCAL_BOOK, JSON.stringify(book)); return Promise.resolve(true) }
+    catch (e) { pushLog('error', `Tuvaller kaydedilemedi: ${errText(e)}`); return Promise.resolve(false) }
+  }, [adoptBook, pushLog])
 
   const commitActive = useCallback((): CanvasBook => {
     const cur = bookRef.current
@@ -247,10 +248,11 @@ export default function App() {
     }
   }, [])
 
-  const showCanvas = useCallback((book: CanvasBook, id: string) => {
+  const showCanvas = useCallback((book: CanvasBook, id: string, persist = true) => {
     const tab = book.tabs.find((t) => t.id === id) ?? book.tabs[0]
     const next = { ...book, activeId: tab.id }
-    rememberBook(next)
+    if (persist) void rememberBook(next)
+    else adoptBook(next)
     const view = reconcileLoopMembership(tab.graph)
     graphRef.current = view
     stackRef.current = []
@@ -261,7 +263,7 @@ export default function App() {
     selectedIdsRef.current = []
     setSelectedEdgeId(null)
     setStepStatus({})
-  }, [rememberBook])
+  }, [rememberBook, adoptBook])
 
   useEffect(() => {
     void (async () => {
@@ -269,6 +271,7 @@ export default function App() {
         setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
         const book = normalizeCanvasBook(await api.getCanvases())
         const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
+        setLibrary(libraryOf(book))
         bookRef.current = book
         activeIdRef.current = tab.id
         setActiveId(tab.id)
@@ -279,6 +282,7 @@ export default function App() {
         try {
           const book = previewBook()
           const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
+          setLibrary(libraryOf(book))
           bookRef.current = book
           activeIdRef.current = tab.id
           setActiveId(tab.id)
@@ -298,10 +302,10 @@ export default function App() {
   }, [pushLog, refreshWindows])
 
   useEffect(() => {
-    if (!loaded) return
-    const t = setTimeout(() => rememberBook(commitActive()), 400)
+    if (!loaded || libraryBusy) return
+    const t = setTimeout(() => { if (!libraryBusyRef.current) void rememberBook(commitActive()) }, 400)
     return () => clearTimeout(t)
-  }, [graph, stack, loaded, rememberBook, commitActive])
+  }, [graph, stack, loaded, libraryBusy, rememberBook, commitActive])
 
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
@@ -436,6 +440,7 @@ export default function App() {
 
   const askSure = (question: string) =>
     new Promise<boolean>((resolve) => {
+      confirmAnswer.current?.(false)
       confirmAnswer.current = resolve
       setConfirmQuestion(question)
     })
@@ -450,48 +455,111 @@ export default function App() {
   const canvasName = () => bookRef.current.tabs.find((t) => t.id === activeIdRef.current)?.name ?? 'Tuval'
 
   const switchTab = (id: string) => {
-    if (runningRef.current || id === activeIdRef.current) return
+    if (runningRef.current || libraryBusyRef.current || id === activeIdRef.current) return
     showCanvas(commitActive(), id)
   }
 
   const addTab = () => {
-    if (runningRef.current) return
+    if (runningRef.current || libraryBusyRef.current) return
     const committed = commitActive()
-    const id = newId()
     const name = nextCanvasName(committed.tabs)
-    const fresh = initialGraph()
-    showCanvas({ activeId: id, tabs: [...committed.tabs, { id, name, graph: fresh }] }, id)
+    const book = addCanvasTab(committed, name, initialGraph())
+    showCanvas(book, book.activeId)
     pushLog('info', `${name} açıldı.`)
   }
 
   const closeTab = async (id: string) => {
-    if (runningRef.current) return
+    if (runningRef.current || libraryBusyRef.current) return
     const looking = id === activeIdRef.current ? commitActive() : bookRef.current
     if (looking.tabs.length < 2) return
     const tab = looking.tabs.find((t) => t.id === id)
     if (!tab) return
-    if (tab.graph.nodes.some((n) => n.kind !== 'start')) {
-      const yes = await askSure(`“${tab.name}” kapatılsın mı? Bu tuvaldeki akış silinir.`)
-      if (!yes || runningRef.current) return
+    const saved = libraryOf(looking).canvases.find(c => c.id === tab.savedId)
+    if (tab.graph.nodes.some(n => n.kind !== 'start') && (!saved || JSON.stringify(saved.graph) !== JSON.stringify(tab.graph))) {
+      const yes = await askSure(`“${tab.name}” sekmesi kapatılsın mı? Kaydedilmeyen değişiklikler kaybolur. Sağdaki kayıtlı tuval silinmez.`)
+      if (!yes || runningRef.current || libraryBusyRef.current) return
     }
     const again = id === activeIdRef.current ? commitActive() : bookRef.current
     if (again.tabs.length < 2 || !again.tabs.some((t) => t.id === id)) return
-    const idx = again.tabs.findIndex((t) => t.id === id)
-    const tabs = again.tabs.filter((t) => t.id !== id)
     const wasOpen = id === activeIdRef.current
-    const nextId = wasOpen ? tabs[Math.max(0, idx - 1)].id : again.activeId
-    const book: CanvasBook = { activeId: nextId, tabs }
-    if (wasOpen) showCanvas(book, nextId)
+    const book = closeCanvasTab(again, id)
+    if (wasOpen) showCanvas(book, book.activeId)
     else rememberBook(book)
     pushLog('info', `${tab.name} kapatıldı.`)
   }
 
   const renameTab = (id: string, name: string) => {
+    if (runningRef.current || libraryBusyRef.current) return
     const clean = name.trim().slice(0, 48)
     if (!clean) return
     const base = id === activeIdRef.current ? commitActive() : bookRef.current
     if (!base.tabs.some((t) => t.id === id)) return
     rememberBook({ ...base, tabs: base.tabs.map((t) => (t.id === id ? { ...t, name: clean } : t)) })
+  }
+
+  /** Critical library writes are acknowledged before the UI discards or replaces data. */
+  const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false) => {
+    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current) return
+    libraryBusyRef.current = true
+    setLibraryBusy(true)
+    try {
+      const next = change(commitActive())
+      if (api) {
+        if (await api.saveCanvases(next) === false) throw new Error('Tuvaller diske kaydedilemedi.')
+      } else localStorage.setItem(LOCAL_BOOK, JSON.stringify(next))
+      if (open) showCanvas(next, next.activeId, false)
+      else adoptBook(next)
+      pushLog('success', message)
+    } catch (e) { pushLog('error', errText(e)) }
+    finally { libraryBusyRef.current = false; setLibraryBusy(false) }
+  }
+  const saveCurrentCanvas = () => saveLibraryChange(b => saveCanvas(b, b.activeId), `“${canvasName()}” Tuvaller'e kaydedildi.`)
+  const openLibraryCanvas = (canvas: SavedCanvas, link: boolean) => saveLibraryChange(b => openSavedCanvas(b, canvas, link), `“${canvas.name}” yeni sekmede açıldı.`, true)
+  const deleteLibraryCanvas = async (id: string) => {
+    if (runningRef.current || libraryBusyRef.current) return
+    const c = libraryOf(bookRef.current).canvases.find(c => c.id === id)
+    if (!c || !await askSure(`“${c.name}” kayıtlı tuvalini silmek istediğinize emin misiniz? Açık sekmeler ve otomasyonların kayıtlı kopyaları silinmez.`)) return
+    await saveLibraryChange(b => deleteSavedCanvas(b, id), `“${c.name}” kayıtlı tuvali silindi.`)
+  }
+  const createAutomation = (name: string) => saveLibraryChange(b => saveAutomation(b, name), `“${name.trim()}” otomasyonu açık sekmelerin sırasıyla kaydedildi.`)
+  const updateAutomation = async (id: string) => {
+    if (runningRef.current || libraryBusyRef.current) return
+    const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
+    if (!a || !await askSure(`“${a.name}” otomasyonu açık sekmelerin soldan sağa sırası ve içerikleriyle güncellensin mi?`)) return
+    await saveLibraryChange(b => saveAutomation(b, a.name, id), `“${a.name}” otomasyonu güncellendi.`)
+  }
+  const loadAutomation = async (id: string) => {
+    if (runningRef.current || libraryBusyRef.current) return
+    const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
+    if (!a?.canvases.length || !await askSure(`“${a.name}” açılsın mı? Açık sekmeler bu kayıtlı listeyle değiştirilecek. Kaydedilmeyen değişiklikleri korumak için önce Hayır deyip tuvalleri kaydet.`)) return
+    await saveLibraryChange(b => openAutomation(b, id), `“${a.name}” tuval listesi açıldı.`, true)
+  }
+  const removeAutomation = async (id: string) => {
+    if (runningRef.current || libraryBusyRef.current) return
+    const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
+    if (!a || !await askSure(`“${a.name}” otomasyonunu ve kayıtlı tuval listesini silmek istediğinize emin misiniz? Açık sekmeler ve ayrı tuval kayıtları silinmez.`)) return
+    await saveLibraryChange(b => deleteAutomation(b, id), `“${a.name}” otomasyonu silindi.`)
+  }
+  const changeAutomationCanvas = async (automationId: string, canvasId: string, action: 'delete' | 'up' | 'down') => {
+    if (runningRef.current || libraryBusyRef.current) return
+    if (action === 'delete' && !await askSure('Bu tuvali otomasyonun kayıtlı listesinden silmek istediğinize emin misiniz? Açık sekme ve ayrı tuval kaydı silinmez.')) return
+    await saveLibraryChange(b => editAutomationCanvas(b, automationId, canvasId, action), action === 'delete' ? 'Tuval otomasyondan silindi.' : 'Otomasyonun tuval sırası kaydedildi.')
+  }
+  const moveTab = (id: string, delta: -1 | 1) => {
+    if (runningRef.current || libraryBusyRef.current) return
+    void rememberBook(moveCanvasTab(commitActive(), id, delta))
+  }
+  const downloadJson = (value: unknown, name: string) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }))
+    const a = document.createElement('a'); a.href = url; a.download = fileNameFor(name); a.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const exportAutomationFile = (id: string) => {
+    try {
+      const file = exportAutomation(commitActive(), id)
+      downloadJson(file, `${file.name}.automation`)
+      pushLog('info', `“${file.name}” otomasyonu dışa aktarıldı.`)
+    } catch (e) { pushLog('error', errText(e)) }
   }
 
   const unpack = async (id: string) => {
@@ -551,6 +619,7 @@ export default function App() {
   }
 
   const addNode = (kind: NodeKind) => {
+    if (runningRef.current || libraryBusyRef.current || confirmAnswer.current) return
     const g = graphRef.current
     const sel = g.nodes.find((n) => n.id === selectedNodeId)
     const selPort = sel ? freePort(g, sel) : null
@@ -592,7 +661,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      if (confirmQuestion) return
+      if (confirmQuestion || runningRef.current || libraryBusyRef.current) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (scanner && mod) return
@@ -885,7 +954,8 @@ export default function App() {
   }
 
   const run = async (startId?: string) => {
-    if (graphRef.current.nodes.length === 0) return
+    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current || graphRef.current.nodes.length === 0) return
+    runningRef.current = true
     if (!startId) writeCanvas(resetLoopTicks(rooted(graphRef.current, stackRef.current)))
     const path = stackRef.current.map((c) => c.id)
     const full = path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current
@@ -903,44 +973,60 @@ export default function App() {
     } catch (e) {
       pushLog('error', errText(e))
     } finally {
+      runningRef.current = false
       setRunning(false)
     }
   }
 
   const stop = () => {
-    if (api) void api.stopAgent()
+    sequenceRef.current.stop()
+    if (api) void api.stopAgent().catch(e => pushLog('error', errText(e)))
     else stopDemo()
     pushLog('warn', 'Durdurma istendi…')
   }
 
-  const exportGraph = () => {
-    const name = canvasName()
-    const blob = new Blob([JSON.stringify(rooted(graphRef.current, stackRef.current), null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = fileNameFor(name)
-    a.click()
-    URL.revokeObjectURL(a.href)
-    pushLog('info', `“${name}” dışa aktarıldı.`)
+  const runAllCanvases = async () => {
+    if (!loaded || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
+    const book = commitActive()
+    runningRef.current = true
+    setRunning(true)
+    try {
+      const outcome = await sequenceRef.current.run(book.tabs, async (tab, index, total) => {
+        const prepared = { ...tab, graph: resetLoopTicks(tab.graph) }
+        const committed = commitActive()
+        const next = activateCanvasSnapshot(committed, prepared)
+        showCanvas(next, tab.id, false)
+        setSequenceLabel(`${index + 1}/${total} · ${tab.name}`)
+        pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” Başlangıç'tan çalışıyor…`)
+        if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
+        if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
+        const result = api ? await api.runAgent(prepared.graph, undefined, [], { requireEnd: true })
+          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), undefined, patchNode, [], true)
+        if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
+        return result
+      })
+      pushLog(outcome === 'completed' ? 'success' : 'warn', outcome === 'completed' ? 'Açık tuvallerin tamamı soldan sağa Bitti node’una ulaştı.' : 'Tuval sırası durduruldu; kalan tuvaller çalıştırılmadı.')
+    } catch (e) { pushLog('error', errText(e)) }
+    finally { runningRef.current = false; setRunning(false); setSequenceLabel('') }
   }
 
+  const exportGraph = () => {
+    downloadJson(rooted(graphRef.current, stackRef.current), canvasName())
+    pushLog('info', `“${canvasName()}” dışa aktarıldı.`)
+  }
   const importGraph = async (file: File) => {
+    if (runningRef.current || libraryBusyRef.current) return
     try {
-      const g = reconcileLoopMembership(normalizeGraph(JSON.parse(await file.text())))
-      graphRef.current = g
-      stackRef.current = []
-      setStack([])
-      setGraph(g)
-      setSelectedNodeId(null)
-      setSelectedIds([])
-      selectedIdsRef.current = []
-      setSelectedEdgeId(null)
-      setStepStatus({})
-      rememberBook(commitActive())
-      pushLog('success', `“${canvasName()}” tuvaline yüklendi: ${file.name}`)
-    } catch {
-      pushLog('error', 'Dosya okunamadı (geçerli bir akış JSON’u değil).')
-    }
+      const raw = JSON.parse(await file.text())
+      if (raw?.format === 'nubbo-automation') {
+        await saveLibraryChange(b => importAutomation(b, raw), `“${raw.name}” otomasyonu içe aktarıldı. Aç ile kayıtlı listeyi yükleyebilirsin.`)
+        return
+      }
+      if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) throw new Error('Geçerli bir akış veya otomasyon JSON dosyası değil.')
+      const g = reconcileLoopMembership(normalizeGraph(raw)), id = newId()
+      const name = file.name.replace(/\.json$/i, '').trim().slice(0, 48) || 'Tuval'
+      await saveLibraryChange(b => saveCanvas({ ...b, activeId: id, tabs: [...b.tabs, { id, name, graph: g }] }, id), `“${name}” kaydedildi ve yeni sekmede açıldı.`, true)
+    } catch (e) { pushLog('error', `Dosya okunamadı: ${errText(e)}`) }
   }
 
   const resetLoops = async () => {
@@ -1036,6 +1122,7 @@ export default function App() {
                 <button
                   type="button"
                   role="menuitem"
+                  disabled={running || libraryBusy || !loaded}
                   onClick={() => {
                     setFileOpen(false)
                     fileRef.current?.click()
@@ -1053,6 +1140,7 @@ export default function App() {
                 >
                   Dışa Aktar
                 </button>
+                <button type="button" role="menuitem" disabled={running || libraryBusy || !loaded} onClick={() => { setFileOpen(false); void saveCurrentCanvas() }}>Tuvali Kaydet</button>
               </div>
             )}
           </div>
@@ -1082,6 +1170,7 @@ export default function App() {
         </div>
         <Toolbar
           running={running}
+          busy={libraryBusy || !loaded || !!confirmQuestion}
           hasStart={hasStart}
           hasSelection={!!selectedNodeId}
           capturing={capturing}
@@ -1101,7 +1190,12 @@ export default function App() {
         <CanvasTabs
           tabs={tabList}
           activeId={activeId}
-          disabled={running}
+          disabled={running || libraryBusy || !loaded || !!confirmQuestion}
+          running={running}
+          sequenceLabel={sequenceLabel}
+          onRunAll={() => void runAllCanvases()}
+          onStop={stop}
+          onMove={moveTab}
           onSelect={switchTab}
           onAdd={addTab}
           onClose={(id) => void closeTab(id)}
@@ -1110,7 +1204,7 @@ export default function App() {
         <div className="workspace">
           <div className="canvas-wrap">
             {stack.length > 0 && (
-              <button type="button" className="xp-btn package-exit" onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
+              <button type="button" className="xp-btn package-exit" disabled={running || libraryBusy} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
                 Paketten çık
               </button>
             )}
@@ -1120,7 +1214,7 @@ export default function App() {
               selectedIds={selectedIds}
               selectedEdgeId={selectedEdgeId}
               stepStatus={stepStatus}
-              running={running}
+              running={running || libraryBusy}
               onSelectNode={selectNode}
               onSelectMany={selectMany}
               onSelectEdge={selectEdge}
@@ -1172,6 +1266,19 @@ export default function App() {
               onPatchNode={updateNode}
             />
           </div>
+          <div className="right-sidebar">
+            <CanvasLibraryPanel library={library} disabled={running || libraryBusy || !loaded || !!confirmQuestion}
+              onSaveCanvas={() => void saveCurrentCanvas()}
+              onOpenCanvas={(c, link) => void openLibraryCanvas(c, link)}
+              onDeleteCanvas={id => void deleteLibraryCanvas(id)}
+              onCreateAutomation={name => void createAutomation(name)}
+              onOpenAutomation={id => void loadAutomation(id)}
+              onSaveAutomation={id => void updateAutomation(id)}
+              onRenameAutomation={(id, name) => void saveLibraryChange(b => renameAutomation(b, id, name), 'Otomasyon adı kaydedildi.')}
+              onDeleteAutomation={id => void removeAutomation(id)}
+              onExportAutomation={exportAutomationFile}
+              onEditAutomationCanvas={(a, c, action) => void changeAutomationCanvas(a, c, action)} />
+            <fieldset className="canvas-editor-fields" disabled={running || libraryBusy}>
           <SidePanel
             tab={sideTab}
             onTab={setSideTab}
@@ -1245,6 +1352,8 @@ export default function App() {
             }}
             capturing={capturing}
           />
+            </fieldset>
+          </div>
           <LogPanel
             logs={logs}
             onClear={() => setLogs([])}

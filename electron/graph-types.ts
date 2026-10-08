@@ -137,11 +137,18 @@ export type CanvasTab = {
   id: string
   name: string
   graph: AgentGraph
+  /** Explicit library record this open tab was loaded from. */
+  savedId?: string
 }
+
+export type SavedCanvas = { id: string; name: string; graph: AgentGraph; updatedAt: number }
+export type CanvasAutomation = { id: string; name: string; canvases: SavedCanvas[]; updatedAt: number }
+export type CanvasLibrary = { canvases: SavedCanvas[]; automations: CanvasAutomation[] }
 
 export type CanvasBook = {
   activeId: string
   tabs: CanvasTab[]
+  library?: CanvasLibrary
   /**
    * Agent branches: recipes of edits over a canvas, kept as they are, never copies of a flow.
    * Their shape lives in electron/tool-branch.ts; this layer only carries them so a save does
@@ -762,25 +769,51 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   return { nodes, edges }
 }
 
+/** Independent snapshots. Empty arrays mean intentionally deleted, never reseed them. */
+function normalizeSavedCanvases(raw: unknown): SavedCanvas[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  return raw.flatMap((value, i) => {
+    if (!value || typeof value !== 'object') return []
+    const r = value as Partial<SavedCanvas>
+    if (!r.graph || !Array.isArray(r.graph.nodes) || !Array.isArray(r.graph.edges)) return []
+    let id = typeof r.id === 'string' && r.id ? r.id : rid()
+    if (seen.has(id)) id = rid()
+    seen.add(id)
+    return [{ id, name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
+      graph: normalizeGraph(r.graph), updatedAt: Number.isFinite(r.updatedAt) && r.updatedAt! >= 0 ? r.updatedAt! : 0 }]
+  })
+}
+
 export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
-  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown } | null
-  if (rec && Array.isArray(rec.tabs) && rec.tabs.length) {
-    const tabs: CanvasTab[] = rec.tabs.map((item, i) => {
-      const t = item as { id?: unknown; name?: unknown; graph?: unknown }
-      const name = typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`
-      return {
-        id: typeof t?.id === 'string' && t.id ? t.id : rid(),
-        name,
-        graph: normalizeGraph(t?.graph),
-      }
-    })
-    const activeId = tabs.some((t) => t.id === rec.activeId) ? String(rec.activeId) : tabs[0].id
-    // Branches are carried through untouched; whoever uses them checks their own fields.
-    const branches = Array.isArray(rec.branches)
-      ? rec.branches.filter((b) => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string')
-      : undefined
-    return branches && branches.length ? { activeId, tabs, branches } : { activeId, tabs }
+  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown; library?: unknown } | null
+  const seen = new Set<string>()
+  const tabs: CanvasTab[] = rec && Array.isArray(rec.tabs) && rec.tabs.length ? rec.tabs.map((item, i) => {
+    const t = item as Partial<CanvasTab> | null
+    let id = typeof t?.id === 'string' && t.id ? t.id : rid()
+    if (seen.has(id)) id = rid()
+    seen.add(id)
+    return { id, name: typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
+      graph: normalizeGraph(t?.graph), ...(typeof t?.savedId === 'string' ? { savedId: t.savedId } : {}) }
+  }) : [{ id: rid(), name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }]
+  const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0].id
+  let library: CanvasLibrary
+  if (rec?.library && typeof rec.library === 'object') {
+    const lib = rec.library as Partial<CanvasLibrary>
+    const ids = new Set<string>()
+    library = { canvases: normalizeSavedCanvases(lib.canvases), automations: Array.isArray(lib.automations) ? lib.automations.flatMap((a) => {
+      if (!a || typeof a !== 'object' || !Array.isArray(a.canvases)) return []
+      let id = typeof a.id === 'string' && a.id ? a.id : rid()
+      if (ids.has(id)) id = rid()
+      ids.add(id)
+      return [{ id, name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon',
+        canvases: normalizeSavedCanvases(a.canvases), updatedAt: Number.isFinite(a.updatedAt) && a.updatedAt >= 0 ? a.updatedAt : 0 }]
+    }) : [] }
+  } else {
+    // Upgrade old saved tabs once; closing a tab will no longer remove its saved flow.
+    library = { canvases: tabs.map(t => ({ id: t.id, name: t.name, graph: structuredClone(t.graph), updatedAt: 0 })), automations: [] }
+    for (const t of tabs) t.savedId = t.id
   }
-  const id = rid()
-  return { activeId: id, tabs: [{ id, name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }] }
+  const branches = Array.isArray(rec?.branches) ? rec!.branches.filter(b => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string') : undefined
+  return { activeId, tabs, library, ...(branches?.length ? { branches } : {}) }
 }

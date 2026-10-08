@@ -548,8 +548,8 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string }
-): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string }> {
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean }
+): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string; reachedEnd?: boolean }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
   if (probing()) throw new Error('Tek adım sürüyor; koşu için bitmesini bekle.')
@@ -561,7 +561,7 @@ async function runFlow(
   setDebugRun(!!opts?.debug)
   let awake: number | undefined
   let hidden = false
-  let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string } | undefined
+  let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string; reachedEnd?: boolean } | undefined
   let runId = ''
   try {
     const graph = normalizeGraph(raw)
@@ -596,6 +596,7 @@ async function runFlow(
     }
     const summary = await runGraph(graph, agent.executor, {
       maxSteps: Math.max(1, s.maxSteps),
+      ...(opts?.requireEnd ? { reportEnd: true } : {}),
       stepDelayMs: Math.max(0, s.stepDelayMs),
       startId,
       resume: !!startId,
@@ -607,7 +608,7 @@ async function runFlow(
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
     })
     // A run that went through every step but had loop items end on an error is not a success.
-    outcome = { ok: summary.failed === 0, failed: summary.failed, steps: summary.steps }
+    outcome = { ok: summary.failed === 0, failed: summary.failed, steps: summary.steps, ...(opts?.requireEnd ? { reachedEnd: summary.reachedEnd === true } : {}) }
     return { ...outcome, runId }
   } catch (e) {
     if (e instanceof StoppedError) {

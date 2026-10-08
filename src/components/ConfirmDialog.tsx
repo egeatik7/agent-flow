@@ -10,20 +10,16 @@ type Props = {
 export default function ConfirmDialog(p: Props) {
   const yesRef = useRef<HTMLButtonElement>(null)
 
-  const yes = useRef(p.onYes)
   const no = useRef(p.onNo)
-  yes.current = p.onYes
   no.current = p.onNo
 
   useEffect(() => {
     yesRef.current?.focus()
+    // Enter belongs to the focused native button: Hayır must never act as Evet.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         no.current()
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        yes.current()
       }
     }
     window.addEventListener('keydown', onKey)

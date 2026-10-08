@@ -101,7 +101,8 @@ export async function runDemo(
   step: (id: string, s: StepStatus) => void,
   startId?: string,
   patchNode?: (id: string, patch: Partial<AgentNode>) => void,
-  packagePath?: string[]
+  packagePath?: string[],
+  reportEnd = false
 ) {
   demoStop = false
   const ex: Executor = {
@@ -153,15 +154,17 @@ export async function runDemo(
     },
   }
   try {
-    await runGraph(graph, ex, {
+    const summary = await runGraph(graph, ex, {
       maxSteps: settings.maxSteps,
       stepDelayMs: Math.min(settings.stepDelayMs, 300),
       startId,
       resume: !!startId,
       packagePath,
+      reportEnd,
     })
+    return { ok: summary.failed === 0, ...summary }
   } catch (e) {
-    if (e instanceof StoppedError) log('warn', 'Ajan durduruldu.')
+    if (e instanceof StoppedError) { log('warn', 'Ajan durduruldu.'); return { ok: false, stopped: true } }
     else throw e
   }
 }

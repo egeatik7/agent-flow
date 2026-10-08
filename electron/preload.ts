@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   captureAfter: (ms: number) => ipcRenderer.invoke('capture:afterDelay', ms),
 
-  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
+  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean }) =>
     ipcRenderer.invoke('agent:run', graph, startId, packagePath, opts),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
   callTool: (name: string, args?: unknown) => ipcRenderer.invoke('tools:call', name, args, 'panel'),

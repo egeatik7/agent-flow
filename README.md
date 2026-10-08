@@ -18,7 +18,9 @@ sayfanın içine bakar. Emin olamadığı yerde OpenRouter’daki modele sorar.
 
 ## Tuvaller
 
-Araç çubuğunun altında her tuval bir sekmedir ve ayrı bir akıştır. Ajan yalnızca açık olanı çalıştırır. **+** yeni tuval açar, **×** kapatır; son sekme kapanmaz. Sekmenin adına çift tıklayınca adı değişir. **Dışa Aktar** yalnız açık tuvali, tuvalin adıyla indirir. **İçe Aktar** yalnız o tuvalin yerini alır.
+Araç çubuğunun altında her tuval bir sekmedir ve ayrı bir akıştır. **Ajanı Çalıştır** açık tuvali çalıştırır; sekme çubuğunun en solundaki **▶ / ■** bütün açık tuvallerin soldan sağa sırasını oynatır/durdurur. Sıradaki tuval, önceki tuval hatasız biçimde kendi **Bitti** node'una ulaşınca başlar.
+
+Sağdaki **Tuvaller** penceresinde kayıtlı tuvaller ve adlandırılmış **Otomasyonlar** grupları vardır. **Tuvali Kaydet** listeye kaydeder; kayıt yanındaki **+** yeni sekmede açar, kırmızı **×** onayla siler. Sekmeyi kapatmak kayıtlı tuvali silmez. Otomasyonlar açık sekmelerin içeriklerini ve soldan sağa sırasını saklar; **Aç**, **Kaydet** ve **Export** düğmeleriyle kullanılır. **İçe Aktar** tek tuvali yeni sekmede açıp kaydeder; otomasyon JSON'u ise sağdaki gruplara ekler. [Kullanım ayrıntıları](docs/tuvaller-ve-otomasyonlar.md).
 
 Tuvalde **Ctrl+A** bütün node’ları seçer. **Ctrl+C** kopyalar, **Ctrl+X** keser (Başlangıç yerinde kalır), **Ctrl+V** yapıştırır. Ok, iki ucu da kopyadaysa durur; seçimin dışına çıkan ok kopar. Aynı kopya başka bir tuvale veya açık bir paketin içine de yapışır.
 

@@ -62,7 +62,7 @@ type Budget = { used: number }
 type Tally = { n: number; failed: number }
 
 /** What a run reports when it ends without being stopped: steps taken, and loop items or laps that ended on an error. */
-export type RunSummary = { steps: number; failed: number }
+export type RunSummary = { steps: number; failed: number; reachedEnd?: boolean }
 
 /** At most this many item names are listed in the end-of-loop summary. */
 const FAILED_NAMES_SHOWN = 5
@@ -117,6 +117,8 @@ export async function runGraph(
   opts: {
     maxSteps: number
     stepDelayMs: number
+    /** Opt-in evidence for canvas sequencing; normal runs keep their existing result shape. */
+    reportEnd?: boolean
     startId?: string
     nested?: boolean
     root?: AgentGraph
@@ -598,9 +600,9 @@ export async function runGraph(
       }
     }
   } catch (e) {
-    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed }
+    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed, ...(opts.reportEnd ? { reachedEnd: true } : {}) }
     throw e
   }
   if (!opts.nested) ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
-  return { steps: tally.n, failed: tally.failed }
+  return { steps: tally.n, failed: tally.failed, ...(opts.reportEnd ? { reachedEnd: false } : {}) }
 }

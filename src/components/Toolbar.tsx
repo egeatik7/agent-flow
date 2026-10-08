@@ -3,6 +3,7 @@ import { NODE_KINDS, NODE_SPECS, type NodeKind } from '../types'
 
 type Props = {
   running: boolean
+  busy?: boolean
   hasStart: boolean
   hasSelection: boolean
   capturing: number
@@ -37,7 +38,7 @@ export default function Toolbar(p: Props) {
   return (
     <div className="toolbar">
       <div className="dropdown" ref={ref}>
-        <button type="button" className="xp-btn" onClick={() => setOpen((o) => !o)}>
+        <button type="button" className="xp-btn" disabled={p.running || p.busy} onClick={() => setOpen((o) => !o)}>
           + Node Ekle ▾
         </button>
         {open && (
@@ -47,6 +48,7 @@ export default function Toolbar(p: Props) {
               <button
                 type="button"
                 key={k}
+                disabled={p.running || p.busy}
                 onClick={() => {
                   p.onAdd(k)
                   setOpen(false)
@@ -69,7 +71,7 @@ export default function Toolbar(p: Props) {
           type="button"
           className="xp-btn"
           onClick={p.onPackage}
-          disabled={p.running}
+          disabled={p.running || p.busy}
           title="Seçili node’ları tek pakete alır. Döngünün bir parçası seçilirse kutu, içindeki her node ile birlikte girer."
         >
           Paketle
@@ -78,10 +80,10 @@ export default function Toolbar(p: Props) {
 
       <span className="tb-sep" />
 
-      <button type="button" className="xp-btn" onClick={p.onOpenScanner} disabled={p.running} title="Ekrandaki yazıları gör, birini seçerek Tıkla node’u ekle">
+      <button type="button" className="xp-btn" onClick={p.onOpenScanner} disabled={p.running || p.busy} title="Ekrandaki yazıları gör, birini seçerek Tıkla node’u ekle">
         Ekran Tarayıcı
       </button>
-      <button type="button" className="xp-btn" onClick={p.onCapture} disabled={p.capturing > 0 || p.running}>
+      <button type="button" className="xp-btn" onClick={p.onCapture} disabled={p.capturing > 0 || p.running || p.busy}>
         {p.capturing > 0 ? `İmleci hedefe götür… ${p.capturing}` : 'İmleçle Yakala (3 sn)'}
       </button>
 
@@ -93,10 +95,10 @@ export default function Toolbar(p: Props) {
         </button>
       ) : (
         <>
-          <button type="button" className="xp-btn primary" onClick={p.onRun}>
+          <button type="button" className="xp-btn primary" disabled={p.busy} onClick={p.onRun}>
             ▶ Ajanı Çalıştır
           </button>
-          <button type="button" className="xp-btn" onClick={p.onRunFromSelected} disabled={!p.hasSelection}>
+          <button type="button" className="xp-btn" onClick={p.onRunFromSelected} disabled={p.busy || !p.hasSelection}>
             Seçiliden Çalıştır
           </button>
         </>
@@ -104,14 +106,14 @@ export default function Toolbar(p: Props) {
 
       <span className="tb-sep" />
 
-      <button type="button" className="xp-btn" onClick={p.onLayout} disabled={p.running}>
+      <button type="button" className="xp-btn" onClick={p.onLayout} disabled={p.running || p.busy}>
         Düzenle
       </button>
       <button
         type="button"
         className="xp-btn"
         onClick={p.onForget}
-        disabled={p.running}
+        disabled={p.running || p.busy}
         title="Bütün node’ların hafızasını ve kayıtlı yollarını siler. Akışın kendisi durur."
       >
         Hafızayı Sil
@@ -120,7 +122,7 @@ export default function Toolbar(p: Props) {
         type="button"
         className="xp-btn"
         onClick={p.onResetLoops}
-        disabled={p.running}
+        disabled={p.running || p.busy}
         title="Bu tuvaldeki her döngüyü 1. öğeye alır. Önce dıştakiler, sonra onların ilk öğesine göre iç listeler."
       >
         Döngüleri Sıfırla
