@@ -108,6 +108,16 @@ test('an unprepared double-click proposal moves only; next model turn sends its 
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),true);
  assert.equal(callsOf(f,'move').length,1);assert.equal(callsOf(f,'click').length,1);assert.equal(callsOf(f,'click')[0][3],'double');
  assert.match(f.queries[1].history[0].note,/NOT sent/);assert.equal(f.queries[1].history[0].raw,'double()');
+ assert.equal(f.queries[1].history[0].execution.status,'sent');assert.equal(f.queries[1].history[0].execution.action.kind,'move');
+ assert.equal(f.queries[2].history[1].execution.action.kind,'double');
+});
+test('failed initiative dispatch is not reported as a successful history action',async()=>{
+ const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('call_user')];
+ f.bridge.clickAt=async()=>{throw new Error('Native input failed');};
+ f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
+ assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),false);
+ assert.equal(f.queries[2].history[1].execution.status,'unconfirmed');
+ assert.match(f.queries[2].history[1].note,/Native input failed/);
 });
 test('repeated valid clicks and more than six unchanged actions are not vetoed',async()=>{
  const f=fixture({screenCheck:'off'});f.bridge.inputState=async()=>{throw new Error('Unexpected focus verdict');};

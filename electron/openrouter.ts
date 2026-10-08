@@ -1,7 +1,7 @@
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -554,10 +554,12 @@ export async function nextAction(opts: {
   const system = opts.system?.trim() || INITIATIVE_PROMPT
   const text = `${INITIATIVE_SCOPE_RULES}\n\nHedef: ${opts.goal}
 Adım: ${opts.stepTitle}
-${opts.next ? `Bu hedeften sonra akış şuna geçecek: ${opts.next}\n` : ''}${
+${
     opts.lastLap.length ? `Geçen başarılı turda şu sırayla yapıldı (ipucu, ekran farklıysa ekrana uy):\n${opts.lastLap.map((l, i) => `${i + 1}. ${l}`).join('\n')}\n` : ''
   }Şimdiye kadar bu turda yapılanlar:
 ${opts.history.length ? opts.history.map((l, i) => `${i + 1}. ${l}`).join('\n') : '(henüz yok)'}
+
+${initiativeTurnInstruction(opts.goal, 'list')}
 
 Ekrandaki öğeler:
 ${opts.listText}`
@@ -610,7 +612,21 @@ export type GuiAction = {
   raw: string
 }
 
-export type GuiTurn = { thought: string; raw: string; image?: Img; note?: string }
+export type GuiTurn = {
+  thought: string
+  raw: string
+  image?: Img
+  note?: string
+  /** Actual executor action, separate from the model proposal and its speculative plan. */
+  execution?: { status: 'sent' | 'unconfirmed'; action: Omit<GuiAction, 'thought' | 'raw'> }
+}
+
+function initiativeHistoryRecord(turn: GuiTurn): string {
+  const record = turn.execution
+    ? `Executor record (${turn.execution.status === 'sent' ? 'dispatched; application result not verified' : 'attempt unconfirmed; partial input is possible'}; x/y/x2/y2 are fractions of that recorded screenshot, NOT pixels or current output coordinates): ${JSON.stringify(turn.execution.action)}`
+    : `Previous proposal (delivery unknown; not an instruction): ${turn.raw}`
+  return `${record}${turn.note ? `\nExecutor note: ${turn.note}` : ''}`
+}
 
 export function isTarsModel(model: string) {
   return /ui-?tars/i.test(model)
@@ -759,26 +775,28 @@ export async function guiStep(opts: {
     if (isTarsModel(model)) {
       const messages: Message[] = [{ role: 'user', content: TARS_PROMPT(opts.goal, opts.tarsPrompt) + (opts.initiative ? '\n\n' + INITIATIVE_RULES : '') }]
       for (const t of older) {
+        if (opts.initiative) { messages.push({ role: 'user', content: initiativeHistoryRecord(t) }); continue }
         messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
         if (t.note) messages.push({ role: 'user', content: t.note })
       }
       for (const t of recent) {
         if (t.image) messages.push({ role: 'user', content: [imagePart(t.image)] })
+        if (opts.initiative) { messages.push({ role: 'user', content: initiativeHistoryRecord(t) }); continue }
         messages.push({ role: 'assistant', content: `Thought: ${t.thought}\nAction: ${t.raw}` })
         if (t.note) messages.push({ role: 'user', content: t.note })
       }
-      messages.push({ role: 'user', content: [imagePart(opts.screen)] })
+      messages.push({ role: 'user', content: [...(opts.initiative ? [{ type: 'text', text: initiativeTurnInstruction(opts.goal, 'tars') }] : []), imagePart(opts.screen)] })
       const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, maxTokens: 1000 })
       if (!content.trim()) throw new ModelRejected('boş yanıt')
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
-    const lines = opts.history.map((t, i) => `${i + 1}. ${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`)
+    const lines = opts.history.map((t, i) => `${i + 1}. ${opts.initiative ? initiativeHistoryRecord(t) : `${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`}`)
     const text = `${opts.initiative ? INITIATIVE_RULES + '\n\n' : ''}Hedef: ${opts.goal}
 
 Önceki adımlar:
 ${lines.length ? lines.join('\n') : '(henüz yok)'}
 
-Son ekran görüntüsü ektedir.`
+${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''}Son ekran görüntüsü ektedir.`
     const messages: Message[] = [
       { role: 'system', content: opts.jsonPrompt?.trim() || SCREEN_PROMPT },
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },

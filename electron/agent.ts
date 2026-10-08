@@ -1440,6 +1440,7 @@ export function createAgent(ctx: AgentContext) {
       }
 
       const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img, ...(moveNote ? { note: moveNote } : {}) }
+      const { thought: _thought, raw: _raw, ...dispatchedAction } = a
       try {
         let patch: string | undefined
         if (['click', 'double', 'right', 'drag'].includes(a.kind) && a.x !== undefined && a.y !== undefined) {
@@ -1454,6 +1455,7 @@ export function createAgent(ctx: AgentContext) {
         if (['click', 'double', 'right'].includes(a.kind)) {
           log('info', 'Modelin seçtiği tıklama yürütüldü: ' + describeGui(a))
         }
+        turn.execution = { status: 'sent', action: dispatchedAction }
         pointerPrepared = a.kind === 'move' && sent === true
         path.push({
           patch,
@@ -1470,7 +1472,8 @@ export function createAgent(ctx: AgentContext) {
         })
       } catch (e) {
         if (e instanceof StoppedError) throw e
-        turn.note = `Bu eylem yapılamadı: ${(e as Error).message.split('\n')[0]}`
+        turn.execution = { status: 'unconfirmed', action: dispatchedAction }
+        turn.note = `Eylem tamamlanamadı: ${(e as Error).message.split('\n')[0]}`
         log('warn', turn.note)
       }
       history.push(turn)
