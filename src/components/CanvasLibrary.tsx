@@ -19,6 +19,8 @@ const editorFor = (a: CanvasAutomation): Editor => ({ key: a.id, id: a.id, name:
 export default function CanvasLibrary(p: Props) {
   const [view, setView] = useState<'canvases' | 'automations'>('canvases')
   const [editor, setEditor] = useState<Editor | null>(null)
+  // Kullanıcı isteği: "Genişlet" tuvalleri açar, "Daralt" yeniden gizler. Taslak kaybolmaz.
+  const [collapsed, setCollapsed] = useState(false)
   const [adding, setAdding] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -46,6 +48,7 @@ export default function CanvasLibrary(p: Props) {
     if (locked || busy.current) return
     if (dirty && !await p.onConfirm('Kaydedilmeyen otomasyon düzenlemesini bırakmak istediğinize emin misiniz?')) return
     setEditor(automation ? editorFor(automation) : { key: newId(), name: '', entries: [] })
+    setCollapsed(false)
     setAdding(''); setView('automations')
   }
   const change = (fn: (e: Editor) => Editor) => setEditor(e => e ? fn(e) : null)
@@ -103,12 +106,12 @@ export default function CanvasLibrary(p: Props) {
           <div className="automation-name-row"><strong title={a.name}>{a.name}</strong><span>{a.entries.length} tuval</span>
             <button className="library-mini library-delete" title={`“${a.name}” otomasyonunu sil`} disabled={locked} onClick={() => p.onDeleteAutomation(a.id)}>×</button></div>
           <div className="automation-actions">
-            <button className="xp-btn" disabled={locked} onClick={() => void choose(a)}>Düzenle</button>
+            <button className="xp-btn" disabled={locked} onClick={() => { if (editor?.id === a.id) setCollapsed(!collapsed); else void choose(a) }}>{editor?.id === a.id && !collapsed ? 'Daralt' : 'Genişlet'}</button>
             <button className="xp-btn" disabled={locked || !a.entries.length || (editor?.id === a.id && dirty)} title="Kayıtlı sırayı üstteki çalışma sekmelerinde aç" onClick={() => p.onOpenAutomation(a.id)}>Aç</button>
             <button className="xp-btn" disabled={locked || (editor?.id === a.id && dirty)} onClick={() => p.onExportAutomation(a.id)}>Export</button>
           </div>
         </div>)}
-        {editor && <div className="automation-editor">
+        {editor && !collapsed && <div className="automation-editor">
           <label className="field-label" htmlFor="automation-name">Otomasyon adı</label>
           <input id="automation-name" className="xp-input" value={editor.name} placeholder="Otomasyon adı" maxLength={48} disabled={locked} onChange={e => change(d => ({ ...d, name: e.target.value }))} />
           <div className="automation-editor-status">{dirty ? 'Kaydedilmeyen değişiklikler var.' : editor.id ? 'Kayıtlı liste.' : 'Yeni liste.'}</div>

@@ -36,7 +36,7 @@ function setup(failSave = false) {
 
 describe('automation editor interaction through real React state and callbacks', () => {
   it('adds a previously absent saved canvas and persists only after Save', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['A'])
     expect(text(h.renderer.root)).toContain('2. B')
     await h.click('Kaydet')
@@ -45,20 +45,20 @@ describe('automation editor interaction through real React state and callbacks',
     expect(text(h.renderer.root)).toContain('Kayıtlı liste.')
   })
   it('keeps an unsaved list when switching between depot and automations', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     await h.click('Tuval Deposu'); await h.click('Otomasyonlar')
     expect(text(h.renderer.root)).toContain('2. B')
     expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
   })
   it('cancels discarding a draft, then discards it only after confirmation', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     h.confirm = false; await h.click('Vazgeç'); expect(text(h.renderer.root)).toContain('2. B')
     h.confirm = true; await h.click('Vazgeç'); expect(text(h.renderer.root)).not.toContain('2. B')
     expect(h.saves).toBe(0)
   })
   it('stages membership removal with confirmation without deleting the depot entry', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
     const remove = () => h.renderer.root.findByProps({ title: 'Tuvali otomasyon listesinden çıkar' })
     h.confirm = false; await act(async () => { remove().props.onClick() }); expect(text(h.renderer.root)).toContain('1. A')
     h.confirm = true; await act(async () => { remove().props.onClick() }); expect(text(h.renderer.root)).not.toContain('1. A')
@@ -67,14 +67,14 @@ describe('automation editor interaction through real React state and callbacks',
     expect(h.book.library!.canvases.map(c => c.name)).toEqual(['A', 'B', 'C'])
   })
   it('a failed persistence call cannot clear the dirty draft or claim it was saved', async () => {
-    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B'); await h.click('Kaydet')
+    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B'); await h.click('Kaydet')
     expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
     expect(text(h.renderer.root)).toContain('2. B')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
     expect(h.button('Kaydet').props.disabled).toBe(false)
   })
   it('blocks overwriting a group that changed while its dirty draft was open', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     h.mutate(b => deleteSavedCanvas(b, 'A'))
     expect(text(h.renderer.root)).toContain('Kayıt değişti veya silindi.')
     expect(h.button('Kaydet').props.disabled).toBe(true)
@@ -82,7 +82,7 @@ describe('automation editor interaction through real React state and callbacks',
     expect(h.saves).toBe(0)
   })
   it('excludes members already selected and prevents a duplicate add', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     const select = h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' })
     expect(select.findAllByType('option').map(o => o.props.value)).toEqual(['', 'C'])
     expect(h.button('Ekle').props.disabled).toBe(true)
@@ -90,12 +90,26 @@ describe('automation editor interaction through real React state and callbacks',
   it('retains the lock for the duration of an asynchronous save', async () => {
     const h = setup(); let release!: (value: null) => void
     h.saveOverride = () => new Promise(resolve => { release = resolve })
-    await h.click('Otomasyonlar'); await h.click('Düzenle'); await h.add('B')
+    await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     await act(async () => { h.button('Kaydet').props.onClick() })
     expect(h.button('Kaydet').props.disabled).toBe(true)
-    expect(h.button('Düzenle').props.disabled).toBe(true)
+    expect(h.button('Daralt').props.disabled).toBe(true)
     await act(async () => release(null))
     expect(h.button('Kaydet').props.disabled).toBe(false)
     expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
+  })
+
+  // Kullanıcı isteği: "Düzenle" yerine Genişlet/Daralt; Genişlet tuvalleri açar, Daralt gizler.
+  it('Genişlet tuvalleri açar, Daralt gizler ve taslak kaybolmaz', async () => {
+    const h = setup(); await h.click('Otomasyonlar')
+    expect(h.button('Genişlet')).toBeDefined()
+    await h.click('Genişlet'); await h.add('B')
+    expect(text(h.renderer.root)).toContain('2. B')
+    expect(h.button('Daralt')).toBeDefined()
+    await h.click('Daralt')
+    expect(text(h.renderer.root)).not.toContain('2. B')
+    expect(h.button('Genişlet')).toBeDefined()
+    await h.click('Genişlet')
+    expect(text(h.renderer.root)).toContain('2. B')
   })
 })

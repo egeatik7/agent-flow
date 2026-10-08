@@ -989,27 +989,37 @@ export default function App() {
     pushLog('warn', 'Durdurma istendi…')
   }
 
-  const runAllCanvases = async () => {
+  // Kullanıcı isteği: üstteki oynatma tuşu AKTİF tuvalden başlar ve SAĞA doğru devam eder.
+  // "Seçiliden Çalıştır" ise aktif tuvali seçili ADIMDAN başlatır; o tuval Bitti'ye ulaşınca
+  // sıra sağındaki tuvallerle devam eder (soldakiler çalıştırılmaz).
+  const runAllCanvases = async (startNodeId?: string) => {
     if (!loaded || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
     const book = commitActive()
+    const from = book.tabs.findIndex(t => t.id === activeId)
+    const ordered = from <= 0 ? book.tabs : book.tabs.slice(from)
+    if (!ordered.length) { pushLog('warn', 'Oynatılacak tuval yok.'); return }
     runningRef.current = true
     setRunning(true)
     try {
-      const outcome = await sequenceRef.current.run(book.tabs, async (tab, index, total) => {
+      pushLog('info', startNodeId
+        ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
+        : `Aktif tuvalden sağa doğru oynatılıyor (${ordered.length} tuval).`)
+      const outcome = await sequenceRef.current.run(ordered, async (tab, index, total) => {
         const prepared = { ...tab, graph: resetLoopTicks(tab.graph) }
         const committed = commitActive()
         const next = activateCanvasSnapshot(committed, prepared)
         showCanvas(next, tab.id, false)
         setSequenceLabel(`${index + 1}/${total} · ${tab.name}`)
-        pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” Başlangıç'tan çalışıyor…`)
+        const ilk = index === 0 ? startNodeId : undefined
+        pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, undefined, [], { requireEnd: true })
-          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), undefined, patchNode, [], true)
+        const result = api ? await api.runAgent(prepared.graph, ilk, [], { requireEnd: true })
+          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), ilk, patchNode, [], true)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
       })
-      pushLog(outcome === 'completed' ? 'success' : 'warn', outcome === 'completed' ? 'Açık tuvallerin tamamı soldan sağa Bitti node’una ulaştı.' : 'Tuval sırası durduruldu; kalan tuvaller çalıştırılmadı.')
+      pushLog(outcome === 'completed' ? 'success' : 'warn', outcome === 'completed' ? 'Aktif tuvalden sağa doğru bütün tuvaller Bitti node’una ulaştı.' : 'Tuval sırası durduruldu; kalan tuvaller çalıştırılmadı.')
     } catch (e) { pushLog('error', errText(e)) }
     finally { runningRef.current = false; setRunning(false); setSequenceLabel('') }
   }
@@ -1184,7 +1194,7 @@ export default function App() {
           onCapture={captureAsNewNode}
           onOpenScanner={() => openScanner(null)}
           onRun={() => run()}
-          onRunFromSelected={() => selectedNodeId && run(selectedNodeId)}
+          onRunFromSelected={() => { if (selectedNodeId) void runAllCanvases(selectedNodeId) }}
           onStop={stop}
           onLayout={() => setGraph((g) => autoLayout(g))}
           onForget={forgetAll}
