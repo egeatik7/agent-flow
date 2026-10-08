@@ -1146,17 +1146,17 @@ export function createAgent(ctx: AgentContext) {
           + ', direct=' + String(!!guard?.direct) + ', temizle=' + String(!!clearField)
           + ', tiklama=' + JSON.stringify(guard?.at ?? null) + ', bag=' + (binding ? 'var' : 'yok')
           + ', hedefKaydi=' + String(!!binding?.mustRetarget) + '.')
-        // KULLANICI KARARI: "yazı alanı değil" reddi kaldırıldı. Alanı BİZ tıkladıysak
-        // (bağlı bir tıklama noktası var) sınıflandırma başarısız olsa bile YAZILIR: Blender'ın
-        // alanı UIA'da "Window" / native "GHOST_WindowClass" ve caret null gelir; orada
-        // sınıflandırma ASLA başaramaz ama alan gerçekten yazı kabul eder (ölçüldü: 1.9.45 günlüğü).
+        // KULLANICI KARARI: "yazı alanı değil / Pane" reddi YOK. Alanı BİZ tıkladıysak
+        // (bağlı bir tıklama noktası var) sınıflandırma başarısız olsa bile DİREKT YAZILIR:
+        // Blender alanı UIA'da "Window" / native "GHOST_WindowClass" ve caret null gelir; orada
+        // sınıflandırma asla başaramaz ama alan gerçekten yazı kabul eder (ölçüldü: 1.9.45 günlüğü).
         if (!inputWasSent && typed.writeSent !== true && binding?.at) {
           try {
             const duz = await bridge.typeText(text, false, false, binding.at, undefined, undefined)
             checkStopped()
             inputWasSent = true
             log('warn', 'Alan sınıflandırılamadı (' + (typed.focusType || d?.native || 'bilinmiyor')
-              + '); tıklanan alana yine de yazıldı. Değer okunamadıysa doğrulanmamış sayılır.')
+              + '); tıklanan alana DİREKT yazıldı. Değer okunamadıysa doğrulanmamış sayılır.')
             reportTyping(duz)
             return duz
           } catch (e) {
@@ -1708,12 +1708,18 @@ export function createAgent(ctx: AgentContext) {
         const h = hoverOf()
         const cursor = h ? await bridge.cursorPos() : undefined
         checkStopped()
-        // KULLANICI KARARI: modelin kendi tıklaması OLDUĞU GİBİ gönderilir. Eski modda buraya
-        // imleç kaydının pencere damgası (hwnd) ekleniyordu; kayıt başka bir pencereye aitse
-        // tıklama "örtülü" sayılıp REDDEDİLİYORDU (ölçüldü: tıklama hiç gitmiyordu). Damga artık
-        // yalnız click_current yolunda kullanılır (orada "nokta değişti mi" güvencesidir).
-        void h
-        void cursor
+        // ESKI (SAĞLAM) YOL GERİ: imleç kaydı bu noktayla uyuşuyorsa tıklamaya PENCERE DAMGASI
+        // verilir → worker örtülme + pencere kimliği kontrolünü yapar (1.9.43'te çalışan yol).
+        // AMA "hazırlanmamış tıklamayı harekete çevir" kapısı YOK: model kendi tıklar.
+        const p = { x: shot.area.x + (a.x ?? NaN) * shot.area.w, y: shot.area.y + (a.y ?? NaN) * shot.area.h }
+        if (h && h.hwnd && h.hwnd > 0) {
+          try {
+            const hazir = !!cursor && hoverDecision(cursor).ok && Math.hypot(p.x - h.x, p.y - h.y) <= HOVER_TOLERANCE_PX
+            if (hazir) observedClickWindow = h.hwnd
+          } catch {
+            /* karar verilemezse damga verilmez; tıklama yine gönderilir */
+          }
+        }
         proposedClickPending = false
       }
       log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)

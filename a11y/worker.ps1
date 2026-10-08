@@ -1096,12 +1096,21 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ hwnd = [long]([XpWin]::RootAt([int]$P.x, [int]$P.y)) }
     }
     'clickAt' {
+      # KULLANICI KURALI: "yap, devam et". Örtülme/kimlik uyuşmazlığı artık TIKLAMAYI ENGELLEMİYOR;
+      # yalnız not düşülür. Tutmazsa sıradaki adım zaten ilerleyemez (tren doğal olarak durur).
+      $uyari = ''
       if ($P.target) {
-        [void](Get-BoundWindow $P.target $false)
-        if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Target point is covered by another window' }
+        try {
+          [void](Get-BoundWindow $P.target $false)
+          if ([XpWin]::RootAt([int]$P.x, [int]$P.y) -ne [IntPtr]([long]$P.target.hwnd)) {
+            $uyari = 'INPUT_CLICK_OCCLUDED: nokta başka pencerede; yine de tıklandı'
+          }
+        } catch {
+          $uyari = 'INPUT_TARGET_STALE: ' + $_.Exception.Message.Split([char]10)[0]
+        }
       }
       Invoke-MouseAt ([int]$P.x) ([int]$P.y) ([string]$P.button)
-      return $true
+      return [pscustomobject]@{ ok = $true; warning = $uyari }
     }
     'locate' {
       $win = Find-WindowOrNull ([string]$P.windowTitle)
@@ -1215,9 +1224,7 @@ function Invoke-Op([string]$op, $P) {
       }
       try { $out.where = [string](Get-TopLevel $focus).Current.Name } catch {}
       $visual = (-not (Test-TextLike $focus)) -and ($direct -or (Test-VisualInput $P.guard))
-      # KULLANICI KARARI: alanı BIZ tikLADIysak ($P.at var) siniflandirma basarisiz olsa bile YAZILIR.
-      # Blender alani UIA'da "Window" / native "GHOST_WindowClass" ve caret null gelir; orada
-      # siniflandirma ASLA basaramaz ama alan gercekten yazi kabul eder (olculdu: 1.9.45 gunlugu).
+      # KULLANICI KARARI: alanı BIZ tikLADIysak ($P.at var) siniflandirma/Pane reddi YOK - direkt yazilir.
       if (-not (Test-TextLike $focus) -and -not $visual -and -not $P.at) {
         $out.skippedClear = $true
         $out.code = 'INPUT_FOCUS_UNRESOLVED'

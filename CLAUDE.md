@@ -316,3 +316,15 @@ Bu karar, önceki öneri/inceleme/merge arayüzü hedeflerinin yerine geçer. Nu
 Mevcut node'lar, kullanıcı akışları, OCR/hedef bulma, tuş/yazma motoru ve döngü hata politikası değiştirilmez. Kayıtlı eski branch verileri topluca silinmez. Branch'in bellek/düzenleme kodu, mevcut test senaryolarını bozmamak için test katmanında kalabilir; kullanıcı tuvalini gösterme/merge transportu yoktur ve eski çağrılar açık ret alır.
 
 CLI/HTTP araçları yalnız `NUBBO_PROFILE` ile ayrı profil açılmış VE `NUBBO_TEST_TOOLS=1` verilmiş oturumda kullanılabilir. Normal kullanıcı oturumunda eski `agentEndpoint=true` ayarı kapıyı açamaz. Test araçlarının mevcut izin, token, durdurma ve odak korumaları korunur. `scripts/dev-start-test.cjs` gerekli test bayrağını verir. Kapsamlı sağlamlaştırma testleri sonraki iştir; bu değişikliğe otomatik onarım yöneticisi veya yeni node mimarisi ekleme.
+
+## 19. Cesaret ve ilerleme kuralı — kullanıcının açık kararı (8 Ekim 2026)
+
+**Bu bölüm, §4'ün ve §16'nın "doğrulamayı geliştir" diye okunan kısımlarının önüne geçer.** Kullanıcının sözü: *"Her eylemin sağlamasını yapmak low IQ bir yöntem. Trenin yoldan çıkmasına izin ver; doğal şekilde çöksün, sonra zaten ileri gidemez."* Programın amacı **robust çalışmak**tır; kendi kendini durdurmak değil.
+
+- **Eylemi önceden engelleyen kontrol yasaktır.** Bir tıklama, yazma veya tuş çağrısı "belki yanlış olur" gerekçesiyle `throw` ile reddedilmez. Eylem **yapılır**, sonuç **gözlenir**, yanlışsa **incelenir ve geri sarılır**. Kendi ilerlemesini durdurmak, yanlış eylem yapmak kadar büyük bir hatadır.
+- **İlerleme ölçütü** "kaç hata engellendi" değil, **"iş ilerledi mi"**dir. Koşu her turda **bir sonraki adıma geçebilmelidir**.
+- **Geri sarma**: hata fark edilince akışı kesmek yerine **incele** (log + kare + son adımlar) → **etkilenen adımı geri al / yeniden kur** → **düzeltilmiş hâliyle devam et**. Dış uygulamada geri alınamayan bir yan etki varsa bu **açıkça** yazılır; yine de akış ilerler.
+- **Tek istisna — kendini koruma (sağlama değil)**: (1) **Durdur** (Ctrl+Shift+Q) her koşulda çalışır; (2) Nubbo **kendi penceresini** yazma/tıklama hedefi yapmaz. Bunlar "izin isteme" değil, **kapsam** kuralıdır.
+- **Yasak yaklaşımlar**: (a) kendini kayıran, yalnızca "kapı fırladı mı" diye soran testler; (b) kırmızı test varken exe veya teslim üretmek; (c) soruya cevap yerine eylem; (d) ezberden kod düzenlemek — önce dosya okunur; (e) "güvenli oldu" diye reddeden kod. **Korku tasarım değildir.**
+- **Mevcut borç**: `a11y/worker.ps1` ve `electron/agent.ts` içinde eylemi engelleyen **~60 kapı** var (8 Ekim 2026 ölçümü: toplam ~102 `throw`). Sırayla **uyarıya** çevrilir: tıklama/fare ailesi → yazma aşaması → önplan/kimlik ailesi. Bitince bu sayı güncellenir.
+- **Rapor kalıbı (üç satır)**: *neyi değiştirdim · ne ölçtüm · ne hâlâ bozuk*. Uzun özet ilerleme değildir.
