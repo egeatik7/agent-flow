@@ -142,8 +142,9 @@ export type CanvasTab = {
 }
 
 export type SavedCanvas = { id: string; name: string; graph: AgentGraph; updatedAt: number }
-export type CanvasAutomation = { id: string; name: string; canvases: SavedCanvas[]; updatedAt: number }
-export type CanvasLibrary = { canvases: SavedCanvas[]; automations: CanvasAutomation[] }
+export type AutomationEntry = { id: string; canvasId: string }
+export type CanvasAutomation = { id: string; name: string; entries: AutomationEntry[]; updatedAt: number }
+export type CanvasLibrary = { schemaVersion?: 2; canvases: SavedCanvas[]; automations: CanvasAutomation[] }
 
 export type CanvasBook = {
   activeId: string
@@ -799,19 +800,54 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
   const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0].id
   let library: CanvasLibrary
   if (rec?.library && typeof rec.library === 'object') {
-    const lib = rec.library as Partial<CanvasLibrary>
+    const lib = rec.library as { canvases?: unknown; automations?: unknown }
+    const catalog = normalizeSavedCanvases(lib.canvases)
+    const legacyMembers = new Set<string>()
     const ids = new Set<string>()
-    library = { canvases: normalizeSavedCanvases(lib.canvases), automations: Array.isArray(lib.automations) ? lib.automations.flatMap((a) => {
-      if (!a || typeof a !== 'object' || !Array.isArray(a.canvases)) return []
+    const automations: CanvasAutomation[] = Array.isArray(lib.automations) ? lib.automations.flatMap(value => {
+      if (!value || typeof value !== 'object') return []
+      const a = value as { id?: unknown; name?: unknown; entries?: unknown; canvases?: unknown; updatedAt?: unknown }
+      if (!Array.isArray(a.entries) && !Array.isArray(a.canvases)) return []
       let id = typeof a.id === 'string' && a.id ? a.id : rid()
       if (ids.has(id)) id = rid()
       ids.add(id)
-      return [{ id, name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon',
-        canvases: normalizeSavedCanvases(a.canvases), updatedAt: Number.isFinite(a.updatedAt) && a.updatedAt >= 0 ? a.updatedAt : 0 }]
-    }) : [] }
+      const entryIds = new Set<string>()
+      const makeEntry = (rawId: unknown, canvasId: string): AutomationEntry => {
+        let entryId = typeof rawId === 'string' && rawId ? rawId : rid()
+        if (entryIds.has(entryId)) entryId = rid()
+        entryIds.add(entryId)
+        return { id: entryId, canvasId }
+      }
+      const entries = Array.isArray(a.entries) ? a.entries.flatMap(value => {
+        const e = value as Partial<AutomationEntry> | null
+        return e && typeof e.canvasId === 'string' && catalog.some(c => c.id === e.canvasId) ? [makeEntry(e.id, e.canvasId)] : []
+      }) : normalizeSavedCanvases(a.canvases).map(snapshot => {
+        // V1 automation snapshots move into the single catalog. A differing old
+        // copy must survive migration; never overwrite an already-saved canvas.
+        const identical = (c: SavedCanvas) => c.name === snapshot.name && JSON.stringify(c.graph) === JSON.stringify(snapshot.graph)
+        const same = catalog.find(c => c.id === snapshot.id && identical(c)) ?? catalog.find(identical)
+        let canvasId = same?.id
+        if (!canvasId) {
+          canvasId = catalog.some(c => c.id === snapshot.id) ? rid() : snapshot.id
+          catalog.push({ ...snapshot, id: canvasId })
+        }
+        legacyMembers.add(canvasId)
+        return makeEntry(snapshot.id, canvasId)
+      })
+      return [{ id, name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon', entries,
+        updatedAt: typeof a.updatedAt === 'number' && Number.isFinite(a.updatedAt) && a.updatedAt >= 0 ? a.updatedAt : 0 }]
+    }) : []
+    library = { schemaVersion: 2, canvases: catalog, automations }
+    // Old group-open tabs had no savedId. Reattach an exact, unambiguous
+    // legacy working copy so its next Save updates the shared group record.
+    for (const tab of tabs) if (!tab.savedId) {
+      const matches = catalog.filter(c => legacyMembers.has(c.id) && c.name === tab.name && JSON.stringify(c.graph) === JSON.stringify(tab.graph))
+      if (matches.length === 1) tab.savedId = matches[0].id
+    }
+
   } else {
     // Upgrade old saved tabs once; closing a tab will no longer remove its saved flow.
-    library = { canvases: tabs.map(t => ({ id: t.id, name: t.name, graph: structuredClone(t.graph), updatedAt: 0 })), automations: [] }
+    library = { schemaVersion: 2, canvases: tabs.map(t => ({ id: t.id, name: t.name, graph: structuredClone(t.graph), updatedAt: 0 })), automations: [] }
     for (const t of tabs) t.savedId = t.id
   }
   const branches = Array.isArray(rec?.branches) ? rec!.branches.filter(b => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string') : undefined

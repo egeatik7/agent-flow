@@ -12,6 +12,7 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "tests"
+    "tests",
+    "src/vite-env.d.ts"
   ]
 }

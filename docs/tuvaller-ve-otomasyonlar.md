@@ -1,49 +1,52 @@
-# Tuvaller ve Otomasyonlar
+# Tuvaller ve Otomasyonlar — tek depo
 
-## Sağdaki Tuvaller penceresi
+Sağdaki **Node / LLM / Ayarlar / Ajan / Tuvaller** sekmelerinden **Tuvaller**’e geç. Ayrı bir sabit kutu yoktur. Bu sekmede iki ekran vardır: **Tuval Deposu** ve **Otomasyonlar**.
 
-**Tuvali Kaydet**, açık olan tuvali sağdaki **Kayıtlı Tuvaller** listesine kaydeder. Aynı kayda bağlı bir sekmede tekrar Kaydet, o kaydı günceller. Aynı adı taşıyan başka kayıtları değiştirmez.
+## Tuval Deposu
 
-- **+**: Kayıtlı tuvali yeni, bağımsız bir üst sekmede açar. Birden fazla kez açılabilir.
-- **Kırmızı ×**: Onay penceresi açar. **Evet** kayıtlı tuvali siler, **Hayır** iptal eder. Açık sekmeler ve otomasyonların kendi kopyaları korunur.
-- Üstteki sekmenin **×** düğmesi yalnız sekmeyi kapatır. Kaydedilmeyen değişiklikler varsa uyarı gösterir; sağdaki kayıt silinmez. Son açık sekme kapatılamaz.
-- Üst sekmeye çift tıklayarak adını değiştirebilirsin. Seçili sekmedeki **‹ / ›** ile sekmeyi sola veya sağa taşıyabilirsin.
+**Tuvali Kaydet**, aktif üst sekmenin çalışma kopyasını depoya kaydeder. Kayda bağlı bir sekmede tekrar kaydetmek aynı kaydı günceller. Aynı adı taşıyan farklı kayıtlar birbirini ezmez. **Dosya → İçe Aktar** ile tek tuval JSON’u da eklenebilir; mevcut sekme ezilmez.
 
-Eski sürümden ilk açılışta mevcut kayıtlı sekmeler sağdaki listeye de taşınır. İçerikleri korunur. Silinmiş kayıtlar yeniden başlatınca geri gelmez.
+Her kaydın yanında:
 
-**Dosya → İçe Aktar**, tek tuval JSON'unu yeni sekmede açar ve sağdaki listeye kaydeder; mevcut sekmeyi ezmez. **Dosya → Dışa Aktar** geçerli tuvalin JSON dosyasını indirir. Uygulama, açık sekmelerin çalışma kopyalarını otomatik saklar; sağdaki kalıcı kayıtları güncellemek için **Tuvali Kaydet** kullan.
+- **+**: Yeni üst sekmede aç. Açılan sekme aynı depo kaydına bağlıdır; düzenlemeleri kayda aktarmak için **Tuvali Kaydet** kullan.
+- **Kapat**: Açık çalışma sekmesini kapat; depo kaydı kalır. Birden çok açıksa aktif olan, o aktif değilse son açılan kopya kapatılır. Son üst sekme kapatılamaz. Kaydedilmeyen içerik değişikliğinde uyarı gelir.
+- **✎**: Depodaki adı değiştir. Aynı kaydın adı bütün otomasyonlarda ve bağlı açık sekmelerde değişir.
+- **Kırmızı ×**: Onayla kaydı depodan sil. Bu kaydı kullanan otomasyonların listelerinden de çıkarılır. Açık çalışma kopyaları kaybolmaz; kayıt bağlantıları kaldırılır. Daha sonra Tuvali Kaydet ile yeni kayıt olarak saklanabilirler.
 
-## Otomasyon grupları
+Üst sekmedeki **×** yalnız çalışma sekmesini kapatır. Depoyu silmez. Üst sekmeye çift tıklayıp adını değiştirdiğinde yeni adı depoya aktarmak için Tuvali Kaydet kullan. **Dosya → Dışa Aktar** aktif çalışma kopyasının JSON’unu indirir.
 
-**Yeni otomasyon adı** alanına bir ad yazıp **+ Kaydet** düğmesine bas. Açık sekmelerin **soldan sağa sırası ve tüm içerikleri**, o otomasyonun kendi kopyaları olarak saklanır. En soldaki tuval grubun en üstünde görünür.
+## Otomasyonlar
 
-Her grubun düğmeleri:
+Bir otomasyon ayrı tuval kopyaları saklamaz. Depodaki kayıtların **sıralı listesidir**. Bu yüzden aynı tuval birden çok otomasyonda kullanılabilir; depoda kaydedilen içerik ve ad değişikliği hepsinde geçerlidir.
 
-- **✎**: Grubun adını değiştir.
-- **Aç**: Grubun kayıtlı tuval listesini üstte aç. Açık sekmelerin yerini değiştireceği için önce onay ister; önemli değişikliklerini önce kaydet.
-- **Kaydet**: Grubu şu an açık sekmelerin sırası ve içerikleriyle güncelle. Önce onay ister. Bu bir içerik/sıra kaydıdır; başka bir sekmedeki değişiklik grubu kendiliğinden değiştirmez.
-- **Export**: Grubu bütün tuvallerinin içerikleriyle tek JSON dosyasına aktar. Başka Nubbo kurulumunda **Dosya → İçe Aktar** ile sağdaki Otomasyonlar listesine eklenir. İçe aktarmak mevcut açık sekmeleri değiştirmez; ardından **Aç** kullan.
-- **Kırmızı ×**: Onay verildiğinde grubu sil. Açık sekmeler ve ayrı kayıtlı tuvaller korunur.
+1. **Otomasyonlar → + Yeni** ile boş düzenleyici aç. Adını yaz.
+2. **Depodan tuval seç → Ekle** ile kayıtları ekle. Listede zaten bulunan kayıt ekleme seçeneklerinden çıkarılır.
+3. **↑ / ↓** ile sırala; kırmızı **×** ile yalnız bu otomasyon listesinden çıkar. Depodaki kayıt ve başka otomasyonlar korunur.
+4. **Kaydet** ile adı, üyeleri ve sıralamayı sakla. Bu aşamaya kadar değişiklikler taslaktır; kayıtlı otomasyon değiştirilmez.
+5. Kayıtlı otomasyonun **Aç** düğmesi bu listeyi üstte soldan sağa açar. Açık çalışma sekmelerini değiştireceği için onay ister.
 
-Grubun içindeki her tuval için **+** yalnız o tuvali yeni sekmede açar; **↑ / ↓** kayıtlı sırasını değiştirir; kırmızı **×** onaydan sonra o tuvali yalnız bu gruptan siler. Grubu değiştirmek açık sekmelerin sırasını değiştirmez. Grubun yeni sırasıyla çalıştırmak için **Aç** düğmesine bas.
+Var olan bir otomasyon için **Düzenle** kullan. Listeye daha önce dahil olmayan kayıtlı tuvalleri aynı seçim alanından ekleyebilirsin. **Kaydet** açık üst sekmelerden yeni bir liste tahmin etmez; düzenlediğin listeyi kaydeder. Liste değişikliğinden sonra üst çalışma sekmelerini yeni sıraya geçirmek için **Aç** kullan.
 
-Kayıtlar Nubbo'nun mevcut kullanıcı profilinde saklanır; bütün bilgisayarın klasörleri kendiliğinden taranmaz. Taşımak/yedeklemek için tuval ve otomasyon JSON dosyalarını dışa aktar.
+**Vazgeç** kayıtlı listeye döner ve kaydedilmeyen değişiklikler varsa onay ister. Başka bir otomasyona geçerken de taslağı bırakmak için onay istenir. Tuval Deposu ekranına veya Node/LLM/Ayarlar/Ajan sekmelerine geçmek taslağı silmez. Uygulama kapatılırsa kaydedilmemiş otomasyon taslağı saklanmaz.
 
-## Üstteki Oynat / Durdur
+Kayıtlı listeden farklı bir taslak açıkken o otomasyonun Aç/Export düğmeleri pasiftir; önce Kaydet veya Vazgeç. Tuvalin **node içeriğini** değiştirdiğinde de önce Tuvali Kaydet kullan: otomasyonun Kaydet düğmesi üyeleri/sırayı kaydeder, çalışma kopyalarının içeriklerini otomatik kaydetmez.
 
-Sekme çubuğunun en solundaki **▶**, o an açık olan bütün tuvallerin sırasını sabitler ve **en soldakinin Başlangıç node'undan** çalıştırır. Bir tuval hatasız biçimde kendi **Bitti** node'una ulaşınca sıradaki tuvalin Başlangıç node'u çalışır. Son tuval de bittiğinde sıra tamamlanır. Her tuvalin döngüleri baştan başlar; tuvaller ayrı koşulardır ve döngü değişkenleri birbirine aktarılmaz.
+Otomasyonun kırmızı **×** düğmesi yalnız grubu siler; tuval deposunu veya açık sekmeleri silmez. Boş otomasyon kaydedilebilir; çalıştırmak üzere açılmaz.
 
-- Seçili sekme hangisi olursa olsun sıra soldan başlar.
-- Bütün tuvallere başlamadan önce kök düzeyde Başlangıç ve Bitti node'larının bulunması kontrol edilir. Eksik varsa hiçbir tuval çalıştırılmaz.
-- Bağlanmamış bir Bitti node'unun bulunması yeterli değildir: koşu gerçekten Bitti'ye ulaşmalıdır. Bir paketin içindeki Bitti, dış tuvalin Bitti'si sayılmaz.
-- Koşu hata verirse, bir döngü öğesi hata vermişse veya Bitti'ye ulaşmadan zincir tükenirse sonraki tuval başlatılmaz. Mevcut tek-tuval çalıştırma ve döngü hata politikası değişmez.
-- **■**, o anki koşuyu ve sıranın geri kalanını durdurur. Kaydetme beklenirken basılırsa da bir sonraki koşu başlamaz.
-- Çalışma sırasında kayıt silme, sekme değiştirme ve sıralama düğmeleri devre dışıdır. Oynat/Durdur, uzun sekme listesi yatay kaydırıldığında da görünür kalır.
-- Her tuvalin ilerlemesi üstte `2/3 · Tuval adı` biçiminde ve günlükte gösterilir.
-- Kayıt diske yazılamazsa bu işlem başarılı gösterilmez; tuval sırası sonraki koşuya geçmez.
+## Export / import
 
-Bu özellik node'ların tıklama, yazma veya OCR davranışlarını değiştirmez. Her adıma yeni ekran doğrulama/LLM çağrısı eklemez. Bitti bilgisi doğrudan mevcut koşu motorundan gelir.
+**Export**, kayıtlı sırayı ve kullandığı depo tuvalleriyle birlikte taşınabilir JSON üretir. **Dosya → İçe Aktar** bu dosyayı gruplara ve depoya ekler; mevcut çalışma sekmelerini değiştirmez. Aynı ad/içeriğe sahip depo kayıtları yeniden kullanılabilir; farklı içerik var olan kaydın üzerine yazılmaz.
 
-## Doğrulama kapsamı
+Eski v1 otomasyon JSON’ları da içe aktarılır. Yeni export biçimi v2’dir: içerikler tek listede, sıra ise kayıtlara referansla tutulur. Eski EXE’ye dönerek aynı profil verisini kaydetme; eski sürüm bu yeni biçimi anlamayabilir. Önce profil yedeğini al.
 
-Otomatik testler kayıt bağımsızlığı, eski kayıtların taşınması, silme/yeniden açma, isim çakışmaları, sıra, export/import, Durdur, hata ve gerçek Bitti bilgisini kapsar. Arayüz bileşenlerinin üretildiği HTML de test edilir. Gerçek Windows masaüstü, Electron pencere etkileşimleri ve saatler süren gerçek otomasyon bu geliştirme ortamında denenmemiştir.
+## Eski kayıtların taşınması
+
+Önceki patch otomasyonların içinde ayrı tuval kopyaları tutuyordu. İlk yüklemede bunlar depoya taşınır ve gruplar depo kayıtlarına bağlanır. Aynı ad/içerikteki kopyalar aynı kaydı kullanır. Bir eski kopyanın içeriği depodakinden farklıysa **veri kaybolmaması için ayrı bir depo kaydı** oluşturulur; ada bakılarak biri diğerinin üzerine yazılmaz. İsimler aynı görünebilir; bunları depoda yeniden adlandırabilirsin. Sonraki yüklemelerde yeniden kopya üretilmez.
+
+Depoda silinen tuval otomasyon açılırken yeniden oluşturulmaz. Kayıtlar ortak bir kaynakta tutulur. Liste üzerinde çalışırken kayıt başka bir yoldan değişmiş/silinmişse eski taslak onu ezmez; Düzenle ile yeniden yüklemen istenir.
+
+## Sırayla oynatma
+
+Üstte en soldaki **▶ / ■** önceki patch’teki gibi çalışır. Açık üst sekmeler soldan sağa, her biri Başlangıç node’undan yürür. Önceki tuval kendi Bitti node’una hatasız ulaşmadan sonraki başlamaz. Durdur veya hata kalan sırayı başlatmaz. Sekme sırası ile otomasyonun kayıtlı sırası ayrı çalışma durumlarıdır; otomasyonun sırasını üstte açmak için Aç kullan.
+
+Bu düzeltme OCR, tıklama, yazma, inisiyatif ve koşu motorunu değiştirmez. Masaüstü eylemlerine yeni kontrol eklemez.

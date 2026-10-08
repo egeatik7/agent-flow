@@ -3,7 +3,7 @@ import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
-import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameAutomation, deleteAutomation, editAutomationCanvas, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
+import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
 import { CanvasSequence } from './lib/canvas-sequence'
 import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
@@ -24,6 +24,7 @@ import {
   type AppSettings,
   type CanvasBook,
   type SavedCanvas,
+  type CanvasAutomation,
   type Locator,
   type LogEntry,
   type LogLevel,
@@ -499,7 +500,7 @@ export default function App() {
 
   /** Critical library writes are acknowledged before the UI discards or replaces data. */
   const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false) => {
-    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current) return
+    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current) return false
     libraryBusyRef.current = true
     setLibraryBusy(true)
     try {
@@ -510,28 +511,36 @@ export default function App() {
       if (open) showCanvas(next, next.activeId, false)
       else adoptBook(next)
       pushLog('success', message)
-    } catch (e) { pushLog('error', errText(e)) }
+      return true
+    } catch (e) { pushLog('error', errText(e)); return false }
     finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
   const saveCurrentCanvas = () => saveLibraryChange(b => saveCanvas(b, b.activeId), `“${canvasName()}” Tuvaller'e kaydedildi.`)
-  const openLibraryCanvas = (canvas: SavedCanvas, link: boolean) => saveLibraryChange(b => openSavedCanvas(b, canvas, link), `“${canvas.name}” yeni sekmede açıldı.`, true)
+  const openLibraryCanvas = (canvas: SavedCanvas) => saveLibraryChange(b => openSavedCanvas(b, canvas), `“${canvas.name}” yeni sekmede açıldı.`, true)
   const deleteLibraryCanvas = async (id: string) => {
     if (runningRef.current || libraryBusyRef.current) return
     const c = libraryOf(bookRef.current).canvases.find(c => c.id === id)
-    if (!c || !await askSure(`“${c.name}” kayıtlı tuvalini silmek istediğinize emin misiniz? Açık sekmeler ve otomasyonların kayıtlı kopyaları silinmez.`)) return
+    if (!c || !await askSure(`“${c.name}” kayıtlı tuvalini silmek istediğinize emin misiniz? Bu kaydı kullanan otomasyonlardaki bağlantıları da silinecek. Açık çalışma sekmeleri silinmez.`)) return
     await saveLibraryChange(b => deleteSavedCanvas(b, id), `“${c.name}” kayıtlı tuvali silindi.`)
   }
-  const createAutomation = (name: string) => saveLibraryChange(b => saveAutomation(b, name), `“${name.trim()}” otomasyonu açık sekmelerin sırasıyla kaydedildi.`)
-  const updateAutomation = async (id: string) => {
-    if (runningRef.current || libraryBusyRef.current) return
-    const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
-    if (!a || !await askSure(`“${a.name}” otomasyonu açık sekmelerin soldan sağa sırası ve içerikleriyle güncellensin mi?`)) return
-    await saveLibraryChange(b => saveAutomation(b, a.name, id), `“${a.name}” otomasyonu güncellendi.`)
+  const closeLibraryCanvas = (id: string) => {
+    const tabs = commitActive().tabs.filter(t => t.savedId === id)
+    const tab = tabs.find(t => t.id === activeIdRef.current) ?? tabs[tabs.length - 1]
+    if (tab) void closeTab(tab.id)
+  }
+  const saveAutomationEditor = async (draft: AutomationDraft): Promise<CanvasAutomation | null> => {
+    let savedId: string | undefined
+    const ok = await saveLibraryChange(b => {
+      const next = saveAutomation(b, draft)
+      savedId = draft.id ?? libraryOf(next).automations[libraryOf(next).automations.length - 1].id
+      return next
+    }, `“${draft.name.trim()}” otomasyon listesi kaydedildi.`)
+    return ok ? libraryOf(bookRef.current).automations.find(a => a.id === savedId) ?? null : null
   }
   const loadAutomation = async (id: string) => {
     if (runningRef.current || libraryBusyRef.current) return
     const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
-    if (!a?.canvases.length || !await askSure(`“${a.name}” açılsın mı? Açık sekmeler bu kayıtlı listeyle değiştirilecek. Kaydedilmeyen değişiklikleri korumak için önce Hayır deyip tuvalleri kaydet.`)) return
+    if (!a?.entries.length || !await askSure(`“${a.name}” açılsın mı? Açık sekmeler bu kayıtlı listeyle değiştirilecek. Kaydedilmeyen değişiklikleri korumak için önce Hayır deyip tuvalleri kaydet.`)) return
     await saveLibraryChange(b => openAutomation(b, id), `“${a.name}” tuval listesi açıldı.`, true)
   }
   const removeAutomation = async (id: string) => {
@@ -539,11 +548,6 @@ export default function App() {
     const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
     if (!a || !await askSure(`“${a.name}” otomasyonunu ve kayıtlı tuval listesini silmek istediğinize emin misiniz? Açık sekmeler ve ayrı tuval kayıtları silinmez.`)) return
     await saveLibraryChange(b => deleteAutomation(b, id), `“${a.name}” otomasyonu silindi.`)
-  }
-  const changeAutomationCanvas = async (automationId: string, canvasId: string, action: 'delete' | 'up' | 'down') => {
-    if (runningRef.current || libraryBusyRef.current) return
-    if (action === 'delete' && !await askSure('Bu tuvali otomasyonun kayıtlı listesinden silmek istediğinize emin misiniz? Açık sekme ve ayrı tuval kaydı silinmez.')) return
-    await saveLibraryChange(b => editAutomationCanvas(b, automationId, canvasId, action), action === 'delete' ? 'Tuval otomasyondan silindi.' : 'Otomasyonun tuval sırası kaydedildi.')
   }
   const moveTab = (id: string, delta: -1 | 1) => {
     if (runningRef.current || libraryBusyRef.current) return
@@ -1267,19 +1271,19 @@ export default function App() {
             />
           </div>
           <div className="right-sidebar">
-            <CanvasLibraryPanel library={library} disabled={running || libraryBusy || !loaded || !!confirmQuestion}
-              onSaveCanvas={() => void saveCurrentCanvas()}
-              onOpenCanvas={(c, link) => void openLibraryCanvas(c, link)}
-              onDeleteCanvas={id => void deleteLibraryCanvas(id)}
-              onCreateAutomation={name => void createAutomation(name)}
-              onOpenAutomation={id => void loadAutomation(id)}
-              onSaveAutomation={id => void updateAutomation(id)}
-              onRenameAutomation={(id, name) => void saveLibraryChange(b => renameAutomation(b, id, name), 'Otomasyon adı kaydedildi.')}
-              onDeleteAutomation={id => void removeAutomation(id)}
-              onExportAutomation={exportAutomationFile}
-              onEditAutomationCanvas={(a, c, action) => void changeAutomationCanvas(a, c, action)} />
-            <fieldset className="canvas-editor-fields" disabled={running || libraryBusy}>
+            <fieldset className="canvas-editor-fields" disabled={running || libraryBusy || !!confirmQuestion}>
           <SidePanel
+            canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} disabled={running || libraryBusy || !loaded || !!confirmQuestion}
+              onConfirm={askSure}
+              onSaveCanvas={() => void saveCurrentCanvas()}
+              onOpenCanvas={c => void openLibraryCanvas(c)}
+              onCloseCanvas={closeLibraryCanvas}
+              onRenameCanvas={(id, name) => saveLibraryChange(b => renameSavedCanvas(b, id, name), 'Tuval adı depoda ve onu kullanan otomasyonlarda güncellendi.')}
+              onDeleteCanvas={id => void deleteLibraryCanvas(id)}
+              onOpenAutomation={id => void loadAutomation(id)}
+              onSaveAutomation={saveAutomationEditor}
+              onDeleteAutomation={id => void removeAutomation(id)}
+              onExportAutomation={exportAutomationFile} />}
             tab={sideTab}
             onTab={setSideTab}
             settings={settings}

@@ -19,10 +19,11 @@ import {
   type ModelInfo,
 } from '../types'
 
-export type SideTab = 'node' | 'llm' | 'settings' | 'agent'
+export type SideTab = 'node' | 'llm' | 'settings' | 'agent' | 'canvases'
 
 type Props = {
   tab: SideTab
+  canvasPanel?: ReactNode
   onTab: (t: SideTab) => void
   settings: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
@@ -1000,6 +1001,7 @@ export default function SidePanel(p: Props) {
             ['llm', 'LLM'],
             ['settings', 'Ayarlar'],
             ['agent', 'Ajan'],
+            ['canvases', 'Tuvaller'],
           ] as [SideTab, string][]
         ).map(([k, label]) => (
           <button type="button" key={k} className={`tab ${p.tab === k ? 'active' : ''}`} onClick={() => p.onTab(k)}>
@@ -1012,6 +1014,7 @@ export default function SidePanel(p: Props) {
         {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
         {p.tab === 'settings' && <Settings {...p} />}
         {p.tab === 'agent' && <AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} />}
+        {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}</div>}
       </div>
     </aside>
   )
