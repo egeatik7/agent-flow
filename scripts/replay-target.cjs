@@ -9,8 +9,17 @@ async function replayTrace(bundle, observer) {
   const request = bundle.events.find(e => e.kind === 'request');
   if (!request || bundle.events.filter(e => e.kind === 'request').length !== 1) throw new Error('Replay needs exactly one resolver request');
   const observations = source => bundle.events.filter(e => e.kind === 'observation' && e.source === source);
-  const windows = observations('windows'), onnx = observations('onnx'), tars = observations('tars');
-  const models = bundle.events.filter(e => e.kind === 'model');
+  const dismissals = bundle.events.map((e,i)=>({e,i})).filter(({e})=>e.kind==='input'&&e.mode==='popup-dismiss'&&e.phase==='sent');
+  if (dismissals.length > 1) throw new Error('Replay contains repeated popup input; not a single target resolution');
+  const dismissalIndex = dismissals[0]?.i ?? -1;
+  // Live recovery already sent its intermediate click. Offline preview must never send it:
+  // reproduce only the recorded post-dismissal visual decision from its matching new frame.
+  const visualEvents = bundle.events.filter((e,i)=>i>dismissalIndex&&e.source==='tars');
+  const windows = observations('windows'), onnx = observations('onnx'), tars = visualEvents.filter(e=>e.kind==='observation');
+  const models = bundle.events.filter((e,i)=>e.kind==='model'&&(e.source!=='tars'||i>dismissalIndex));
+  if (dismissalIndex >= 0 && (!tars.some(e=>e.scan?.image) || !models.some(e=>e.source==='tars'))) {
+    throw new Error('Popup recovery replay is incomplete: fresh frame and target decision required');
+  }
   let iconPass = 0, inputCalls = 0;
   function observed(source) {
     const e = observations(source).find(e => Object.hasOwn(e, 'value'));
@@ -51,7 +60,13 @@ async function replayTrace(bundle, observer) {
     'a11y-bridge': bridge,
     browser: { userChromeItems: async () => chrome ? { items: chrome.items, area: chrome.area, host: chrome.window } : null },
     shots: { rememberShot: () => {} },
-    openrouter: { isTarsModel: () => false, chooseScreenTarget: async () => nextModel('list'), guiStep: async () => nextModel('tars') },
+    openrouter: { isTarsModel: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
+      const value = nextModel('tars');
+      if (value.intent) return value;
+      // Legacy diagnostic traces used GuiAction. Replay their recorded target interpretation
+      // read-only; this adapter never runs on live model responses or sends input.
+      return {intent:['click','double','right'].includes(value.kind)?'target':'missing',x:value.x,y:value.y,reason:value.thought||''};
+    } },
   };
   const saved = new Map();
   for (const [name, exports] of Object.entries(replacements)) {

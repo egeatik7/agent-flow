@@ -1,7 +1,7 @@
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -807,6 +807,75 @@ ${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''
     const content = await chatOnce(opts.apiKey, model, messages, true)
     if (!content.trim()) throw new ModelRejected('boş yanıt')
     return parseJsonAction(content)
+  })
+}
+
+export type VisualTargetResult = {
+  intent: 'target' | 'dismiss' | 'missing'
+  x?: number
+  y?: number
+  reason: string
+}
+
+/** A separate, strict reply contract; normal GUI/initiative parsers are untouched. */
+export function validateVisualTargetReply(content: string, model: string, screen: Img, allowDismiss: boolean): VisualTargetResult {
+  if (!Number.isFinite(screen.w) || !Number.isFinite(screen.h) || screen.w <= 0 || screen.h <= 0) throw new ModelRejected('Görsel hedef görüntü boyutu geçersiz')
+  let intent: unknown, reason = '', point: [number, number] | null = null
+  let maxX = 1000, maxY = 1000
+  if (isTarsModel(model)) {
+    const tags = [...content.matchAll(/^\s*Intent:\s*(\w+)\s*$/gim)]
+    if (tags.length !== 1) throw new ModelRejected('Görsel hedef yanıtında tek bir Intent alanı gerekli')
+    intent = tags[0][1].toLowerCase()
+    reason = (content.match(/Thought:\s*([\s\S]*?)(?:\n\s*Intent:|\n\s*Action:|$)/i)?.[1] ?? '').trim()
+    const actions = [...content.matchAll(/^\s*Action:\s*(.+)$/gim)]
+    if (actions.length !== 1) throw new ModelRejected('Görsel hedef yanıtında tek bir Action gerekli')
+    const raw = actions[0][1].trim()
+    if (intent === 'missing') {
+      if (!/^call_user\(\s*\)$/.test(raw)) throw new ModelRejected('Eksik hedef için call_user() gerekli')
+    } else {
+      const match = raw.match(/^click\(\s*start_box\s*=\s*(['"])([^'"\r\n]+)\1\s*\)$/)
+      if (!match) throw new ModelRejected('Görsel hedef yalnız tek koordinatlı click kabul eder')
+      const box = match[2].replace(/<\|box_start\|>|<\|box_end\|>/g, '').trim()
+      if (!/^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)?\s*\)$/.test(box)) {
+        throw new ModelRejected('Görsel hedef noktası biçimi geçersiz')
+      }
+      point = pointOf(match[2])
+    }
+    if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
+  } else {
+    const p = parseJson(content)
+    intent = p.intent
+    reason = String(p.reason ?? '').trim()
+    if (p.action != null) throw new ModelRejected('Görsel hedef JSON yanıtı eylem değil intent taşımalı')
+    if (intent !== 'missing' && typeof p.x === 'number' && typeof p.y === 'number') point = [p.x, p.y]
+    if (intent === 'missing' && (p.x != null || p.y != null)) throw new ModelRejected('Eksik hedef koordinat taşıyamaz')
+  }
+  if (!['target', 'dismiss', 'missing'].includes(String(intent))) throw new ModelRejected('Görsel hedef intent alanı geçersiz')
+  if (intent === 'dismiss' && !allowDismiss) throw new ModelRejected('Bu hedef aramasında popup kapatma etkin değil')
+  if (intent === 'missing') return { intent, reason }
+  if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || maxX <= 0 || maxY <= 0 ||
+      point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) {
+    throw new ModelRejected('Görsel hedef koordinatı eksik veya görüntünün dışında')
+  }
+  return { intent: intent as 'target' | 'dismiss', x: point[0] / maxX, y: point[1] / maxY, reason }
+}
+
+export async function chooseVisualTarget(opts: {
+  apiKey: string; model: string | string[]; goal: string; screen: Img; allowDismiss: boolean
+  dismissalRecord?: string; tarsPrompt?: string; jsonPrompt?: string
+}): Promise<VisualTargetResult> {
+  const context = `${VISUAL_TARGET_RULES}\nDismissals enabled: ${opts.allowDismiss ? 'YES (one unrelated popup only)' : 'NO'}.\n${opts.dismissalRecord ? `Executor record: ${opts.dismissalRecord}\n` : ''}Original requested target: ${opts.goal}`
+  return runModelChain(asModelChain(opts.model), async model => {
+    const native = isTarsModel(model)
+    const custom = native ? opts.tarsPrompt : opts.jsonPrompt
+    const standard = native ? TARS_TEMPLATE : SCREEN_PROMPT
+    const contract = native ? VISUAL_TARGET_TARS_PROMPT : VISUAL_TARGET_JSON_PROMPT
+    const prompt = `${custom?.trim() && custom !== standard ? fillGoal(custom, opts.goal) + '\n\n' : ''}${fillGoal(contract, opts.goal)}\n\n${context}`
+    const messages: Message[] = native
+      ? [{ role: 'user', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
+      : [{ role: 'system', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
+    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, maxTokens: 1000 })
+    return validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
   })
 }
 

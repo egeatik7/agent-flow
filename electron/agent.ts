@@ -28,6 +28,8 @@ import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
 import {
   chooseScreenTarget,
+  chooseVisualTarget,
+  type VisualTargetResult,
   guiStep,
   isTarsModel,
   judgeReaction,
@@ -65,6 +67,8 @@ export type AgentContext = {
 type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
 
 class NotFoundError extends Error {}
+/** A popup input was attempted: never replay it through the generic target retry. */
+class VisualTargetRecoveryError extends Error {}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** After a click, before keys: lets the field take focus. */
@@ -533,6 +537,7 @@ export function createAgent(ctx: AgentContext) {
             log('info', 'Görsel model ekran görüntüsüne bakıyor.')
             return await locateWithTars(node, wide, readOnly)
           } catch (e) {
+            if (e instanceof StoppedError || e instanceof VisualTargetRecoveryError) throw e
             if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
           }
@@ -579,97 +584,132 @@ export function createAgent(ctx: AgentContext) {
     throw new Error(`“${node.title}”: görsel mod için ekranda neyin bulunacağını yaz.`)
   }
 
+  function validVisualPoint(result: VisualTargetResult): boolean {
+    return Number.isFinite(result.x) && Number.isFinite(result.y) && result.x! >= 0 && result.x! < 1 && result.y! >= 0 && result.y! < 1
+  }
+
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
   async function locateWithTars(node: AgentNode, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
     if (!s.apiKey) throw new NotFoundError('Görsel hedefleme için API anahtarı yok.')
     const model = agentModels(s)
     const prompt = visionPrompt(node)
-    const res = await bridge.scan({
+    const canDismiss = !readOnly && node.kind === 'click' && node.clickMode !== 'move'
+    let dismissalRecord: string | undefined
+    let didDismiss = false
+    const capture = () => bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
-      image: 'plain',
-      uia: false,
-      ocr: false,
-      fresh: wide,
+      image: 'plain', uia: false, ocr: false, fresh: wide || didDismiss,
       maxImageW: isTarsModel(model[0] || '') ? 1288 : 1400,
-      snap: isTarsModel(model[0] || '') ? 28 : 0,
-      fit: true,
-      readOnly,
+      snap: isTarsModel(model[0] || '') ? 28 : 0, fit: true, readOnly,
     })
-    trace(node, { kind: 'observation', source: 'tars', scan: res })
-    warnMissingWindow(res)
-    if (!res.image) throw new NotFoundError('Görsel hedefleme için ekran görüntüsü alınamadı.')
-    const action = await guiStep({
-      apiKey: s.apiKey,
-      model,
-      goal: `Find this on the screen and click it once: ${prompt}. Do nothing else.`,
-      history: [],
-      screen: res.image,
-      tarsPrompt: promptOf(s.llmPrompts, 'tars'),
-      jsonPrompt: promptOf(s.llmPrompts, 'screen'),
-    })
-    trace(node, { kind: 'model', source: 'tars', value: action })
-    let pointed = (action.kind === 'click' || action.kind === 'double' || action.kind === 'right') && typeof action.x === 'number' && typeof action.y === 'number'
-    let a = res.area
-    let thought = action.thought
-    // A small, wordless target - a colour swatch, a tiny icon - is easy to miss on a whole screen and
-    // easy to point at inside a small frame. If the first look found nothing and we know roughly
-    // where to look (the point just clicked, or a recorded hint), the same question is asked again
-    // about a crop around that point, and the answer is mapped back onto the screen. A crop is not
-    // new detail, but it removes everything else the model was looking at.
-    if (!pointed) {
-      const anchor =
-        node.locator?.x !== undefined && node.locator?.y !== undefined
-          ? { x: node.locator.x, y: node.locator.y }
-          : lastClickPoint
-      if (anchor) {
-        const zoomW = 420
-        const zoomH = 240
-        const rect = {
-          x: Math.max(0, Math.round(anchor.x - zoomW / 2)),
-          y: Math.max(0, Math.round(anchor.y - zoomH / 2)),
-          w: zoomW,
-          h: zoomH,
-        }
-        try {
-          const crop = await bridge.crop(rect, 1080, true, isTarsModel(model[0] || '') ? 28 : 0)
-          trace(node, { kind: 'observation', source: 'tars', scan: { ...crop, zoomed: rect } as unknown as ScanResult })
-          if (crop.image) {
-            const again = await guiStep({
-              apiKey: s.apiKey,
-              model,
-              goal: `This is a ZOOMED-IN crop of one part of the screen, ${crop.area.w}x${crop.area.h} pixels of it. Find this inside the crop and click it once: ${prompt}. Do nothing else.`,
-              history: [],
-              screen: crop.image,
-              tarsPrompt: promptOf(s.llmPrompts, 'tars'),
-              jsonPrompt: promptOf(s.llmPrompts, 'screen'),
-            })
-            trace(node, { kind: 'model', source: 'tars', value: again })
-            const ok2 = (again.kind === 'click' || again.kind === 'double' || again.kind === 'right') && typeof again.x === 'number' && typeof again.y === 'number'
-            log('info', `[Görsel model] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
-            if (ok2) {
-              pointed = true
-              a = crop.area
-              thought = again.thought
-              action.x = again.x
-              action.y = again.y
-            }
+    try {
+      let res = await capture()
+      let action: VisualTargetResult
+      while (true) {
+        checkStopped()
+        trace(node, { kind: 'observation', source: 'tars', scan: res })
+        warnMissingWindow(res)
+        if (!res.image) throw new NotFoundError('Görsel hedefleme için ekran görüntüsü alınamadı.')
+        action = await chooseVisualTarget({
+          apiKey: s.apiKey, model, goal: prompt, screen: res.image,
+          allowDismiss: canDismiss && !didDismiss, dismissalRecord,
+          tarsPrompt: promptOf(s.llmPrompts, 'tars'), jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+        })
+        checkStopped()
+        trace(node, { kind: 'model', source: 'tars', value: action })
+        if (action.intent !== 'dismiss') break
+        if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
+        if (!validVisualPoint(action)) throw new VisualTargetRecoveryError('Popup kapatma yanıtında geçerli nokta yok; tıklama gönderilmedi.')
+        const x = res.area.x + action.x! * res.area.w, y = res.area.y + action.y! * res.area.h
+        await waitUnlocked()
+        checkStopped()
+        clearHover()
+        lastClickPoint = undefined
+        guiReplace = false
+        // Flag before dispatch: a thrown native call can have partially sent input.
+        didDismiss = true
+        try { await bridge.clickAt(x, y, 'left') }
+        catch (e) { throw new VisualTargetRecoveryError(`Popup kapatma girdisi başarısız; tekrar gönderilmeyecek: ${(e as Error).message}`) }
+        checkStopped()
+        trace(node, { kind: 'input', point: { x: Math.round(x), y: Math.round(y) }, mode: 'popup-dismiss', phase: 'sent' })
+        log('info', `Popup kapatma tıklaması gönderildi @${Math.round(x)},${Math.round(y)}; node tamamlanmadı, asıl hedef yeni görüntüde aranacak.`)
+        dismissalRecord = `One LEFT click was dispatched at screen (${Math.round(x)},${Math.round(y)}) to dismiss an unrelated popup. No click on the requested target has been sent. The popup's disappearance is NOT verified. Do not reuse that point; find the original requested target in this new image.`
+        await pause(FOCUS_MS)
+        res = await capture()
+      }
+      let pointed = action.intent === 'target' && validVisualPoint(action)
+      let a = res.area
+      let thought = action.reason
+      // A small, wordless target - a colour swatch, a tiny icon - is easy to miss on a whole screen and
+      // easy to point at inside a small frame. If the first look found nothing and we know roughly
+      // where to look (the point just clicked, or a recorded hint), the same question is asked again
+      // about a crop around that point, and the answer is mapped back onto the screen. A crop is not
+      // new detail, but it removes everything else the model was looking at.
+      if (!pointed) {
+        const anchor =
+          node.locator?.x !== undefined && node.locator?.y !== undefined
+            ? { x: node.locator.x, y: node.locator.y }
+            : lastClickPoint
+        if (anchor) {
+          const zoomW = 420
+          const zoomH = 240
+          const rect = {
+            x: Math.max(0, Math.round(anchor.x - zoomW / 2)),
+            y: Math.max(0, Math.round(anchor.y - zoomH / 2)),
+            w: zoomW,
+            h: zoomH,
           }
-        } catch (e) {
-          log('warn', `[Görsel model] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
+          try {
+            const crop = await bridge.crop(rect, 1080, true, isTarsModel(model[0] || '') ? 28 : 0)
+            trace(node, { kind: 'observation', source: 'tars', scan: { ...crop, zoomed: rect } as unknown as ScanResult })
+            if (crop.image) {
+              const again = await chooseVisualTarget({
+                apiKey: s.apiKey,
+                model,
+                goal: `This is a ZOOMED-IN crop of one part of the screen, ${crop.area.w}x${crop.area.h} pixels of it. Find the requested target inside the crop: ${prompt}.`,
+                allowDismiss: false, dismissalRecord,
+                screen: crop.image,
+                tarsPrompt: promptOf(s.llmPrompts, 'tars'),
+                jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+              })
+              trace(node, { kind: 'model', source: 'tars', value: again })
+              const ok2 = again.intent === 'target' && validVisualPoint(again)
+              log('info', `[Görsel model] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
+              if (ok2) {
+                pointed = true
+                a = crop.area
+                thought = again.reason
+                action.x = again.x
+                action.y = again.y
+              }
+            }
+          } catch (e) {
+            if (e instanceof StoppedError) throw e
+            log('warn', `[Görsel model] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
+          }
         }
       }
-    }
-    if (!pointed) throw new NotFoundError(`Görsel model hedefi göstermedi${action.thought ? `: ${action.thought}` : ''}.`)
-    const x = a.x + action.x! * a.w
-    const y = a.y + action.y! * a.h
-    trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[Görsel model] ekran görüntüsü' } })
-    log('info', `[Görsel model] ${thought || action.raw}`)
-    return {
-      x,
-      y,
-      label: '[Görsel model] ekran görüntüsü',
-      memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
+      checkStopped()
+      if (!pointed) {
+        const message = `Görsel model asıl hedefi göstermedi${action.reason ? `: ${action.reason}` : ''}.`
+        if (didDismiss) throw new VisualTargetRecoveryError(`${message} Popup tıklaması tekrarlanmayacak; sonraki node'a geçilmedi.`)
+        throw new NotFoundError(message)
+      }
+      const x = a.x + action.x! * a.w
+      const y = a.y + action.y! * a.h
+      trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[Görsel model] ekran görüntüsü' } })
+      log('info', `[Görsel model] ${thought || action.intent}`)
+      return {
+        x,
+        y,
+        label: '[Görsel model] ekran görüntüsü',
+        memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
+      }
+    } catch (e) {
+      if (e instanceof StoppedError || e instanceof VisualTargetRecoveryError) throw e
+      if (didDismiss) throw new VisualTargetRecoveryError(`Popup girdisinden sonra asıl hedef aranamadı; kapatma tekrarlanmayacak: ${(e as Error).message}`)
+      throw e
     }
   }
 

@@ -127,6 +127,26 @@ export function initiativeDecisionModels(models: string[]): string[] {
   return decisionModels.length ? [...decisionModels, ...models.filter(name => /ui-?tars/i.test(name))] : [...models]
 }
 
+/** Target finding is not a task-running loop. A dismissal must never become the target. */
+export const VISUAL_TARGET_RULES = `You locate the exact target requested by ONE node. Classify your next point explicitly:
+target: the requested control itself is visible and accessible; point at that control.
+dismiss: an unrelated popup covers the requested control; point ONLY at that popup's unambiguous Close/X or Cancel button. This is an intermediate action, never the requested target.
+missing: you cannot locate the requested control or cannot safely distinguish the popup from the main application.
+Do not open menus, launch applications, change settings or create another task. Do not approve confirmations, save/discard work, start jobs, delete anything or close the main application as a dismissal. If dismissals are disabled, an obstructed target is missing. Do not point through a popup at a covered control. Never report a dismissal as target. When the user explicitly asks to close a popup, its close button IS the target.
+After a recorded dismissal, use the NEW screenshot to locate the ORIGINAL requested control. The record only says input was sent; it does not prove the popup disappeared. Never replay its coordinates or keep trying to close it.`
+
+export const VISUAL_TARGET_TARS_PROMPT = `You locate one requested control in a screenshot. You do not execute a whole task.
+Reply in exactly this format:
+Thought: one short reason
+Intent: target OR dismiss OR missing
+Action: click(start_box='(x,y)') OR call_user()
+Use click with coordinates for target or dismiss. Use call_user() for missing. No other actions. UI-TARS 1.5 coordinates are pixels of the supplied image; other UI-TARS versions use their normal 0-1000 grid.
+Requested target: {{hedef}}`
+
+export const VISUAL_TARGET_JSON_PROMPT = `Locate one requested control in the screenshot. Classify it explicitly as target, dismiss or missing.
+Reply with JSON only: {"intent":"target|dismiss|missing","x":0,"y":0,"reason":"one short reason"}.
+x and y use the 0-1000 screenshot grid, NOT screen pixels or 0-1 fractions. For missing, omit coordinates. Do not return an action plan.`
+
 export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
 Pick one verdict: ready, missed, loading, blocked, unknown.
 JSON only: {"verdict":"ready|missed|loading|blocked|unknown","reason":"<short reason>"}`

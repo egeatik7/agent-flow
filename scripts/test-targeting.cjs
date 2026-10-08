@@ -59,6 +59,24 @@ test('preview rejects disabled UIA target without falling through to other stage
   const b=bundle(['uia'],[],{node:{locator:{controlType:'Button',name:'Kaydet',windowTitle:'Fixture'}},events:[{kind:'observation',source:'uia',value:{x:10,y:10,w:100,h:30,name:'Kaydet',enabled:false}}]});
   await assert.rejects(replayTrace(b),/bulunamadı/);
 });
+test('popup-recovery trace replays its recorded fresh target frame without sending the intermediate click',async()=>{
+  const b=bundle(['tars'],[],{model:true,node:{prompt:'Output input'},events:[
+    {kind:'observation',source:'tars',scan:{area:{x:0,y:0,w:1000,h:700},image:{data:'before',w:1000,h:700},items:[],window:'Fixture'}},
+    {kind:'model',source:'tars',value:{intent:'dismiss',x:.8,y:.3,reason:'Popup'}},
+    {kind:'input',mode:'popup-dismiss',phase:'sent',point:{x:800,y:210}},
+    {kind:'observation',source:'tars',scan:{area:{x:300,y:100,w:600,h:400},image:{data:'after',w:600,h:400},items:[],window:'Fixture'}},
+    {kind:'model',source:'tars',value:{intent:'target',x:.25,y:.5,reason:'Input'}},
+  ]});
+  const r=await replayTrace(b);assert.deepEqual({x:r.result.x,y:r.result.y},{x:450,y:300});assert.equal(r.inputCalls,0);
+});
+test('popup-recovery trace without a new recorded frame is incomplete rather than replaying a close point',async()=>{
+  const b=bundle(['tars'],[],{model:true,node:{prompt:'Input'},events:[
+    {kind:'observation',source:'tars',scan:{area:{x:0,y:0,w:1000,h:700},image:{data:'before',w:1000,h:700},items:[],window:'Fixture'}},
+    {kind:'model',source:'tars',value:{intent:'dismiss',x:.8,y:.3,reason:'Popup'}},
+    {kind:'input',mode:'popup-dismiss',phase:'sent',point:{x:800,y:210}},
+  ]});
+  await assert.rejects(replayTrace(b),/incomplete/);
+});
 test('observer mutations and recorder errors cannot change the production selection',async()=>{
   const b=bundle(['windows'],[item(1,'Kaydet',100,50)]);
   const r=await replayTrace(b,e=>{if(e.scan) e.scan.items.length=0; if(e.kind==='resolved') e.target.x=9999; throw new Error('Recorder unavailable');});
