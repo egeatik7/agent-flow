@@ -1,0 +1,208 @@
+import { createElement } from 'react'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { createNode, DEFAULT_SETTINGS, normalizeCanvasBook, type AgentGraph, type AgentNode, type CanvasBook } from '../electron/graph-types'
+import { runGraph, StoppedError, type Executor } from '../electron/runner'
+import Toolbar from '../src/components/Toolbar'
+import NodeCanvas from '../src/components/NodeCanvas'
+import CanvasTabs from '../src/components/CanvasTabs'
+import LogPanel from '../src/components/LogPanel'
+
+// Exercise App's real callbacks and the real runner. Only rendering and desktop input
+// are replaced: no Windows session or LLM is needed to test the selected-node handoff.
+vi.mock('../src/components/TitleBar', () => ({ default: () => null }))
+vi.mock('../src/components/Toolbar', () => ({ default: () => null }))
+vi.mock('../src/components/NodeCanvas', () => ({ default: () => null }))
+vi.mock('../src/components/CanvasTabs', () => ({ default: () => null }))
+vi.mock('../src/components/SidePanel', () => ({ default: () => null }))
+vi.mock('../src/components/LogPanel', () => ({ default: () => null }))
+vi.mock('../src/components/ScreenScanner', () => ({ default: () => null }))
+vi.mock('../src/components/ConfirmDialog', () => ({ default: () => null }))
+
+let App: typeof import('../src/App').default
+let book: CanvasBook
+let mounted: ReactTestRenderer | undefined
+let stopped = false
+let onPatch = (_p: unknown) => {}
+let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
+const executed: string[] = []
+const dispatched: { graph: AgentGraph; startId?: string; packagePath?: string[] }[] = []
+const api = {
+  getSettings: async () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, maxSteps: 100 }),
+  getCanvases: async () => structuredClone(book),
+  saveCanvases: async (_b: CanvasBook) => true,
+  listWindows: async () => [],
+  bootReady: () => {},
+  onAgentLog: (_cb: (p: unknown) => void) => () => {},
+  onAgentStep: (_cb: (p: unknown) => void) => () => {},
+  onAgentPatch: (cb: (p: unknown) => void) => { onPatch = cb; return () => { onPatch = () => {} } },
+  stopAgent: async () => { stopped = true; return true },
+  runAgent: async (graph: AgentGraph, startId?: string, packagePath?: string[], options?: { requireEnd?: boolean }) => {
+    dispatched.push({ graph: structuredClone(graph), startId, packagePath: packagePath?.slice() })
+    stopped = false
+    const record = async (node: AgentNode) => {
+      executed.push(node.text ?? node.prompt ?? node.id)
+      await beforeAction?.(node)
+    }
+    const ex: Executor = {
+      log: () => {}, step: () => {}, shouldStop: () => stopped,
+      click: record, type: record, key: record, exists: async () => true,
+      patchNode: (id, patch) => onPatch({ id, patch }),
+    }
+    try {
+      const summary = await runGraph(graph, ex, {
+        maxSteps: 100, stepDelayMs: 0, startId, resume: !!startId,
+        packagePath, reportEnd: options?.requireEnd,
+      })
+      return { ok: summary.failed === 0, ...summary }
+    } catch (e) {
+      if (e instanceof StoppedError) return { ok: false, stopped: true }
+      throw e
+    }
+  },
+}
+
+beforeAll(async () => {
+  vi.stubGlobal('window', { xpAgent: api, addEventListener: () => {}, removeEventListener: () => {}, setTimeout, clearTimeout })
+  vi.stubGlobal('requestAnimationFrame', (cb: () => void) => { cb(); return 0 })
+  App = (await import('../src/App')).default
+})
+afterAll(() => vi.unstubAllGlobals())
+afterEach(() => {
+  if (mounted) act(() => mounted!.unmount())
+  mounted = undefined
+  executed.length = 0
+  dispatched.length = 0
+  stopped = false
+  beforeAction = undefined
+})
+
+let edgeId = 0
+const edge = (from: AgentNode, to: AgentNode, fromPort = 'next') => ({ id: `selected-edge-${++edgeId}`, from: from.id, fromPort, to: to.id })
+function task(text: string, x = 300) {
+  return { ...createNode('type', x, 100), text }
+}
+function nextCanvas() {
+  const start = createNode('start', 0, 100), write = task('RIGHT'), end = createNode('end', 650, 100)
+  return { id: 'right', name: 'Right', graph: { nodes: [start, write, end], edges: [edge(start, write), edge(write, end)] } }
+}
+function scenario(depth = 1, withLoop = false, connectedEnd = true) {
+  const before = task('BEFORE'), selected = task('SELECTED {{öğe}}', 650), after = task('AFTER', 1000)
+  const innerStart = createNode('start', 0, 100), innerEnd = createNode('end', 1350, 100)
+  let graph: AgentGraph = { nodes: [innerStart, before, selected, after, innerEnd], edges: [edge(innerStart, before), edge(before, selected), edge(selected, after), edge(after, innerEnd)] }
+  const path: string[] = []
+  for (let i = 0; i < depth; i++) {
+    const start = createNode('start', 0, 100), pkg = createNode('package', 350, 100), end = createNode('end', 1200, 100)
+    pkg.inner = graph
+    graph = { nodes: [start, pkg, end], edges: [edge(start, pkg), ...(connectedEnd || i < depth - 1 ? [edge(pkg, end)] : [])] }
+    path.unshift(pkg.id)
+  }
+  let loop: AgentNode | undefined
+  if (withLoop) {
+    loop = { ...createNode('loop', 300, 0), items: ['first', 'second', 'third'], startIndex: 1, loopIndex: 1, members: [path[0]] }
+    const start = graph.nodes[0], pkg = graph.nodes[1], end = graph.nodes[2]
+    graph = { nodes: [start, loop, pkg, end], edges: [edge(start, loop), edge(loop, end, 'done')] }
+  }
+  book = normalizeCanvasBook({ activeId: 'active', tabs: [
+    { id: 'left', name: 'Left', graph: nextCanvas().graph },
+    { id: 'active', name: 'Active', graph }, nextCanvas(),
+  ] })
+  return { path, selected, loop }
+}
+async function mount() {
+  await act(async () => { mounted = create(createElement(App)) })
+  return mounted!
+}
+async function select(renderer: ReactTestRenderer, path: string[], id: string) {
+  for (const pkgId of path) await act(async () => { renderer.root.findByType(NodeCanvas).props.onEnterPackage(pkgId) })
+  await act(async () => { renderer.root.findByType(NodeCanvas).props.onSelectNode(id) })
+}
+const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
+
+describe('Seçiliden Çalıştır: real App → bridge arguments → runner → next canvas', () => {
+  it.each([1, 2])('keeps %i package levels, skips prior actions, then runs only the canvas on the right', async depth => {
+    const s = scenario(depth), r = await mount()
+    await select(r, s.path, s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(dispatched[0]?.packagePath).toEqual(s.path)
+    expect(dispatched[0]?.startId).toBe(s.selected.id)
+    expect(executed).toEqual(['SELECTED {{öğe}}', 'AFTER', 'RIGHT'])
+    expect(dispatched).toHaveLength(2)
+    expect(dispatched[1].packagePath).toEqual([])
+    expect(dispatched[1].startId).toBeUndefined()
+    expect(logs(r)).not.toContain('Başlangıç node’u bulunamadı')
+  })
+  it('retains the marked loop item when resuming inside a package', async () => {
+    const s = scenario(1, true), r = await mount()
+    await select(r, s.path, s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(dispatched[0].graph.nodes.find(n => n.id === s.loop!.id)?.startIndex).toBe(1)
+    expect(executed).toEqual(['SELECTED second', 'AFTER', 'BEFORE', 'SELECTED third', 'AFTER', 'RIGHT'])
+  })
+  it('a package-local End cannot advance to the right canvas when the root End is disconnected', async () => {
+    const s = scenario(2, false, false), r = await mount()
+    await select(r, s.path, s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(executed).toEqual(['SELECTED {{öğe}}', 'AFTER'])
+    expect(dispatched).toHaveLength(1)
+    expect(logs(r)).toContain('Bitti node’una ulaşmadı')
+  })
+  it('normal sequence Play still starts at the active canvas root and resets its loop marker', async () => {
+    const s = scenario(1, true), r = await mount()
+    await select(r, s.path, s.selected.id)
+    await act(async () => { r.root.findByType(CanvasTabs).props.onRunAll(); await Promise.resolve() })
+    expect(dispatched[0].startId).toBeUndefined()
+    expect(dispatched[0].packagePath).toEqual([])
+    expect(dispatched[0].graph.nodes.find(n => n.id === s.loop!.id)?.startIndex).toBe(0)
+    expect(executed).toEqual(['BEFORE', 'SELECTED first', 'AFTER', 'BEFORE', 'SELECTED second', 'AFTER', 'BEFORE', 'SELECTED third', 'AFTER', 'RIGHT'])
+    expect(dispatched).toHaveLength(2)
+  })
+  it('a selected root node also skips preceding nodes and continues to the right', async () => {
+    const s = scenario(0), r = await mount()
+    await select(r, [], s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(dispatched[0].packagePath).toEqual([])
+    expect(executed).toEqual(['SELECTED {{öğe}}', 'AFTER', 'RIGHT'])
+  })
+  it('subsequent canvases start from their first item even when they have a saved marker', async () => {
+    const s = scenario()
+    const start = createNode('start', 0, 100), loop = createNode('loop', 300, 0), write = task('RIGHT {{öğe}}', 350), end = createNode('end', 1200, 100)
+    loop.items = ['first', 'second']; loop.startIndex = 1; loop.members = [write.id]
+    book.tabs[2].graph = { nodes: [start, loop, write, end], edges: [edge(start, loop), edge(loop, end, 'done')] }
+    const r = await mount()
+    await select(r, s.path, s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(dispatched[1].graph.nodes.find(n => n.id === loop.id)?.startIndex).toBe(0)
+    expect(executed).toEqual(['SELECTED {{öğe}}', 'AFTER', 'RIGHT first', 'RIGHT second'])
+  })
+  it('Stop while a selected action is pending prevents remaining actions and the next canvas', async () => {
+    const s = scenario(), r = await mount()
+    await select(r, s.path, s.selected.id)
+    let release!: () => void
+    beforeAction = async () => new Promise<void>(resolve => { release = resolve })
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(r.root.findByType(Toolbar).props.running).toBe(true)
+    await act(async () => { r.root.findByType(Toolbar).props.onStop(); release(); await Promise.resolve() })
+    expect(executed).toEqual(['SELECTED {{öğe}}'])
+    expect(dispatched).toHaveLength(1)
+    expect(r.root.findByType(Toolbar).props.running).toBe(false)
+  })
+  it('an actual execution error does not launch the right canvas', async () => {
+    const s = scenario(), r = await mount()
+    await select(r, s.path, s.selected.id)
+    beforeAction = async () => { throw new Error('desktop action failed') }
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    expect(executed).toEqual(['SELECTED {{öğe}}'])
+    expect(dispatched).toHaveLength(1)
+    expect(logs(r)).toContain('desktop action failed')
+    expect(r.root.findByType(Toolbar).props.running).toBe(false)
+  })
+  it('package-path runs without End reporting retain the legacy result shape', async () => {
+    const s = scenario()
+    const summary = await runGraph(book.tabs[1].graph, {
+      log: () => {}, step: () => {}, shouldStop: () => false,
+      click: async () => {}, type: async () => {}, key: async () => {}, exists: async () => true,
+    }, { maxSteps: 100, stepDelayMs: 0, startId: s.selected.id, packagePath: s.path, resume: true })
+    expect(summary).toEqual({ steps: 4, failed: 0 })
+  })
+})

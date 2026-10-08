@@ -994,6 +994,9 @@ export default function App() {
   // sıra sağındaki tuvallerle devam eder (soldakiler çalıştırılmaz).
   const runAllCanvases = async (startNodeId?: string) => {
     if (!loaded || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
+    // showCanvas clears the open package view. Capture its path before switching;
+    // the selected node belongs to that package, not to the root canvas.
+    const startPath = startNodeId ? stackRef.current.map(c => c.id) : []
     const book = commitActive()
     const from = book.tabs.findIndex(t => t.id === activeId)
     const ordered = from <= 0 ? book.tabs : book.tabs.slice(from)
@@ -1005,17 +1008,20 @@ export default function App() {
         ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
         : `Aktif tuvalden sağa doğru oynatılıyor (${ordered.length} tuval).`)
       const outcome = await sequenceRef.current.run(ordered, async (tab, index, total) => {
-        const prepared = { ...tab, graph: resetLoopTicks(tab.graph) }
+        // Selected-node runs resume the marked item. Only fresh canvases restart
+        // their loops from the beginning, including every subsequent canvas.
+        const prepared = { ...tab, graph: index === 0 && startNodeId ? tab.graph : resetLoopTicks(tab.graph) }
         const committed = commitActive()
         const next = activateCanvasSnapshot(committed, prepared)
         showCanvas(next, tab.id, false)
         setSequenceLabel(`${index + 1}/${total} · ${tab.name}`)
         const ilk = index === 0 ? startNodeId : undefined
+        const path = index === 0 ? startPath : []
         pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, ilk, [], { requireEnd: true })
-          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), ilk, patchNode, [], true)
+        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true })
+          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), ilk, patchNode, path, true)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
       })

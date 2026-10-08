@@ -151,14 +151,17 @@ export async function runGraph(
       stepDelayMs: opts.stepDelayMs,
       root: opts.root ?? graph,
       resume: opts.resume,
+      reportEnd: opts.reportEnd,
       tally: opts.tally ?? { n: 0, failed: 0 },
     }
-    await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
+    let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
     for (let i = layers.length - 1; i >= 0; i--) {
       const { parent, pkg } = layers[i]
-      await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id })
+      summary = await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id })
     }
-    return { steps: shared.tally.n, failed: shared.tally.failed }
+    // The final summary belongs to the outer canvas. A package-local End is not
+    // enough to start the next canvas, and legacy runs retain their result shape.
+    return summary
   }
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = opts.afterNodeId ? undefined : findEntry(graph, opts.startId)
