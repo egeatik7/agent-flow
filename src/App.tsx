@@ -1096,27 +1096,7 @@ export default function App() {
           onLayout={() => setGraph((g) => autoLayout(g))}
           onForget={forgetAll}
           onResetLoops={() => void resetLoops()}
-          ocrEngine={settings.ocrEngine === 'onnx' ? 'onnx' : 'windows'}
-          onOcrEngine={(ocrEngine) => {
-            const prev = settingsRef.current.ocrEngine === 'onnx' ? 'onnx' : 'windows'
-            setSettings((s) => ({ ...s, ocrEngine }))
-            const remember = api
-              ? api.saveSettings({ ocrEngine })
-              : Promise.resolve(localStorage.setItem(LOCAL_SETTINGS, JSON.stringify({ ...settingsRef.current, ocrEngine })))
-            void remember
-              .then(() => {
-                pushLog(
-                  'info',
-                  ocrEngine === 'onnx'
-                    ? 'OCR: ONNX. Ekrandaki yazı bu okuyucudan gelir. Windows OCR’nin uydurduğu satır kullanılmaz.'
-                    : 'OCR: Windows. ONNX yalnızca Çinceyi ve kaçan İngilizceyi ekler.'
-                )
-              })
-              .catch((e) => {
-                setSettings((s) => ({ ...s, ocrEngine: prev }))
-                pushLog('error', errText(e))
-              })
-          }}
+
         />
         <CanvasTabs
           tabs={tabList}

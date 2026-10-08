@@ -183,3 +183,42 @@ test('public input bridge selects explicit keyboard/direct-key paths and carries
   assert.equal(p.ownPid,process.pid);assert.equal(p.button,'double');assert.equal(p.target,undefined);spawned[0].answer(parts[0],true);await click;
  });
 });
+
+test('all OCR scan preferences fuse conflicting readers on the captured frame without another worker capture', async () => {
+  for (const preference of [undefined, 'windows', 'onnx', 'combined']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nubbo-combined-test-'));
+    const shot = path.join(dir, 'xpas-onnx-fixture.raw'); fs.writeFileSync(shot, 'frame');
+    let normal = 0, sideways = 0;
+    try {
+      await fakeBridge(async ({ bridge, spawned }) => {
+        bridge.setOcrEngine(preference);
+        const pending = bridge.scan({ image: 'none', tilt: true, readOnly: true, ocrEngine: preference });
+        await flush(); spawned[0].say('READY'); await flush();
+        const req = spawned[0].requests()[0];
+        spawned[0].answer(req.id, { area: { x: -1920, y: 30, w: 1920, h: 1080 }, items: [{ id: 1, text: 'Finlshed', type: 'Text', src: 'ocr', x: -1900, y: 50, w: 100, h: 20 }], image: null, shot, ocr: true, ocrCount: 1, uiaCount: 0 });
+        const result = await pending;
+        assert.equal(spawned[0].requests().length, 1);
+        assert.deepEqual(result.items.map(i => i.text), ['Finlshed', 'Finished']);
+        assert.deepEqual(result.items.map(i => i.ocrSources), [['windows'], ['onnx']]);
+        assert.equal(result.ocrEngine, 'combined'); assert.equal(result.shot, undefined);
+      }, { ...realOnnx, readRawShot: () => ({ bgra: Buffer.alloc(16), w: 2, h: 2 }),
+        recognizeBgra: async (bgra, w, h, x, y) => { normal++; assert.equal(x, -1920); assert.equal(y, 30); return [{ text: 'Finished', conf: .99, x: -1900, y: 50, w: 100, h: 20 }]; },
+        recognizeSideways: async (_b, _w, _h, _x, _y, _items, mode) => { sideways++; assert.equal(mode, 'combined'); return []; }, onnxError: () => null });
+      assert.equal(normal, 1); assert.equal(sideways, 1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+test('a failed ONNX reader preserves the Windows words, preview and same-frame fallback', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nubbo-combined-fail-'));
+  const shot = path.join(dir, 'xpas-onnx-fixture.raw'); fs.writeFileSync(shot, 'frame');
+  try {
+    await fakeBridge(async ({ bridge, spawned }) => {
+      const pending = bridge.scan({ image: 'plain', readOnly: true });
+      await flush(); spawned[0].say('READY'); await flush();
+      const words = [{ t: 'Done', x: 10, y: 10, w: 40, h: 20 }];
+      spawned[0].answer(spawned[0].requests()[0].id, { area: { x: 0, y: 0, w: 100, h: 100 }, items: [{ id: 1, text: 'Done', type: 'Text', src: 'ocr', x: 10, y: 10, w: 40, h: 20, words }], image: { data: 'PREVIEW', w: 100, h: 100 }, shot, ocr: true, ocrCount: 1, uiaCount: 0 });
+      const r = await pending; assert.deepEqual(r.items[0].words, words); assert.equal(r.items[0].text, 'Done');
+      assert.equal(r.image.data, 'PREVIEW'); assert.equal(r.onnx, false); assert.equal(r.shot, undefined);
+    }, { ...realOnnx, readRawShot: () => ({ bgra: Buffer.alloc(16), w: 2, h: 2 }), recognizeBgra: async () => { throw new Error('unavailable'); } });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -1524,7 +1524,7 @@ const screenRead: ToolDef = {
       maxImageW: num(args.maxImageW) ?? 1600,
       sig: true,
     })
-    const items = (s.items ?? []).slice(0, 200).map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, w: i.w, h: i.h, src: i.src, type: i.type }))
+    const items = (s.items ?? []).map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, w: i.w, h: i.h, src: i.src, type: i.type, words: i.words, ocrSources: i.ocrSources, ocrConfidence: i.ocrConfidence }))
     // An asked-for picture must travel with the answer: as data the caller can actually look at, and
     // as a file with a path it can open. Before this, asking for an image produced a message about a
     // screenshot whose path was never returned, so the caller was told about an image it could not see.

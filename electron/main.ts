@@ -71,7 +71,7 @@ let sessionApproved = false
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
-  if (s.ocrEngine !== 'onnx') s.ocrEngine = 'windows'
+  s.ocrEngine = 'combined'
   const ramp = clampRamp(s.valueLo, s.valueHi)
   s.valueLo = ramp.lo
   s.valueHi = ramp.hi
@@ -673,7 +673,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
     const next = { ...getSettings(), ...partial }
-    if (next.ocrEngine !== 'onnx') next.ocrEngine = 'windows'
+    next.ocrEngine = 'combined'
     const ramp = clampRamp(next.valueLo, next.valueHi)
     next.valueLo = ramp.lo
     next.valueHi = ramp.hi

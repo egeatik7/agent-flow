@@ -535,7 +535,8 @@ export function placeSideways(
   srcW: number,
   srcH: number,
   originX: number,
-  originY: number
+  originY: number,
+  engine: OcrEngine = 'windows'
 ): ScreenItem[] {
   const ocr = existing.filter((i) => i.src === 'ocr')
   const fresh: ScreenItem[] = []
@@ -545,7 +546,7 @@ export function placeSideways(
     if (!text) continue
     const box = unrotateCcw(line, srcW, srcH, originX, originY)
     if (!box) continue
-    if ([...ocr, ...fresh].some((it) => overlapRatio(box, it) > 0)) continue
+    if ([...ocr, ...fresh].some((it) => overlapRatio(box, it) > 0 && (engine !== 'combined' || exactReading(text, it.text)))) continue
     const item = lineItem(nextId++, text, { ...line, text, x: box.x, y: box.y, w: box.w, h: box.h })
     fresh.push(item)
   }
@@ -558,11 +559,12 @@ export async function recognizeSideways(
   h: number,
   originX: number,
   originY: number,
-  existing: ScreenItem[]
+  existing: ScreenItem[],
+  engine: OcrEngine = 'windows'
 ): Promise<ScreenItem[]> {
   const turned = rotateBgraCcw(bgra, w, h)
   const lines = await recognizeBgra(turned.bgra, turned.w, turned.h, 0, 0)
-  return placeSideways(lines, existing, w, h, originX, originY)
+  return placeSideways(lines, existing, w, h, originX, originY, engine)
 }
 
 function keyOf(s: string): string {
@@ -590,7 +592,7 @@ function overlapRatio(a: { x: number; y: number; w: number; h: number }, b: { x:
   return small > 0 ? inter / small : 0
 }
 
-export type OcrEngine = 'windows' | 'onnx'
+export type OcrEngine = 'windows' | 'onnx' | 'combined'
 
 function acceptedText(line: OnnxLine): string | null {
   const text = line.text.replace(/\s+/g, ' ').trim()
@@ -610,7 +612,45 @@ function lineItem(id: number, text: string, line: OnnxLine): ScreenItem {
   const y = Math.round(line.y)
   const w = Math.max(1, Math.round(line.w))
   const h = Math.max(1, Math.round(line.h))
-  return { id, text, type: 'Text', src: 'ocr', x, y, w, h, words: [{ t: text, x, y, w, h }] }
+  // ONNX measures a line, not individual words. Never invent word boxes.
+  return { id, text, type: 'Text', src: 'ocr', x, y, w, h, ocrSources: ['onnx'], ocrConfidence: line.conf,
+    ...(!/\s/.test(text) ? { words: [{ t: text, x, y, w, h, ocrSources: ['onnx'] }] } : {}) }
+}
+
+function exactReading(a: string, b: string): boolean {
+  // Substrings, counters and differing spellings are separate evidence.
+  return a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function combineReaders(items: ScreenItem[], lines: OnnxLine[]): { items: ScreenItem[]; added: number; usedOnnx: boolean } {
+  const out: ScreenItem[] = items.map(i => ({ ...i,
+    ...(i.src === 'ocr' ? { ocrSources: [...(i.ocrSources ?? ['windows' as const])] } : {}),
+    words: i.words?.map(w => ({ ...w, ...(w.ocrSources ? { ocrSources: [...w.ocrSources] } : {}) })),
+  }))
+  let nextId = out.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1
+  let added = 0, usedOnnx = false
+  for (const line of lines) {
+    const text = acceptedText(line)
+    if (!text || ![line.x, line.y, line.w, line.h, line.conf].every(Number.isFinite) || line.w <= 0 || line.h <= 0) continue
+    usedOnnx = true
+    const duplicate = out.find(i => i.src === 'ocr' && exactReading(text, i.text) && overlapRatio(line, i) >= 0.45)
+    if (duplicate) {
+      duplicate.ocrSources = [...new Set([...(duplicate.ocrSources ?? []), 'onnx' as const])]
+      duplicate.ocrConfidence = line.conf
+      // Keep Windows' original word positions and annotate corroborated words.
+      duplicate.words = duplicate.words?.map(w => ({ ...w, ocrSources: [...new Set([...(w.ocrSources ?? ['windows' as const]), 'onnx' as const])] }))
+      continue
+    }
+    const word = out.filter(i => i.src === 'ocr').flatMap(i => i.words ?? [])
+      .find(w => exactReading(text, w.t) && overlapRatio(line, w) >= 0.45)
+    if (word) {
+      word.ocrSources = [...new Set([...(word.ocrSources ?? ['windows' as const]), 'onnx' as const])]
+      continue
+    }
+    out.push(lineItem(nextId++, text, line))
+    added++
+  }
+  return { items: out, added, usedOnnx }
 }
 
 /**
@@ -636,6 +676,7 @@ export function mergeOnnxLines(
   engine: OcrEngine = 'windows'
 ): { items: ScreenItem[]; added: number; usedOnnx: boolean } {
   if (engine === 'onnx') return preferOnnx(items, lines)
+  if (engine === 'combined') return combineReaders(items, lines)
   const out: ScreenItem[] = items.map((i) => ({ ...i, words: i.words?.map((w) => ({ ...w })) }))
   let added = 0
   let nextId = out.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1

@@ -65,7 +65,7 @@ const nextCondition = { next: node('condition') };
 
 test('edited condition cannot succeed from its old locator', async () => {
   const a = agent();
-  assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: 'BİTTİ' })), false);
+  assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: '“BİTTİ”' })), false);
   assert(!a.calls.some(x => x[0] === 'locate'));
   assert(a.calls.some(x => x[0] === 'scan'));
 });
@@ -73,12 +73,12 @@ test('edited condition cannot succeed from its old locator', async () => {
 test('edited condition still succeeds when the new text is actually visible', async () => {
   const a = agent();
   a.scan.items = [{ id: 1, text: 'BİTTİ', type: 'Text', src: 'ocr', x: 20, y: 20, w: 50, h: 20 }];
-  assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc })), true);
+  assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: '“BİTTİ”' })), true);
 });
 
 test('unchanged picked and icon-only conditions retain their established path', async () => {
   const a = agent();
-  assert.equal(await a.ex.exists('OLD', node('condition', { locator: loc })), true);
+  assert.equal(await a.ex.exists('', node('condition', { locator: loc })), true);
   assert(!a.calls.some(x => x[0] === 'scan'));
   const b = agent({ findImage: async () => ({ score: 0.99, x: 10, y: 10 }) });
   assert.equal(await b.ex.exists('', node('condition', { locator: { controlType: 'Point', icon: 'saved-image' } })), true);

@@ -620,11 +620,11 @@ function NodeFields(p: Props & { n: AgentNode }) {
       {n.kind === 'condition' && (
         <>
           <div className="field">
-            <label>Ekranda aranacak yazı (seçilen öğe varsa boş bırakılabilir)</label>
+            <label>Ekranda aranacak yazı / durum (seçilen öğe varsa boş bırakılabilir)</label>
             <input
               className="xp-input"
               value={n.text ?? ''}
-              placeholder="Örn: İndirme tamamlandı"
+              placeholder="Örn: job finished 60/60 yazıyorsa evet ver"
               onChange={(e) => upd({ text: e.target.value })}
             />
             <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
@@ -650,7 +650,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
               Yazı ya da seçilen öğe (uygulamanın kendi öğesi veya resmi) görünürse <b>var</b>, görünmezse <b>yok</b> çıkışından devam eder.
               Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir.
               Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul; ama süre vermek daha hızlı tepki verir (her saniye bakar).
-              Pasif (soluk) düğmeler “var” sayılmaz. Yazı alanına ekranda gerçekten görünen yazıyı yaz; öğe adındaki “caret-down” gibi ekler ekranda görünmez.
+              Yalnız tırnak içindeki metin (örn. “Bitti”) yerel olarak aranır. Diğer tarifleri LLM, Windows + ONNX sonuçlarından yorumlar; tıklama veya fare hareketi gönderilmez. Metni boş bırakırsan seçilmiş öğe/resim aranır.
               Günlükte “… gördü:” satırı neyin “var” dediğini gösterir.
             </p>
           </div>

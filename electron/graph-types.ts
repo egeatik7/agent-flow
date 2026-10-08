@@ -171,7 +171,7 @@ export type AppSettings = {
   /** Tried, in order, when `agentModel` cannot be reached. */
   agentBackups: string[]
   /** Which reader supplies on-screen text. UI Automation names are used either way. */
-  ocrEngine: 'windows' | 'onnx'
+  ocrEngine: 'windows' | 'onnx' | 'combined'
   /** Output value for an input of 0. The preview and the readers share this. */
   valueLo: number
   /** Output value for an input of 1. */
@@ -240,7 +240,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hideWhileRunning: true,
   agentModel: 'bytedance/ui-tars-1.5-7b',
   agentBackups: [],
-  ocrEngine: 'windows',
+  ocrEngine: 'combined',
   valueLo: 0.15,
   valueHi: 0.8,
   findOrder: ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'],

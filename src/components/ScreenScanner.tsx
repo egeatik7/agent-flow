@@ -339,7 +339,7 @@ export default function ScreenScanner(p: Props) {
                       width: `${(Math.max(4, i.w) / area.w) * 100}%`,
                       height: `${(Math.max(4, i.h) / area.h) * 100}%`,
                     }}
-                    title={`${i.text} (${i.src === 'uia' ? i.type : 'OCR'})`}
+                    title={`${i.text} (${i.src === 'uia' ? i.type : `OCR: ${(i.ocrSources ?? ['windows']).join('+')}`})`}
                     onMouseEnter={() => setHover(i.id)}
                     onMouseLeave={() => setHover(null)}
                     onClick={() => p.onPick(i)}
@@ -361,7 +361,7 @@ export default function ScreenScanner(p: Props) {
               >
                 <span className={`src-dot ${i.src}`} />
                 <span className="scan-text">{i.text}</span>
-                <span className="scan-type">{i.src === 'uia' ? i.type : 'OCR'}</span>
+                <span className="scan-type">{i.src === 'uia' ? i.type : (i.ocrSources ?? ['windows']).join('+')}</span>
               </button>
             ))}
           </div>

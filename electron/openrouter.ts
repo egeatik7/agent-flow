@@ -1,5 +1,5 @@
 import { spatialContext } from './spatial-context'
-import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES } from './word-targets'
+import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
 import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
@@ -315,7 +315,8 @@ ${describeWordCandidates(scan, candidates)}
 
 ${spatialContext(scan)}
 
-${WORD_TARGET_RULES}
+${opts.kind === 'condition' ? CONDITION_TARGET_RULES : WORD_TARGET_RULES}
+${OCR_READER_RULES}
 Reply with JSON only: {"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}
 
 Step: ${opts.stepTitle}
@@ -350,7 +351,7 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
   const parsed = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
   const raw = parsed.id ?? parsed.i ?? parsed.index
   const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
-  const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && !c.contextOnly) : undefined
+  const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
   return {
     id: selected?.parentId ?? null,
     ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
@@ -552,7 +553,7 @@ export async function nextAction(opts: {
   system?: string
 }): Promise<AgentAction> {
   const system = opts.system?.trim() || INITIATIVE_PROMPT
-  const text = `${INITIATIVE_SCOPE_RULES}\n\nHedef: ${opts.goal}
+  const text = `${INITIATIVE_SCOPE_RULES}\n\n${OCR_READER_RULES}\n\nHedef: ${opts.goal}
 Adım: ${opts.stepTitle}
 ${
     opts.lastLap.length ? `Geçen başarılı turda şu sırayla yapıldı (ipucu, ekran farklıysa ekrana uy):\n${opts.lastLap.map((l, i) => `${i + 1}. ${l}`).join('\n')}\n` : ''

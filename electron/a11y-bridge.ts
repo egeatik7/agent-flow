@@ -191,12 +191,14 @@ function withHud<T extends object>(payload: T): T & { hudHwnd?: string } {
   return hudHwnd ? { ...payload, hudHwnd } : payload
 }
 
-let ocrEngine: OcrEngine = 'windows'
+let ocrEngine: OcrEngine = 'combined'
 let valueLo = 0.15
 let valueHi = 0.8
 
 export function setOcrEngine(v: OcrEngine | undefined) {
-  ocrEngine = v === 'onnx' ? 'onnx' : 'windows'
+  // Legacy saved preferences remain loadable; screen text now always uses both readers.
+  void v
+  ocrEngine = 'combined'
 }
 
 export function setValueRamp(lo: number, hi: number) {
@@ -257,7 +259,7 @@ export async function scan(opts: {
   fit?: boolean
   /** Also return a tiny grayscale signature to tell whether the screen changed. */
   sig?: boolean
-  /** Which reader wins. Defaults to the saved choice. */
+  /** Legacy reader choices are accepted; OCR scans now always combine both readers. */
   ocrEngine?: OcrEngine
   /** Also read a turned copy, and keep only lines the upright pass missed. The preview is already a separate copy. */
   tilt?: boolean
@@ -301,13 +303,14 @@ export async function scan(opts: {
     }),
     180000
   )
-  const items = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
+  const original = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
+  const items = original.map(i => i.src === 'ocr' ? { ...i, ocrSources: i.ocrSources ?? ['windows' as const] } : i)
   let onnx = false
   let onnxAdded = 0
   let sideCount = Number(r.sideCount) || 0
-  let engine: OcrEngine = 'windows'
+  const engine: OcrEngine = 'combined'
   const shot = r.shot
-  const prefer = opts.ocrEngine ?? ocrEngine
+  const prefer = ocrEngine
   const holdShot = opts.deferOnnx === true && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')
   if (!holdShot && opts.ocr !== false && shot && typeof shot === 'string' && path.basename(shot).startsWith('xpas-onnx-')) {
     try {
@@ -317,12 +320,8 @@ export async function scan(opts: {
       items.splice(0, items.length, ...merged.items)
       onnxAdded = merged.added
       onnx = merged.usedOnnx && !onnxError()
-      if (prefer === 'onnx' && merged.usedOnnx) {
-        engine = 'onnx'
-        sideCount = 0
-      }
       if (opts.tilt) {
-        const side = await recognizeSideways(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0, items)
+        const side = await recognizeSideways(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0, items, 'combined')
         if (side.length) {
           items.push(...side)
           sideCount += side.length
@@ -346,7 +345,7 @@ export async function scan(opts: {
   return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine, shot: holdShot ? shot : undefined }
 }
 
-/** Second reader, used only after Windows OCR missed the target. The raw frame is the ramped copy, turned again for sideways text. */
+/** Compatibility entry for deferred/replayed frames. Both readers are merged without discarding alternatives. */
 export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<ScanResult> {
   const shot = res.shot
   const { shot: _drop, ...base } = res
@@ -357,12 +356,11 @@ export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<Sc
     const originX = res.area?.x ?? 0
     const originY = res.area?.y ?? 0
     const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, originX, originY)
-    // This is a fallback reader: keep unrelated, valid Windows OCR lines.
-    // Explicit ONNX-only scans still use their selected engine above.
-    const merged = mergeOnnxLines(res.items, lines, 'windows')
+    // Preserve all Windows evidence, including conflicting readings at the same location.
+    const merged = mergeOnnxLines(res.items, lines, 'combined')
     const items = merged.items.slice()
     let sideCount = 0
-    const side = await recognizeSideways(raw.bgra, raw.w, raw.h, originX, originY, items)
+    const side = await recognizeSideways(raw.bgra, raw.w, raw.h, originX, originY, items, 'combined')
     if (side.length) {
       items.push(...side)
       sideCount = side.length
@@ -373,7 +371,7 @@ export async function applyOnnx(res: ScanResult & { shot?: string }): Promise<Sc
       onnx: (merged.usedOnnx || sideCount > 0) && !onnxError(),
       onnxAdded: merged.added + sideCount,
       sideCount,
-      ocrEngine: merged.usedOnnx ? 'onnx' : base.ocrEngine,
+      ocrEngine: 'combined',
     }
   } finally {
     fs.unlink(shot, () => {})

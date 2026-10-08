@@ -1,4 +1,5 @@
-export type ScreenWord = { t: string; x: number; y: number; w: number; h: number }
+export type OcrSource = 'windows' | 'onnx'
+export type ScreenWord = { t: string; x: number; y: number; w: number; h: number; ocrSources?: OcrSource[] }
 
 export type ScreenItem = {
   id: number
@@ -11,6 +12,8 @@ export type ScreenItem = {
   h: number
   aid?: string
   words?: ScreenWord[]
+  ocrSources?: OcrSource[]
+  ocrConfidence?: number
 }
 
 export type ScanResult = {
@@ -37,7 +40,7 @@ export type ScanResult = {
   /** Text file describing this scan's capture, when the scanner saved diagnostic PNGs. */
   captureDebug?: string
   /** Which reader supplied the OCR lines on this scan. */
-  ocrEngine?: 'windows' | 'onnx'
+  ocrEngine?: 'windows' | 'onnx' | 'combined'
 }
 
 export type Target = { x: number; y: number; w: number; h: number; text: string; item: ScreenItem; clickPoint?: { x: number; y: number } }
@@ -342,7 +345,7 @@ export function refineTarget(item: ScreenItem, text?: string): Target {
 export function describeItems(items: ScreenItem[], limit = 400): string {
   return items
     .slice(0, limit)
-    .map((i) => `#${i.id} ${i.src === 'ocr' ? 'Text' : i.type} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}`)
+    .map((i) => `#${i.id} ${i.src === 'ocr' ? 'Text' : i.type} "${i.text.replace(/"/g, "'")}" @${Math.round(i.x)},${Math.round(i.y)} ${Math.round(i.w)}x${Math.round(i.h)}${i.src === 'ocr' ? ` OCR-reader=${(i.ocrSources ?? ['windows']).join('+')}${i.ocrConfidence !== undefined ? ` ONNX-confidence=${i.ocrConfidence.toFixed(3)}` : ''}` : ''}`)
     .join('\n')
 }
 

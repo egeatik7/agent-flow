@@ -6,6 +6,9 @@ For an OCR target, choose exactly ONE word: the word you are most confident lies
 These IDs belong only to this current list. Screenshot numbers, if present, refer to original control/phrase IDs; OCR word IDs in this list have their own coordinates. Resolve word IDs from the list, not screenshot numbering.
 Preserve a specifically named application's identity. A generic "browser"/"tarayıcı" label does not identify Google Chrome or any other named application. If the requested application is not identified by observed evidence, return id:null; do not substitute another application with a similar purpose.`
 
+export const OCR_READER_RULES = `OCR-reader identifies Windows, ONNX, or both reading the SAME captured frame. Different readings at overlapping coordinates are alternatives for one location, not automatically different buttons. Infer the best reading from nearby words and the instruction. Do not concatenate conflicting alternatives or mix observations from unrelated locations. ONNX-confidence is that reader's recognition score, not proof of clickability. Keep counters, totals and negations meaningful: 6/60 is not 60/60, and running is not finished.`
+export const CONDITION_TARGET_RULES = `This is a READ-ONLY existence condition, NOT an action. Interpret the user's whole instruction and decide whether observed screen evidence supports the requested state. Choose one listed word/control or OCR-context-only line as evidence, or id:null if it is absent. For this condition, an unsplit line IS selectable as evidence even without word geometry; no click is sent. Do not open menus, close popups, advance the application or plan steps to make the condition true. A semantic paraphrase can match, but required numbers, totals and negations must agree. For example, "job finished 60/60 yazıyorsa evet ver" needs evidence of completion with 60/60; a running job or 6/60 does not qualify.`
+
 export type WordCandidate = { item: ScreenItem; parentId: number; wordIndex?: number; contextOnly?: boolean }
 
 function validBox(w: { x: number; y: number; w: number; h: number }): boolean {
@@ -24,7 +27,8 @@ export function wordCandidates(scan: ScanResult): WordCandidate[] {
     const valid = (parent.words ?? []).map((w, index) => ({ w, index })).filter(({ w }) => w.t.trim() && validBox(w))
     if (valid.length) {
       for (const { w, index } of valid) {
-        out.push({ item: { id: nextId++, text: w.t, type: 'Word', src: 'ocr', x: w.x, y: w.y, w: w.w, h: w.h }, parentId: parent.id, wordIndex: index })
+        out.push({ item: { id: nextId++, text: w.t, type: 'Word', src: 'ocr', x: w.x, y: w.y, w: w.w, h: w.h,
+          ocrSources: w.ocrSources ?? parent.ocrSources, ocrConfidence: parent.ocrConfidence }, parentId: parent.id, wordIndex: index })
       }
     } else if (validBox(parent)) {
       // Older scans/readers may lack word geometry: expose it honestly as an unsplit box.
@@ -38,7 +42,7 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
   return candidates.map(({ item, parentId, wordIndex, contextOnly }) => {
     const x = (item.x + item.w / 2 - scan.area.x) / Math.max(1, scan.area.w) * 100
     const y = (item.y + item.h / 2 - scan.area.y) / Math.max(1, scan.area.h) * 100
-    return `${describeItems([item])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}`
+    return `${describeItems([item])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}`
   }).join('\n')
 }
 

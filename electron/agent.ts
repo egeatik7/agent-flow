@@ -203,18 +203,18 @@ export function createAgent(ctx: AgentContext) {
       image: withImage ? 'marked' : targetTrace && ctx.onTargetTrace && ctx.captureTargetImages ? 'plain' : 'none',
       fresh: wide,
       tilt: true,
-      ocrEngine: deferOnnx ? 'windows' : undefined,
+      ocrEngine: 'combined',
       deferOnnx,
       readOnly,
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
     const ocrVia =
-      res.ocrEngine === 'onnx' ? `ONNX ${res.onnxAdded ?? 0}` : res.ocr ? `${res.ocrCount}${res.onnxAdded ? ` +çince ${res.onnxAdded}` : ''}` : 'kapalı'
+      res.ocrEngine === 'combined' ? `Windows ${res.ocrCount} + ONNX ${res.onnxAdded ?? 0} ek okuma` : res.ocrEngine === 'onnx' ? `ONNX ${res.onnxAdded ?? 0}` : res.ocr ? `${res.ocrCount}` : 'kapalı'
     const side = res.sideCount ? ` +yan ${res.sideCount}` : ''
     log('info', `Ekran tarandı: ${res.items.length} yazı/öğe (UIA ${res.uiaCount}, OCR ${ocrVia}${side})${res.window ? ` — ${res.window}` : ''}`)
     if (ocrVia === 'kapalı') log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
-    if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'Çince okuyucu açılamadı; Windows OCR ile devam ediliyor.')
+    if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'ONNX okuması kullanılamadı veya ek yazı bulamadı; mevcut Windows OCR sonuçları korunuyor.')
     return res
   }
 
@@ -346,7 +346,9 @@ export function createAgent(ctx: AgentContext) {
     const loc = node.locator
     const win = s.targetWindow || loc?.windowTitle || ''
     const hasText = !!prompt || !!(loc?.text || loc?.name)?.trim()
-    const marked = extractTarget(prompt)
+    // Conditions with a literal-only instruction are handled in exists().
+    // Quotes embedded inside a descriptive condition must not erase its numbers/negations.
+    const marked = node.kind === 'condition' ? null : extractTarget(prompt)
     const quoted = marked?.quoted ? marked.text : ''
     const order = activeFindOrder(s.findOrder, s.findOff)
     trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey, memory: memoFor(node) })
@@ -373,7 +375,7 @@ export function createAgent(ctx: AgentContext) {
 
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(false, wide, true, readOnly, true)
+        winScan = await scanFor(false, wide, false, readOnly, true)
         const { shot: _temporary, ...snapshot } = winScan
         trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
         // A diagnostic screenshot must not become a new model input. This path
@@ -418,7 +420,7 @@ export function createAgent(ctx: AgentContext) {
           if (!userChrome) continue
           ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
-          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true)
+          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition')
           if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
           log('info', '[chrome] Sayfada bulunamadı.')
         }
@@ -501,25 +503,25 @@ export function createAgent(ctx: AgentContext) {
           continue
         }
         if (stage === 'windows' && quoted) {
-          ctx.setMethod?.('Windows OCR')
-          log('info', `“${quoted}” Windows OCR ile aranıyor.`)
+          ctx.setMethod?.('Windows + ONNX OCR')
+          log('info', `“${quoted}” birleşik OCR ile aranıyor.`)
           const scan = await windowsScan()
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
-            const reader = pick.item.src === 'ocr' ? 'Windows OCR' : 'uygulama öğesi'
+            const reader = pick.item.src === 'ocr' ? (pick.item.ocrSources ?? ['windows']).join('+') : 'uygulama öğesi'
             return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'windows', pick.target, pick.item)
           }
-          log('info', `“${quoted}” Windows OCR’da yok.`)
+          log('info', `“${quoted}” birleşik OCR’da yok.`)
         }
         if (stage === 'onnx' && quoted) {
           ctx.setMethod?.('ONNX OCR')
-          log('info', `“${quoted}” ONNX ile aranıyor.`)
+          log('info', `“${quoted}” ONNX aşamasında aynı birleşik taramada aranıyor.`)
           const scan = await onnxReady()
           const side = scan.sideCount ? ` +yan ${scan.sideCount}` : ''
           log('info', `ONNX ${scan.onnxAdded ?? 0}${side} satır.`)
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
-            const reader = pick.item.src === 'ocr' ? 'ONNX' : 'uygulama öğesi'
+            const reader = pick.item.src === 'ocr' ? (pick.item.ocrSources ?? ['onnx']).join('+') : 'uygulama öğesi'
             return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'onnx', pick.target, pick.item)
           }
           log('info', `“${quoted}” ONNX’te yok.`)
@@ -538,6 +540,7 @@ export function createAgent(ctx: AgentContext) {
             return await locateWithTars(node, wide, readOnly)
           } catch (e) {
             if (e instanceof StoppedError || e instanceof VisualTargetRecoveryError) throw e
+            if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
             if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
           }
@@ -577,6 +580,7 @@ export function createAgent(ctx: AgentContext) {
 
   function visionPrompt(node: AgentNode): string {
     const p = node.prompt?.trim()
+    if (p && node.kind === 'condition') return `Read-only existence/state check. Find visible evidence for the whole condition, preserving required counters and negations. If the condition is not supported by the current screen, return missing. Do not point to an action that would make it true, open menus, or dismiss popups. Condition: ${p}`
     if (p) return p
     if (node.locator?.icon) return 'İkinci resimdeki simgenin/düğmenin ekrandaki yerini bul'
     const t = node.locator?.text || node.locator?.name
@@ -956,7 +960,7 @@ export function createAgent(ctx: AgentContext) {
     const win = loc.windowTitle || getSettings().targetWindow || ''
     if (win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point', 'Custom'].includes(loc.controlType)) {
       try {
-        const r = await bridge.locate(loc, win)
+        const r = await bridge.locate(loc, win, true)
         if (r && r.w * r.h < 600 * 400) {
           if (r.enabled === false) {
             noteOnce(node.id, 'disabled', `“${r.name || loc.name}” ekranda ama pasif (tıklanamaz); hazır sayılmıyor.`)
@@ -1114,7 +1118,7 @@ export function createAgent(ctx: AgentContext) {
         stepTitle: NODE_SPECS[node.kind].label,
         history,
         lastLap,
-        listText: describeItems(items, 300),
+        listText: describeItems(items, items.length),
         image,
         next,
       })
@@ -1607,37 +1611,39 @@ export function createAgent(ctx: AgentContext) {
     },
     exists: async (text, node) => {
       await waitUnlocked()
+      checkStopped()
+      // The runner may pass an extracted needle. Always keep the full user's instruction.
+      const instruction = node.text?.trim() || text.trim()
       const found = (how: string) => {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      if (node.locator && locatorFitsText(node, text)) {
+      if (!instruction && node.locator) {
         const how = await savedTargetVisible(node)
-        if (how) return found(how)
+        checkStopped()
+        return how ? found(how) : false
       }
-      if (text) {
-        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true, ocrEngine: 'windows', deferOnnx: true })
-        try {
-          noteCjk(res, node.id)
-          const hit = containsTextStrict(res.items, text)
-          if (hit) return found(`Windows OCR “${hit.text}”`)
-          let onnxRes: ScanResult = res
-          try {
-            onnxRes = await bridge.applyOnnx(res)
-          } catch {
-            /* Windows lines stay */
-          }
-          const hit2 = containsTextStrict(onnxRes.items, text)
-          if (hit2) return found(`ONNX “${hit2.text}”`)
-          if (!node.locator && !noted.has(`${node.id}:loose`)) {
-            const near = onnxRes.items.find((i) => containsText([i], text))
-            if (near) noteOnce(node.id, 'loose', `“${text}” tam kelime olarak yok ama “${near.text}” içinde geçiyor; Koşul bunu “var” saymıyor. Gerekirse yazıyı “${near.text}” yap.`)
-          }
-        } finally {
-          bridge.discardShot(res.shot)
-        }
+      if (!instruction) return false
+      const literal = instruction.match(/^(?:"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“)$/)
+      if (literal) {
+        const wanted = literal.slice(1).find(Boolean)!.trim()
+        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
+        checkStopped()
+        noteCjk(res, node.id)
+        const hit = containsTextStrict(res.items, wanted)
+        return hit ? found(`birleşik OCR “${hit.text}”`) : false
       }
-      return false
+      if (!getSettings().apiKey) throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
+      try {
+        // Same target resolver as Click, without dispatch, popup recovery or memory writes.
+        // A text edit cannot inherit an old recorded target as positive evidence.
+        const target = await resolveTarget({ ...node, prompt: instruction, locator: undefined }, 0, true, true)
+        checkStopped()
+        return found(target.label)
+      } catch (e) {
+        if (e instanceof NotFoundError) return false
+        throw e
+      }
     },
     captureFailure: async (label) => {
       if (!failDir) return

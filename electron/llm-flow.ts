@@ -51,6 +51,7 @@ export function listPromptFor(kind: string, saved?: string): string {
   // KAYITLI OZEL PROMPT AYNEN KULLANILIR: kullanicinin metni degistirilmez, cümle eklenmez
   // (spatial/kelime paketlerinin kurali ve testi bunu sart kosuyor).
   if (typeof saved === 'string' && saved.trim()) return saved
+  if (kind === 'condition') return `You are a read-only Windows screen observer. Select observed evidence for the user's existence/state condition, or id:null when absent. Interpret the whole instruction semantically; preserve required numbers and negations. OCR words and unsplit OCR lines can be evidence. No input or application action is allowed. Reply with JSON only: {"id": <one listed candidate number or null>, "text": "<observed evidence>", "reason": "<short reason>"}`
   // Yerlesik metinde eylem cumlesi node turune gore uyarlanir; cumle bulunamazsa sona eklenir.
   const cumle = kind === 'type' ? LIST_TYPE_SENTENCE : LIST_CLICK_SENTENCE
   if (LIST_PROMPT.includes(LIST_CLICK_SENTENCE)) return LIST_PROMPT.split(LIST_CLICK_SENTENCE).join(cumle)
