@@ -16,7 +16,8 @@ contextBridge.exposeInMainWorld('xpAgent', {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
-  setWindowTheme: (theme: 'aero' | 'xp') => ipcRenderer.invoke('window:theme', theme),
+  onCloseRequested: on('window:close-requested'),
+  finishClose: (id: number, allow: boolean) => ipcRenderer.invoke('window:finish-close', id, allow),
   bootReady: () => ipcRenderer.send('boot:ready'),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),

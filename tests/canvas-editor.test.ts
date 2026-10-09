@@ -12,7 +12,9 @@ function setup(failSave = false) {
   book = saveAutomation(book, { name: 'Models', entries: [{ id: 'entry-A', canvasId: 'A' }] })
   let renderer!: ReactTestRenderer, confirm = true, saves = 0
   let saveOverride: ((draft: AutomationDraft) => Promise<CanvasAutomation | null>) | undefined
+  let reviewClose: (() => Promise<boolean>) | null = null
   const props = () => ({ library: book.library!, tabs: book.tabs, disabled: false,
+    onCloseReview: (review: (() => Promise<boolean>) | null) => { reviewClose = review },
     onConfirm: async () => confirm, onSaveCanvas: () => {}, onOpenCanvas: () => {}, onCloseCanvas: () => {}, onRenameCanvas: async () => true, onDeleteCanvas: () => {}, onOpenAutomation: () => {}, onDeleteAutomation: () => {}, onExportAutomation: () => {},
     onSaveAutomation: async (draft: AutomationDraft) => {
       saves++
@@ -30,86 +32,85 @@ function setup(failSave = false) {
     await click('Ekle')
   }
   return { renderer, click, add, button, get book() { return book }, get saves() { return saves }, set confirm(value: boolean) { confirm = value },
+    reviewClose: () => reviewClose!(),
     set saveOverride(value: ((draft: AutomationDraft) => Promise<CanvasAutomation | null>) | undefined) { saveOverride = value },
     mutate(fn: (b: CanvasBook) => CanvasBook) { act(() => { book = fn(book); renderer.update(createElement(CanvasLibrary, props())) }) } }
 }
 
-describe('automation editor interaction through real React state and callbacks', () => {
-  it('adds a previously absent saved canvas and persists only after Save', async () => {
+describe('automation containers persist edits immediately', () => {
+  it('adds a saved canvas immediately without another Save button', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['A'])
-    expect(text(h.renderer.root)).toContain('2. B')
-    await h.click('Kaydet')
     expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['A', 'B'])
     expect(h.saves).toBe(1); expect(h.book.library!.canvases).toHaveLength(3)
-    expect(text(h.renderer.root)).toContain('Kayıtlı liste.')
+    expect(text(h.renderer.root)).toContain('Liste otomatik kaydedildi.')
+    expect(h.button('Kaydet')).toBeUndefined()
   })
-  it('keeps an unsaved list when switching between depot and automations', async () => {
+  it('retains the stored list when switching panels or collapsing it', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    await h.click('Tuval Deposu'); await h.click('Otomasyonlar')
+    await h.click('Tuval Deposu'); await h.click('Otomasyonlar'); await h.click('Daralt'); await h.click('Genişlet')
     expect(text(h.renderer.root)).toContain('2. B')
-    expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
-    expect(h.book.library!.automations[0].entries).toHaveLength(1)
+    expect(h.book.library!.automations[0].entries).toHaveLength(2)
   })
-  it('cancels discarding a draft, then discards it only after confirmation', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    h.confirm = false; await h.click('Vazgeç'); expect(text(h.renderer.root)).toContain('2. B')
-    h.confirm = true; await h.click('Vazgeç'); expect(text(h.renderer.root)).not.toContain('2. B')
-    expect(h.saves).toBe(0)
+  it('creates a named persistent empty container immediately', async () => {
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('+ Yeni')
+    expect(h.book.library!.automations.map(a => a.name)).toEqual(['Models', 'Otomasyon 1'])
+    await h.add('B'); expect(h.book.library!.automations[1].entries[0].canvasId).toBe('B')
   })
-  it('stages membership removal with confirmation without deleting the depot entry', async () => {
+  it('removes membership immediately while keeping the canvas in the depot', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
-    const remove = () => h.renderer.root.findByProps({ title: 'Tuvali otomasyon listesinden çıkar' })
-    h.confirm = false; await act(async () => { remove().props.onClick() }); expect(text(h.renderer.root)).toContain('1. A')
-    h.confirm = true; await act(async () => { remove().props.onClick() }); expect(text(h.renderer.root)).not.toContain('1. A')
-    expect(h.book.library!.automations[0].entries).toHaveLength(1)
-    await h.click('Kaydet'); expect(h.book.library!.automations[0].entries).toEqual([])
+    await act(async () => { h.renderer.root.findByProps({ title: 'Tuvali otomasyon listesinden çıkar' }).props.onClick() })
+    expect(h.book.library!.automations[0].entries).toEqual([])
     expect(h.book.library!.canvases.map(c => c.name)).toEqual(['A', 'B', 'C'])
   })
-  it('a failed persistence call cannot clear the dirty draft or claim it was saved', async () => {
-    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B'); await h.click('Kaydet')
-    expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
+  it('a failed write retains the attempted list and provides a retry', async () => {
+    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+    expect(text(h.renderer.root)).toContain('Değişiklik kaydedilemedi.')
     expect(text(h.renderer.root)).toContain('2. B')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
-    expect(h.button('Kaydet').props.disabled).toBe(false)
+    expect(h.button('Tekrar Dene').props.disabled).toBe(false)
+    await h.click('Tekrar Dene'); expect(h.saves).toBe(2)
   })
-  it('blocks overwriting a group that changed while its dirty draft was open', async () => {
-    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+  it('blocks a stale failed edit from overwriting a newer container', async () => {
+    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     h.mutate(b => deleteSavedCanvas(b, 'A'))
     expect(text(h.renderer.root)).toContain('Kayıt değişti veya silindi.')
-    expect(h.button('Kaydet').props.disabled).toBe(true)
-    expect(text(h.renderer.root)).toContain('2. B')
-    expect(h.saves).toBe(0)
+    expect(h.button('Tekrar Dene').props.disabled).toBe(true)
+    await h.click('Yeniden Yükle'); expect(text(h.renderer.root)).not.toContain('2. B')
+    expect(h.saves).toBe(1)
   })
-  it('excludes members already selected and prevents a duplicate add', async () => {
+  it('excludes already-added members and prevents duplicate adds', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     const select = h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' })
     expect(select.findAllByType('option').map(o => o.props.value)).toEqual(['', 'C'])
     expect(h.button('Ekle').props.disabled).toBe(true)
   })
-  it('retains the lock for the duration of an asynchronous save', async () => {
-    const h = setup(); let release!: (value: null) => void
+  it('locks changes until an asynchronous automatic write is acknowledged', async () => {
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
+    let release!: (value: null) => void
     h.saveOverride = () => new Promise(resolve => { release = resolve })
-    await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    await act(async () => { h.button('Kaydet').props.onClick() })
-    expect(h.button('Kaydet').props.disabled).toBe(true)
+    await act(async () => { h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' }).props.onChange({ target: { value: 'B' } }) })
+    await act(async () => { h.button('Ekle').props.onClick() })
     expect(h.button('Daralt').props.disabled).toBe(true)
+    expect(h.button('Ekle').props.disabled).toBe(true)
     await act(async () => release(null))
-    expect(h.button('Kaydet').props.disabled).toBe(false)
-    expect(text(h.renderer.root)).toContain('Kaydedilmeyen değişiklikler var.')
+    expect(h.button('Tekrar Dene').props.disabled).toBe(false)
   })
-
-  // Kullanıcı isteği: "Düzenle" yerine Genişlet/Daralt; Genişlet tuvalleri açar, Daralt gizler.
-  it('Genişlet tuvalleri açar, Daralt gizler ve taslak kaybolmaz', async () => {
-    const h = setup(); await h.click('Otomasyonlar')
-    expect(h.button('Genişlet')).toBeDefined()
-    await h.click('Genişlet'); await h.add('B')
-    expect(text(h.renderer.root)).toContain('2. B')
-    expect(h.button('Daralt')).toBeDefined()
-    await h.click('Daralt')
-    expect(text(h.renderer.root)).not.toContain('2. B')
-    expect(h.button('Genişlet')).toBeDefined()
-    await h.click('Genişlet')
-    expect(text(h.renderer.root)).toContain('2. B')
+  it('automatically persists name edits on blur and order edits immediately', async () => {
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Renamed' } }) })
+    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onBlur() })
+    expect(h.book.library!.automations[0].name).toBe('Renamed')
+    await act(async () => { h.renderer.root.findAllByProps({ title: 'Yukarı taşı' })[1].props.onClick() })
+    expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['B', 'A'])
+  })
+  it('flushes an unfinished name on close and blocks closure when the write fails', async () => {
+    const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
+    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Pending name' } }) })
+    await act(async () => { expect(await h.reviewClose()).toBe(true) })
+    expect(h.book.library!.automations[0].name).toBe('Pending name')
+    h.saveOverride = async () => null
+    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Failed name' } }) })
+    await act(async () => { expect(await h.reviewClose()).toBe(false) })
+    expect(h.book.library!.automations[0].name).toBe('Pending name')
   })
 })

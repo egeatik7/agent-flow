@@ -28,8 +28,9 @@ export type XpAgentApi = {
   profile?: string
   minimize: () => Promise<void>
   maximize: () => Promise<void>
-  setWindowTheme?: (theme: 'aero' | 'xp') => Promise<boolean>
   close: () => Promise<void>
+  onCloseRequested?: (cb: (id: unknown) => void) => () => void
+  finishClose?: (id: number, allow: boolean) => Promise<void>
   bootReady?: () => void
   getSettings: () => Promise<AppSettings>
   saveSettings: (partial: Partial<AppSettings>) => Promise<AppSettings>

@@ -12,6 +12,8 @@ import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
 import ConfirmDialog from './components/ConfirmDialog'
+import SaveCanvasDialog from './components/SaveCanvasDialog'
+import { canvasDirty, emptyCanvasSession, settleCanvasChanges, startCanvasSession, type SaveDecision } from '../electron/canvas-session'
 import {
   DEFAULT_SETTINGS,
   NODE_SPECS,
@@ -85,8 +87,7 @@ function initialGraph(): AgentGraph {
 }
 
 function emptyBook(): CanvasBook {
-  const id = newId()
-  return normalizeCanvasBook({ activeId: id, tabs: [{ id, name: 'Tuval 1', graph: initialGraph() }] })
+  return { activeId: '', tabs: [], library: { schemaVersion: 2, canvases: [], automations: [] } }
 }
 
 function nextCanvasName(tabs: { name: string }[]): string {
@@ -106,7 +107,10 @@ function previewBook(): CanvasBook {
     const raw = localStorage.getItem(LOCAL_BOOK)
     if (raw) return normalizeCanvasBook(JSON.parse(raw))
     const g = localStorage.getItem(LOCAL_GRAPH)
-    if (g) return normalizeCanvasBook(undefined, JSON.parse(g))
+    if (g) {
+      const legacy = normalizeGraph(JSON.parse(g))
+      if (legacy.nodes.length) return normalizeCanvasBook(undefined, legacy)
+    }
   } catch {
     /* corrupt preview data */
   }
@@ -142,7 +146,7 @@ export default function App() {
   const [theme, selectTheme] = useTheme()
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [graph, setGraph] = useState<AgentGraph>(book0.tabs[0].graph)
+  const [graph, setGraph] = useState<AgentGraph>({ nodes: [], edges: [] })
   const [activeId, setActiveId] = useState(book0.activeId)
   const [tabList, setTabList] = useState(book0.tabs.map((t) => ({ id: t.id, name: t.name })))
   const [stack, setStack] = useState<Crumb[]>([])
@@ -160,7 +164,7 @@ export default function App() {
   const [runProgress, setRunProgress] = useState<RunProgress>(() => finishProgress(beginProgress(''), false))
   const stopRequested = useRef(false)
   const [canvasFocus, setCanvasFocus] = useState<{ nodeId: string; at: number }>()
-  const [sideTab, setSideTab] = useState<SideTab>('node')
+  const [sideTab, setSideTab] = useState<SideTab>('canvases')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [library, setLibrary] = useState(() => libraryOf(book0))
@@ -170,6 +174,16 @@ export default function App() {
   const [sequenceLabel, setSequenceLabel] = useState('')
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
+  const [saveQuestion, setSaveQuestion] = useState<string | null>(null)
+  const saveAnswer = useRef<((answer: SaveDecision) => void) | null>(null)
+  const [closing, setClosing] = useState(false)
+  const closingRef = useRef(false)
+  const runIdle = useRef<(() => void) | null>(null)
+  const writeQueue = useRef<Promise<boolean>>(Promise.resolve(true))
+  const automationCloseReview = useRef<(() => Promise<boolean>) | null>(null)
+  const registerAutomationCloseReview = useCallback((review: (() => Promise<boolean>) | null) => {
+    automationCloseReview.current = review
+  }, [])
 
   const graphRef = useRef(graph)
   graphRef.current = graph
@@ -246,12 +260,24 @@ export default function App() {
     setLibrary(libraryOf(book))
   }, [])
 
+  const persistBook = useCallback((book: CanvasBook): Promise<boolean> => {
+    const snapshot = structuredClone(book)
+    // Draft autosaves, catalog writes and final closure always reach disk in order.
+    const next = writeQueue.current.then(async () => {
+      try {
+        if (api) { if (await api.saveCanvases(snapshot) === false) throw new Error('Tuvaller diske kaydedilemedi.') }
+        else localStorage.setItem(LOCAL_BOOK, JSON.stringify(snapshot))
+        return true
+      } catch (e) { pushLog('error', `Tuvaller kaydedilemedi: ${errText(e)}`); return false }
+    })
+    writeQueue.current = next
+    return next
+  }, [pushLog])
+
   const rememberBook = useCallback((book: CanvasBook): Promise<boolean> => {
     adoptBook(book)
-    if (api) return api.saveCanvases(book).then(ok => ok !== false).catch(e => { pushLog('error', errText(e)); return false })
-    try { localStorage.setItem(LOCAL_BOOK, JSON.stringify(book)); return Promise.resolve(true) }
-    catch (e) { pushLog('error', `Tuvaller kaydedilemedi: ${errText(e)}`); return Promise.resolve(false) }
-  }, [adoptBook, pushLog])
+    return persistBook(book)
+  }, [adoptBook, persistBook])
 
   const commitActive = useCallback((): CanvasBook => {
     const cur = bookRef.current
@@ -266,10 +292,11 @@ export default function App() {
 
   const showCanvas = useCallback((book: CanvasBook, id: string, persist = true) => {
     const tab = book.tabs.find((t) => t.id === id) ?? book.tabs[0]
-    const next = { ...book, activeId: tab.id }
+    const next = { ...book, activeId: tab?.id ?? '' }
     if (persist) void rememberBook(next)
     else adoptBook(next)
-    const view = reconcileLoopMembership(tab.graph)
+    const view = tab ? reconcileLoopMembership(tab.graph) : { nodes: [], edges: [] }
+    if (!tab) setSideTab('canvases')
     graphRef.current = view
     stackRef.current = []
     setStack([])
@@ -285,25 +312,15 @@ export default function App() {
     void (async () => {
       if (api) {
         setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
-        const book = normalizeCanvasBook(await api.getCanvases())
-        const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
-        setLibrary(libraryOf(book))
-        bookRef.current = book
-        activeIdRef.current = tab.id
-        setActiveId(tab.id)
-        setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
-        setGraph(reconcileLoopMembership(tab.graph))
+        const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
+        showCanvas(book, '', false)
+        await persistBook(book)
         pushLog('info', 'Nubbo Agent Studio hazır.')
       } else {
         try {
-          const book = previewBook()
-          const tab = book.tabs.find((t) => t.id === book.activeId) ?? book.tabs[0]
-          setLibrary(libraryOf(book))
-          bookRef.current = book
-          activeIdRef.current = tab.id
-          setActiveId(tab.id)
-          setTabList(book.tabs.map((t) => ({ id: t.id, name: t.name })))
-          setGraph(reconcileLoopMembership(tab.graph))
+          const book = startCanvasSession(previewBook())
+          showCanvas(book, '', false)
+          await persistBook(book)
           const s = localStorage.getItem(LOCAL_SETTINGS)
           if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
         } catch {
@@ -315,13 +332,13 @@ export default function App() {
       void refreshWindows()
       requestAnimationFrame(() => requestAnimationFrame(() => api?.bootReady?.()))
     })()
-  }, [pushLog, refreshWindows])
+  }, [pushLog, refreshWindows, showCanvas, persistBook])
 
   useEffect(() => {
-    if (!loaded || libraryBusy) return
-    const t = setTimeout(() => { if (!libraryBusyRef.current) void rememberBook(commitActive()) }, 400)
+    if (!loaded || libraryBusy || closing || saveQuestion) return
+    const t = setTimeout(() => { if (!libraryBusyRef.current && !closingRef.current && !saveAnswer.current) void rememberBook(commitActive()) }, 400)
     return () => clearTimeout(t)
-  }, [graph, stack, loaded, libraryBusy, rememberBook, commitActive])
+  }, [graph, stack, loaded, libraryBusy, closing, saveQuestion, rememberBook, commitActive])
 
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
@@ -500,6 +517,22 @@ export default function App() {
     done?.(yes)
   }
 
+  const askCanvasSave = (tab: { name: string }): Promise<SaveDecision> => new Promise(resolve => {
+    saveAnswer.current = resolve
+    setSaveQuestion(tab.name)
+  })
+  const answerCanvasSave = (answer: SaveDecision) => {
+    const done = saveAnswer.current
+    saveAnswer.current = null
+    setSaveQuestion(null)
+    done?.(answer)
+  }
+  const settleChanges = (ids?: string[]) => settleCanvasChanges(commitActive, askCanvasSave, async book => {
+    if (!await persistBook(book)) return false
+    adoptBook(book)
+    return true
+  }, ids)
+
   const canvasName = () => bookRef.current.tabs.find((t) => t.id === activeIdRef.current)?.name ?? 'Tuval'
 
   const switchTab = (id: string) => {
@@ -517,23 +550,20 @@ export default function App() {
   }
 
   const closeTab = async (id: string) => {
-    if (runningRef.current || libraryBusyRef.current) return
-    const looking = id === activeIdRef.current ? commitActive() : bookRef.current
-    if (looking.tabs.length < 2) return
+    if (runningRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return
+    const looking = commitActive()
     const tab = looking.tabs.find((t) => t.id === id)
     if (!tab) return
-    const saved = libraryOf(looking).canvases.find(c => c.id === tab.savedId)
-    if (tab.graph.nodes.some(n => n.kind !== 'start') && (!saved || JSON.stringify(saved.graph) !== JSON.stringify(tab.graph))) {
-      const yes = await askSure(`“${tab.name}” sekmesi kapatılsın mı? Kaydedilmeyen değişiklikler kaybolur. Sağdaki kayıtlı tuval silinmez.`)
-      if (!yes || runningRef.current || libraryBusyRef.current) return
-    }
-    const again = id === activeIdRef.current ? commitActive() : bookRef.current
-    if (again.tabs.length < 2 || !again.tabs.some((t) => t.id === id)) return
-    const wasOpen = id === activeIdRef.current
-    const book = closeCanvasTab(again, id)
-    if (wasOpen) showCanvas(book, book.activeId)
-    else rememberBook(book)
-    pushLog('info', `${tab.name} kapatıldı.`)
+    libraryBusyRef.current = true; setLibraryBusy(true)
+    try {
+      if (!await settleChanges([id])) return
+      const wasOpen = id === activeIdRef.current
+      const book = closeCanvasTab(commitActive(), id)
+      if (!await persistBook(book)) return
+      if (wasOpen) showCanvas(book, book.activeId, false)
+      else adoptBook(book)
+      pushLog('info', `${tab.name} kapatıldı.`)
+    } finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
 
   const renameTab = (id: string, name: string) => {
@@ -546,15 +576,13 @@ export default function App() {
   }
 
   /** Critical library writes are acknowledged before the UI discards or replaces data. */
-  const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false) => {
-    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current) return false
+  const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false, reviewingClose = false) => {
+    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current || (!reviewingClose && closingRef.current) || saveAnswer.current) return false
     libraryBusyRef.current = true
     setLibraryBusy(true)
     try {
       const next = change(commitActive())
-      if (api) {
-        if (await api.saveCanvases(next) === false) throw new Error('Tuvaller diske kaydedilemedi.')
-      } else localStorage.setItem(LOCAL_BOOK, JSON.stringify(next))
+      if (!await persistBook(next)) return false
       if (open) showCanvas(next, next.activeId, false)
       else adoptBook(next)
       pushLog('success', message)
@@ -581,14 +609,22 @@ export default function App() {
       const next = saveAutomation(b, draft)
       savedId = draft.id ?? libraryOf(next).automations[libraryOf(next).automations.length - 1].id
       return next
-    }, `“${draft.name.trim()}” otomasyon listesi kaydedildi.`)
+    }, `“${draft.name.trim()}” otomasyon listesi kaydedildi.`, false, true)
     return ok ? libraryOf(bookRef.current).automations.find(a => a.id === savedId) ?? null : null
   }
   const loadAutomation = async (id: string) => {
-    if (runningRef.current || libraryBusyRef.current) return
+    if (runningRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return
     const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
-    if (!a?.entries.length || !await askSure(`“${a.name}” açılsın mı? Açık sekmeler bu kayıtlı listeyle değiştirilecek. Kaydedilmeyen değişiklikleri korumak için önce Hayır deyip tuvalleri kaydet.`)) return
-    await saveLibraryChange(b => openAutomation(b, id), `“${a.name}” tuval listesi açıldı.`, true)
+    if (!a?.entries.length) return
+    libraryBusyRef.current = true; setLibraryBusy(true)
+    try {
+      if (!await settleChanges()) return
+      const next = openAutomation(commitActive(), id)
+      if (!await persistBook(next)) return
+      showCanvas(next, next.activeId, false)
+      pushLog('success', `“${a.name}” tuval listesi açıldı.`)
+    } catch (e) { pushLog('error', errText(e)) }
+    finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
   const removeAutomation = async (id: string) => {
     if (runningRef.current || libraryBusyRef.current) return
@@ -673,7 +709,7 @@ export default function App() {
   }
 
   const addNode = (kind: NodeKind) => {
-    if (runningRef.current || libraryBusyRef.current || confirmAnswer.current) return
+    if (!activeIdRef.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || closingRef.current || saveAnswer.current) return
     const g = graphRef.current
     const sel = g.nodes.find((n) => n.id === selectedNodeId)
     const selPort = sel ? freePort(g, sel) : null
@@ -715,7 +751,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
-      if (confirmQuestion || runningRef.current || libraryBusyRef.current) return
+      if (!activeIdRef.current || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (scanner && mod) return
@@ -1009,7 +1045,7 @@ export default function App() {
   }
 
   const run = async (startId?: string) => {
-    if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current || graphRef.current.nodes.length === 0) return
+    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || !activeIdRef.current || graphRef.current.nodes.length === 0) return
     runningRef.current = true
     if (!startId) writeCanvas(resetLoopTicks(rooted(graphRef.current, stackRef.current)))
     const path = stackRef.current.map((c) => c.id)
@@ -1041,6 +1077,7 @@ export default function App() {
       setRunProgress(prev => finishProgress(prev, halted || stopRequested.current, failed && !stopRequested.current))
       runningRef.current = false
       setRunning(false)
+      runIdle.current?.(); runIdle.current = null
     }
   }
 
@@ -1056,7 +1093,7 @@ export default function App() {
   // "Seçiliden Çalıştır" ise aktif tuvali seçili ADIMDAN başlatır; o tuval Bitti'ye ulaşınca
   // sıra sağındaki tuvallerle devam eder (soldakiler çalıştırılmaz).
   const runAllCanvases = async (startNodeId?: string) => {
-    if (!loaded || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
+    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
     // showCanvas clears the open package view. Capture its path before switching;
     // the selected node belongs to that package, not to the root canvas.
     const startPath = startNodeId ? stackRef.current.map(c => c.id) : []
@@ -1095,7 +1132,7 @@ export default function App() {
       halted = outcome !== 'completed'
       pushLog(outcome === 'completed' ? 'success' : 'warn', outcome === 'completed' ? 'Aktif tuvalden sağa doğru bütün tuvaller Bitti node’una ulaştı.' : 'Tuval sırası durduruldu; kalan tuvaller çalıştırılmadı.')
     } catch (e) { failed = true; pushLog('error', errText(e)) }
-    finally { setRunProgress(prev => finishProgress(prev, halted || stopRequested.current, failed && !stopRequested.current)); runningRef.current = false; setRunning(false); setSequenceLabel('') }
+    finally { setRunProgress(prev => finishProgress(prev, halted || stopRequested.current, failed && !stopRequested.current)); runningRef.current = false; setRunning(false); setSequenceLabel(''); runIdle.current?.(); runIdle.current = null }
   }
 
   const exportGraph = () => {
@@ -1195,11 +1232,64 @@ export default function App() {
 
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const counts = graph.nodes.filter((n) => n.kind !== 'start').length
+  const hasCanvas = !!activeId
+  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion
+
+  const closeProgram = async (requestId?: number) => {
+    if (closingRef.current) return
+    if (!loaded || libraryBusyRef.current || confirmAnswer.current || saveAnswer.current || capturing || scanner) {
+      pushLog('warn', 'Açık işlemi tamamladıktan sonra programı kapatabilirsiniz.')
+      if (requestId !== undefined) await api?.finishClose?.(requestId, false)
+      return
+    }
+    closingRef.current = true; setClosing(true)
+    let allow = false
+    try {
+      if (runningRef.current) {
+        const finished = new Promise<void>(resolve => { runIdle.current = resolve })
+        stop()
+        await finished
+      }
+      // Drain writes before final saves/discards; a delayed autosave cannot undo them.
+      await writeQueue.current
+      if (automationCloseReview.current && !await automationCloseReview.current()) {
+        pushLog('error', 'Otomasyon düzenlemesi kaydedilemedi. Program açık bırakıldı; sağdaki listeden tekrar deneyin.')
+        return
+      }
+      if (!await settleChanges()) return
+      const next = emptyCanvasSession(commitActive())
+      if (!await persistBook(next)) return
+      showCanvas(next, '', false)
+      allow = true
+    } catch (e) { pushLog('error', errText(e)) }
+    finally {
+      try { if (requestId !== undefined) await api?.finishClose?.(requestId, allow) }
+      catch (e) { pushLog('error', errText(e)) }
+      finally { closingRef.current = false; setClosing(false) }
+    }
+  }
+  const closeProgramRef = useRef(closeProgram)
+  closeProgramRef.current = closeProgram
+  useEffect(() => api?.onCloseRequested?.(id => {
+    if (typeof id === 'number') void closeProgramRef.current(id)
+  }), [])
+
+  useEffect(() => {
+    if (api) return
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const book = commitActive()
+      if (!book.tabs.some(tab => canvasDirty(book, tab))) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [commitActive])
 
   return (
     <div className="desktop">
       <div className="xp-window">
-        <TitleBar />
+        <TitleBar onClose={() => api ? void api.close() : void closeProgram()} />
         <div className="menubar">
           <div className="dropdown" ref={fileMenuRef}>
             <button type="button" className={fileOpen ? 'open' : ''} onClick={() => setFileOpen((o) => !o)}>
@@ -1210,7 +1300,7 @@ export default function App() {
                 <button
                   type="button"
                   role="menuitem"
-                  disabled={running || libraryBusy || !loaded}
+                  disabled={running || editorLocked || !loaded}
                   onClick={() => {
                     setFileOpen(false)
                     fileRef.current?.click()
@@ -1221,6 +1311,7 @@ export default function App() {
                 <button
                   type="button"
                   role="menuitem"
+                  disabled={!hasCanvas || editorLocked}
                   onClick={() => {
                     setFileOpen(false)
                     exportGraph()
@@ -1228,7 +1319,7 @@ export default function App() {
                 >
                   Dışa Aktar
                 </button>
-                <button type="button" role="menuitem" disabled={running || libraryBusy || !loaded} onClick={() => { setFileOpen(false); void saveCurrentCanvas() }}>Tuvali Kaydet</button>
+                <button type="button" role="menuitem" disabled={!hasCanvas || running || editorLocked || !loaded} onClick={() => { setFileOpen(false); void saveCurrentCanvas() }}>Tuvali Kaydet</button>
               </div>
             )}
           </div>
@@ -1247,7 +1338,7 @@ export default function App() {
             }}
           />
           <span className="menubar-status">
-            {tabList.find((t) => t.id === activeId)?.name ?? 'Tuval'} · {counts} aşama · {graph.edges.length} bağlantı
+            {hasCanvas ? `${tabList.find((t) => t.id === activeId)?.name ?? 'Tuval'} · ${counts} aşama · ${graph.edges.length} bağlantı` : 'Açık tuval yok'}
             {settings.targetWindow
               ? ` · hedef: ${settings.targetWindow}${
                   windows.length && !windows.some((w) => w.title === settings.targetWindow) ? ' (açık değil)' : ''
@@ -1260,7 +1351,7 @@ export default function App() {
           theme={theme}
           onTheme={selectTheme}
           running={running}
-          busy={libraryBusy || !loaded || !!confirmQuestion}
+          busy={editorLocked || !loaded || !hasCanvas}
           hasStart={hasStart}
           hasSelection={!!selectedNodeId}
           capturing={capturing}
@@ -1278,9 +1369,13 @@ export default function App() {
 
         />
         <CanvasTabs
-          tabs={tabList}
+          tabs={tabList.map(tab => {
+            const full = commitActive()
+            const current = full.tabs.find(t => t.id === tab.id)
+            return { ...tab, dirty: current ? canvasDirty(full, current) : false }
+          })}
           activeId={activeId}
-          disabled={running || libraryBusy || !loaded || !!confirmQuestion}
+          disabled={running || editorLocked || !loaded}
           running={running}
           sequenceLabel={sequenceLabel}
           onRunAll={() => void runAllCanvases()}
@@ -1294,11 +1389,11 @@ export default function App() {
         <div className="workspace">
           <div className="canvas-wrap">
             {stack.length > 0 && (
-              <button type="button" className="xp-btn package-exit" disabled={libraryBusy} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
+              <button type="button" className="xp-btn package-exit" disabled={editorLocked} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
                 Paketten çık
               </button>
             )}
-            <NodeCanvas
+            {hasCanvas && <NodeCanvas
               graph={graph}
               canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}
               pasteRevision={pasteRevision}
@@ -1311,7 +1406,7 @@ export default function App() {
               highlightedNodeIds={visibleRunNodes(runProgress, rooted(graph, stack), graph, activeId)}
               runPhase={runProgress.canvasId === activeId ? runProgress.phase : 'idle'}
               traversedEdges={runProgress.canvasId === activeId ? runProgress.edges : undefined}
-              running={running || libraryBusy}
+              running={running || editorLocked}
               onSelectNode={selectNode}
               onSelectMany={selectMany}
               onSelectEdge={selectEdge}
@@ -1360,13 +1455,14 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-            />
+            />}
           </div>
           <div className="right-sidebar">
-            <fieldset className="canvas-editor-fields" disabled={running || libraryBusy || !!confirmQuestion}>
+            <fieldset className="canvas-editor-fields" disabled={running || editorLocked}>
           <SidePanel
-            disabled={running || libraryBusy || !!confirmQuestion}
-            canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} disabled={running || libraryBusy || !loaded || !!confirmQuestion}
+            disabled={running || editorLocked}
+            canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
+              onCloseReview={registerAutomationCloseReview}
               onConfirm={askSure}
               onSaveCanvas={() => void saveCurrentCanvas()}
               onOpenCanvas={c => void openLibraryCanvas(c)}
@@ -1468,6 +1564,7 @@ export default function App() {
       {confirmQuestion && (
         <ConfirmDialog question={confirmQuestion} onYes={() => answerSure(true)} onNo={() => answerSure(false)} />
       )}
+      {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion} onAnswer={answerCanvasSave} />}
       {scanner && (
         <ScreenScanner
           targetLabel={

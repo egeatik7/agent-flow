@@ -138,6 +138,8 @@ export type CanvasTab = {
   graph: AgentGraph
   /** Explicit library record this open tab was loaded from. */
   savedId?: string
+  /** Last explicitly saved/opened state; also the untouched state of a new canvas. */
+  baseline?: { name: string; graph: AgentGraph }
 }
 
 export type SavedCanvas = { id: string; name: string; graph: AgentGraph; updatedAt: number }
@@ -836,15 +838,17 @@ function normalizeSavedCanvases(raw: unknown): SavedCanvas[] {
 export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
   const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown; library?: unknown } | null
   const seen = new Set<string>()
-  const tabs: CanvasTab[] = rec && Array.isArray(rec.tabs) && rec.tabs.length ? rec.tabs.map((item, i) => {
+  const tabs: CanvasTab[] = rec && Array.isArray(rec.tabs) ? rec.tabs.map((item, i) => {
     const t = item as Partial<CanvasTab> | null
     let id = typeof t?.id === 'string' && t.id ? t.id : rid()
     if (seen.has(id)) id = rid()
     seen.add(id)
     return { id, name: typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
-      graph: normalizeGraph(t?.graph), ...(typeof t?.savedId === 'string' ? { savedId: t.savedId } : {}) }
+      graph: normalizeGraph(t?.graph), ...(typeof t?.savedId === 'string' ? { savedId: t.savedId } : {}),
+      ...(t?.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
+        ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}) }
   }) : [{ id: rid(), name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }]
-  const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0].id
+  const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0]?.id ?? ''
   let library: CanvasLibrary
   if (rec?.library && typeof rec.library === 'object') {
     const lib = rec.library as { canvases?: unknown; automations?: unknown }

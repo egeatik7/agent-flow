@@ -157,7 +157,7 @@ describe('one canonical canvas catalog with ordered automation references', () =
     expect(closed.tabs.map(t => t.name)).toEqual(['A', 'B'])
     expect(closed.library).toBe(b.library); expect(closed.branches).toBe(b.branches)
     expect(closed.activeId).toBe('b')
-    expect(closeCanvasTab(closeCanvasTab(closed, 'b'), 'a').tabs).toHaveLength(1)
+    expect(closeCanvasTab(closeCanvasTab(closed, 'b'), 'a').tabs).toHaveLength(0)
   })
   it('starting on the left preserves edits in the previously active right tab', () => {
     const b = group(book()), changed = { ...b, tabs: b.tabs.map(t => t.id === 'b' ? { ...t, graph: { ...t.graph, nodes: t.graph.nodes.map(n => ({ ...n, title: 'unsaved edit' })) } } : t) }

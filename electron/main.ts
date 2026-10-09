@@ -1,8 +1,7 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import os from 'os'
-import { setWindowTheme, supportsAcrylic } from './window-theme'
+import { WindowCloseGuard } from './window-close'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
@@ -61,6 +60,7 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
 })
 
 let mainWindow: BrowserWindow | null = null
+const closeGuard = new WindowCloseGuard()
 let hudWindow: BrowserWindow | null = null
 let reportBoot: (pct: number, line: string) => void = () => {}
 let closeBoot: () => void = () => {}
@@ -329,7 +329,11 @@ function createWindow() {
     }
   })
 
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (event) => {
+    if (!closeGuard.request(id => mainWindow?.webContents.send('window:close-requested', id))) {
+      event.preventDefault()
+      return
+    }
     destroyHud()
   })
   mainWindow.on('closed', () => {
@@ -647,6 +651,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   closeBoot = closeSplash
   const failsafe = setTimeout(revealApp, 20000)
   ipcMain.on('boot:ready', () => {
+    closeGuard.ready = true
     clearTimeout(failsafe)
     revealApp()
   })
@@ -674,10 +679,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     else mainWindow.maximize()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
-  ipcMain.handle('window:theme', (event, theme: unknown) => {
-    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
-    if (theme !== 'aero' && theme !== 'xp') return false
-    return setWindowTheme(mainWindow, theme, supportsAcrylic(process.platform, os.release()))
+  ipcMain.handle('window:finish-close', (event, id: unknown, allow: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return
+    if (closeGuard.reply(id, allow)) mainWindow.close()
   })
 
   ipcMain.handle('settings:get', () => getSettings())
@@ -821,11 +825,12 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return info ? info.file : null
   })
   void syncEndpoint()
-  /** The canvas book as the app stores it, with a single canvas when nothing was saved yet. */
+  /** An explicitly empty session must not fall back to the old graph and resurrect a tab. */
   function loadCanvases(): CanvasBook {
     const saved = store.get('canvases') as CanvasBook | undefined
-    if (saved?.tabs?.length) return normalizeCanvasBook(saved)
-    return normalizeCanvasBook(undefined, normalizeGraph(store.get('graph')))
+    if (saved && Array.isArray(saved.tabs)) return normalizeCanvasBook(saved)
+    const legacy = normalizeGraph(store.get('graph'))
+    return legacy.nodes.length ? normalizeCanvasBook(undefined, legacy) : normalizeCanvasBook({ activeId: '', tabs: [] })
   }
 
   ipcMain.handle('canvases:get', () => loadCanvases())
@@ -938,9 +943,11 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
 }
 
-app.on('before-quit', () => {
-  destroyHud()
-  bridge.shutdown()
+app.on('before-quit', (event) => {
+  if (mainWindow && !mainWindow.isDestroyed() && closeGuard.ready && !closeGuard.approved) {
+    event.preventDefault()
+    mainWindow.close()
+  }
 })
 
 app.on('will-quit', () => {

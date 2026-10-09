@@ -7,6 +7,9 @@ import Toolbar from '../src/components/Toolbar'
 import NodeCanvas from '../src/components/NodeCanvas'
 import CanvasTabs from '../src/components/CanvasTabs'
 import LogPanel from '../src/components/LogPanel'
+import SidePanel from '../src/components/SidePanel'
+import { saveAutomation, saveCanvas } from '../electron/canvas-library'
+import SaveCanvasDialog from '../src/components/SaveCanvasDialog'
 
 // Exercise App's real callbacks and the real runner. Only rendering and desktop input
 // are replaced: no Windows session or LLM is needed to test the selected-node handoff.
@@ -18,6 +21,7 @@ vi.mock('../src/components/SidePanel', () => ({ default: () => null }))
 vi.mock('../src/components/LogPanel', () => ({ default: () => null }))
 vi.mock('../src/components/ScreenScanner', () => ({ default: () => null }))
 vi.mock('../src/components/ConfirmDialog', () => ({ default: () => null }))
+vi.mock('../src/components/SaveCanvasDialog', () => ({ default: () => null }))
 
 let App: typeof import('../src/App').default
 let book: CanvasBook
@@ -28,13 +32,18 @@ let onPatch = (_p: unknown) => {}
 let onStep = (_p: unknown) => {}
 let onEdge = (_p: unknown) => {}
 let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
+let onCloseRequested = (_id: unknown) => {}
+let failPersistence = false
+const closeReplies: { id: number; allow: boolean }[] = []
 const executed: string[] = []
 const dispatched: { graph: AgentGraph; startId?: string; packagePath?: string[] }[] = []
 const windowListeners = new Map<string, Set<(event: unknown) => void>>()
 const api = {
   getSettings: async () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, maxSteps: 100 }),
   getCanvases: async () => structuredClone(book),
-  saveCanvases: async (b: CanvasBook) => { lastSaved = structuredClone(b); return true },
+  saveCanvases: async (b: CanvasBook) => { if (failPersistence) return false; lastSaved = structuredClone(b); return true },
+  onCloseRequested: (cb: (id: unknown) => void) => { onCloseRequested = cb; return () => { onCloseRequested = () => {} } },
+  finishClose: async (id: number, allow: boolean) => { closeReplies.push({ id, allow }) },
   listWindows: async () => [],
   bootReady: () => {},
   onAgentLog: (_cb: (p: unknown) => void) => () => {},
@@ -87,6 +96,79 @@ afterEach(() => {
   stopped = false
   beforeAction = undefined
   lastSaved = undefined
+  failPersistence = false
+  closeReplies.length = 0
+})
+
+describe('real App empty startup and close review', () => {
+  const requestClose = async (id = 1) => { await act(async () => { onCloseRequested(id); await Promise.resolve() }) }
+  const answer = async (decision: 'save' | 'discard' | 'cancel') => {
+    await act(async () => { mounted!.root.findByType(SaveCanvasDialog).props.onAnswer(decision); await Promise.resolve() })
+  }
+  const changeActive = async () => {
+    const start = mounted!.root.findByType(NodeCanvas).props.graph.nodes[0] as AgentNode
+    await act(async () => { mounted!.root.findByType(NodeCanvas).props.onMoveNodes({ [start.id]: { x: start.x + 20, y: start.y } }) })
+  }
+
+  it('opens no canvas on startup while retaining the right-side depot', async () => {
+    scenario()
+    await act(async () => { mounted = create(createElement(App)) })
+    expect(mounted!.root.findByType(CanvasTabs).props.tabs).toEqual([])
+    expect(mounted!.root.findAllByType(NodeCanvas)).toEqual([])
+    expect(mounted!.root.findByType(SidePanel).props.tab).toBe('canvases')
+    expect(mounted!.root.findByType(SidePanel).props.canvasPanel.props.library.canvases).toHaveLength(3)
+    await act(async () => { mounted!.root.findByType(CanvasTabs).props.onAdd() })
+    expect(mounted!.root.findByType(NodeCanvas).props.graph.nodes[0].kind).toBe('start')
+  })
+  it('asks each changed canvas in order and leaves the last saved version when discarded', async () => {
+    scenario(0); await mount()
+    const first = book.tabs[0].id, second = book.tabs[1].id
+    await act(async () => { mounted!.root.findByType(CanvasTabs).props.onSelect(first) }); await changeActive()
+    await act(async () => { mounted!.root.findByType(CanvasTabs).props.onSelect(second) }); await changeActive()
+    const secondSaved = structuredClone(lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!.graph)
+    await requestClose()
+    expect(mounted!.root.findByType(SaveCanvasDialog).props.name).toBe('Left')
+    await answer('save')
+    expect(mounted!.root.findByType(SaveCanvasDialog).props.name).toBe('Active')
+    await answer('discard')
+    expect(closeReplies).toEqual([{ id: 1, allow: true }])
+    expect(lastSaved!.tabs).toEqual([])
+    expect(lastSaved!.library!.canvases.find(c => c.id === book.tabs[0].savedId)!.graph.nodes[0].x).toBe(book.tabs[0].graph.nodes[0].x + 20)
+    expect(lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!.graph).toEqual(secondSaved)
+  })
+  it('Cancel keeps the edited canvas open and a later failed Save also blocks native closure', async () => {
+    scenario(0); await mount(); await changeActive(); await requestClose()
+    await answer('cancel')
+    expect(closeReplies).toEqual([{ id: 1, allow: false }])
+    expect(mounted!.root.findAllByType(NodeCanvas)).toHaveLength(1)
+    failPersistence = true
+    await requestClose(2); await answer('save')
+    expect(closeReplies.at(-1)).toEqual({ id: 2, allow: false })
+    expect(mounted!.root.findByType(CanvasTabs).props.tabs).toHaveLength(3)
+  })
+  it('can close the last canvas after saving it and returns to an empty workspace', async () => {
+    scenario(0); await act(async () => { mounted = create(createElement(App)) })
+    await act(async () => { mounted!.root.findByType(CanvasTabs).props.onAdd() }); await changeActive()
+    const id = mounted!.root.findByType(CanvasTabs).props.activeId
+    await act(async () => { mounted!.root.findByType(CanvasTabs).props.onClose(id); await Promise.resolve() })
+    await answer('save')
+    expect(mounted!.root.findByType(CanvasTabs).props.tabs).toEqual([])
+    expect(mounted!.root.findAllByType(NodeCanvas)).toEqual([])
+    expect(lastSaved!.library!.canvases.some(c => c.name === 'Tuval 1')).toBe(true)
+  })
+  it('waits for a stopped run and its final node patches before asking to save', async () => {
+    const s = scenario(0); await mount()
+    let release!: () => void
+    beforeAction = async () => new Promise<void>(resolve => { release = resolve })
+    await act(async () => { mounted!.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
+    await requestClose()
+    expect(stopped).toBe(true); expect(mounted!.root.findAllByType(SaveCanvasDialog)).toEqual([])
+    await act(async () => { onPatch({ id: s.selected.id, patch: { text: 'Final stopped patch' } }); release(); await Promise.resolve() })
+    await answer('save')
+    expect(closeReplies).toEqual([{ id: 1, allow: true }])
+    const saved = lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!
+    expect(saved.graph.nodes.find(n => n.id === s.selected.id)!.text).toBe('Final stopped patch')
+  })
 })
 
 let edgeId = 0
@@ -122,7 +204,17 @@ function scenario(depth = 1, withLoop = false, connectedEnd = true) {
   return { path, selected, loop }
 }
 async function mount() {
+  const originalActive = book.activeId
+  for (const tab of book.tabs) book = saveCanvas(book, tab.id)
+  book = saveAutomation(book, { name: 'Test sequence', entries: book.tabs.map(t => ({ id: `entry-${t.id}`, canvasId: t.savedId! })) })
+  const automationId = book.library!.automations.at(-1)!.id
   await act(async () => { mounted = create(createElement(App)) })
+  await act(async () => { await mounted!.root.findByType(SidePanel).props.canvasPanel.props.onOpenAutomation(automationId) })
+  const opened = mounted!.root.findByType(CanvasTabs).props.tabs as { id: string; name: string }[]
+  const index = book.tabs.findIndex(t => t.id === originalActive)
+  book.tabs = book.tabs.map((t, i) => ({ ...t, id: opened[i].id }))
+  book.activeId = book.tabs[index].id
+  await act(async () => { mounted!.root.findByType(CanvasTabs).props.onSelect(book.activeId) })
   return mounted!
 }
 async function select(renderer: ReactTestRenderer, path: string[], id: string) {
@@ -175,8 +267,8 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
       onPatch({ id: s.selected.id, patch: { text: 'UPDATED' } })
     })
     expect(view.root.findByType(NodeCanvas).props.graph.nodes.find((n: AgentNode) => n.id === s.selected.id).text).toBe('UPDATED')
-    await act(async () => { view.root.findByType(CanvasTabs).props.onSelect('right'); await Promise.resolve() })
-    const saved = lastSaved!.tabs.find(t => t.id === 'active')!.graph
+    await act(async () => { view.root.findByType(CanvasTabs).props.onSelect(book.tabs[2].id); await Promise.resolve() })
+    const saved = lastSaved!.tabs.find(t => t.id === book.tabs[1].id)!.graph
     expect(saved.nodes.find(n => n.id === s.loop!.id)?.startIndex).toBe(2)
     expect(saved.nodes.find(n => n.id === sibling.id)?.memory).toEqual(memory)
     let inner = saved

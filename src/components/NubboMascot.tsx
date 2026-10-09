@@ -20,6 +20,7 @@ export default function NubboMascot() {
   const src = broken || !playing ? still : nubbo
   return (
     <div className="nubbo-brand">
+      <div className="nubbo-mascot-slot">
       <img
         key={src}
         className="nubbo-mascot brand-xp"
@@ -31,6 +32,7 @@ export default function NubboMascot() {
         onError={() => setBroken(true)}
       />
       <img className="nubbo-mascot brand-aero" src={aeroMascot} alt="" width={186} height={186} draggable={false} />
+      </div>
       <div className="nubbo-logo-slot">
         <img className="nubbo-logo brand-xp" src={logo} alt="Nubbo Agent Studio" draggable={false} />
         <img className="nubbo-logo brand-aero" src={aeroLogo} alt="Nubbo Agent Studio" draggable={false} />

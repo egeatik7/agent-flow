@@ -135,7 +135,7 @@ export default function Toolbar(p: Props) {
         {(['aero', 'xp'] as const).map(theme => (
           <button key={theme} type="button" className={`xp-btn theme-option${p.theme === theme ? ' active' : ''}`}
             aria-pressed={p.theme === theme} onClick={() => p.onTheme(theme)}
-            title={theme === 'aero' ? 'Lila cam Aero arayüzü' : 'Klasik Windows XP arayüzü'}>
+            title={theme === 'aero' ? 'Aero: her basışta lila, gök mavisi, su yeşili ve şeftali renkleri arasında geçiş' : 'Klasik Windows XP arayüzü'}>
             {theme === 'aero' && <span className="theme-orb" aria-hidden="true" />}
             {theme === 'aero' ? 'Aero' : 'XP'}
           </button>

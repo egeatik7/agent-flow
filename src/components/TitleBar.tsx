@@ -1,6 +1,6 @@
 import appIcon from '../assets/app-icon-32.png'
 
-export default function TitleBar() {
+export default function TitleBar(p: { onClose?: () => void }) {
   const api = typeof window !== 'undefined' ? window.xpAgent : undefined
   const profile = String(api?.profile ?? '')
   return (
@@ -33,7 +33,7 @@ export default function TitleBar() {
           type="button"
           className="title-btn close"
           title="Kapat"
-          onClick={() => void api?.close()}
+          onClick={() => p.onClose ? p.onClose() : void api?.close()}
         >
           ✕
         </button>

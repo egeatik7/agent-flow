@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type CanvasTabItem = { id: string; name: string }
+export type CanvasTabItem = { id: string; name: string; dirty?: boolean }
 
 type Props = {
   tabs: CanvasTabItem[]
@@ -35,11 +35,11 @@ export default function CanvasTabs(p: Props) {
 
   return (
     <div className="canvas-tabs-row">
-      <div className="canvas-sequence-controls">
+      {p.tabs.length > 0 && <div className="canvas-sequence-controls">
       <button type="button" className="xp-btn canvas-sequence-play" title="Açık tuvallerin tamamını soldan sağa oynat" aria-label="Tuvalleri sırayla oynat" disabled={p.disabled} onClick={p.onRunAll}>▶</button>
       <button type="button" className="xp-btn canvas-sequence-stop" title="Çalışmayı ve tuval sırasını durdur" aria-label="Tuval sırasını durdur" disabled={!p.running} onClick={p.onStop}>■</button>
       {p.sequenceLabel && <span className="canvas-sequence-label" role="status">{p.sequenceLabel}</span>}
-      </div>
+      </div>}
       <div className="canvas-tabs" role="tablist" aria-label="Tuval sekmeleri">
       {p.tabs.map((tab, index) => {
         const on = tab.id === p.activeId
@@ -85,7 +85,7 @@ export default function CanvasTabs(p: Props) {
                 }}
               />
             ) : (
-              <span className="canvas-tab-name">{tab.name}</span>
+              <span className="canvas-tab-name">{tab.name}{tab.dirty ? ' *' : ''}</span>
             )}
             {on && !editing && <>
               <button type="button" className="canvas-tab-x" title="Tuvali sola taşı" disabled={p.disabled || index === 0} onClick={e => { e.stopPropagation(); p.onMove(tab.id, -1) }}>‹</button>
@@ -95,7 +95,7 @@ export default function CanvasTabs(p: Props) {
               type="button"
               className="canvas-tab-x"
               title="Tuvali kapat"
-              disabled={p.disabled || p.tabs.length < 2}
+              disabled={p.disabled}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()

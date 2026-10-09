@@ -6,14 +6,15 @@ const nameOf = (name: string) => name.trim().slice(0, 48)
 
 /** Tab operations keep the library and tool-owned book metadata intact. */
 export function addCanvasTab(book: CanvasBook, name: string, graph: AgentGraph): CanvasBook {
-  const tab = { id: newId(), name: nameOf(name) || 'Tuval', graph: copy(graph) }
+  const clean = nameOf(name) || 'Tuval'
+  const tab = { id: newId(), name: clean, graph: copy(graph), baseline: { name: clean, graph: copy(graph) } }
   return { ...book, activeId: tab.id, tabs: [...book.tabs, tab] }
 }
 export function closeCanvasTab(book: CanvasBook, id: string): CanvasBook {
   const index = book.tabs.findIndex(t => t.id === id)
-  if (index < 0 || book.tabs.length < 2) return book
+  if (index < 0) return book
   const tabs = book.tabs.filter(t => t.id !== id)
-  return { ...book, activeId: book.activeId === id ? tabs[Math.max(0, index - 1)].id : book.activeId, tabs }
+  return { ...book, activeId: book.activeId === id ? tabs[Math.max(0, index - 1)]?.id ?? '' : book.activeId, tabs }
 }
 export function activateCanvasSnapshot(book: CanvasBook, tab: CanvasTab): CanvasBook {
   if (!book.tabs.some(t => t.id === tab.id)) throw new Error('Sıradaki tuval artık açık değil.')
@@ -28,26 +29,26 @@ export function saveCanvas(book: CanvasBook, tabId: string): CanvasBook {
   const existing = lib.canvases.find(c => c.id === tab.savedId)
   const id = existing?.id ?? newId()
   const record: SavedCanvas = { id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
-  return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id } : t), library: { ...lib,
+  return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id, baseline: { name: tab.name, graph: copy(tab.graph) } } : t), library: { ...lib,
     canvases: existing ? lib.canvases.map(c => c.id === id ? record : c) : [...lib.canvases, record] } }
 }
 export function deleteSavedCanvas(book: CanvasBook, id: string): CanvasBook {
   const lib = libraryOf(book)
-  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, savedId: undefined } : t),
+  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, savedId: undefined, baseline: undefined } : t),
     library: { ...lib, canvases: lib.canvases.filter(c => c.id !== id), automations: lib.automations.map(a => ({ ...a, entries: a.entries.filter(e => e.canvasId !== id) })) } }
 }
 export function renameSavedCanvas(book: CanvasBook, id: string, name: string): CanvasBook {
   const clean = nameOf(name), lib = libraryOf(book)
   if (!clean) throw new Error('Tuval adı boş olamaz.')
   if (!lib.canvases.some(c => c.id === id)) throw new Error('Tuval artık depoda yok.')
-  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, name: clean } : t),
+  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, name: clean, ...(t.baseline ? { baseline: { ...t.baseline, name: clean } } : {}) } : t),
     library: { ...lib, canvases: lib.canvases.map(c => c.id === id ? { ...c, name: clean, updatedAt: Date.now() } : c) } }
 }
 export function openSavedCanvas(book: CanvasBook, canvas: SavedCanvas): CanvasBook {
   const current = libraryOf(book).canvases.find(c => c.id === canvas.id)
   if (!current) throw new Error('Tuval artık depoda yok.')
   const id = newId()
-  return { ...book, activeId: id, tabs: [...book.tabs, { id, name: current.name, graph: copy(current.graph), savedId: current.id }] }
+  return { ...book, activeId: id, tabs: [...book.tabs, { id, name: current.name, graph: copy(current.graph), savedId: current.id, baseline: { name: current.name, graph: copy(current.graph) } }] }
 }
 export function moveCanvasTab(book: CanvasBook, id: string, delta: -1 | 1): CanvasBook {
   const index = book.tabs.findIndex(t => t.id === id), next = index + delta
@@ -98,7 +99,7 @@ export function automationCanvases(book: CanvasBook, id: string): SavedCanvas[] 
 export function openAutomation(book: CanvasBook, id: string): CanvasBook {
   const canvases = automationCanvases(book, id)
   if (!canvases.length) throw new Error('Otomasyon boş.')
-  const tabs = canvases.map(c => ({ id: newId(), name: c.name, graph: copy(c.graph), savedId: c.id }))
+  const tabs = canvases.map(c => ({ id: newId(), name: c.name, graph: copy(c.graph), savedId: c.id, baseline: { name: c.name, graph: copy(c.graph) } }))
   return { ...book, activeId: tabs[0].id, tabs }
 }
 export type AutomationFile = { format: 'nubbo-automation'; version: 2; name: string; canvases: { id: string; name: string; graph: AgentGraph }[]; order: string[] }
