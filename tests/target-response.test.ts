@@ -1,9 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chooseScreenTarget, setStopCheck, validateTargetReply, ModelRejected, guiStep } from '../electron/openrouter'
 import type { ScanResult } from '../electron/matcher'
+import { mergeOnnxLines } from '../electron/ocr-onnx'
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false) })
 const scan = { area: { x: 0, y: 0, w: 1000, h: 700 }, items: [{ id: 1, text: 'path', type: 'Edit', src: 'uia', x: 100, y: 100, w: 200, h: 20 }], image: null } as ScanResult
 describe('target response failures', () => {
+  it.each(['click', 'condition'] as const)('sends overlapping reader observations separately for %s', async (kind) => {
+    const merged = mergeOnnxLines([{ id: 1, text: 'Chrome', type: 'Text', src: 'ocr', x: 20, y: 30, w: 100, h: 20,
+      words: [{ t: 'Chrome', x: 20, y: 30, w: 100, h: 20 }] }],
+      [{ text: 'Chrome', conf: .99, x: 21, y: 30, w: 98, h: 20 }], 'combined')
+    const observed = { ...scan, items: merged.items }
+    let req: any
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      req = JSON.parse(init.body)
+      // IDs 3 and 4 are request-local word candidates; ONNX owns #4.
+      return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: '{"id":4,"text":"Chrome"}', }, finish_reason: 'stop' }] }) }
+    }))
+    const result = await chooseScreenTarget({ apiKey: 'fake', model: 'valid', prompt: 'Chrome', kind, stepTitle: kind, scan: observed, sendImage: false })
+    expect(req.messages[1].content).toContain('#3 Text "Chrome" @20,30 100x20 OCR-reader=windows')
+    expect(req.messages[1].content).toContain('#4 Text "Chrome" @21,30 98x20 OCR-reader=onnx')
+    expect(req.messages[1].content).toContain('overlapping-OCR=#4(100%)')
+    expect(req.messages[1].content).toContain('overlapping-OCR=#3(100%)')
+    expect(req.messages[1].content).toContain('Select only ONE listed candidate')
+    expect(result).toMatchObject({ id: 2, candidateId: 4, wordIndex: 0 })
+  })
   it('rejects reasoning prose ending in incomplete JSON instead of returning absent target', () => {
     expect(() => validateTargetReply('We need id 181. So {"id":181,"reason":"Görsel klasörü altı')).toThrow(ModelRejected)
     expect(() => validateTargetReply('{"id":null,"reason":"No observed target"}')).not.toThrow()

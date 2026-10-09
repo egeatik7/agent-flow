@@ -14,6 +14,23 @@ async function ask(reply: unknown, system?: string) {
  return { result, request: JSON.parse(body) }
 }
 describe('OCR words to model and exact selected word', () => {
+ it('links overlapping readings across readers without merging, averaging or linking distant labels', () => {
+  const evidence: ScanResult = { ...scan, items: [
+   { id: 1, text: 'Chrome', type: 'Text', src: 'ocr', x: -20, y: 30, w: 100, h: 20, ocrSources: ['windows'] },
+   { id: 2, text: 'Chr0me', type: 'Text', src: 'ocr', x: -19, y: 30, w: 98, h: 20, ocrSources: ['onnx'] },
+   { id: 3, text: 'Chrome', type: 'Text', src: 'ocr', x: 500, y: 30, w: 100, h: 20, ocrSources: ['onnx'] },
+   { id: 4, text: 'Other', type: 'Text', src: 'ocr', x: -20, y: 30, w: 100, h: 20, ocrSources: ['windows'] },
+  ] }
+  const before = JSON.stringify(evidence)
+  const lines = describeWordCandidates(evidence, wordCandidates(evidence)).split('\n')
+  expect(lines[0]).toContain('overlapping-OCR=#2(100%)')
+  expect(lines[0]).not.toContain('#4(')
+  expect(lines[1]).toContain('overlapping-OCR=#1(100%),#4(100%)')
+  expect(lines[2]).not.toContain('overlapping-OCR=')
+  expect(lines[0]).toContain('@-20,30 100x20')
+  expect(lines[1]).toContain('@-19,30 98x20')
+  expect(JSON.stringify(evidence)).toBe(before)
+ })
  it('splits only real measured words and retains UIA IDs without mutating scanner data', () => {
   const old = JSON.stringify(scan), candidates = wordCandidates(scan)
   expect(candidates.map(c => c.item.text)).toEqual(['Run', 'Remesh', 'Save'])

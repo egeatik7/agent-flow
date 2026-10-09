@@ -527,7 +527,8 @@ function unrotateCcw(
 
 /**
  * Lines read on the counter-clockwise frame, mapped back to the screen.
- * A line that overlaps any OCR box already found, including one added here, is dropped.
+ * Combined scans retain each reader observation, even at overlapping coordinates.
+ * Legacy single-reader modes retain their overlap filter.
  */
 export function placeSideways(
   lines: OnnxLine[],
@@ -546,7 +547,7 @@ export function placeSideways(
     if (!text) continue
     const box = unrotateCcw(line, srcW, srcH, originX, originY)
     if (!box) continue
-    if ([...ocr, ...fresh].some((it) => overlapRatio(box, it) > 0 && (engine !== 'combined' || exactReading(text, it.text)))) continue
+    if (engine !== 'combined' && [...ocr, ...fresh].some((it) => overlapRatio(box, it) > 0)) continue
     const item = lineItem(nextId++, text, { ...line, text, x: box.x, y: box.y, w: box.w, h: box.h })
     fresh.push(item)
   }
@@ -617,11 +618,6 @@ function lineItem(id: number, text: string, line: OnnxLine): ScreenItem {
     ...(!/\s/.test(text) ? { words: [{ t: text, x, y, w, h, ocrSources: ['onnx'] }] } : {}) }
 }
 
-function exactReading(a: string, b: string): boolean {
-  // Substrings, counters and differing spellings are separate evidence.
-  return a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
 function combineReaders(items: ScreenItem[], lines: OnnxLine[]): { items: ScreenItem[]; added: number; usedOnnx: boolean } {
   const out: ScreenItem[] = items.map(i => ({ ...i,
     ...(i.src === 'ocr' ? { ocrSources: [...(i.ocrSources ?? ['windows' as const])] } : {}),
@@ -633,20 +629,8 @@ function combineReaders(items: ScreenItem[], lines: OnnxLine[]): { items: Screen
     const text = acceptedText(line)
     if (!text || ![line.x, line.y, line.w, line.h, line.conf].every(Number.isFinite) || line.w <= 0 || line.h <= 0) continue
     usedOnnx = true
-    const duplicate = out.find(i => i.src === 'ocr' && exactReading(text, i.text) && overlapRatio(line, i) >= 0.45)
-    if (duplicate) {
-      duplicate.ocrSources = [...new Set([...(duplicate.ocrSources ?? []), 'onnx' as const])]
-      duplicate.ocrConfidence = line.conf
-      // Keep Windows' original word positions and annotate corroborated words.
-      duplicate.words = duplicate.words?.map(w => ({ ...w, ocrSources: [...new Set([...(w.ocrSources ?? ['windows' as const]), 'onnx' as const])] }))
-      continue
-    }
-    const word = out.filter(i => i.src === 'ocr').flatMap(i => i.words ?? [])
-      .find(w => exactReading(text, w.t) && overlapRatio(line, w) >= 0.45)
-    if (word) {
-      word.ocrSources = [...new Set([...(word.ocrSources ?? ['windows' as const]), 'onnx' as const])]
-      continue
-    }
+    // Independent reader evidence keeps its own text, measured box, confidence and ID.
+    // Do not collapse even identical ONNX/Windows readings or borrow word geometry.
     out.push(lineItem(nextId++, text, line))
     added++
   }

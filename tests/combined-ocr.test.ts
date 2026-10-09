@@ -15,23 +15,26 @@ describe('same-frame Windows + ONNX OCR evidence', () => {
   it('never replaces a Windows line with a conflicting Chinese reading', () => {
     expect(merged([row('Local')], [line('完成')]).items.map(i => i.text)).toEqual(['Local', '完成'])
   })
-  it('deduplicates an exact same-place reading, keeping measured Windows words', () => {
+  it('preserves both exact same-place readings with independent source and geometry', () => {
     const r = row('Job finished')
     r.words = [{ t: 'Job', x: 20, y: 30, w: 25, h: 20 }, { t: 'finished', x: 65, y: 30, w: 55, h: 20 }]
     const before = JSON.stringify(r)
-    const out = merged([r], [line('JOB  finished')])
-    expect(out.items).toHaveLength(1)
-    expect(out.usedOnnx).toBe(true); expect(out.added).toBe(0)
-    expect(out.items[0].ocrSources).toEqual(['windows', 'onnx'])
-    expect(out.items[0].words?.[1]).toMatchObject({ x: 65, w: 55, ocrSources: ['windows', 'onnx'] })
+    const out = merged([r], [line('JOB  finished', { x: 21, w: 98 })])
+    expect(out.items).toHaveLength(2)
+    expect(out.usedOnnx).toBe(true); expect(out.added).toBe(1)
+    expect(out.items.map(i => i.ocrSources)).toEqual([['windows'], ['onnx']])
+    expect(out.items[0].words?.[1]).toMatchObject({ x: 65, w: 55 })
+    expect(out.items[1]).toMatchObject({ text: 'JOB finished', x: 21, w: 98, ocrConfidence: .99 })
+    expect(out.items[1].words).toBeUndefined()
     expect(JSON.stringify(r)).toBe(before)
   })
-  it('deduplicates a whole ONNX token against an actual measured Windows word', () => {
+  it('preserves an ONNX token even when it matches a measured Windows word', () => {
     const r = row('Google Chrome')
     r.words = [{ t: 'Google', x: 20, y: 30, w: 30, h: 20 }, { t: 'Chrome', x: 65, y: 30, w: 55, h: 20 }]
     const out = merged([r], [line('Chrome', { x: 65, w: 55 })])
-    expect(out.items).toHaveLength(1)
-    expect(out.items[0].words?.[1].ocrSources).toEqual(['windows', 'onnx'])
+    expect(out.items).toHaveLength(2)
+    expect(out.items[0].words?.[1].ocrSources).toBeUndefined()
+    expect(out.items[1]).toMatchObject({ text: 'Chrome', x: 65, w: 55, ocrSources: ['onnx'] })
     expect(r.words[1].ocrSources).toBeUndefined()
   })
   it('retains same-name buttons at different locations and overlapping substrings/counters', () => {
@@ -60,6 +63,18 @@ describe('same-frame Windows + ONNX OCR evidence', () => {
     // CCW x=30,y=10,w=20,h=100 -> original x=40,y=30,w=100,h=20.
     const side = placeSideways([line('Right', { x: 30, y: 10, w: 20, h: 100 })], existing, 150, 100, 0, 0, 'combined')
     expect(side[0]).toMatchObject({ text: 'Right', x: 40, y: 30, w: 100, h: 20 })
-    expect(placeSideways([line('Wrong', { x: 30, y: 10, w: 20, h: 100 })], existing, 150, 100, 0, 0, 'combined')).toEqual([])
+    expect(placeSideways([line('Wrong', { x: 30, y: 10, w: 20, h: 100 })], existing, 150, 100, 0, 0, 'combined')[0]).toMatchObject({ text: 'Wrong', x: 40, y: 30, w: 100, h: 20, ocrSources: ['onnx'] })
+  })
+  it('keeps independent selectable IDs for identical one-word readings', () => {
+    const win = row('Chrome', 12)
+    win.words = [{ t: 'Chrome', x: 20, y: 30, w: 100, h: 20 }]
+    const out = merged([win], [line('Chrome')])
+    const scan = { area: { x: 0, y: 0, w: 1000, h: 500 }, items: out.items } as ScanResult
+    const candidates = wordCandidates(scan)
+    expect(candidates.map(c => c.item.text)).toEqual(['Chrome', 'Chrome'])
+    expect(new Set(candidates.map(c => c.item.id)).size).toBe(2)
+    expect(candidates.map(c => c.item.ocrSources)).toEqual([['windows'], ['onnx']])
+    expect(describeWordCandidates(scan, candidates)).toContain('OCR-reader=windows')
+    expect(describeWordCandidates(scan, candidates)).toContain('OCR-reader=onnx ONNX-confidence=0.990')
   })
 })

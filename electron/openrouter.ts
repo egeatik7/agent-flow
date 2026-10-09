@@ -189,7 +189,7 @@ async function chatOnce(
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; maxTokens?: number } = {}
+  opts: { json?: boolean } = {}
 ): Promise<string> {
   const once = async (json: boolean) => {
     reportOut(model, messages)
@@ -199,7 +199,7 @@ async function chatOnce(
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: opts.maxTokens ?? (hasImage ? 2500 : 800),
+        // Leave output/reasoning token limits to the provider's model defaults.
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
@@ -246,7 +246,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; maxTokens?: number; validate?: (text: string) => void } = {},
+  opts: { json?: boolean; validate?: (text: string) => void } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -790,7 +790,7 @@ export async function guiStep(opts: {
         if (t.note) messages.push({ role: 'user', content: t.note })
       }
       messages.push({ role: 'user', content: [...(opts.initiative ? [{ type: 'text', text: initiativeTurnInstruction(opts.goal, 'tars') }] : []), imagePart(opts.screen)] })
-      const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, maxTokens: 1000 })
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: false })
       if (!content.trim()) throw new ModelRejected('boş yanıt')
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
@@ -875,7 +875,7 @@ export async function chooseVisualTarget(opts: {
     const messages: Message[] = native
       ? [{ role: 'user', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
       : [{ role: 'system', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
-    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, maxTokens: 1000 })
+    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native })
     return validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
   })
 }

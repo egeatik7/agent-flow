@@ -6,7 +6,7 @@ For an OCR target, choose exactly ONE word: the word you are most confident lies
 These IDs belong only to this current list. Screenshot numbers, if present, refer to original control/phrase IDs; OCR word IDs in this list have their own coordinates. Resolve word IDs from the list, not screenshot numbering.
 Preserve a specifically named application's identity. A generic "browser"/"tarayıcı" label does not identify Google Chrome or any other named application. If the requested application is not identified by observed evidence, return id:null; do not substitute another application with a similar purpose.`
 
-export const OCR_READER_RULES = `OCR-reader identifies Windows, ONNX, or both reading the SAME captured frame. Different readings at overlapping coordinates are alternatives for one location, not automatically different buttons. Infer the best reading from nearby words and the instruction. Do not concatenate conflicting alternatives or mix observations from unrelated locations. ONNX-confidence is that reader's recognition score, not proof of clickability. Keep counters, totals and negations meaningful: 6/60 is not 60/60, and running is not finished.`
+export const OCR_READER_RULES = `OCR-reader identifies the reader of each observation from the SAME captured frame. Windows and ONNX observations are supplied separately even when their text and coordinates overlap. Identical or differing readings at overlapping coordinates can refer to the SAME target; they are not automatically different buttons, additional completed jobs or additional actions. Infer the best reading from nearby words and the instruction. Select only ONE listed candidate for the requested target or condition evidence. Do not concatenate conflicting alternatives or mix observations from unrelated locations. overlapping-OCR lists cross-reader candidate IDs whose boxes geometrically overlap; its percentage is intersection area divided by the smaller box area, NOT a probability or proof of one button. Use it to recognize repeated observations of the same screen location, while still checking text and surrounding context. Each candidate keeps its own measured box; never average boxes or borrow word geometry from another observation. ONNX-confidence is that reader's recognition score, not proof of clickability. Keep counters, totals and negations meaningful: 6/60 is not 60/60, and running is not finished.`
 export const CONDITION_TARGET_RULES = `This is a READ-ONLY existence condition, NOT an action. Interpret the user's whole instruction and decide whether observed screen evidence supports the requested state. Choose one listed word/control or OCR-context-only line as evidence, or id:null if it is absent. For this condition, an unsplit line IS selectable as evidence even without word geometry; no click is sent. Do not open menus, close popups, advance the application or plan steps to make the condition true. A semantic paraphrase can match, but required numbers, totals and negations must agree. For example, "job finished 60/60 yazıyorsa evet ver" needs evidence of completion with 60/60; a running job or 6/60 does not qualify.`
 
 export type WordCandidate = { item: ScreenItem; parentId: number; wordIndex?: number; contextOnly?: boolean }
@@ -38,11 +38,37 @@ export function wordCandidates(scan: ScanResult): WordCandidate[] {
   return out
 }
 
+/** Measured cross-reader overlap, without grouping targets or altering their boxes/IDs. */
+function readerOverlaps(candidates: WordCandidate[]): Map<number, Map<number, number>> {
+  const readers = (item: ScreenItem) => item.ocrSources ?? ['windows']
+  const windows = candidates.filter(c => c.item.src === 'ocr' && readers(c.item).includes('windows'))
+  const onnx = candidates.filter(c => c.item.src === 'ocr' && readers(c.item).includes('onnx'))
+  const links = new Map<number, Map<number, number>>()
+  const add = (from: number, to: number, overlap: number) => {
+    if (!links.has(from)) links.set(from, new Map())
+    links.get(from)!.set(to, Math.round(overlap * 100))
+  }
+  for (const { item: a } of windows) for (const { item: b } of onnx) {
+    if (a.id === b.id || !validBox(a) || !validBox(b)) continue
+    const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+    const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+    if (w <= 0 || h <= 0) continue
+    const overlap = w * h / Math.min(a.w * a.h, b.w * b.h)
+    if (overlap < .45) continue
+    add(a.id, b.id, overlap)
+    add(b.id, a.id, overlap)
+  }
+  return links
+}
+
 export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[]): string {
+  const overlaps = readerOverlaps(candidates)
   return candidates.map(({ item, parentId, wordIndex, contextOnly }) => {
     const x = (item.x + item.w / 2 - scan.area.x) / Math.max(1, scan.area.w) * 100
     const y = (item.y + item.h / 2 - scan.area.y) / Math.max(1, scan.area.h) * 100
-    return `${describeItems([item])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}`
+    const links = overlaps.get(item.id)
+    const overlapHint = links?.size ? ` overlapping-OCR=${[...links].map(([id, percent]) => `#${id}(${percent}%)`).join(',')}` : ''
+    return `${describeItems([item])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
 }
 
