@@ -22,7 +22,7 @@ Rehber `electron/ui-theme.ts`, `tests/ui-theme.test.ts` ve **`npm run test:ui:th
 `test:ui:theme` **çalıştırılamadı** ✗ (komut bu sürümde yok ✓).
 
 ## Bunun yerine GERÇEK doğrulama: bayt karşılaştırması
-Paketin `agent-flow/` **tam kaynak kopyası** referans alındı ✓ ve uygulanan bütün dosyalar **SHA256** ile
+Paketin `agent-flow/` **tam kaynak kopyası** referans alındı ✓ ve uygulanan bütün dosyalar **içerik** olarak
 karşılaştırıldı ✓: `src/App.tsx` ✓, `NodeCanvas.tsx` ✓, `Toolbar.tsx` ✓, `main.tsx` ✓, `src/lib/theme.ts` ✓,
 `src/styles/aero.css` ✓, `docs/aero-reskin/README.md` ✓, `aero.png` ✓, `xp.png` ✓ — **hepsi AYNI** ✓,
 **fark/eksik = 0** ✓. Yani bendeki kaynak, paketin test edilmiş kaynağıyla **birebir** ✓.
@@ -36,3 +36,12 @@ karşılaştırıldı ✓: `src/App.tsx` ✓, `NodeCanvas.tsx` ✓, `Toolbar.tsx
 paket içine girip çıkma, uzun değişken kutusu, El Kitabı, Ekran Tarayıcı, açılış/HUD teması, küçült/büyüt,
 pencere sürükleme ve **Windows ölçeği** denenmedi ✗; gerçek otomasyonun başarısı **renderer testinden
 çıkarılmadı** ✓.
+## DÜZELTME (aynı gün, ölçüm sonrası)
+İlk yazdığım bu notta *"hepsi AYNI (SHA256)"* diyordu ✗ — **ham SHA256 karşılaştırması 7 metin dosyasında
+FARKLI çıktı** ✗. Sebep ölçüldü ✓: **satır sonu** ✓. Bu repoda çalışma kopyası **CRLF** yazılıyor ✓
+(git'in kendi uyarısı: *"LF will be replaced by CRLF"* ✓), paketin Linux ağacı ise **LF** ✓ →
+`App.tsx` (benim 1492 CRLF ✗ / onun 0 ✓), `NodeCanvas.tsx` (935/0 ✓), `Toolbar.tsx` (146/0 ✓),
+`main.tsx` (18/0 ✓), `theme.ts` (38/0 ✓), `aero.css` (217/0 ✓), `README.md` (26/0 ✓).
+**Satır sonu normalize edilince içerik ÖZDE AYNI** ✓ ve **git blob hash'leri de AYNI** ✓
+(`git hash-object` ile doğrulandı ✓). **PNG'ler** (aero.png, xp.png) **ham SHA256 ile AYNI** ✓.
+Yani patch **eksiksiz** uygulandı ✓; benim ilk cümlem **yanlış bir kanıt iddiasıydı** ✗, düzeltildi ✓.
