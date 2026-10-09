@@ -1,4 +1,4 @@
-import { NODE_W, nodeHeight, type AgentGraph, type AgentNode } from './graph-types'
+import { nodeWidth, nodeHeight, type AgentGraph, type AgentNode } from './graph-types'
 
 export const FRAME_PAD = 24
 export const FRAME_HEAD = 28
@@ -55,7 +55,7 @@ export function firstMember(graph: AgentGraph, loop: AgentNode): AgentNode | und
 
 function nodeRect(graph: AgentGraph, n: AgentNode, depth: number): Rect {
   if (n.kind === 'loop') return frameRect(graph, n, depth + 1)
-  return { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }
+  return { x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) }
 }
 
 /** The box around its members; an empty box keeps its own size at its own spot. */

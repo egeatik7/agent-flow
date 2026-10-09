@@ -405,10 +405,15 @@ export const NODE_W = 230
 export const NODE_BORDER = 2
 export const NODE_HEADER = 26
 export const NODE_BODY = 58
+export const PACKAGE_BODY = 80
 export const NODE_PORT_ROW = 22
 
+export function nodeWidth(kind: NodeKind): number {
+  return kind === 'package' ? NODE_W + 32 : NODE_W
+}
+
 export function nodeHeight(kind: NodeKind): number {
-  const body = kind === 'probe' ? 118 : NODE_BODY
+  const body = kind === 'probe' ? 118 : kind === 'package' ? PACKAGE_BODY : NODE_BODY
   return NODE_BORDER * 2 + NODE_HEADER + body + Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW + 4
 }
 
@@ -422,8 +427,8 @@ export function outputPoint(n: AgentNode, port: string) {
     NODE_SPECS[n.kind].outputs.findIndex((o) => o.key === port)
   )
   return {
-    x: n.x + NODE_W - NODE_BORDER,
-    y: n.y + NODE_BORDER + NODE_HEADER + NODE_BODY + idx * NODE_PORT_ROW + NODE_PORT_ROW / 2,
+    x: n.x + nodeWidth(n.kind) - NODE_BORDER,
+    y: n.y + NODE_BORDER + NODE_HEADER + (n.kind === 'package' ? PACKAGE_BODY : NODE_BODY) + idx * NODE_PORT_ROW + NODE_PORT_ROW / 2,
   }
 }
 
@@ -475,6 +480,14 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
   }
 }
 
+/** Count actual nodes across nested packages, without counting package wrappers
+ * or their synthetic Start/End markers. Loops count once, not once per item. */
+export function packageStepCount(graph: AgentGraph | undefined): number {
+  return (graph?.nodes ?? []).reduce((count, node) => count + (
+    node.kind === 'package' ? packageStepCount(node.inner) : node.kind === 'start' || node.kind === 'end' ? 0 : 1
+  ), 0)
+}
+
 export function summarize(n: AgentNode): string {
   switch (n.kind) {
     case 'start':
@@ -511,7 +524,7 @@ export function summarize(n: AgentNode): string {
     case 'moveFile':
       return `${n.source?.trim() || '{{dosya}}'} → ${n.text?.trim() || 'hedef yolu yaz…'}`
     case 'package': {
-      const steps = (n.inner?.nodes ?? []).filter((x) => x.kind !== 'start' && x.kind !== 'end').length
+      const steps = packageStepCount(n.inner)
       return steps ? `${steps} adım` : 'Boş paket'
     }
     case 'probe':

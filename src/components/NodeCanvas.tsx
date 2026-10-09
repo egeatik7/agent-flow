@@ -8,6 +8,7 @@ import {
   listItems,
   loopKeys,
   nodeHeight,
+  nodeWidth,
   outputPoint,
   portLabel,
   summarize,
@@ -40,6 +41,9 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 
 type Props = {
   graph: AgentGraph
+  canvasKey?: string
+  pasteRevision?: number
+  onPasteTarget?: (readPoint: (() => { x: number; y: number }) | null) => void
   /** When a branch is being looked at: the nodes it touches and the connections it adds. */
   /** Ask the canvas to bring this node into view (used to find a branch's region). */
   focus?: { nodeId: string; at: number }
@@ -142,6 +146,8 @@ export default function NodeCanvas(p: Props) {
   const [marquee, setMarquee] = useState<Marquee | null>(null)
   const graphRef = useRef(p.graph)
   graphRef.current = p.graph
+  const pasteClick = useRef<{ canvasKey: string | undefined; point: { x: number; y: number } } | null>(null)
+  const previousPasteRevision = useRef(p.pasteRevision)
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
   const packageLooks = useMemo(() => packageAppearances(p.graph), [p.graph.nodes])
@@ -155,7 +161,7 @@ export default function NodeCanvas(p: Props) {
     let w = 2400
     let h = 1600
     for (const n of p.graph.nodes) {
-      w = Math.max(w, n.x + NODE_W + 600)
+      w = Math.max(w, n.x + nodeWidth(n.kind) + 600)
       h = Math.max(h, n.y + nodeHeight(n.kind) + 500)
     }
     for (const f of frames) {
@@ -170,6 +176,19 @@ export default function NodeCanvas(p: Props) {
     const v = viewRef.current
     return { x: (clientX - r.left - v.x) / v.z, y: (clientY - r.top - v.y) / v.z }
   }
+
+  // App owns Ctrl+V; the canvas supplies its real transformed click point.
+  // A different canvas/package cannot inherit a stale point from this view.
+  useEffect(() => {
+    p.onPasteTarget?.(() => {
+      if (pasteClick.current && pasteClick.current.canvasKey === p.canvasKey) return pasteClick.current.point
+      const el = scrollRef.current
+      if (!el) return { x: 320, y: 240 }
+      const v = viewRef.current
+      return { x: (el.clientWidth / 2 - v.x) / v.z, y: (el.clientHeight / 2 - v.y) / v.z }
+    })
+    return () => p.onPasteTarget?.(null)
+  }, [p.canvasKey, p.onPasteTarget])
 
   const setViewNow = (next: View) => {
     viewRef.current = next
@@ -195,7 +214,7 @@ export default function NodeCanvas(p: Props) {
     const v = viewRef.current
     const left = v.x + n.x * v.z
     const top = v.y + n.y * v.z
-    const right = left + NODE_W * v.z
+    const right = left + nodeWidth(n.kind) * v.z
     const bottom = top + nodeHeight(n.kind) * v.z
     const m = 56
     const vw = el.clientWidth
@@ -250,9 +269,11 @@ export default function NodeCanvas(p: Props) {
   }, [!!linking])
 
   useEffect(() => {
-    if (p.selectedNodeId) reveal(p.selectedNodeId)
+    const pasted = previousPasteRevision.current !== p.pasteRevision
+    previousPasteRevision.current = p.pasteRevision
+    if (p.selectedNodeId && !pasted) reveal(p.selectedNodeId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.selectedNodeId])
+  }, [p.selectedNodeId, p.pasteRevision])
 
   const statusClass = (id: string, status: StepStatus | undefined) => p.highlightedNodeIds?.includes(id) ? p.runPhase === 'stopped' ? 'stopped' : 'running' : status ?? ''
   const statusLabel = (id: string, status: StepStatus | undefined) => {
@@ -315,7 +336,7 @@ export default function NodeCanvas(p: Props) {
     for (const n of g.nodes) if (n.kind === 'loop' && !moving.has(n.id)) frozen.set(n.id, frameRect(without, n))
     const skip = new Set(moving)
     const leadNode = byId.get(lead)
-    const leadRect = leadNode?.kind === 'loop' ? frameRect(g, leadNode) : { x: leadNode?.x ?? 0, y: leadNode?.y ?? 0, w: NODE_W, h: 40 }
+    const leadRect = leadNode?.kind === 'loop' ? frameRect(g, leadNode) : { x: leadNode?.x ?? 0, y: leadNode?.y ?? 0, w: leadNode ? nodeWidth(leadNode.kind) : NODE_W, h: 40 }
     const start = toCanvas(e.clientX, e.clientY)
     const orig = Object.fromEntries([...moving].map((id) => [id, { x: byId.get(id)?.x ?? 0, y: byId.get(id)?.y ?? 0 }]))
     const d0: Drag = { ids, frozen, over: ownerOf(g, lead)?.id ?? null, skip }
@@ -335,7 +356,7 @@ export default function NodeCanvas(p: Props) {
       const next: Record<string, { x: number; y: number }> = {}
       for (const [id, o] of Object.entries(orig)) next[id] = { x: Math.max(0, o.x + dx), y: Math.max(0, o.y + dy) }
       p.onMoveNodes(next)
-      const px = leadRect.x + dx + Math.min(leadRect.w, NODE_W) / 2
+      const px = leadRect.x + dx + (leadNode?.kind === 'loop' ? Math.min(leadRect.w, NODE_W) : leadRect.w) / 2
       const py = leadRect.y + dy + 16
       let over: string | null = null
       let area = Infinity
@@ -447,7 +468,7 @@ export default function NodeCanvas(p: Props) {
     // A loop failure points at its visible header, not the empty centre of
     // a potentially enormous frame. Regular nodes are centred as a whole.
     const frame = node.kind === 'loop' ? frameRect(p.graph, node) : null
-    const x = frame ? frame.x + Math.min(frame.w / 2, NODE_W / 2) : node.x + NODE_W / 2
+    const x = frame ? frame.x + Math.min(frame.w / 2, NODE_W / 2) : node.x + nodeWidth(node.kind) / 2
     const y = frame ? frame.y + 14 : node.y + nodeHeight(node.kind) / 2
     setViewNow({ x: el.clientWidth / 2 - x * z, y: el.clientHeight / 2 - y * z, z })
     // Only when the request changes (the stamp), so panning afterwards is not undone.
@@ -465,6 +486,9 @@ export default function NodeCanvas(p: Props) {
       style={{
         backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
+      }}
+      onMouseDownCapture={(e) => {
+        if (e.button === 0 || e.button === 2) pasteClick.current = { canvasKey: p.canvasKey, point: toCanvas(e.clientX, e.clientY) }
       }}
       onMouseDown={(e) => {
         if (e.button === 1) {
@@ -524,7 +548,7 @@ export default function NodeCanvas(p: Props) {
             if (n.kind === 'loop') {
               const f = frameById.get(n.id)
               if (f && overlaps({ x: f.rect.x, y: f.rect.y, w: f.rect.w, h: 28 }, drawn)) hits.push(n.id)
-            } else if (overlaps({ x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }, drawn)) {
+            } else if (overlaps({ x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) }, drawn)) {
               hits.push(n.id)
             }
           }
@@ -724,7 +748,7 @@ export default function NodeCanvas(p: Props) {
               key={n.id}
               data-node-id={n.id}
               className={cls}
-              style={{ left: n.x, top: n.y, width: NODE_W, height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length }}
+              style={{ left: n.x, top: n.y, width: nodeWidth(n.kind), height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length }}
               onMouseDown={(e) => startNodeDrag(e, n)}
               onContextMenu={(e) => {
                 e.preventDefault()
@@ -734,7 +758,7 @@ export default function NodeCanvas(p: Props) {
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
             >
-              <div className="node-head" style={{ background: headerGradient(packageLook?.color ?? spec.color) }}>
+              <div className="node-head" style={{ background: packageLook ? `linear-gradient(90deg, ${packageLook.color} 0%, ${packageLook.color} 28%, #0a246a 72%, #05070c 100%)` : headerGradient(spec.color) }}>
                 <span className="node-icon">{packageLook ? (
                   <svg className="package-symbol" viewBox="0 0 16 16" role="img" aria-label={`Paket simgesi ${packageLook.badge}`}>
                     <path d={packageLook.symbol} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
@@ -751,28 +775,28 @@ export default function NodeCanvas(p: Props) {
                 <>
                 <div className="node-summary">{summarize(n)}</div>
                 {n.kind === 'package' && (
-                  <div className="field-row wrap">
+                  <div className="package-actions">
                     <button
                       type="button"
-                      className="xp-btn enter-pkg"
+                      className="xp-btn enter-pkg package-action package-action-open"
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation()
                         p.onEnterPackage(n.id)
                       }}
                     >
-                      İçine gir
+                      <span className="package-action-icon" aria-hidden="true">↪</span> İçine gir
                     </button>
                     <button
                       type="button"
-                      className="xp-btn enter-pkg"
+                      className="xp-btn enter-pkg package-action package-action-unpack"
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation()
                         p.onUnpackPackage(n.id)
                       }}
                     >
-                      Paketi çıkar
+                      <span className="package-action-icon" aria-hidden="true">▤</span> Paketi çıkar
                     </button>
                   </div>
                 )}

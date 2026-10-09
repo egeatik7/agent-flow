@@ -30,6 +30,7 @@ let onEdge = (_p: unknown) => {}
 let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
 const executed: string[] = []
 const dispatched: { graph: AgentGraph; startId?: string; packagePath?: string[] }[] = []
+const windowListeners = new Map<string, Set<(event: unknown) => void>>()
 const api = {
   getSettings: async () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, maxSteps: 100 }),
   getCanvases: async () => structuredClone(book),
@@ -67,7 +68,13 @@ const api = {
 }
 
 beforeAll(async () => {
-  vi.stubGlobal('window', { xpAgent: api, addEventListener: () => {}, removeEventListener: () => {}, setTimeout, clearTimeout })
+  vi.stubGlobal('window', { xpAgent: api,
+    addEventListener: (name: string, fn: (event: unknown) => void) => {
+      if (!windowListeners.has(name)) windowListeners.set(name, new Set())
+      windowListeners.get(name)!.add(fn)
+    },
+    removeEventListener: (name: string, fn: (event: unknown) => void) => windowListeners.get(name)?.delete(fn),
+    setTimeout, clearTimeout })
   vi.stubGlobal('requestAnimationFrame', (cb: () => void) => { cb(); return 0 })
   App = (await import('../src/App')).default
 })
@@ -125,6 +132,24 @@ async function select(renderer: ReactTestRenderer, path: string[], id: string) {
 const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
 
 describe('Seçiliden Çalıştır: real App → bridge arguments → runner → next canvas', () => {
+  it('real Ctrl+C/Ctrl+V consumes the canvas point, selects fresh copies and creates no external edges', async () => {
+    const s = scenario(1), r = await mount()
+    const canvas = r.root.findByType(NodeCanvas), before = structuredClone(canvas.props.graph) as AgentGraph
+    await act(async () => { canvas.props.onSelectNode(s.path[0]) })
+    r.root.findByType(NodeCanvas).props.onPasteTarget(() => ({ x: 900, y: 400 }))
+    const shortcut = async (key: string) => {
+      const e = { key, ctrlKey: true, metaKey: false, target: { tagName: 'DIV' }, preventDefault: vi.fn() }
+      await act(async () => { for (const listener of [...(windowListeners.get('keydown') ?? [])]) listener(e) })
+      expect(e.preventDefault).toHaveBeenCalled()
+    }
+    await shortcut('c'); await shortcut('v')
+    const after = r.root.findByType(NodeCanvas).props.graph as AgentGraph
+    const copy = after.nodes.find(n => !before.nodes.some(old => old.id === n.id))!
+    expect(copy.kind).toBe('package'); expect(copy.x).toBe(769); expect(copy.y).toBe(332)
+    expect(after.edges).toEqual(before.edges)
+    expect(r.root.findByType(NodeCanvas).props.selectedIds).toEqual([copy.id])
+    expect(copy.inner!.nodes[0].id).not.toBe(before.nodes.find(n => n.id === s.path[0])!.inner!.nodes[0].id)
+  })
   it.each([1, 2])('keeps outer loop patches and hidden sibling memory while inspecting %i package levels', async depth => {
     const s = scenario(depth, true)
     const sibling = { ...createNode('click', 0, 0), id: 'hidden-sibling' }

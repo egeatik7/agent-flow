@@ -276,3 +276,62 @@
   border: 1px solid rgba(255, 255, 255, 0.6);
   background: rgba(0, 0, 0, 0.16);
 }
+
+/* Slightly larger package cards, with quiet XP-style raised controls. Dimensions
+   match PACKAGE_BODY/nodeWidth so ports, selection and loop frames stay aligned. */
+.agent-node.kind-package .node-body {
+  height: 80px;
+  padding: 8px 9px;
+  background: linear-gradient(180deg, #fffef9 0%, #f2efdf 100%);
+}
+
+.agent-node.kind-package .node-summary {
+  color: #38415b;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.package-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.package-actions .package-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  margin-top: 0;
+  padding: 0 9px;
+  border: 1px solid #7b8ca7;
+  border-radius: 3px;
+  color: #203a65;
+  background: linear-gradient(180deg, #ffffff 0%, #f9f7ee 42%, #e4dec9 100%);
+  box-shadow: inset 0 0 0 1px #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.package-actions .package-action:hover {
+  border-color: #2d5ca4;
+  background: linear-gradient(180deg, #ffffff 0%, #fff9e4 42%, #eadeb8 100%);
+}
+
+.package-actions .package-action:active {
+  background: #e8e1ca;
+  box-shadow: inset 1px 1px 2px #c4baa0;
+}
+
+.package-actions .package-action:focus-visible {
+  outline: 1px dotted #203a65;
+  outline-offset: -4px;
+}
+
+.package-action-icon {
+  color: #346e9b;
+  font-size: 14px;
+  line-height: 1;
+}

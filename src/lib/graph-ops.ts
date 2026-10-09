@@ -5,6 +5,7 @@ import {
   createNode,
   newId,
   nodeHeight,
+  nodeWidth,
   type AgentEdge,
   type AgentGraph,
   type AgentNode,
@@ -62,11 +63,11 @@ export function addAfter(
     y = r.y + (port === 'error' ? r.h + 30 : 0)
   } else {
     const portIdx = Math.max(0, NODE_SPECS[from.kind].outputs.findIndex((o) => o.key === port))
-    x = from.x + NODE_W + GAP_X
+    x = from.x + nodeWidth(from.kind) + GAP_X
     y = from.y + portIdx * (nodeHeight(from.kind) + 30)
   }
   const occupied = (px: number, py: number) =>
-    graph.nodes.some((n) => n.kind !== 'loop' && Math.abs(n.x - px) < NODE_W - 20 && Math.abs(n.y - py) < 90)
+    graph.nodes.some((n) => n.kind !== 'loop' && Math.abs(n.x - px) < Math.max(nodeWidth(n.kind), nodeWidth(kind)) - 20 && Math.abs(n.y - py) < 90)
   let guard = 0
   while (occupied(x, y) && guard++ < 20) y += 120
 
@@ -155,7 +156,7 @@ export function reconcileLoopMembership(graph: AgentGraph): AgentGraph {
         exclude.add(n.id)
         for (const a of ancestors(current, n.id)) exclude.add(a.id)
       }
-      const rect = n.kind === 'loop' ? frameRect(current, n) : { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }
+      const rect = n.kind === 'loop' ? frameRect(current, n) : { x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) }
       const hit = loopAt(current, rect.x + rect.w / 2, rect.y + rect.h / 2, exclude)
       if (!hit || (ownerOf(current, n.id)?.id ?? null) === hit.id) continue
       const next = setMembership(current, [n.id], hit.id)
@@ -210,7 +211,7 @@ export function wrapInLoop(graph: AgentGraph, ids: string[]): { graph: AgentGrap
   const owners = new Set(top.map((id) => ownerOf(graph, id)?.id ?? ''))
   const parent = owners.size === 1 ? [...owners][0] || undefined : undefined
 
-  const rects = nodes.map((n) => (n.kind === 'loop' ? frameRect(graph, n) : { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }))
+  const rects = nodes.map((n) => (n.kind === 'loop' ? frameRect(graph, n) : { x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) }))
   const loop = createNode('loop', Math.min(...rects.map((r) => r.x)) - 24, Math.min(...rects.map((r) => r.y)) - 52, nextIndex(graph, 'loop'))
   loop.members = top
 
@@ -298,7 +299,7 @@ export function packageSelection(graph: AgentGraph, ids: string[]): { graph: Age
     }
   }
 
-  const rects = chosen.map((n) => (n.kind === 'loop' ? frameRect(graph, n) : { x: n.x, y: n.y, w: NODE_W, h: nodeHeight(n.kind) }))
+  const rects = chosen.map((n) => (n.kind === 'loop' ? frameRect(graph, n) : { x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) }))
   const pkg = createNode(
     'package',
     Math.max(0, Math.min(...rects.map((r) => r.x))),
@@ -432,12 +433,23 @@ export function autoLayout(graph: AgentGraph): AgentGraph {
   }
   let maxD = Math.max(0, ...depth.values())
   for (const n of graph.nodes) if (!depth.has(n.id)) depth.set(n.id, ++maxD)
+  const columnWidths = new Map<number, number>()
+  for (const n of graph.nodes) {
+    const d = depth.get(n.id)!
+    columnWidths.set(d, Math.max(columnWidths.get(d) ?? NODE_W, nodeWidth(n.kind)))
+  }
+  const columnX = new Map<number, number>()
+  let x = 40
+  for (let d = 0; d <= maxD; d++) {
+    columnX.set(d, x)
+    x += (columnWidths.get(d) ?? NODE_W) + GAP_X
+  }
   const rows = new Map<number, number>()
   const nodes = graph.nodes.map((n) => {
     const d = depth.get(n.id)!
     const row = rows.get(d) ?? 0
     rows.set(d, row + 1)
-    return { ...n, x: 40 + d * (NODE_W + GAP_X), y: 60 + row * 200 }
+    return { ...n, x: columnX.get(d)!, y: 60 + row * 200 }
   })
   return { ...graph, nodes }
 }
@@ -499,8 +511,9 @@ function rewriteNode(n: AgentNode, map: Map<string, string>, dx: number, dy: num
 
 let pasteSerial = 0
 
-/** Pastes a clip into this canvas. A Başlangıç that the canvas already has is left out. */
-export function pasteNodes(graph: AgentGraph, clip: NodeClip): { graph: AgentGraph; ids: string[] } | null {
+/** Paste only the clip's own connections/membership. A present Başlangıç is
+ * left out; an optional canvas point centres the visible bounds of the copy. */
+export function pasteNodes(graph: AgentGraph, clip: NodeClip, center?: { x: number; y: number }): { graph: AgentGraph; ids: string[] } | null {
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const nodes = clip.nodes.filter((n) => !(hasStart && n.kind === 'start'))
   if (!nodes.length) return null
@@ -510,12 +523,20 @@ export function pasteNodes(graph: AgentGraph, clip: NodeClip): { graph: AgentGra
   const minY = Math.min(...nodes.map((n) => n.y))
   const bump = (pasteSerial % 8) * 28
   pasteSerial += 1
-  const dx = 72 + bump - minX
-  const dy = 72 + bump - minY
+  let dx = 72 + bump - minX
+  let dy = 72 + bump - minY
+  if (center && Number.isFinite(center.x) && Number.isFinite(center.y)) {
+    const clipGraph: AgentGraph = { nodes, edges: [] }
+    const rects = nodes.map(n => n.kind === 'loop' ? frameRect(clipGraph, n) : { x: n.x, y: n.y, w: nodeWidth(n.kind), h: nodeHeight(n.kind) })
+    const x1 = Math.min(...rects.map(r => r.x)), x2 = Math.max(...rects.map(r => r.x + r.w))
+    const y1 = Math.min(...rects.map(r => r.y)), y2 = Math.max(...rects.map(r => r.y + r.h))
+    dx = center.x - (x1 + x2) / 2
+    dy = center.y - (y1 + y2) / 2
+  }
   const created = nodes.map((n) => rewriteNode(n, map, dx, dy, true))
   const edges = clip.edges
     .filter((e) => map.has(e.from) && map.has(e.to))
     .map((e) => ({ id: newId(), from: map.get(e.from)!, fromPort: e.fromPort, to: map.get(e.to)! }))
-  const next = reconcileLoopMembership({ nodes: [...graph.nodes, ...created], edges: [...graph.edges, ...edges] })
+  const next = { ...graph, nodes: [...graph.nodes, ...created], edges: [...graph.edges, ...edges] }
   return { graph: next, ids: created.map((n) => n.id) }
 }

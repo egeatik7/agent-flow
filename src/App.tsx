@@ -146,6 +146,7 @@ export default function App() {
   const [stack, setStack] = useState<Crumb[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [pasteRevision, setPasteRevision] = useState(0)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [capturing, setCapturing] = useState(0)
@@ -174,6 +175,10 @@ export default function App() {
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
   const clipRef = useRef<NodeClip | null>(null)
+  const pasteTargetRef = useRef<(() => { x: number; y: number }) | null>(null)
+  const registerPasteTarget = useCallback((readPoint: (() => { x: number; y: number }) | null) => {
+    pasteTargetRef.current = readPoint
+  }, [])
   const runningRef = useRef(false)
   runningRef.current = running
   const stackRef = useRef(stack)
@@ -749,13 +754,14 @@ export default function App() {
         const clip = clipRef.current
         if (!clip) return
         e.preventDefault()
-        const pasted = pasteNodes(graphRef.current, clip)
+        const pasted = pasteNodes(graphRef.current, clip, pasteTargetRef.current?.())
         if (!pasted) {
           pushLog('warn', 'Yapıştırılacak node kalmadı. Bu tuvalde zaten bir Başlangıç var.')
           return
         }
         graphRef.current = pasted.graph
         setGraph(pasted.graph)
+        setPasteRevision(revision => revision + 1)
         selectedIdsRef.current = pasted.ids
         setSelectedIds(pasted.ids)
         setSelectedNodeId(pasted.ids[pasted.ids.length - 1] ?? null)
@@ -1290,6 +1296,9 @@ export default function App() {
             )}
             <NodeCanvas
               graph={graph}
+              canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}
+              pasteRevision={pasteRevision}
+              onPasteTarget={registerPasteTarget}
               focus={canvasFocus}
               selectedNodeId={selectedNodeId}
               selectedIds={selectedIds}
