@@ -47,6 +47,9 @@ type Props = {
   selectedEdgeId: string | null
   stepStatus: Record<string, StepStatus>
   running: boolean
+  highlightedNodeIds?: string[]
+  runPhase?: 'idle' | 'running' | 'stopped'
+  traversedEdges?: ReadonlySet<string>
   onSelectNode: (id: string | null, additive?: boolean) => void
   onSelectMany: (ids: string[], mode: 'replace' | 'add') => void
   onSelectEdge: (id: string | null) => void
@@ -249,7 +252,13 @@ export default function NodeCanvas(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.selectedNodeId])
 
-  const runningId = Object.keys(p.stepStatus).find((id) => p.stepStatus[id] === 'running' && byId.get(id)?.kind !== 'loop')
+  const statusClass = (id: string, status: StepStatus | undefined) => p.highlightedNodeIds?.includes(id) ? p.runPhase === 'stopped' ? 'stopped' : 'running' : status ?? ''
+  const statusLabel = (id: string, status: StepStatus | undefined) => {
+    if (p.highlightedNodeIds?.includes(id)) return p.runPhase === 'stopped' ? 'durdu' : 'çalışıyor'
+    return status === 'done' ? 'tamam' : status === 'error' ? 'hata' : ''
+  }
+
+  const runningId = p.runPhase === 'running' ? [...(p.highlightedNodeIds ?? [])].reverse().find(id => byId.get(id)?.kind !== 'loop') : undefined
   useEffect(() => {
     if (runningId) reveal(runningId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,7 +442,12 @@ export default function NodeCanvas(p: Props) {
     const node = byId.get(p.focus.nodeId)
     if (!el || !node) return
     const z = viewRef.current.z
-    setViewNow({ x: el.clientWidth / 2 - node.x * z, y: el.clientHeight / 2 - node.y * z, z })
+    // A loop failure points at its visible header, not the empty centre of
+    // a potentially enormous frame. Regular nodes are centred as a whole.
+    const frame = node.kind === 'loop' ? frameRect(p.graph, node) : null
+    const x = frame ? frame.x + Math.min(frame.w / 2, NODE_W / 2) : node.x + NODE_W / 2
+    const y = frame ? frame.y + 14 : node.y + nodeHeight(node.kind) / 2
+    setViewNow({ x: el.clientWidth / 2 - x * z, y: el.clientHeight / 2 - y * z, z })
     // Only when the request changes (the stamp), so panning afterwards is not undone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.focus?.at])
@@ -556,7 +570,8 @@ export default function NodeCanvas(p: Props) {
             'loop-frame',
             p.selectedIds.includes(f.loop.id) ? 'selected' : '',
             drag?.over === f.loop.id ? 'drop' : '',
-            st === 'running' ? 'running' : '',
+            st === 'running' && p.runPhase === 'running' ? 'running' : '',
+            p.highlightedNodeIds?.includes(f.loop.id) ? `run-${p.runPhase}` : '',
             st === 'error' ? 'failed' : '',
             hoverTarget === f.loop.id ? 'drop-target' : '',
           ]
@@ -598,7 +613,7 @@ export default function NodeCanvas(p: Props) {
                 <span className="frame-in node-port in" title="Giriş: akış kutuya buradan girer" />
                 <span className="frame-title">↻ {f.label}</span>
                 {f.sub && <span className="frame-sub">{f.sub}</span>}
-                {st === 'running' && <span className="status-chip running">çalışıyor</span>}
+                {statusLabel(f.loop.id, st) && <span className={`status-chip ${statusClass(f.loop.id, st)}`}>{statusLabel(f.loop.id, st)}</span>}
               </div>
               {empty && <div className="frame-empty">Tekrar edecek node’ları buraya sürükle</div>}
               {NODE_SPECS.loop.outputs.map((o, idx) => (
@@ -665,7 +680,7 @@ export default function NodeCanvas(p: Props) {
                   strokeWidth={sel ? 3 : 2}
                   fill="none"
                   markerEnd={`url(#${sel ? 'arrow-sel' : `arrow-${PORT_COLORS[e.fromPort] ? e.fromPort : 'next'}`})`}
-                  className={p.running ? 'edge-line flowing' : 'edge-line'}
+                  className={p.runPhase === 'running' && p.traversedEdges?.has(e.id) ? 'edge-line flowing' : 'edge-line'}
                 />
                 {label && (
                   <text x={mx} y={my - 6} className="edge-label" fill={color}>
@@ -695,7 +710,8 @@ export default function NodeCanvas(p: Props) {
             `kind-${n.kind}`,
             p.selectedIds.includes(n.id) ? 'selected' : '',
             hoverTarget === n.id ? 'drop-target' : '',
-            st !== 'idle' ? st : '',
+            st !== 'idle' && (st !== 'running' || p.runPhase === 'running') ? st : '',
+            p.highlightedNodeIds?.includes(n.id) ? `run-${p.runPhase}` : '',
           ]
             .filter(Boolean)
             .join(' ')
@@ -718,7 +734,7 @@ export default function NodeCanvas(p: Props) {
               <div className="node-head" style={{ background: headerGradient(spec.color) }}>
                 <span className="node-icon">{spec.icon}</span>
                 <span className="node-title">{n.title}</span>
-                {st !== 'idle' && <span className={`status-chip ${st}`}>{st === 'running' ? 'çalışıyor' : st === 'done' ? 'tamam' : 'hata'}</span>}
+                {statusLabel(n.id, st) && <span className={`status-chip ${statusClass(n.id, st)}`}>{statusLabel(n.id, st)}</span>}
               </div>
               <div className={'node-body' + (n.kind === 'probe' ? ' probe-body' : '')}>
                 {n.kind === 'probe' ? (

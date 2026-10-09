@@ -1534,6 +1534,7 @@ export function createAgent(ctx: AgentContext) {
   const executor: Executor = {
     log,
     step: (id, status) => send('agent:step', { id, status }),
+    edge: (id, from, to) => send('agent:edge', { id, from, to }),
     patchNode: (id, patch) => send('agent:patch', { id, patch }),
     shouldStop: stopped,
     setLoop: (text) => ctx.setLoop?.(text),

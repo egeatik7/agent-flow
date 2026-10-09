@@ -24,6 +24,8 @@ let book: CanvasBook
 let mounted: ReactTestRenderer | undefined
 let stopped = false
 let onPatch = (_p: unknown) => {}
+let onStep = (_p: unknown) => {}
+let onEdge = (_p: unknown) => {}
 let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
 const executed: string[] = []
 const dispatched: { graph: AgentGraph; startId?: string; packagePath?: string[] }[] = []
@@ -34,7 +36,8 @@ const api = {
   listWindows: async () => [],
   bootReady: () => {},
   onAgentLog: (_cb: (p: unknown) => void) => () => {},
-  onAgentStep: (_cb: (p: unknown) => void) => () => {},
+  onAgentStep: (cb: (p: unknown) => void) => { onStep = cb; return () => { onStep = () => {} } },
+  onAgentEdge: (cb: (p: unknown) => void) => { onEdge = cb; return () => { onEdge = () => {} } },
   onAgentPatch: (cb: (p: unknown) => void) => { onPatch = cb; return () => { onPatch = () => {} } },
   stopAgent: async () => { stopped = true; return true },
   runAgent: async (graph: AgentGraph, startId?: string, packagePath?: string[], options?: { requireEnd?: boolean }) => {
@@ -45,7 +48,7 @@ const api = {
       await beforeAction?.(node)
     }
     const ex: Executor = {
-      log: () => {}, step: () => {}, shouldStop: () => stopped,
+      log: () => {}, step: (id, status) => onStep({ id, status }), edge: (id, from, to) => onEdge({ id, from, to }), shouldStop: () => stopped,
       click: record, type: record, key: record, exists: async () => true,
       patchNode: (id, patch) => onPatch({ id, patch }),
     }
@@ -196,6 +199,80 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(dispatched).toHaveLength(1)
     expect(logs(r)).toContain('desktop action failed')
     expect(r.root.findByType(Toolbar).props.running).toBe(false)
+  })
+  it('keeps live and stopped highlights through three package views', async () => {
+    const s = scenario(3), r = await mount()
+    let release!: () => void
+    beforeAction = async node => {
+      if (node.id === s.selected.id) await new Promise<void>(resolve => { release = resolve })
+    }
+    await act(async () => { r.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
+    let canvas = r.root.findByType(NodeCanvas)
+    expect(canvas.props.runPhase).toBe('running')
+    expect(canvas.props.highlightedNodeIds).toEqual([s.path[0]])
+    const seenEdges = [...canvas.props.traversedEdges]
+    for (let i = 0; i < s.path.length; i++) {
+      await act(async () => { r.root.findByType(NodeCanvas).props.onEnterPackage(s.path[i]) })
+      canvas = r.root.findByType(NodeCanvas)
+      expect(canvas.props.highlightedNodeIds).toEqual([s.path[i + 1] ?? s.selected.id])
+      expect([...canvas.props.traversedEdges]).toEqual(seenEdges)
+    }
+    const exit = () => r.root.findAllByType('button').find(b => b.props.className?.includes('package-exit'))!
+    expect(exit().props.disabled).toBe(false)
+    await act(async () => { exit().props.onClick() })
+    expect(r.root.findByType(NodeCanvas).props.highlightedNodeIds).toEqual([s.path[2]])
+    await act(async () => { r.root.findByType(Toolbar).props.onStop(); release(); await Promise.resolve() })
+    canvas = r.root.findByType(NodeCanvas)
+    expect(canvas.props.runPhase).toBe('stopped')
+    expect(canvas.props.highlightedNodeIds).toEqual([s.selected.id])
+    expect(canvas.props.selectedNodeId).toBe(s.selected.id)
+    expect(canvas.props.focus.nodeId).toBe(s.selected.id)
+    // Stop opened the deepest view automatically. Subsequent manual navigation
+    // must remain under the user's control, not snap back on every render.
+    await act(async () => { exit().props.onClick() })
+    expect(r.root.findByType(NodeCanvas).props.highlightedNodeIds).toEqual([s.path[2]])
+    await act(async () => { r.root.findByType(NodeCanvas).props.onEnterPackage(s.path[2]) })
+    expect(r.root.findByType(NodeCanvas).props.highlightedNodeIds).toEqual([s.selected.id])
+    expect(r.root.findByType(NodeCanvas).props.running).toBe(false)
+  })
+  it('automatically opens the failing leaf from the root without manual package navigation', async () => {
+    const s = scenario(3), r = await mount()
+    beforeAction = async node => { if (node.id === s.selected.id) throw new Error('nested desktop failure') }
+    await act(async () => { r.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
+    const canvas = r.root.findByType(NodeCanvas)
+    expect(canvas.props.runPhase).toBe('stopped')
+    expect(canvas.props.graph.nodes.some((n: AgentNode) => n.id === s.selected.id)).toBe(true)
+    expect(canvas.props.selectedNodeId).toBe(s.selected.id)
+    expect(canvas.props.focus.nodeId).toBe(s.selected.id)
+    expect(dispatched).toHaveLength(1)
+  })
+  it('opens the actual failed loop member even if execution later reaches End', async () => {
+    const start = createNode('start', 0, 0), write = task('loop member'), end = createNode('end', 900, 0)
+    const loop = { ...createNode('loop', 200, 0), items: ['one', 'two'], members: [write.id] }
+    book = normalizeCanvasBook({ activeId: 'active', tabs: [{ id: 'active', name: 'Active', graph: {
+      nodes: [start, loop, write, end], edges: [edge(start, loop), edge(loop, end, 'done')],
+    } }] })
+    const r = await mount()
+    let actions = 0
+    beforeAction = async () => { if (++actions === 1) throw new Error('first item failed') }
+    await act(async () => { r.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
+    const canvas = r.root.findByType(NodeCanvas)
+    expect(actions).toBe(2)
+    expect(canvas.props.stepStatus[end.id]).toBe('done')
+    expect(canvas.props.runPhase).toBe('stopped')
+    expect(canvas.props.selectedNodeId).toBe(write.id)
+    expect(canvas.props.focus.nodeId).toBe(write.id)
+    expect(canvas.props.highlightedNodeIds).toEqual([loop.id, write.id])
+  })
+  it('clears highlights after normal completion and resets arrows between canvases', async () => {
+    const s = scenario(0), r = await mount()
+    await select(r, [], s.selected.id)
+    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
+    const canvas = r.root.findByType(NodeCanvas)
+    expect(canvas.props.runPhase).toBe('idle')
+    expect(canvas.props.highlightedNodeIds).toEqual([])
+    expect([...canvas.props.traversedEdges]).toEqual(book.tabs[2].graph.edges.map(e => e.id))
+    expect([...canvas.props.traversedEdges]).not.toContain(book.tabs[1].graph.edges[0].id)
   })
   it('package-path runs without End reporting retain the legacy result shape', async () => {
     const s = scenario()

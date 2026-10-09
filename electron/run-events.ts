@@ -12,5 +12,5 @@
  */
 export function windowEventAllowed(channel: string, derived: boolean): boolean {
   if (!derived) return true
-  return channel !== 'agent:step' && channel !== 'agent:patch'
+  return channel !== 'agent:step' && channel !== 'agent:patch' && channel !== 'agent:edge'
 }

@@ -147,6 +147,38 @@
   box-shadow: 0 0 0 2px #c03030;
 }
 
+.status-chip.stopped { background: #fff0cc; color: #8a5000; }
+
+/* Current leaf and its containing packages/loops share the same live marker.
+   Keep this after the theme's normal running/error/selection shadows. */
+.agent-node.run-running,
+.loop-frame.run-running {
+  --run-glow: #1665ca;
+  border-color: var(--run-glow);
+  animation: run-glow 1.4s ease-in-out infinite alternate;
+}
+
+.agent-node.run-stopped,
+.loop-frame.run-stopped {
+  --run-glow: #c87700;
+  border-color: var(--run-glow);
+  animation: run-glow 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes run-glow {
+  from { box-shadow: 0 0 0 2px var(--run-glow), 0 0 8px var(--run-glow); }
+  to { box-shadow: 0 0 0 3px var(--run-glow), 0 0 18px var(--run-glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-node.run-running, .loop-frame.run-running,
+  .agent-node.run-stopped, .loop-frame.run-stopped {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--run-glow), 0 0 12px var(--run-glow);
+  }
+  .edge-line.flowing { animation: none; }
+}
+
 .loop-frame {
   border-radius: 6px;
 }

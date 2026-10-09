@@ -5,6 +5,7 @@ import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
 import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
 import { CanvasSequence } from './lib/canvas-sequence'
+import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
 import NodeCanvas from './components/NodeCanvas'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
@@ -153,6 +154,9 @@ export default function App() {
   const [windows, setWindows] = useState<{ title: string; handle: string }[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
+  const [runProgress, setRunProgress] = useState<RunProgress>(() => finishProgress(beginProgress(''), false))
+  const stopRequested = useRef(false)
+  const [canvasFocus, setCanvasFocus] = useState<{ nodeId: string; at: number }>()
   const [sideTab, setSideTab] = useState<SideTab>('node')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -341,6 +345,33 @@ export default function App() {
     [appendClick, pushLog]
   )
 
+  const recordStep = useCallback((id: string, status: StepStatus) => {
+    setStepStatus(prev => ({ ...prev, [id]: status }))
+    const full = rooted(graphRef.current, stackRef.current)
+    setRunProgress(prev => progressStep(prev, full, id, status))
+  }, [])
+  const recordEdge = useCallback((id: string, from: string, to: string) => {
+    const full = rooted(graphRef.current, stackRef.current)
+    setRunProgress(prev => progressEdge(prev, full, id, from, to))
+  }, [])
+
+  // Navigate once AFTER the engine stops. During execution, inspection and
+  // panning remain under the user's control; later manual navigation stays put.
+  useEffect(() => {
+    if (runProgress.phase !== 'stopped' || !runProgress.nodeId || runProgress.canvasId !== activeIdRef.current) return
+    const found = runNodeView(rooted(graphRef.current, stackRef.current), runProgress.nodeId)
+    if (!found) return
+    graphRef.current = found.view
+    stackRef.current = found.stack
+    setGraph(found.view)
+    setStack(found.stack)
+    setSelectedNodeId(runProgress.nodeId)
+    setSelectedIds([runProgress.nodeId])
+    selectedIdsRef.current = [runProgress.nodeId]
+    setSelectedEdgeId(null)
+    setCanvasFocus(prev => ({ nodeId: runProgress.nodeId!, at: (prev?.at ?? 0) + 1 }))
+  }, [runProgress.phase, runProgress.nodeId, runProgress.canvasId])
+
   useEffect(() => {
     if (!api) return
     const offLog = api.onAgentLog((payload) => {
@@ -349,7 +380,11 @@ export default function App() {
     })
     const offStep = api.onAgentStep((payload) => {
       const p = payload as { id: string; status: StepStatus }
-      setStepStatus((prev) => ({ ...prev, [p.id]: p.status }))
+      recordStep(p.id, p.status)
+    })
+    const offEdge = api.onAgentEdge?.(payload => {
+      const p = payload as { id: string; from: string; to: string }
+      recordEdge(p.id, p.from, p.to)
     })
     const offPatch = api.onAgentPatch((payload) => {
       const p = payload as { id: string; patch: Partial<AgentNode> }
@@ -358,9 +393,10 @@ export default function App() {
     return () => {
       offLog()
       offStep()
+      offEdge?.()
       offPatch()
     }
-  }, [pushLog, patchNode])
+  }, [pushLog, patchNode, recordStep, recordEdge])
 
   const selected = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId) ?? null, [graph.nodes, selectedNodeId])
   const selectedEdge = useMemo(() => graph.edges.find((e) => e.id === selectedEdgeId) ?? null, [graph.edges, selectedEdgeId])
@@ -594,13 +630,16 @@ export default function App() {
     const g = graphRef.current
     const n = g.nodes.find((x) => x.id === id && x.kind === 'package')
     if (!n) return
-    setStack((s) => [...s, { parent: g, id }])
-    setGraph(normalizeGraph(n.inner ?? { nodes: [], edges: [] }))
+    const nextStack = [...stackRef.current, { parent: g, id }]
+    const view = normalizeGraph(n.inner ?? { nodes: [], edges: [] })
+    stackRef.current = nextStack
+    graphRef.current = view
+    setStack(nextStack)
+    setGraph(view)
     setSelectedNodeId(null)
     setSelectedIds([])
     selectedIdsRef.current = []
     setSelectedEdgeId(null)
-    setStepStatus({})
   }
 
   const exitPackage = () => {
@@ -614,12 +653,12 @@ export default function App() {
     const nextStack = s.slice(0, -1)
     stackRef.current = nextStack
     setStack(nextStack)
+    graphRef.current = parent
     setGraph(parent)
     setSelectedNodeId(crumb.id)
     setSelectedIds([crumb.id])
     selectedIdsRef.current = [crumb.id]
     setSelectedEdgeId(null)
-    setStepStatus({})
   }
 
   const addNode = (kind: NodeKind) => {
@@ -966,23 +1005,35 @@ export default function App() {
     const name = canvasName()
     setRunning(true)
     setStepStatus({})
+    stopRequested.current = false
+    setRunProgress(beginProgress(activeIdRef.current))
+    let halted = true
+    let failed = false
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (api) {
         const result = await api.runAgent(full, startId, path)
+        halted = !!result.stopped || !result.ok
+        failed = !result.ok && !result.stopped
         // The agent log already explains each error; this one line says the run did not end clean.
         if (!result.ok && !result.stopped) pushLog('error', `“${name}” ${result.failed ?? 0} öğe/tur hatayla bitti, başarılı sayılmaz. Hatalar yukarıdaki kayıtlarda.`)
-      } else
-        await runDemo(full, settingsRef.current, pushLog, (id, s) => setStepStatus((prev) => ({ ...prev, [id]: s })), startId, patchNode, path)
+      } else {
+        const result = await runDemo(full, settingsRef.current, pushLog, recordStep, startId, patchNode, path, false, recordEdge)
+        halted = !!result.stopped || !result.ok
+        failed = !result.ok && !result.stopped
+      }
     } catch (e) {
+      failed = true
       pushLog('error', errText(e))
     } finally {
+      setRunProgress(prev => finishProgress(prev, halted || stopRequested.current, failed && !stopRequested.current))
       runningRef.current = false
       setRunning(false)
     }
   }
 
   const stop = () => {
+    stopRequested.current = true
     sequenceRef.current.stop()
     if (api) void api.stopAgent().catch(e => pushLog('error', errText(e)))
     else stopDemo()
@@ -1003,6 +1054,9 @@ export default function App() {
     if (!ordered.length) { pushLog('warn', 'Oynatılacak tuval yok.'); return }
     runningRef.current = true
     setRunning(true)
+    stopRequested.current = false
+    let halted = true
+    let failed = false
     try {
       pushLog('info', startNodeId
         ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
@@ -1014,6 +1068,7 @@ export default function App() {
         const committed = commitActive()
         const next = activateCanvasSnapshot(committed, prepared)
         showCanvas(next, tab.id, false)
+        setRunProgress(beginProgress(tab.id))
         setSequenceLabel(`${index + 1}/${total} · ${tab.name}`)
         const ilk = index === 0 ? startNodeId : undefined
         const path = index === 0 ? startPath : []
@@ -1021,13 +1076,14 @@ export default function App() {
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
         const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true })
-          : await runDemo(prepared.graph, settingsRef.current, pushLog, (id, status) => setStepStatus(prev => ({ ...prev, [id]: status })), ilk, patchNode, path, true)
+          : await runDemo(prepared.graph, settingsRef.current, pushLog, recordStep, ilk, patchNode, path, true, recordEdge)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
       })
+      halted = outcome !== 'completed'
       pushLog(outcome === 'completed' ? 'success' : 'warn', outcome === 'completed' ? 'Aktif tuvalden sağa doğru bütün tuvaller Bitti node’una ulaştı.' : 'Tuval sırası durduruldu; kalan tuvaller çalıştırılmadı.')
-    } catch (e) { pushLog('error', errText(e)) }
-    finally { runningRef.current = false; setRunning(false); setSequenceLabel('') }
+    } catch (e) { failed = true; pushLog('error', errText(e)) }
+    finally { setRunProgress(prev => finishProgress(prev, halted || stopRequested.current, failed && !stopRequested.current)); runningRef.current = false; setRunning(false); setSequenceLabel('') }
   }
 
   const exportGraph = () => {
@@ -1224,16 +1280,20 @@ export default function App() {
         <div className="workspace">
           <div className="canvas-wrap">
             {stack.length > 0 && (
-              <button type="button" className="xp-btn package-exit" disabled={running || libraryBusy} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
+              <button type="button" className="xp-btn package-exit" disabled={libraryBusy} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
                 Paketten çık
               </button>
             )}
             <NodeCanvas
               graph={graph}
+              focus={canvasFocus}
               selectedNodeId={selectedNodeId}
               selectedIds={selectedIds}
               selectedEdgeId={selectedEdgeId}
               stepStatus={stepStatus}
+              highlightedNodeIds={visibleRunNodes(runProgress, rooted(graph, stack), graph, activeId)}
+              runPhase={runProgress.canvasId === activeId ? runProgress.phase : 'idle'}
+              traversedEdges={runProgress.canvasId === activeId ? runProgress.edges : undefined}
               running={running || libraryBusy}
               onSelectNode={selectNode}
               onSelectMany={selectMany}

@@ -59,6 +59,7 @@ export type XpAgentApi = {
   testVision: () => Promise<{ model: string; text: string }>
   onAgentLog: (cb: (payload: unknown) => void) => () => void
   onAgentStep: (cb: (payload: unknown) => void) => () => void
+  onAgentEdge?: (cb: (payload: unknown) => void) => () => void
   onAgentPatch: (cb: (payload: unknown) => void) => () => void
   onHud?: (cb: (payload: unknown) => void) => () => void
   onHudLoop?: (cb: (payload: unknown) => void) => () => void

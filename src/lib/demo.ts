@@ -102,12 +102,14 @@ export async function runDemo(
   startId?: string,
   patchNode?: (id: string, patch: Partial<AgentNode>) => void,
   packagePath?: string[],
-  reportEnd = false
+  reportEnd = false,
+  edge?: (id: string, from: string, to: string) => void
 ) {
   demoStop = false
   const ex: Executor = {
     log,
     step,
+    edge,
     patchNode,
     shouldStop: () => demoStop,
     click: async (n) => {

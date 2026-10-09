@@ -24,6 +24,8 @@ export type StepAhead = { next?: AgentNode; then?: AgentNode }
 export type Executor = {
   log: (level: LogLevel, message: string) => void
   step: (id: string, status: StepStatus) => void
+  /** Display-only telemetry: an actual chosen connection, never a look-ahead. */
+  edge?: (id: string, from: string, to: string) => void
   shouldStop: () => boolean
   click: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
   type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
@@ -381,6 +383,7 @@ export async function runGraph(
         }
         return
       }
+      if (!stopAt?.has(nxt.id)) ex.edge?.(edge.id, edge.from, nxt.id)
       cur = nxt
     }
   }
@@ -393,8 +396,9 @@ export async function runGraph(
   // Ölçüldü: 197 saniyede 114 geçiş, 115 aynı hata — ve araç katmanı "0 hata" görüyordu.
   const turImzalari = new Map<string, string>()
 
-  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false): Promise<string> => {
+  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false, incomingEdge?: { id: string; from: string }): Promise<string> => {
     ex.step(loop.id, 'running')
+    if (startAt && incomingEdge) ex.edge?.(incomingEdge.id, incomingEdge.from, startAt.id)
     const first = lapStart(loop)
     if (!first) {
       ex.log('warn', `“${loop.title}” kutusu boş. İçine node sürükle.`)
@@ -551,7 +555,7 @@ export async function runGraph(
     const scope = ownerOf(graph, loop.id) ?? null
     const edge = graph.edges.find((e) => e.from === loop.id && e.fromPort === 'done')
     const nxt = edge ? enterable(edge.to, scope) : null
-    if (nxt) await runChain(nxt, scope)
+    if (nxt && edge) { ex.edge?.(edge.id, edge.from, nxt.id); await runChain(nxt, scope) }
     if (scope) await continueAfter(scope)
   }
 
@@ -564,13 +568,14 @@ export async function runGraph(
       const nxt = edge ? enterable(edge.to, owner) : null
       if (owner && nxt) {
         ex.log('info', `“${done.title}” bitti. “${owner.title}” “${nxt.title}” ile sürüyor.`)
-        await runLoop(owner, ownerOf(graph, owner.id) ?? null, nxt)
+        await runLoop(owner, ownerOf(graph, owner.id) ?? null, nxt, false, edge)
         await continueAfter(owner)
       } else if (owner) {
         ex.log('info', `“${done.title}” bitti. “${owner.title}” kalan öğelerden sürüyor.`)
         await runLoop(owner, ownerOf(graph, owner.id) ?? null, undefined, true)
         await continueAfter(owner)
       } else if (nxt) {
+        if (edge) ex.edge?.(edge.id, edge.from, nxt.id)
         ex.log('info', `“${done.title}” bitti, “${nxt.title}” ile devam ediliyor.`)
         await runChain(nxt, null)
       } else {

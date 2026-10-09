@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   onAgentLog: on('agent:log'),
   onAgentStep: on('agent:step'),
+  onAgentEdge: on('agent:edge'),
   onAgentPatch: on('agent:patch'),
   onHud: on('hud:status'),
   onHudLoop: on('hud:loop'),
