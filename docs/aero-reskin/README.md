@@ -24,3 +24,9 @@ Browser renderer, 1440 × 900 (Windows desktop automation is not exercised):
 Translucent surfaces blend with the app’s lilac/ice-blue backdrop. This is in-app glass; the main native window stays opaque and resizable. Inputs remain opaque, node bodies keep a high-opacity white backing, and no whole-window opacity is applied to text or controls.
 
 Windows executable packaging and native desktop input were not tested in this Linux environment.
+
+## Aero brand assets
+
+`src/assets/nubbo-aero.png` and `src/assets/nubbo-logo-aero.png` are transparent PNGs generated from the original robot and wordmark with the built-in image generation tool. Prompt direction: preserve the wind-up robot, gold winding key, green antenna and held blue sphere; use glossy lilac glass/pearlescent plastic and icy cyan highlights; preserve the exact two-line text “Nubbo / Agent Studio”. Aero uses the new still mascot in the sidebar and HUD; XP keeps its original animated mascot and logo. The new Aero mascot is not an animation.
+
+Both skins share window, toolbar, canvas, node and brand-slot geometry. Graph positions and viewport state remain in the same React canvas instance; themes do not create another graph, remount the canvas or store their own coordinates. Browser checks compare the full node/canvas/sidebar/log/toolbar bounding rectangles across theme switches.

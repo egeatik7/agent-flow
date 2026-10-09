@@ -3,6 +3,8 @@ import { version } from '../../package.json'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
 import logo from '../assets/nubbo-logo.png'
+import aeroMascot from '../assets/nubbo-aero.png'
+import aeroLogo from '../assets/nubbo-logo-aero.png'
 
 /** Plays the transparent Nubbo loop. Hidden windows show the still frame so the animation stops. */
 export default function NubboMascot() {
@@ -20,7 +22,7 @@ export default function NubboMascot() {
     <div className="nubbo-brand">
       <img
         key={src}
-        className="nubbo-mascot"
+        className="nubbo-mascot brand-xp"
         src={src}
         alt=""
         width={186}
@@ -28,7 +30,11 @@ export default function NubboMascot() {
         draggable={false}
         onError={() => setBroken(true)}
       />
-      <img className="nubbo-logo" src={logo} alt="Nubbo Agent Studio" draggable={false} />
+      <img className="nubbo-mascot brand-aero" src={aeroMascot} alt="" width={186} height={186} draggable={false} />
+      <div className="nubbo-logo-slot">
+        <img className="nubbo-logo brand-xp" src={logo} alt="Nubbo Agent Studio" draggable={false} />
+        <img className="nubbo-logo brand-aero" src={aeroLogo} alt="Nubbo Agent Studio" draggable={false} />
+      </div>
       <p className="nubbo-ver">version: {version}</p>
     </div>
   )

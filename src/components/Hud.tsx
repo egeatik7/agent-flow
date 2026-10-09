@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
+import aeroMascot from '../assets/nubbo-aero.png'
 import type { LogLevel } from '../types'
 
 type Status = { level: LogLevel; text: string }
@@ -51,7 +52,8 @@ export default function Hud() {
   return (
     <div className="hud">
       <div className="hud-mascot-slot">
-        <img key={mascot} className="hud-mascot" src={mascot} alt="" draggable={false} />
+        <img key={mascot} className="hud-mascot brand-xp" src={mascot} alt="" draggable={false} />
+        <img className="hud-mascot brand-aero" src={aeroMascot} alt="" draggable={false} />
       </div>
       <div className={`hud-card ${status.level}`}>
         <div className="hud-title">
