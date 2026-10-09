@@ -1,52 +1,32 @@
-import { ancestors } from './groups'
-import {
-  hasTemplate,
-  itemVars,
-  listItems,
-  loopStartIndex,
-  renderTemplate,
-  type AgentGraph,
-} from './graph-types'
+import { enclosingLoop } from './enclosing'
+import { itemVars, listItems, loopStartIndex, renderTemplate, type AgentGraph } from './graph-types'
 
-export type VarReveal = { value: string; where: string }
+export type VarReveal = { value: string; where: string; resolved: boolean }
 
-/** What a template name is at this spot on the canvas: the nearest box, its ticked row. */
-export function revealAt(graph: AgentGraph, nodeId: string, token: string): VarReveal {
-  const raw = token.trim().replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '')
-  const boxes = ancestors(graph, nodeId)
-  const inner = boxes[0]
-  if (!inner) {
-    return { value: 'boş', where: 'Bu node bir Her Öğe İçin kutusunun içinde değil.' }
+/** Read-only preview of the nearest loop's marked row, including ancestors outside packages. */
+export function revealAt(root: AgentGraph, nodeId: string, token: string, seen = new Set<string>()): VarReveal {
+  const loop = enclosingLoop(root, nodeId)
+  if (!loop || seen.has(loop.id)) {
+    const value = renderTemplate(token, { sira: '1' }) ?? token
+    return { value: value === token ? 'Döngü dışında' : value, resolved: value !== token,
+      where: 'Bu node bir Her Öğe İçin kutusunun içinde değil.' }
   }
-  const items = listItems(inner)
-  if (!items.length && hasTemplate(inner.folder)) {
-    const outer = boxes[1]
-    let addr = inner.folder?.trim() ?? ''
-    if (outer) {
-      const outerItems = listItems(outer)
-      const total = outerItems.length || Math.max(1, outer.count ?? 1)
-      const oi = loopStartIndex(outer, total, true)
-      const sample = outerItems[oi] ?? String(oi + 1)
-      addr = renderTemplate(addr, itemVars(sample, oi, total)) ?? addr
-    }
-    return {
-      value: 'çalışırken dolar',
-      where: `“${inner.title}” adresi: ${addr}. Liste akış bu kutuya gelince kurulur.`,
-    }
+  const items = listItems(loop)
+  if (!items.length && loop.folder?.trim()) {
+    const nextSeen = new Set(seen).add(loop.id)
+    const address = loop.folder.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, raw => {
+      const outer = revealAt(root, loop.id, raw, nextSeen)
+      return outer.resolved ? outer.value : raw
+    })
+    return { value: 'Çalışırken belli olacak', resolved: false,
+      where: `“${loop.title}” klasörü: ${address}. Liste henüz alınmadı; tam öğe ve toplam bilinmiyor.` }
   }
-  if (!items.length) {
-    const total = Math.max(1, inner.count ?? 1)
-    const i = loopStartIndex(inner, total, true)
-    const shown = renderTemplate(`{{${raw}}}`, itemVars(String(i + 1), i, total)) ?? '—'
-    return {
-      value: shown.includes('{{') ? '—' : shown,
-      where: `“${inner.title}” listesiz, ${total} tur. İşaretli tur ${i + 1}.`,
-    }
-  }
-  const i = loopStartIndex(inner, items.length, true)
-  const shown = renderTemplate(`{{${raw}}}`, itemVars(items[i], i, items.length)) ?? '—'
-  return {
-    value: shown.includes('{{') ? '—' : shown,
-    where: `“${inner.title}”, işaretli satır ${i + 1}/${items.length}. Her tur bir sonraki satır olur.`,
-  }
+  const total = items.length || Math.max(1, loop.count ?? 1)
+  const index = loopStartIndex(loop, total, true)
+  const value = renderTemplate(token, itemVars(items[index] ?? String(index + 1), index, total)) ?? token
+  return { value: value === token ? 'Bilinmeyen değişken' : value, resolved: value !== token,
+    where: `“${loop.title}”, işaretli ${items.length ? 'öğe' : 'tur'} ${index + 1}/${total}. Bu değer işaretli konum içindir; döngü ilerledikçe değişir.` }
+}
+export function revealTip(token: string, reveal: VarReveal): string {
+  return `${reveal.resolved ? 'Tam karşılığı' : 'Durum'}:\n${reveal.value}\n\n${reveal.where}\n\nAkışta ${token} saklanır.`
 }

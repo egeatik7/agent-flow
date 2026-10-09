@@ -2,11 +2,10 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import AgentTab from './AgentTab'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
-import ProbeMark from './ProbeMark'
+import TemplateInput from './TemplateInput'
 import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
 import {
   NODE_SPECS,
-  TEMPLATE_VARS,
   portLabel,
   listItems,
   loopStartIndex,
@@ -35,6 +34,8 @@ type Props = {
   onTestApi: () => void
   onTestVision: () => void
   graph: AgentGraph
+  rootGraph?: AgentGraph
+  disabled?: boolean
   selected: AgentNode | null
   selectedCount?: number
   selectedEdge: AgentEdge | null
@@ -156,16 +157,13 @@ function TargetBox(p: Props & { n: AgentNode }) {
           {loc.icon && (
             <>
               <img className="icon-preview" alt="Seçilen öğenin resmi" src={`data:image/png;base64,${loc.icon}`} />
-              <p className="hint">
-                Çalışırken sırayla: uygulamanın kendi öğesi, bu resmin ekrandaki aynısı, yazı, en son görsel model (bu resimle birlikte) denenir.
-              </p>
             </>
           )}
         </>
       ) : n.anchor ? (
-        <p className="hint">Son bilinen konum: {n.anchor.x}, {n.anchor.y} (aynı yazı birden çok yerdeyse buna en yakın olan seçilir)</p>
+        <p className="hint">Son bilinen konum: {n.anchor.x}, {n.anchor.y}</p>
       ) : (
-        <p className="hint">Çalışırken ekran okunur, prompt’taki yazı aranır; bulunamazsa LLM ekrandaki yazılardan seçer.</p>
+        null
       )}
       <div className="field-row wrap">
         <button type="button" className="xp-btn primary" onClick={p.onOpenScanner}>
@@ -184,22 +182,11 @@ function TargetBox(p: Props & { n: AgentNode }) {
   )
 }
 
-function VarChips({ onInsert }: { onInsert: (v: string) => void }) {
-  return (
-    <div className="var-chips">
-      <span>Değişken:</span>
-      {TEMPLATE_VARS.map((v) => (
-        <button type="button" key={v} className="chip var" onClick={() => onInsert(v)} title="Alanın sonuna ekle">
-          {v}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-const append = (cur: string | undefined, v: string) => {
-  const c = cur ?? ''
-  return c && !/\s$/.test(c) && !/[\\/]$/.test(c) ? `${c} ${v}` : c + v
+function TemplateField(p: Props & { n: AgentNode; field: 'prompt' | 'text' | 'keys' | 'folder'; label: string; placeholder?: string; multiline?: boolean; id?: string; mono?: boolean }) {
+  return <TemplateInput key={`${p.n.id}:${p.field}`} value={p.n[p.field] ?? ''}
+    graph={p.rootGraph ?? p.graph} nodeId={p.n.id} label={p.label}
+    placeholder={p.placeholder} multiline={p.multiline} id={p.id} mono={p.mono} disabled={p.disabled}
+    onChange={value => p.field === 'folder' ? p.onLoopFolder(p.n.id, value) : p.onUpdateNode({ [p.field]: value })} />
 }
 
 function LoopEditor(p: Props & { n: AgentNode }) {
@@ -216,22 +203,10 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   }
   return (
     <>
-      <p className="hint">
-        Her çalıştırmada liste baştan sona gider. İlk turda <span className="mono">{'{{öğe}}'}</span> birinci öğenin tam yoludur, ikinci turda
-        ikinci öğenin. <span className="mono">{'{{öğe.isim}}'}</span> uzantısız addır (kedi.png → kedi). Yükleme adımının metni{' '}
-        <span className="mono">{'{{öğe}}'}</span> olmalı. İlk adım, kutunun içinde kimsenin bağlanmadığı node’dur.
-      </p>
       {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
       <div className="field">
         <label htmlFor="loop-folder">Klasör</label>
-        <input
-          id="loop-folder"
-          className="xp-input mono"
-          value={folder}
-          spellCheck={false}
-          placeholder={'C:\\Klasör   veya   D:\\İş\\{{öğe}}'}
-          onChange={(e) => p.onLoopFolder(n.id, e.target.value)}
-        />
+        <TemplateField {...p} n={n} field="folder" id="loop-folder" label="Klasör" mono placeholder={'C:\\Klasör veya D:\\İş\\{{öğe}}'} />
         <div className="field-row loop-folder-actions">
           <button type="button" className="xp-btn primary" onClick={() => p.onFillFromFolder(n.id)}>
             Klasörden doldur…
@@ -242,11 +217,6 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             </button>
           )}
         </div>
-        {folderIsTemplate && (
-          <p className="hint">
-            <span className="mono">{'{{öğe}}'}</span> bir dıştaki Her Öğe İçin’in öğesidir. Liste, o kutunun işaretli satırındaki klasörden gelir. Paketin içinde olsa da dışarıdaki kutuya bakar.
-          </p>
-        )}
         <label>Liste (her satır bir öğe)</label>
         {items.length > 0 ? (
           <div className="xp-tick-list">
@@ -280,12 +250,6 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
           />
         )}
-        {items.length > 0 && (
-          <p className="hint">
-            İşaretli satır, Seçiliden Çalıştır’ın başlayacağı öğedir; liste oradan sona gider. Ajanı Çalıştır her zaman birinci satırdan başlar.
-            Çalışırken işaret, turdaki öğeye kayar.
-          </p>
-        )}
       </div>
 
       {items.length === 0 && !folderIsTemplate && (
@@ -315,8 +279,7 @@ function MemoryBox(p: Props & { n: AgentNode }) {
       <label>Hafıza</label>
       <p className="hint">
         Son {m.length} turda bulunan hedef: <b>{last.src === 'ocr' ? 'yazı' : last.type}</b> “{last.text}”
-        {last.win ? <> — {last.win.replace(/^web:/, 'sayfa: ')}</> : null}. Her tur ekran yine taze okunur; hafıza sadece benzer adaylar arasında
-        karar verirken ve bu tur çok farklı bir şey bulunduğunda devreye girer.
+        {last.win ? <> — {last.win.replace(/^web:/, 'sayfa: ')}</> : null}.
       </p>
       <button type="button" className="xp-btn" onClick={() => p.onUpdateNode({ memory: undefined })}>
         Unut
@@ -370,30 +333,13 @@ function AiEditor(p: Props & { n: AgentNode }) {
             </button>
           ))}
         </div>
-        <p className="hint">
-          {engine === 'screen' ? (
-            <>
-              Her adımda ekran görüntüsü alınır, model tıklanacak noktayı doğrudan verir: yazısız ikonlar, 3D görünüm, menüler dahil. Sürükleme,
-              kaydırma ve tuş kombinasyonları da yapabilir (Blender’da Shift+A gibi). Model:{' '}
-              <span className="mono">{model || '—'}</span>{' '}
-              <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>
-                değiştir
-              </button>
-            </>
-          ) : (
-            <>Ekrandaki yazıların numaralı listesinden seçer. Yazı ağırlıklı formlarda ve web sayfalarında hızlıdır.</>
-          )}
-        </p>
+        <div className="node-model-row">Model: <span className="mono">{model || '—'}</span>
+          <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>değiştir</button>
+        </div>
       </div>
       <div className="field">
         <label>Hedef (ne olmasını istiyorsun?)</label>
-        <textarea
-          className="xp-textarea"
-          value={n.prompt ?? ''}
-          placeholder={'Örn: Ayarlar’dan dili Türkçe yap ve kaydet\nveya: çıkan çerez penceresini kapat, sonra “Giriş yap”a bas'}
-          onChange={(e) => upd({ prompt: e.target.value })}
-        />
-        <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
+        <TemplateField {...p} n={n} field="prompt" label="Hedef (ne olmasını istiyorsun?)" placeholder="Örn: Ayarlar’dan dili Türkçe yap ve kaydet" multiline />
       </div>
       <div className="field">
         <label>En fazla eylem</label>
@@ -406,13 +352,6 @@ function AiEditor(p: Props & { n: AgentNode }) {
           onChange={(e) => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
         />
       </div>
-      <p className="hint">
-        Hedefe ulaşınca <b>tamam</b>, ulaşamazsa <b>olmadı</b> çıkışından devam eder. Model “bitti” dediğinde son ekran görsel modelle ayrıca kontrol
-        edilir. Ekran birkaç adımdır değişmiyorsa modele başka yol denemesi söylenir. Ctrl+Shift+Q her an durdurur.
-        {engine === 'screen'
-          ? ' Başarılı turun adımları kaydedilir; sonraki turda önce bu yol modelsiz oynatılır, ekran kayıttakinden farklılaştığı anda model devreye girer.'
-          : ' Başarılı turun eylemleri sonraki turda modele ipucu olarak verilir.'}
-      </p>
       {engine === 'screen' && n.path?.length ? (
         <div className="memo-box">
           <label>Kayıtlı yol ({n.path.length} adım)</label>
@@ -510,13 +449,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
         <>
           <div className="field">
             <label>Neye tıklanacak?</label>
-            <textarea
-              className="xp-textarea"
-              value={n.prompt ?? ''}
-              placeholder={'Örn: Opera’ya tıkla\nveya: “Modeli İndir” yazan butona bas'}
-              onChange={(e) => upd({ prompt: e.target.value })}
-            />
-            <VarChips onInsert={(v) => upd({ prompt: append(n.prompt, v) })} />
+            <TemplateField {...p} n={n} field="prompt" label="Neye tıklanacak?" placeholder="Örn: ‘Modeli İndir’ yazan butona bas" multiline />
           </div>
           <div className="field">
             <label>Tıklama türü</label>
@@ -532,7 +465,6 @@ function NodeFields(p: Props & { n: AgentNode }) {
                 </button>
               ))}
             </div>
-            <p className="hint">Masaüstü simgeleri genelde çift tık ister.</p>
           </div>
           <TargetBox {...p} n={n} />
           <MemoryBox {...p} n={n} />
@@ -543,30 +475,16 @@ function NodeFields(p: Props & { n: AgentNode }) {
         <>
           <div className="field">
             <label>Yazılacak metin</label>
-            <input
-              className="xp-input"
-              value={n.text ?? ''}
-              placeholder="Örn: {{öğe}}  veya  D:\Modeller\{{öğe.isim}}.glb"
-              onChange={(e) => upd({ text: e.target.value })}
-            />
-            <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
+            <TemplateField {...p} n={n} field="text" label="Yazılacak metin" placeholder="Örn: {{öğe}} veya D:\\Modeller\\{{öğe.isim}}.glb" />
           </div>
           <div className="field">
             <label>Hangi alana? (boşsa o an seçili alana yazar)</label>
-            <input
-              className="xp-input"
-              value={n.prompt ?? ''}
-              placeholder="Örn: “Ara” kutusu"
-              onChange={(e) => upd({ prompt: e.target.value })}
-            />
+            <TemplateField {...p} n={n} field="prompt" label="Hangi alana?" placeholder="Örn: ‘Ara’ kutusu" />
           </div>
           <label className="check">
             <input type="checkbox" checked={n.clearFirst !== false} onChange={(e) => upd({ clearFirst: e.target.checked })} />
             Önce alandaki yazıyı sil (Ctrl+A)
           </label>
-          <p className="hint">
-            Tıklama, silme ve yazma arasında kısa beklemeler var. Yazdıktan sonra alanın içi okunur; başka bir şey yazıyorsa bir kez daha yazılır.
-          </p>
           <label className="check">
             <input type="checkbox" checked={!!n.pressEnter} onChange={(e) => upd({ pressEnter: e.target.checked })} />
             Yazdıktan sonra Enter’a bas
@@ -579,8 +497,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
       {n.kind === 'key' && (
         <div className="field">
           <label>Tuş / Kısayol</label>
-          <input className="xp-input mono" value={n.keys ?? ''} placeholder="win+r" onChange={(e) => upd({ keys: e.target.value })} />
-          <VarChips onInsert={(v) => upd({ keys: append(n.keys, v) })} />
+          <TemplateField {...p} n={n} field="keys" label="Tuş / Kısayol" mono placeholder="win+r" />
           <div className="chips">
             {KEY_PRESETS.map((k) => (
               <button
@@ -593,7 +510,6 @@ function NodeFields(p: Props & { n: AgentNode }) {
               </button>
             ))}
           </div>
-          <p className="hint">ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{'{F4}'}, #r) de desteklenir.</p>
         </div>
       )}
 
@@ -622,13 +538,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
         <>
           <div className="field">
             <label>Ekranda aranacak yazı / durum (seçilen öğe varsa boş bırakılabilir)</label>
-            <input
-              className="xp-input"
-              value={n.text ?? ''}
-              placeholder="Örn: job finished 60/60 yazıyorsa evet ver"
-              onChange={(e) => upd({ text: e.target.value })}
-            />
-            <VarChips onInsert={(v) => upd({ text: append(n.text, v) })} />
+            <TemplateField {...p} n={n} field="text" label="Ekranda aranacak yazı / durum" placeholder="Örn: job finished 60/60 yazıyorsa evet ver" />
           </div>
           <TargetBox {...p} n={n} />
           <div className="field">
@@ -647,23 +557,10 @@ function NodeFields(p: Props & { n: AgentNode }) {
                 </button>
               ))}
             </div>
-            <p className="hint">
-              Yazı ya da seçilen öğe (uygulamanın kendi öğesi veya resmi) görünürse <b>var</b>, görünmezse <b>yok</b> çıkışından devam eder.
-              Süre verirsen o süre boyunca tekrar tekrar bakar; süre dolunca “yok” bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir.
-              Kendin de kurabilirsin: “yok” → Zamanlayıcı → tekrar bu Koşul; ama süre vermek daha hızlı tepki verir (her saniye bakar).
-              Yalnız tırnak içindeki metin (örn. “Bitti”) yerel olarak aranır. Diğer tarifleri LLM, Windows + ONNX sonuçlarından yorumlar; tıklama veya fare hareketi gönderilmez. Metni boş bırakırsan seçilmiş öğe/resim aranır.
-              Günlükte “… gördü:” satırı neyin “var” dediğini gösterir.
-            </p>
           </div>
         </>
       )}
 
-      {n.kind === 'probe' && (
-        <div className="field">
-          <p className="hint">Akışa dokunmaz. Bir değişkene tıklayınca, bu node’un durduğu kutudaki işaretli satırın değeri görünür.</p>
-          <ProbeMark graph={p.graph} node={n} onPick={(token) => upd({ text: token })} />
-        </div>
-      )}
       {n.kind === 'loop' && <LoopEditor {...p} n={n} />}
       {(n.kind === 'browser' || n.kind === 'waitFile' || n.kind === 'moveFile') && (
         <p className="hint">Bu adım kaldırıldı. Node’u silip akışa devam edebilirsin.</p>
@@ -677,7 +574,7 @@ function PackageExposed(p: Props & { pkg: AgentNode }) {
   const items = exposedIn(p.pkg)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   if (!items.length) {
-    return <p className="hint">Bir node’u açıp başlığının altındaki “Pakette ayarları göster” kutusunu işaretlersen, ayarları burada açılır.</p>
+    return <p className="hint">İç node’da “Pakette ayarları göster”i işaretle.</p>
   }
   return (
     <div className="pkg-folds">
@@ -734,18 +631,7 @@ function NodeInspector(p: Props) {
   if (!n) {
     return (
       <div className="hint-block">
-        <div>
-          <p className="hint"><b>Nasıl kullanılır?</b></p>
-          <ul className="hint-list">
-            <li>“Tıkla” node’una ekranda gördüğün yazıyı yaz: <b>Opera’ya tıkla</b>, <b>Model Seç’e bas</b>. Ajan ekranı okuyup o yazının üstüne tıklar.</li>
-            <li>Yazıyı tırnak içine alırsan (<b>“Modeli İndir” yazan yere bas</b>) birebir aranır, LLM’e gerek kalmaz.</li>
-            <li><b>Ekrandan Seç</b> ile ekrandaki yazıları görüp doğrudan birini seçebilirsin.</li>
-            <li>Node’un sağındaki <b>+</b> ile ileriye node ekle; renkli noktayı sürükleyip başka node’a bırakarak bağla.</li>
-            <li>Tekrar eden işler için <b>Her Öğe İçin</b> kutusu: node’ları çerçevenin içine sürükle ya da seçip <b>Ctrl+G</b>. Her çalıştırmada liste baştan sona gider; sıradaki dosya <b>{'{{öğe}}'}</b> olur.</li>
-            <li>Birkaç adımlık işi tarif etmek istersen <b>İnisiyatif</b>: hedefi yaz, model ekrana bakarak yapar.</li>
-            <li>Çalışırken uygulama küçülür; <b>Ctrl+Shift+Q</b> ile durdurursun.</li>
-          </ul>
-        </div>
+        <p className="hint">Düzenlemek için bir node seç.</p>
         <div className="nubbo-slot">
           <NubboMascot />
         </div>
@@ -758,21 +644,17 @@ function NodeInspector(p: Props) {
     <div>
       {(p.selectedCount ?? 1) > 1 && (
         <p className="hint">
-          <b>{p.selectedCount} node seçili.</b> Birini sürükleyince hepsi birlikte gider. Shift ile tıklayınca seçime eklenir ya da çıkar. Boş yerde sürüklemek kutu çizer; Shift basılıyken çizilen kutu seçime eklenir.
+          <b>{p.selectedCount} node seçili.</b>
         </p>
       )}
       <div className="inspector-kind" style={{ background: spec.color }}>
         {spec.icon} {spec.label}
       </div>
-      <p className="hint">{spec.description}</p>
 
       <NodeFields {...p} n={n} />
 
       {n.kind === 'package' && (
         <div className="field">
-          <p className="hint">
-            Bu node’un içinde ayrı bir akış durur. Çalışınca orası kendi Başlangıç’ından bitişine kadar gider, sonra bu node’un “sonra” çıkışı devam eder.
-          </p>
           <div className="field-row wrap">
             <button type="button" className="xp-btn primary" onClick={() => p.onEnterPackage(n.id)}>
               İçine gir
@@ -854,7 +736,7 @@ function Settings(p: Props) {
       <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
         <p className="hint">
-          Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Aynı OpenRouter anahtarı kullanılır; model
+          Ekran görüntüsünden hedef bulma bu modeli kullanır. Aynı OpenRouter anahtarı kullanılır; model
           görsel destekli olmalı.
         </p>
         <div className="field">

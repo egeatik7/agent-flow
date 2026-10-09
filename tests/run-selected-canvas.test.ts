@@ -150,6 +150,18 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(r.root.findByType(NodeCanvas).props.selectedIds).toEqual([copy.id])
     expect(copy.inner!.nodes[0].id).not.toBe(before.nodes.find(n => n.id === s.path[0])!.inner!.nodes[0].id)
   })
+  it('does not treat a variable editor or its × button as canvas shortcuts', async () => {
+    const s = scenario(1), r = await mount()
+    await act(async () => { r.root.findByType(NodeCanvas).props.onSelectNode(s.path[0]) })
+    const before = structuredClone(r.root.findByType(NodeCanvas).props.graph)
+    for (const scope of ['[data-template-editor]', '[data-template-field]']) for (const key of ['Delete', 'Backspace', 'a', 'c', 'v']) {
+      const e = { key, ctrlKey: true, metaKey: false, target: { tagName: 'BUTTON', isContentEditable: false,
+        closest: (selector: string) => selector === scope ? {} : null }, preventDefault: vi.fn() }
+      await act(async () => { for (const listener of [...(windowListeners.get('keydown') ?? [])]) listener(e) })
+      expect(e.preventDefault).not.toHaveBeenCalled()
+    }
+    expect(r.root.findByType(NodeCanvas).props.graph).toEqual(before)
+  })
   it.each([1, 2])('keeps outer loop patches and hidden sibling memory while inspecting %i package levels', async depth => {
     const s = scenario(depth, true)
     const sibling = { ...createNode('click', 0, 0), id: 'hidden-sibling' }

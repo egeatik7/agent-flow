@@ -11,7 +11,6 @@ export type NodeKind =
   | 'waitFile'
   | 'moveFile'
   | 'package'
-  | 'probe'
   | 'end'
 
 export type Locator = {
@@ -381,14 +380,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     outputs: NEXT,
     description: 'Seçilen adımları tek node’da toplar. İçi Başlangıç’tan bitişe kadar çalışır, sonra dışarıdaki sonraki node’a geçer.',
   },
-  probe: {
-    label: 'Kontrol',
-    icon: '⌕',
-    color: '#3f6b4e',
-    hasInput: true,
-    outputs: NEXT,
-    description: 'Durduğu yerde {{öğe}}, {{öğe.isim}}, {{sıra}} gibi değişkenlerin ne olduğunu gösterir. Akışı bozmaz.',
-  },
+
   end: {
     label: 'Bitir',
     icon: '■',
@@ -413,7 +405,7 @@ export function nodeWidth(kind: NodeKind): number {
 }
 
 export function nodeHeight(kind: NodeKind): number {
-  const body = kind === 'probe' ? 118 : kind === 'package' ? PACKAGE_BODY : NODE_BODY
+  const body = kind === 'package' ? PACKAGE_BODY : NODE_BODY
   return NODE_BORDER * 2 + NODE_HEADER + body + Math.max(NODE_SPECS[kind].outputs.length, 0) * NODE_PORT_ROW + 4
 }
 
@@ -473,8 +465,6 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
       return { ...base, source: '{{dosya}}', text: '' }
     case 'package':
       return { ...base, inner: { nodes: [], edges: [] } }
-    case 'probe':
-      return base
     default:
       return base
   }
@@ -527,8 +517,6 @@ export function summarize(n: AgentNode): string {
       const steps = packageStepCount(n.inner)
       return steps ? `${steps} adım` : 'Boş paket'
     }
-    case 'probe':
-      return n.text?.trim() ? n.text.trim() : 'Bir değişkene tıkla'
     case 'end':
       return 'Akışı bitir.'
   }
@@ -711,8 +699,54 @@ function sanitizeMembers(nodes: AgentNode[]) {
   }
 }
 
+/** Remove passive legacy Kontrol cards while preserving their real successor/port. */
+function withoutLegacyProbes(g: { nodes?: LegacyNode[]; edges?: Partial<AgentEdge>[] }) {
+  const nodes = (g.nodes ?? []).filter(n => n && n.id)
+  const edges = (g.edges ?? []).filter(e => e && e.from && e.to)
+  const probes = new Set(nodes.filter(n => (n.kind as string) === 'probe').map(n => n.id!))
+  if (!probes.size) return g
+  const successor = new Map<string, string>()
+  const ids = new Set(nodes.map(n => n.id!))
+  for (const e of edges) {
+    if (probes.has(e.from!) && (e.fromPort || 'next') === 'next' && ids.has(e.to!) && !successor.has(e.from!)) successor.set(e.from!, e.to!)
+  }
+  const resolve = (id: string): string | undefined => {
+    const seen = new Set<string>()
+    while (probes.has(id)) {
+      if (seen.has(id)) return undefined
+      seen.add(id)
+      const next = successor.get(id)
+      if (!next) return undefined
+      id = next
+    }
+    return id
+  }
+  const clean = { nodes: nodes.filter(n => !probes.has(n.id!)).map(n => Array.isArray(n.members)
+      ? { ...n, members: n.members.filter(id => !probes.has(id)) } : n),
+    edges: edges.flatMap(e => {
+      if (probes.has(e.from!)) return []
+      const to = resolve(e.to!)
+      return to ? [{ ...e, to }] : []
+    }) }
+  // A disconnected loop picks its head by position. Never silently switch its branch.
+  const head = (members: string[], pool: LegacyNode[], links: Partial<AgentEdge>[]) => {
+    const ids = new Set(members)
+    const candidates = pool.filter(n => ids.has(n.id!) && n.kind !== 'start')
+    const fed = new Set(links.filter(e => ids.has(e.from!) && ids.has(e.to!)).map(e => e.to))
+    const roots = candidates.filter(n => !fed.has(n.id))
+    return [...(roots.length ? roots : candidates)].sort((a, b) => (a.x ?? 60) - (b.x ?? 60) || (a.y ?? 60) - (b.y ?? 60))[0]?.id
+  }
+  for (const loop of nodes) {
+    if (loop.kind !== 'loop' || !Array.isArray(loop.members)) continue
+    const before = head(loop.members, nodes, edges)
+    const after = head(loop.members.filter(id => !probes.has(id)), clean.nodes, clean.edges)
+    if (before && resolve(before) !== after) throw new Error(`“${loop.title || loop.id}”: Kontrol kaldırılınca kutunun ilk adımı değişiyor. Bağımsız kolları bağlayıp yeniden açın. Akış değiştirilmedi.`)
+  }
+  return clean
+}
+
 export function normalizeGraph(raw: unknown): AgentGraph {
-  const g = (raw ?? {}) as { nodes?: LegacyNode[]; edges?: Partial<AgentEdge>[] }
+  const g = withoutLegacyProbes((raw ?? {}) as { nodes?: LegacyNode[]; edges?: Partial<AgentEdge>[] })
   const waitIds = new Set<string>()
   const nodes: AgentNode[] = (g.nodes ?? [])
     .filter((n) => n && n.id)

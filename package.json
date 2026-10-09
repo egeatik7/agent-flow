@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.9.60",
+  "version": "1.9.61",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/boot.js",
   "author": "Nubbo Agent Studio",
@@ -100,6 +100,7 @@
     "cross-env": "^10.1.0",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
+    "jsdom": "^26.1.0",
     "pe-library": "^1.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

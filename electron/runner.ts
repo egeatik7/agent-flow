@@ -5,7 +5,6 @@ import {
   hasTemplate,
   listItems,
   loopKeys,
-  TEMPLATE_VARS,
   loopStartIndex,
   portLabel,
   renderTemplate,
@@ -284,17 +283,6 @@ export async function runGraph(
       case 'moveFile':
         // Skipping would let the next step run as if this one had happened (a file that never arrived).
         throw new Error(`“${node.title}”: Bu node türü artık desteklenmiyor, akışı güncelleyin.`)
-      case 'probe': {
-        const picked = (node.text ?? '').trim()
-        const names = picked ? [picked] : TEMPLATE_VARS
-        const lines = names.map((v) => {
-          const token = v.includes('{{') ? v : `{{${v}}}`
-          const shown = renderTemplate(token, vars) ?? token
-          return `${token} = ${shown === token ? 'boş' : shown}`
-        })
-        ex.log('info', `[${stepNo}] Kontrol: ${lines.join(' · ')}`)
-        return 'next'
-      }
       case 'end':
         return 'end'
       case 'loop':

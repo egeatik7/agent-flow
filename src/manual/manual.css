@@ -34,3 +34,5 @@
   margin: 0;
   padding: 4px 10px 10px;
 }
+
+.xpas-manual-text { white-space: pre-wrap; overflow-wrap: anywhere; }

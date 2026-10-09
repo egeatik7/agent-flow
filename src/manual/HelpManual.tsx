@@ -55,7 +55,7 @@ export default function HelpManual() {
       current = found.el
       shown = true
       anchor.current = { el: found.el, x, y }
-      setTip(found.tip)
+      setTip(now.tip)
       const c = card.current
       setPos(place(found.el, x, y, c?.offsetWidth || 300, c?.offsetHeight || 150))
     }
@@ -112,11 +112,21 @@ export default function HelpManual() {
       setPos(place(a.el, a.x, a.y, c?.offsetWidth || 300, c?.offsetHeight || 150))
     }
 
+    // Dynamic values can change while the pointer remains on a button.
+    const changes = new MutationObserver(() => {
+      if (!shown || !current) return
+      if (!current.isConnected) { hide(); return }
+      const fresh = findTip(current)
+      if (fresh?.el === current) setTip(prev => prev?.title === fresh.tip.title && prev.text === fresh.tip.text ? prev : fresh.tip)
+    })
+    changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-manual-title', 'data-manual-text'] })
+
     document.addEventListener('pointerover', onPoint, true)
     document.addEventListener('pointermove', onPoint, true)
     document.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
     return () => {
+      changes.disconnect()
       window.clearTimeout(restTimer)
       window.clearTimeout(hideTimer)
       document.removeEventListener('pointerover', onPoint, true)

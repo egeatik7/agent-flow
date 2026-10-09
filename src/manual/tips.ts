@@ -63,10 +63,7 @@ const KIND: Record<string, Tip> = {
     title: 'Paket',
     text: 'Seçtiğin adımların tek node’a toplanmış hali. İçine girince o akışı düzenlersin. Çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır.',
   },
-  probe: {
-    title: 'Kontrol',
-    text: 'Akışı bozmaz. İçindeki {{öğe}}, {{öğe.isim}}, {{öğe.ad}}, {{sıra}} veya {{toplam}} düğmesine basınca, node’un durduğu kutudaki işaretli satırın değeri görünür. Çalışırken aynı değer günlüğe de yazılır.',
-  },
+
 }
 
 const BY_LABEL: Record<string, string> = {
@@ -83,7 +80,6 @@ const BY_LABEL: Record<string, string> = {
   'Dosyayı Taşı': 'moveFile',
   Bitir: 'end',
   Paket: 'package',
-  Kontrol: 'probe',
 }
 
 const PORT: Record<string, Tip> = {
@@ -348,12 +344,12 @@ function fieldTip(el: Element): Tip | null {
     ['Tuş / Kısayol', { title: 'Tuş', text: 'ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{F4}, #r) de desteklenir. Win düğmesi Windows kısayolunu başlatır; tamamlanmış kısayolu win+ ile değiştirir. {{öğe}} bu alanda da değişir.' }],
     ['Önce tıklanacak yer', { title: 'Önce tıklanacak yer', text: 'Tuş gitmeden önce modelin ekranda tıklayacağı yer. Odak yanlış penceredeyse tuş oraya gitmesin diye.' }],
     ['Süre (saniye)', { title: 'Süre', text: 'Zamanlayıcının bekleyeceği saniye. Ekrana bakılmaz.' }],
-    ['Ekranda aranacak yazı', { title: 'Aranacak yazı', text: 'Koşul bu yazıyı ekranda arar. Ekranda gerçekten görünen yazıyı yaz. Öğenin iç adındaki caret-down gibi ekler ekranda yoktur, onları yazma.' }],
+    ['Ekranda aranacak yazı', { title: 'Aranacak yazı', text: 'Yalnız tırnak içindeki metin yerel aranır. Diğer tarifleri LLM birleşik Windows + ONNX OCR sonuçlarından yorumlar. Koşul tıklamaz, fareyi oynatmaz ve görsel modele dönmez.' }],
     ['Ekranda ne görünmeli?', { title: 'Ekranda ne görünmeli?', text: 'Görsel modele sorulacak tarif. Önce yazı ve seçilen öğe aranır; bulunamazsa bu tarif modele gider.' }],
     ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca tekrar tekrar bakar. Süre dolunca “yok” çıkışı kullanılır.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
     ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve İnisiyatif için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
-    ['Görsel model adı', { title: 'Görsel model', text: 'Tepki, takılma ve İnisiyatif’in “bitti mi” kontrolü bu modele bakar. Tıklamayı UI-TARS yapar.' }],
+    ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsünden hedef bulma bu modeli kullanır. İnisiyatif’in ekran modu için ayrı model seçilebilir.' }],
     ['Hedef pencere', { title: 'Hedef pencere', text: 'Doluysa yalnızca o pencere okunur ve öne alınır. “Tüm ekran” masaüstü dahil her yere bakar. ↻ listeyi yeniler.' }],
     ['Adımlar arası bekleme', { title: 'Adımlar arası bekleme', text: 'Her adımdan sonra bu kadar milisaniye durur. Sayfanın yerleşmesi için. 800 makul bir başlangıçtır.' }],
     ['Maks. adım', { title: 'Maks. adım', text: 'Bir turda bu kadar adımdan fazla çalışılırsa tur durur. Hiç bitmeyen bir bekleme döngüsüne karşı. Kutunun her turu ayrı sayılır.' }],
@@ -524,6 +520,9 @@ export function findTip(start: EventTarget | null): { el: Element; tip: Tip } | 
   if (start.closest('.xpas-manual')) return null
   let el: Element | null = start
   while (el && el !== document.documentElement) {
+    if (el instanceof HTMLElement && el.dataset.manualTitle && el.dataset.manualText) {
+      return { el, tip: { title: el.dataset.manualTitle, text: el.dataset.manualText } }
+    }
     const tip =
       (el instanceof HTMLButtonElement ? buttonTip(el) : null) ||
       fieldTip(el) ||

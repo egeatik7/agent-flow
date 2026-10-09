@@ -18,7 +18,6 @@ import {
   type StepStatus,
 } from '../types'
 import { allMembers, ancestors, frameInput, frameOutput, frameRect, ownerOf, type Rect } from '../../electron/groups'
-import ProbeMark from './ProbeMark'
 import { packageAppearances } from '../lib/package-appearance'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
@@ -70,7 +69,6 @@ type Props = {
   onRunFrom: (id: string) => void
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
-  onPatchNode: (id: string, patch: Partial<AgentNode>) => void
 }
 
 type Linking = { from: string; port: string; mx: number; my: number; sx: number; sy: number; moved: boolean }
@@ -758,7 +756,7 @@ export default function NodeCanvas(p: Props) {
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
             >
-              <div className="node-head" style={{ background: packageLook ? `linear-gradient(90deg, ${packageLook.color} 0%, ${packageLook.color} 28%, #0a246a 72%, #05070c 100%)` : headerGradient(spec.color) }}>
+              <div className="node-head" style={{ background: packageLook ? `linear-gradient(90deg, ${packageLook.color} 0%, ${packageLook.color} 70%, #0a246a 94%, #05070c 100%)` : headerGradient(spec.color) }}>
                 <span className="node-icon">{packageLook ? (
                   <svg className="package-symbol" viewBox="0 0 16 16" role="img" aria-label={`Paket simgesi ${packageLook.badge}`}>
                     <path d={packageLook.symbol} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
@@ -768,11 +766,7 @@ export default function NodeCanvas(p: Props) {
                 <span className="node-title">{n.title}</span>
                 {statusLabel(n.id, st) && <span className={`status-chip ${statusClass(n.id, st)}`}>{statusLabel(n.id, st)}</span>}
               </div>
-              <div className={'node-body' + (n.kind === 'probe' ? ' probe-body' : '')}>
-                {n.kind === 'probe' ? (
-                  <ProbeMark graph={p.graph} node={n} onPick={(token) => p.onPatchNode(n.id, { text: token })} />
-                ) : (
-                <>
+              <div className="node-body">
                 <div className="node-summary">{summarize(n)}</div>
                 {n.kind === 'package' && (
                   <div className="package-actions">
@@ -819,8 +813,6 @@ export default function NodeCanvas(p: Props) {
                     ◆ geçen tur {n.trace.length} eylemde oldu
                   </div>
                 ) : null}
-                </>
-                )}
               </div>
               <div className="node-outputs">
                 {spec.outputs.map((o) => (

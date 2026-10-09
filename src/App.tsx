@@ -712,7 +712,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
       if (confirmQuestion || runningRef.current || libraryBusyRef.current) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
@@ -1356,12 +1356,12 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-              onPatchNode={updateNode}
             />
           </div>
           <div className="right-sidebar">
             <fieldset className="canvas-editor-fields" disabled={running || libraryBusy || !!confirmQuestion}>
           <SidePanel
+            disabled={running || libraryBusy || !!confirmQuestion}
             canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} disabled={running || libraryBusy || !loaded || !!confirmQuestion}
               onConfirm={askSure}
               onSaveCanvas={() => void saveCurrentCanvas()}
@@ -1426,6 +1426,7 @@ export default function App() {
               }
             }}
             graph={graph}
+            rootGraph={rooted(graph, stack)}
             selected={selected}
             selectedCount={selectedIds.length}
             selectedEdge={selectedEdge}

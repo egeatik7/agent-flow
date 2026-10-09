@@ -49,7 +49,7 @@ describe('package cards count actual nested nodes and retain consistent geometry
   it('actual markup shows a horizontal color/XP blue/black header and both raised controls', () => {
     const n = pkg([createNode('type', 0, 0), pkg([createNode('wait', 0, 0)])])
     const html = renderToStaticMarkup(createElement(NodeCanvas, props(graph([n]))))
-    expect(html).toContain('linear-gradient(90deg,'); expect(html).toContain('#0a246a 72%, #05070c 100%')
+    expect(html).toContain('linear-gradient(90deg,'); expect(html).toContain('#0a246a 94%, #05070c 100%')
     expect(html).toContain('width:262px;height:136px'); expect(html).toContain('2 adım')
     expect(html).toContain('package-action-open'); expect(html).toContain('package-action-unpack')
   })

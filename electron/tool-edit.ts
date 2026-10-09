@@ -49,7 +49,7 @@ export const EDITABLE_FIELDS = [
 ] as const
 
 /** Kinds an edit may add. Başlangıç, Paket and Kutu change the shape of a flow and stay out. */
-export const ADDABLE_KINDS: NodeKind[] = ['click', 'type', 'key', 'wait', 'condition', 'probe', 'ai', 'end']
+export const ADDABLE_KINDS: NodeKind[] = ['click', 'type', 'key', 'wait', 'condition', 'ai', 'end']
 
 export const MAX_OPS = 50
 

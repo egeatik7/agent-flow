@@ -201,7 +201,6 @@ olabilir; branch silinince akışa hiçbir şey olmaz.
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
 | Paket | İçine bir alt akış alır; çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır | sonra |
-| Kontrol | Akışa dokunmaz; döngü değişkenlerinin o anki değerini günlüğe yazar | sonra |
 | Bitir | Akışı sonlandırır | — |
 
 “olmadı” çıkışı ve bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı kalmışsa o adım **hata verir**; sessizce atlanmaz. Kutu dışındaysa akış o noktada durur, kutunun içindeyse o tur hatalı sayılır ve sıradaki öğeye geçilir. Node’u silip akışa devam et.
