@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
+import { useTheme } from './lib/theme'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
@@ -138,6 +139,7 @@ function projectView(full: AgentGraph, stack: Crumb[]): { view: AgentGraph; stac
 }
 
 export default function App() {
+  const [theme, selectTheme] = useTheme()
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [graph, setGraph] = useState<AgentGraph>(book0.tabs[0].graph)
@@ -1255,6 +1257,8 @@ export default function App() {
           </span>
         </div>
         <Toolbar
+          theme={theme}
+          onTheme={selectTheme}
           running={running}
           busy={libraryBusy || !loaded || !!confirmQuestion}
           hasStart={hasStart}

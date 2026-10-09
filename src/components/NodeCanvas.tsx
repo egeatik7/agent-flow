@@ -756,7 +756,7 @@ export default function NodeCanvas(p: Props) {
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
             >
-              <div className="node-head" style={{ background: packageLook ? `linear-gradient(90deg, ${packageLook.color} 0%, ${packageLook.color} 70%, #0a246a 94%, #05070c 100%)` : headerGradient(spec.color) }}>
+              <div className="node-head" style={{ '--node-color': packageLook?.color ?? spec.color, background: packageLook ? `linear-gradient(90deg, ${packageLook.color} 0%, ${packageLook.color} 70%, #0a246a 94%, #05070c 100%)` : headerGradient(spec.color) } as React.CSSProperties}>
                 <span className="node-icon">{packageLook ? (
                   <svg className="package-symbol" viewBox="0 0 16 16" role="img" aria-label={`Paket simgesi ${packageLook.badge}`}>
                     <path d={packageLook.symbol} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
