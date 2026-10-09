@@ -602,7 +602,7 @@ export default function NodeCanvas(p: Props) {
             .filter(Boolean)
             .join(' ')
           return (
-            <div key={f.loop.id} className={cls} style={{ left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth }}>
+            <div key={f.loop.id} className={cls} style={{ '--loop-color': '#c7984e', left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth } as React.CSSProperties}>
               <div
                 className="loop-frame-head"
                 data-node-id={f.loop.id}
@@ -746,7 +746,7 @@ export default function NodeCanvas(p: Props) {
               key={n.id}
               data-node-id={n.id}
               className={cls}
-              style={{ left: n.x, top: n.y, width: nodeWidth(n.kind), height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length }}
+              style={{ '--node-color': packageLook?.color ?? spec.color, '--aero-node-color': packageLook?.aeroColor ?? spec.color, left: n.x, top: n.y, width: nodeWidth(n.kind), height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length } as React.CSSProperties}
               onMouseDown={(e) => startNodeDrag(e, n)}
               onContextMenu={(e) => {
                 e.preventDefault()

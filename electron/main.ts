@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
+import { setWindowTheme, supportsAcrylic } from './window-theme'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
@@ -672,6 +674,11 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     else mainWindow.maximize()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
+  ipcMain.handle('window:theme', (event, theme: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
+    if (theme !== 'aero' && theme !== 'xp') return false
+    return setWindowTheme(mainWindow, theme, supportsAcrylic(process.platform, os.release()))
+  })
 
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {

@@ -23,18 +23,18 @@
   --font-ui: Tahoma, Geneva, Verdana, sans-serif;
   color-scheme: light;
 }
-:root[data-theme='aero'] body { color: var(--aero-ink); background: #d5ccec; }
+:root[data-theme='aero'] body { color: var(--aero-ink); background: #f2effa; }
 :root[data-theme='aero'] .desktop {
   padding: 0;
-  background: radial-gradient(ellipse at 5% 0%, #ffffffc9, transparent 55%), radial-gradient(ellipse at 95% 70%, #e1effc, transparent 65%), linear-gradient(125deg, #eeebff, #c9b9e7 60%, #e1edfa);
+  background: transparent;
 }
 :root[data-theme='aero'] .xp-window {
   border: 3px solid #716886;
   border-top: none;
-  border-radius: 15px;
+  border-radius: 0;
   padding: 0;
   background: linear-gradient(135deg, #f2edff85, #b9b0df70 40%, #d0c5ec85 80%, #eee8ff99);
-  box-shadow: inset 0 0 0 1px #ffffffb3, 0 4px 18px #53477830;
+  box-shadow: none;
 }
 :root[data-theme='aero'] .titlebar {
   height: 30px;
@@ -147,17 +147,17 @@
 
 /* Each kind retains its color as a pastel glass tint, including package identities.
    Inline XP header gradients are intentionally replaced only in Aero. */
-:root[data-theme='aero'] .agent-node { border: 2px solid #ab98c2; border-radius: 9px; background: #fffdffde; box-shadow: 0 3px 9px #6f578a26, inset 0 0 0 1px #fff; }
+:root[data-theme='aero'] .agent-node { border: 2px solid color-mix(in srgb, var(--aero-node-color, var(--node-color)) 38%, #c7b5df); border-radius: 9px; background: #fffdffde; box-shadow: 0 3px 9px #6f578a26, inset 0 0 0 1px #fff; }
 :root[data-theme='aero'] .node-head {
-  background: linear-gradient(180deg, #ffffffe8 0%, #ffffffa8 48%, #ffffff55 49%, #ffffffb0 100%), color-mix(in srgb, var(--node-color) 48%, #d9c7ef) !important;
+  background: linear-gradient(180deg, #ffffff99 0%, #ffffff55 48%, #ffffff08 49%, #ffffff55 100%), color-mix(in srgb, var(--aero-node-color, var(--node-color)) 56%, #e9def8) !important;
   color: #3e3153; text-shadow: 0 1px #ffffffa6; border-radius: 6px 6px 0 0; border-bottom: 1px solid #bca9d24d;
 }
-:root[data-theme='aero'] .node-icon { border: 1px solid #ffffffba; background: color-mix(in srgb, var(--node-color) 25%, #fff); color: #4d3b63; box-shadow: inset 0 1px #fff; border-radius: 4px; }
+:root[data-theme='aero'] .node-icon { border: 1px solid #ffffffba; background: color-mix(in srgb, var(--aero-node-color, var(--node-color)) 25%, #fff); color: #4d3b63; box-shadow: inset 0 1px #fff; border-radius: 4px; }
 :root[data-theme='aero'] .package-badge { color: #54416c; background: #ffffff70; border-color: #fff9; border-radius: 3px; }
-:root[data-theme='aero'] :is(.node-body, .agent-node.kind-package .node-body) { color: #4f4560; background: linear-gradient(#ffffff80, #fbf8ff70); border-color: #e9e0f2; }
+:root[data-theme='aero'] :is(.node-body, .agent-node.kind-package .node-body) { color: #4f4560; background: linear-gradient(#ffffffed, color-mix(in srgb, var(--aero-node-color, var(--node-color)) 9%, #fcfaff)); border-color: color-mix(in srgb, var(--aero-node-color, var(--node-color)) 16%, #eee7f6); }
 :root[data-theme='aero'] .agent-node.kind-package .node-summary { color: #67517c; }
 :root[data-theme='aero'] .package-action-icon { color: #86669e; }
-:root[data-theme='aero'] .node-outputs { background: #f7f2fc99; border-radius: 0 0 7px 7px; }
+:root[data-theme='aero'] .node-outputs { background: color-mix(in srgb, var(--aero-node-color, var(--node-color)) 13%, #f7f2fc); border-radius: 0 0 7px 7px; }
 :root[data-theme='aero'] .node-port { border-color: #8f79ac; box-shadow: 0 1px 3px #7e659444, inset 0 1px #fff; }
 :root[data-theme='aero'] .node-port.in { background: linear-gradient(#fff, #d3c4e7); }
 :root[data-theme='aero'] .add-next { color: #7c6299; border-color: #bca8d0; background: linear-gradient(#fff, #e6d9f3); box-shadow: inset 0 1px #fff; }
@@ -224,4 +224,77 @@
 .nubbo-logo-slot { width: 100%; height: 92px; flex-shrink: 0; margin-top: -6px; }
 .nubbo-logo-slot .nubbo-logo { width: 100%; height: 100%; margin: 0; object-fit: contain; }
 :root[data-theme='aero'] :is(.nubbo-mascot, .nubbo-logo, .hud-mascot) { image-rendering: auto; object-fit: contain; }
-:root[data-theme='aero'] .nubbo-mascot { transform: none; }
+:root[data-theme='aero'] .nubbo-mascot { transform: scaleX(-1); }
+
+/* Use the native DWM backdrop only after the main process confirms support.
+   Ordinary windows stay resizable/maximizable; no transparent-window flag. */
+:root[data-theme='aero'][data-native-glass='true'],
+:root[data-theme='aero'][data-native-glass='true'] body { background: transparent; }
+:root[data-theme='aero'][data-native-glass='true'] .xp-window {
+  background: transparent;
+  border-radius: 15px;
+  border-color: #8b78a999;
+}
+:root[data-theme='aero'][data-native-glass='true'] .titlebar {
+  background: linear-gradient(110deg, #faf7ff66, #c3b8e833 45%, #eeebff55 70%, #c2b6e055);
+}
+
+/* Quiet, semantic color in the log: one tint per message type, with no layout shift. */
+:root[data-theme='aero'] .bottom-panel > .panel-header {
+  color: #584170;
+  background: linear-gradient(#fcf9ff, #e5d7f3 48%, #cdb5e5 49%, #ecdef9);
+}
+:root[data-theme='aero'] .log-body { background: linear-gradient(120deg, #fcfbff, #f3f5fc); }
+:root[data-theme='aero'] .log-line { box-shadow: inset 3px 0 #b8a9cd; }
+:root[data-theme='aero'] .log-line.info { color: #4c6080; background: #eaf1fb99; box-shadow: inset 3px 0 #92aed3; }
+:root[data-theme='aero'] .log-line.success { color: #376751; background: #e5f5ebc2; box-shadow: inset 3px 0 #87bba0; }
+:root[data-theme='aero'] .log-line.warn { color: #835c24; background: #fff2d7bf; box-shadow: inset 3px 0 #d8b56d; }
+:root[data-theme='aero'] .log-line.error { color: #913e55; background: #fce7edc2; box-shadow: inset 3px 0 #cf8fa3; }
+:root[data-theme='aero'] .log-line.chat { color: #74538d; background: #efe5fac2; box-shadow: inset 3px 0 #b297cd; }
+
+/* Reference-shaped window controls: joined buttons, wider coral Close only.
+   All other dimensions, padding and canvas coordinates stay shared. */
+:root[data-theme='aero'] .titlebar-controls { gap: 0; }
+:root[data-theme='aero'] .title-btn { border-color: #76678f; background: linear-gradient(#e5defa, #bab0de 46%, #a69acb 47%, #c8bee7); box-shadow: inset 0 0 0 1px #ede7ffbd; }
+:root[data-theme='aero'] .title-btn:first-child { border-radius: 0 0 0 5px; }
+:root[data-theme='aero'] .title-btn.close { width: 43px; border-radius: 0 0 6px 0; background: linear-gradient(#fbc9be, #e89788 46%, #d36b5b 47%, #eead9a); }
+
+/* Packages have a stronger identifying glass color than ordinary action nodes. */
+:root[data-theme='aero'] .kind-package .node-head {
+  background: linear-gradient(#ffffff80 0%, #ffffff33 48%, #ffffff00 49%, #ffffff33 100%), color-mix(in srgb, var(--aero-node-color, var(--node-color)) 72%, #ddd0f5) !important;
+}
+:root[data-theme='aero'] .agent-node.kind-package { border-color: color-mix(in srgb, var(--aero-node-color, var(--node-color)) 58%, #bea7d8); }
+:root[data-theme='aero'] .agent-node.kind-package .node-body { background: linear-gradient(color-mix(in srgb, var(--aero-node-color, var(--node-color)) 10%, #fff), color-mix(in srgb, var(--aero-node-color, var(--node-color)) 19%, #f9f3ff)); }
+:root[data-theme='aero'] .kind-package .node-outputs { background: color-mix(in srgb, var(--aero-node-color, var(--node-color)) 25%, #f4eafa); }
+:root[data-theme='aero'] .loop-frame { border-color: color-mix(in srgb, var(--loop-color) 45%, #b8a2d2); background: color-mix(in srgb, var(--loop-color) 12%, #f1e8fb80); }
+:root[data-theme='aero'] .loop-frame-head { background: linear-gradient(#ffffff99 0%, #ffffff55 48%, #ffffff00 49%, #ffffff44 100%), color-mix(in srgb, var(--loop-color) 46%, #e4d1f8); color: #52364b; }
+:root[data-theme='aero'] .loop-frame.selected { background: color-mix(in srgb, var(--loop-color) 17%, #eee0fa); }
+/* Status borders always win over normal package/loop identity colors. */
+:root[data-theme='aero'] .kind-package.selected { border-color: #9973bc; }
+:root[data-theme='aero'] :is(.kind-package.drop-target, .loop-frame.drop, .loop-frame.drop-target) { border-color: #60a485; }
+:root[data-theme='aero'] :is(.kind-package.running, .loop-frame.running) { border-color: #7d9ac5; }
+:root[data-theme='aero'] .kind-package.done { border-color: #64a185; }
+:root[data-theme='aero'] :is(.kind-package.error, .loop-frame.failed) { border-color: #ba627b; }
+:root[data-theme='aero'] :is(.kind-package.run-running, .loop-frame.run-running, .kind-package.run-stopped, .loop-frame.run-stopped) { border-color: var(--run-glow); }
+
+:root[data-theme='aero'] .bottom-panel { background: #e3d6f0; }
+:root[data-theme='aero'] .log-body { background: linear-gradient(115deg, #e3d5f0, #d8e5f5 72%, #ded8f0); }
+:root[data-theme='aero'] .bottom-panel > .panel-header { background: linear-gradient(#e9dcfa, #cfb8e9 48%, #bda0d9 49%, #dbc6ee); color: #4c3264; }
+:root[data-theme='aero'] .log-line.info { background: #cfdef2a6; }
+:root[data-theme='aero'] .log-line.success { background: #cfe8dacf; }
+:root[data-theme='aero'] .log-line.warn { background: #f3dfb7cf; }
+:root[data-theme='aero'] .log-line.error { background: #efcedacf; }
+:root[data-theme='aero'] .log-line.chat { background: #d9c5eecf; }
+
+:root[data-theme='aero'] :is(.canvas-sequence-play, .canvas-sequence-stop) { color: #fff; text-shadow: 0 1px 2px #34435f; background-repeat: no-repeat; background-position: center; background-size: 20px 20px, 100% 100%; }
+:root[data-theme='aero'] .xp-btn.canvas-sequence-play { background-image: radial-gradient(circle at 40% 30%, #eafff6, #9cdcc1 28%, #469f84 55%, #397561 68%, transparent 72%), var(--aero-glass); }
+:root[data-theme='aero'] .xp-btn.canvas-sequence-stop { background-image: radial-gradient(circle at 40% 30%, #ffe8e3, #e6aaa9 28%, #b96779 55%, #8a445e 68%, transparent 72%), var(--aero-glass); }
+:root[data-theme='aero'] :is(.canvas-sequence-play, .canvas-sequence-stop):hover:not(:disabled) { filter: brightness(1.08); background-repeat: no-repeat; background-position: center; background-size: 20px 20px, 100% 100%; }
+:root[data-theme='aero'] .xp-btn.canvas-sequence-play:hover:not(:disabled) { background-image: radial-gradient(circle at 40% 30%, #eafff6, #9cdcc1 28%, #469f84 55%, #397561 68%, transparent 72%), var(--aero-hover); }
+:root[data-theme='aero'] .xp-btn.canvas-sequence-stop:hover:not(:disabled) { background-image: radial-gradient(circle at 40% 30%, #ffe8e3, #e6aaa9 28%, #b96779 55%, #8a445e 68%, transparent 72%), var(--aero-hover); }
+
+/* Glossy sequence controls keep their original small rectangular hit targets. */
+:root[data-theme='aero'] .xp-btn.canvas-sequence-play,
+:root[data-theme='aero'] .xp-btn.canvas-sequence-play:hover:not(:disabled) { color: #276853; text-shadow: 0 1px #effff7; background: radial-gradient(ellipse at 50% 0%, #ffffffdd, transparent 65%), linear-gradient(#d9f8e9, #b9e7cf 48%, #7fc8a6 49%, #c9eedc); border-color: #81a791; }
+:root[data-theme='aero'] .xp-btn.canvas-sequence-stop,
+:root[data-theme='aero'] .xp-btn.canvas-sequence-stop:hover:not(:disabled) { color: #8c4160; text-shadow: 0 1px #fff0f4; background: radial-gradient(ellipse at 50% 0%, #ffffffdd, transparent 65%), linear-gradient(#ffe5e9, #edc0ce 48%, #cf90a5 49%, #f4d3dc); border-color: #b28798; }
