@@ -8,7 +8,7 @@ import { CanvasSequence } from './lib/canvas-sequence'
 import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
 import NodeCanvas from './components/NodeCanvas'
 import WorkspaceWelcome, { WorkspacePicker } from './components/WorkspaceWelcome'
-import { hierarchyTarget } from './lib/canvas-hierarchy'
+import { canvasView, emptyNavigation, visitLocation, type CanvasLocation } from './lib/canvas-navigation'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
@@ -164,6 +164,10 @@ export default function App() {
   const [runProgress, setRunProgress] = useState<RunProgress>(() => finishProgress(beginProgress(''), false))
   const stopRequested = useRef(false)
   const [workspacePicker, setWorkspacePicker] = useState<'canvas' | 'automation' | null>(null)
+  const [navigation, setNavigation] = useState(emptyNavigation)
+  const navigationRef = useRef(navigation)
+  navigationRef.current = navigation
+  useEffect(() => { const next = emptyNavigation(); navigationRef.current = next; setNavigation(next) }, [activeId])
   const [canvasFocus, setCanvasFocus] = useState<{ nodeId: string; at: number }>()
   const [sideTab, setSideTab] = useState<SideTab>('canvases')
   const [fileOpen, setFileOpen] = useState(false)
@@ -390,6 +394,8 @@ export default function App() {
     if (runProgress.phase !== 'stopped' || !runProgress.nodeId || runProgress.canvasId !== activeIdRef.current) return
     const found = runNodeView(rooted(graphRef.current, stackRef.current), runProgress.nodeId)
     if (!found) return
+    const history = visitLocation(navigationRef.current, currentLocation(), { path: found.stack.map(c => c.id), nodeId: runProgress.nodeId })
+    navigationRef.current = history; setNavigation(history)
     graphRef.current = found.view
     stackRef.current = found.stack
     setGraph(found.view)
@@ -464,15 +470,54 @@ export default function App() {
     setSelectedNodeId(cur && next.includes(cur) ? cur : (next[next.length - 1] ?? null))
     if (activeIdRef.current) setSideTab('node')
   }
-  const navigateHierarchy = (id: string, path: string[]) => {
-    if (!activeIdRef.current || runningRef.current || libraryBusyRef.current || closingRef.current) return
-    const target = hierarchyTarget(rooted(graphRef.current, stackRef.current), id, path)
-    if (!target) return
+  const currentLocation = (): CanvasLocation => {
+    const path = stackRef.current.map(c => c.id)
+    const tracked = navigationRef.current.entries[navigationRef.current.index]
+    if (tracked && JSON.stringify(tracked.path) === JSON.stringify(path)) {
+      return { path, nodeId: graphRef.current.nodes.some(n => n.id === tracked.nodeId) ? tracked.nodeId : undefined }
+    }
+    return { path, nodeId: selectedRef.current ?? undefined }
+  }
+  const applyLocation = (location: CanvasLocation, inspect = false) => {
+    if (!activeIdRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return false
+    const target = canvasView(rooted(graphRef.current, stackRef.current), location.path)
+    if (!target || (location.nodeId && !target.graph.nodes.some(n => n.id === location.nodeId))) return false
+    // Preserve the existing package-entry rule: a newly created empty package
+    // needs its Start marker before the user adds its first action.
+    if (location.path.length && !target.graph.nodes.some(n => n.kind === 'start')) target.graph = normalizeGraph(target.graph)
     graphRef.current = target.graph; stackRef.current = target.stack
     setGraph(target.graph); setStack(target.stack)
-    selectedRef.current = id; selectedIdsRef.current = [id]
-    setSelectedNodeId(id); setSelectedIds([id]); setSelectedEdgeId(null); setSideTab('node')
-    setCanvasFocus(previous => ({ nodeId: id, at: (previous?.at ?? 0) + 1 }))
+    const selectedId = inspect ? location.nodeId ?? null : null
+    selectedRef.current = selectedId; selectedIdsRef.current = selectedId ? [selectedId] : []
+    setSelectedNodeId(selectedId); setSelectedIds(selectedIdsRef.current); setSelectedEdgeId(null); setSideTab('node')
+    const focusId = location.nodeId ?? target.graph.nodes.find(n => n.kind === 'start')?.id ?? target.graph.nodes[0]?.id
+    setCanvasFocus(previous => ({ nodeId: focusId ?? '', at: (previous?.at ?? 0) + 1 }))
+    return true
+  }
+  const visitCanvasLocation = (location: CanvasLocation, inspect = false) => {
+    const current = currentLocation()
+    if (!applyLocation(location, inspect)) return
+    const history = visitLocation(navigationRef.current, current, location)
+    navigationRef.current = history; setNavigation(history)
+  }
+  const navigateNode = (id: string, inspect = false) => {
+    const node = graphRef.current.nodes.find(n => n.id === id)
+    if (!node) return
+    const path = stackRef.current.map(c => c.id)
+    visitCanvasLocation(node.kind === 'package' && !inspect ? { path: [...path, id] } : { path, nodeId: id }, inspect)
+  }
+  const navigateHistory = (direction: -1 | 1) => {
+    const history = navigationRef.current
+    let index = history.index + direction
+    while (index >= 0 && index < history.entries.length) {
+      if (applyLocation(history.entries[index])) { const next = { ...history, index }; navigationRef.current = next; setNavigation(next); return }
+      index += direction
+    }
+  }
+  const navigateOut = () => {
+    const path = stackRef.current.map(c => c.id)
+    const id = path.pop()
+    if (id) visitCanvasLocation({ path, nodeId: id })
   }
 
   const selectEdge = (id: string | null) => {
@@ -687,40 +732,8 @@ export default function App() {
     }))
   }
 
-  const enterPackage = (id: string) => {
-    const g = graphRef.current
-    const n = g.nodes.find((x) => x.id === id && x.kind === 'package')
-    if (!n) return
-    const nextStack = [...stackRef.current, { parent: g, id }]
-    const view = normalizeGraph(n.inner ?? { nodes: [], edges: [] })
-    stackRef.current = nextStack
-    graphRef.current = view
-    setStack(nextStack)
-    setGraph(view)
-    setSelectedNodeId(null)
-    setSelectedIds([])
-    selectedIdsRef.current = []
-    setSelectedEdgeId(null)
-  }
-
-  const exitPackage = () => {
-    const s = stackRef.current
-    const crumb = s[s.length - 1]
-    if (!crumb) return
-    const parent: AgentGraph = {
-      ...crumb.parent,
-      nodes: crumb.parent.nodes.map((n) => (n.id === crumb.id ? { ...n, inner: graphRef.current } : n)),
-    }
-    const nextStack = s.slice(0, -1)
-    stackRef.current = nextStack
-    setStack(nextStack)
-    graphRef.current = parent
-    setGraph(parent)
-    setSelectedNodeId(crumb.id)
-    setSelectedIds([crumb.id])
-    selectedIdsRef.current = [crumb.id]
-    setSelectedEdgeId(null)
-  }
+  const enterPackage = (id: string) => navigateNode(id)
+  const exitPackage = navigateOut
 
   const addNode = (kind: NodeKind) => {
     if (!activeIdRef.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || closingRef.current || saveAnswer.current) return
@@ -1470,7 +1483,7 @@ export default function App() {
             /> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
           </div>
           <div className="right-sidebar">
-            <fieldset className="canvas-editor-fields" disabled={running || editorLocked}>
+            <fieldset className="canvas-editor-fields" disabled={editorLocked}>
           <SidePanel
             disabled={running || editorLocked}
             canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
@@ -1541,8 +1554,19 @@ export default function App() {
             rootGraph={rooted(graph, stack)}
             canvasName={tabList.find(t => t.id === activeId)?.name}
             canvasKey={activeId}
-            onNavigateNode={navigateHierarchy}
-            onShowHierarchy={() => selectNode(null)}
+            onNavigateNode={navigateNode}
+            locationName={stack.length ? stack.map(c => c.parent.nodes.find(n => n.id === c.id)?.title ?? 'Paket').join(' › ') : tabList.find(t => t.id === activeId)?.name}
+            locationKey={JSON.stringify([activeId, ...stack.map(c => c.id)])}
+            navigationDisabled={editorLocked || !hasCanvas}
+            onNavigateBack={() => navigateHistory(-1)}
+            onNavigateForward={() => navigateHistory(1)}
+            onNavigateOut={navigateOut}
+            canNavigateBack={navigation.index > 0}
+            canNavigateForward={navigation.index < navigation.entries.length - 1}
+            canNavigateOut={stack.length > 0}
+            stepStatus={stepStatus}
+            highlightedNodeIds={visibleRunNodes(runProgress, rooted(graph, stack), graph, activeId)}
+            runPhase={runProgress.canvasId === activeId ? runProgress.phase : 'idle'}
             selected={selected}
             selectedCount={selectedIds.length}
             selectedEdge={selectedEdge}

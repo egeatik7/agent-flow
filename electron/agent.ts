@@ -378,7 +378,6 @@ export function createAgent(ctx: AgentContext) {
     }
     let winScan: (ScanResult & { shot?: string }) | null = null
     let shotFile = ''
-    let onnxScan: ScanResult | null = null
     let seenItems: ScreenItem[] = []
 
     const windowsScan = async () => {
@@ -394,20 +393,6 @@ export function createAgent(ctx: AgentContext) {
       }
       return winScan
     }
-    const onnxReady = async () => {
-      if (onnxScan) return onnxScan
-      const base = await windowsScan()
-      try {
-        onnxScan = await bridge.applyOnnx(base)
-      } catch (e) {
-        log('warn', `ONNX okunamadı: ${(e as Error).message}`)
-        onnxScan = base
-      }
-      seenItems = onnxScan.items
-      trace(node, { kind: 'observation', source: 'onnx', scan: onnxScan })
-      return onnxScan
-    }
-
     const quoteOnScreen = (scan: ScanResult, text: string, where: string): TargetPick | null => {
       const mem = node.templated ? undefined : memoFor(node)
       const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
@@ -506,7 +491,7 @@ export function createAgent(ctx: AgentContext) {
             log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
           }
         }
-        if ((stage === 'windows' || stage === 'onnx') && !quoted) {
+        if (stage === 'windows' && !quoted) {
           if (stage === 'windows') log('info', 'Tırnak içi kesin metin yok; doğrudan OCR metin eşleştirmesi atlanıyor. Ekran taraması ve modelle seçim devam eder.')
           continue
         }
@@ -521,22 +506,9 @@ export function createAgent(ctx: AgentContext) {
           }
           log('info', `“${quoted}” birleşik OCR’da yok.`)
         }
-        if (stage === 'onnx' && quoted) {
-          ctx.setMethod?.('ONNX OCR')
-          log('info', `“${quoted}” ONNX aşamasında aynı birleşik taramada aranıyor.`)
-          const scan = await onnxReady()
-          const side = scan.sideCount ? ` +yan ${scan.sideCount}` : ''
-          log('info', `ONNX ${scan.onnxAdded ?? 0}${side} satır.`)
-          const pick = quoteOnScreen(scan, quoted, scan.window || win)
-          if (pick) {
-            const reader = pick.item.src === 'ocr' ? (pick.item.ocrSources ?? ['onnx']).join('+') : 'uygulama öğesi'
-            return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'onnx', pick.target, pick.item)
-          }
-          log('info', `“${quoted}” ONNX’te yok.`)
-        }
         if (stage === 'list' && hasText) {
           ctx.setMethod?.('Kelime listesi')
-          const scan = onnxScan ?? (await windowsScan())
+          const scan = await windowsScan()
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
           const pick = await pickFrom(node, scan, scan.window || win, true, true)
           if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)

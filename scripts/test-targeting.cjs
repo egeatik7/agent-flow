@@ -34,9 +34,11 @@ test('a recorded list choice refines the click region inside a merged OCR line',
   const b=bundle(['list'],[row],{model:true,node:{prompt:'Click save inside this row'},events:[{kind:'model',source:'list',value:{id:1,text:'Kaydet'}}]});
   const r=await replayTrace(b); assert.equal(r.result.x,330);
 });
-test('ONNX fallback uses its own fresh boxes without sending input',async()=>{
-  const b=bundle(['windows','onnx'],[item(1,'İptal',10,10)],{events:[{kind:'observation',source:'onnx',scan:{area:{x:0,y:0,w:1920,h:1080},items:[item(4,'Kaydet',500,300)],image:null,window:'Fixture'}}]});
-  const r=await replayTrace(b); assert.equal(r.result.x,550); assert.equal(r.inputCalls,0);
+test('combined OCR scan uses its own fresh boxes without sending input',async()=>{
+  // Nubbo-XP-Navigator: Windows + ONNX tek birleşik ayar oldu; ONNX kelimeleri AYNI gözlemin içinde gelir.
+  // Eski test ayrı bir 'onnx' olayı bekliyordu; güvence korunuyor: TAZE kutular kullanılır, girdi GÖNDERİLMEZ.
+  const b=bundle(['windows'],[item(1,'İptal',10,10),item(4,'Kaydet',500,300)]);
+  const r=await replayTrace(b); assert.equal(r.result.x,550); assert.equal(r.result.y,315); assert.equal(r.inputCalls,0);
 });
 test('a recorded model answer choosing an absent candidate never produces a target',async()=>{
   const b=bundle(['list'],[item(1,'Kaydet',100,100)],{model:true,node:{prompt:'Choose save'},events:[{kind:'model',source:'list',value:{id:99,reason:'wrong ID'}}]});

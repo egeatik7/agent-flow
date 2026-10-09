@@ -1,7 +1,8 @@
 /** Find order and the prompts the models actually receive. Empty saved text means the built-in prompt. */
 
-export const FIND_STAGE_IDS = ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'] as const
-export type FindStageId = (typeof FIND_STAGE_IDS)[number]
+export const FIND_STAGE_IDS = ['chrome', 'uia', 'icon', 'windows', 'list', 'tars', 'offset'] as const
+// 'onnx' remains accepted only for old saved settings and API clients.
+export type FindStageId = (typeof FIND_STAGE_IDS)[number] | 'onnx'
 
 export type PromptId = 'list' | 'tars' | 'screen' | 'initiative' | 'reaction' | 'stall'
 
@@ -9,8 +10,7 @@ export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt
   { id: 'chrome', title: 'Chrome sayfası', note: '9222 portundaki sayfanın yazıları. Tam eşleşmezse kelime listesi yazı modeline gider.' },
   { id: 'uia', title: 'Kayıtlı öğe', note: 'Yakalanan düğmenin kendi adı. LLM yok.' },
   { id: 'icon', title: 'Kayıtlı resim', note: 'Simge resmi yerelde aranır. LLM yok.' },
-  { id: 'windows', title: 'Windows OCR', note: 'Yalnızca tırnak içindeki yazıyı rampalı karede ve 90° turda arar. Tırnak yoksa atlanır. Bulunamazsa sıradaki aşama, yani model.' },
-  { id: 'onnx', title: 'ONNX OCR', note: 'Tırnak içindeki yazı Windows’ta yoksa aynı karede aranır. O da yoksa modele geçilir.' },
+  { id: 'windows', title: 'Windows + ONNX OCR', note: 'Tırnak içindeki hedefi iki okuyucunun ortak sonuçlarında arar; düz ve 90° kopyalar okunur. Bu kutu doğrudan hedef eşleştirmesini açıp kapatır. Kelime listesi aşamasının OCR taraması ayrıca devam eder.' },
   { id: 'list', title: 'Kelime listesi → yazı modeli', note: 'OCR’dan çıkan numaralı liste bu prompt ile yazı modeline gider.', prompt: 'list' },
   { id: 'tars', title: 'UI-TARS', note: 'Düz, rampasız ekran görüntüsü. {{hedef}} talimatın yerine yazılır.', prompt: 'tars' },
   { id: 'offset', title: 'Kayıtlı konum', note: 'Eski pencere içi nokta. LLM yok.' },
@@ -171,24 +171,35 @@ export type LlmPrompts = Partial<Record<PromptId, string>>
 const STAGE_SET = new Set<string>(FIND_STAGE_IDS)
 const PROMPT_SET = new Set<string>(Object.keys(DEFAULT_PROMPTS))
 
+function canonicalOrder(order: unknown, off: unknown): FindStageId[] {
+  const disabled = new Set(Array.isArray(off) ? off : [])
+  const legacyOcr = Array.isArray(order) && order.includes('onnx')
+  const preferred = legacyOcr ? order.find(id => (id === 'windows' || id === 'onnx') && !disabled.has(id)) : undefined
+  const seen = new Set<FindStageId>(), result: FindStageId[] = []
+  if (Array.isArray(order)) for (const raw of order) {
+    if (preferred && (raw === 'windows' || raw === 'onnx') && raw !== preferred) continue
+    const id = raw === 'onnx' ? 'windows' : raw
+    if (typeof id !== 'string' || !STAGE_SET.has(id) || seen.has(id as FindStageId)) continue
+    seen.add(id as FindStageId); result.push(id as FindStageId)
+  }
+  return result
+}
+function canonicalOff(order: unknown, off: unknown, complete: boolean): FindStageId[] {
+  const rawOrder = Array.isArray(order) ? order : []
+  const disabled = new Set(Array.isArray(off) ? off : [])
+  const legacy = rawOrder.includes('onnx') || disabled.has('onnx')
+  // Previously either reader-labelled stage could perform the same combined
+  // search. Keep that capability enabled when either old stage was enabled.
+  const windowsOff = legacy
+    ? (complete || rawOrder.includes('windows') ? disabled.has('windows') : true)
+      && (complete || rawOrder.includes('onnx') ? disabled.has('onnx') : true)
+    : disabled.has('windows')
+  return FIND_STAGE_IDS.filter(id => id === 'windows' ? windowsOff : disabled.has(id))
+}
 export function normalizeFind(order: unknown, off: unknown): { order: FindStageId[]; off: FindStageId[] } {
-  const seen = new Set<FindStageId>()
-  const next: FindStageId[] = []
-  if (Array.isArray(order)) {
-    for (const id of order) {
-      if (typeof id !== 'string' || !STAGE_SET.has(id) || seen.has(id as FindStageId)) continue
-      seen.add(id as FindStageId)
-      next.push(id as FindStageId)
-    }
-  }
-  for (const id of FIND_STAGE_IDS) if (!seen.has(id)) next.push(id)
-  const disabled: FindStageId[] = []
-  if (Array.isArray(off)) {
-    for (const id of off) {
-      if (typeof id === 'string' && STAGE_SET.has(id)) disabled.push(id as FindStageId)
-    }
-  }
-  return { order: next, off: disabled }
+  const next = canonicalOrder(order, off)
+  for (const id of FIND_STAGE_IDS) if (!next.includes(id)) next.push(id)
+  return { order: next, off: canonicalOff(order, off, true) }
 }
 
 export function normalizePrompts(raw: unknown): LlmPrompts {
@@ -205,8 +216,8 @@ export function normalizePrompts(raw: unknown): LlmPrompts {
 }
 
 export function activeFindOrder(order: FindStageId[], off: FindStageId[]): FindStageId[] {
-  const disabled = new Set(off)
-  return order.filter((id) => !disabled.has(id))
+  const disabled = new Set(canonicalOff(order, off, false))
+  return canonicalOrder(order, off).filter(id => !disabled.has(id))
 }
 
 export function promptOf(prompts: LlmPrompts | undefined, id: PromptId): string | undefined {

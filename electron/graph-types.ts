@@ -252,7 +252,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ocrEngine: 'combined',
   valueLo: 0.15,
   valueHi: 0.8,
-  findOrder: ['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset'],
+  findOrder: ['chrome', 'uia', 'icon', 'windows', 'list', 'tars', 'offset'],
   findOff: ['list'],
   llmPrompts: {},
   agentPermission: 'ask',

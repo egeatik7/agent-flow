@@ -9,12 +9,13 @@ let root: Root, host: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+  vi.useFakeTimers()
   localStorage.clear()
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(700)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(500)
 })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals() })
 const click = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
 const button = (text: string, selector = 'button') => [...host.querySelectorAll(selector)].find(el => el.textContent === text)!
 const blank = async () => {
@@ -35,37 +36,62 @@ function seed() {
   localStorage.setItem('xp-agent-canvases', JSON.stringify(book))
 }
 describe('XP workspace real DOM interactions', () => {
-  it('opens a saved canvas, jumps to the deepest leaf and restores the expanded tree on a blank click', async () => {
+  it('shows one package scope, supports click/dual click and navigates back, forward and out without selection', async () => {
     seed(); await act(async () => root.render(createElement(App)))
     expect(host.querySelectorAll('.welcome-card')).toHaveLength(3)
     expect(host.querySelectorAll('.canvas-tab')).toHaveLength(0)
     expect(host.querySelector('.theme-picker')).toBeNull()
     expect(host.querySelector('.library-brand .nubbo-logo')).not.toBeNull()
-    expect(host.querySelector('.hierarchy-content .nubbo-logo')).toBeNull()
-    await click(host.querySelectorAll('.welcome-card')[0])
-    expect(host.querySelector('[role="dialog"]')).not.toBeNull()
-    await click(button('Aç', '.workspace-picker button'))
-    expect(host.querySelector('[role="dialog"]')).toBeNull()
-    await blank(); await click(button('Expand All'))
-    expect(host.querySelectorAll('[role="treeitem"]')).toHaveLength(7)
-    await click(host.querySelector('.hierarchy-node[title^="Deep leaf —"]')!)
-    const node = host.querySelector('[data-node-id="deep-leaf"]') as HTMLElement
-    expect(node.classList.contains('selected')).toBe(true)
-    expect(host.querySelectorAll('.agent-node')).toHaveLength(2)
-    expect(host.querySelector('.agent-node.kind-package')).toBeNull()
-    // The real focus effect must center even a node far outside the initial viewport.
-    const stage = host.querySelector('.canvas-inner') as HTMLElement
-    const x = 350 - (4000 + parseFloat(node.style.width) / 2)
-    const y = 250 - (2000 + parseFloat(node.style.height) / 2)
-    expect(stage.style.transform).toBe(`translate(${x}px, ${y}px) scale(1)`)
+    await click(host.querySelectorAll('.welcome-card')[0]); await click(button('Aç', '.workspace-picker button'))
     await blank()
-    expect((host.querySelector('.hierarchy-content') as HTMLElement).style.display).not.toBe('none')
-    expect(host.querySelectorAll('[role="treeitem"]')).toHaveLength(7)
-    await click(button('Collapse All'))
-    expect(host.querySelectorAll('[role="treeitem"]')).toHaveLength(2)
+    const enter = async (title: string) => {
+      await click(host.querySelector(`.navigator-node[title^="${title} —"]`)!)
+      await act(async () => { vi.advanceTimersByTime(301) })
+    }
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(2)
+    await enter('Outer package')
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(3)
+    expect(host.querySelector('.navigator-node[title^="Deep leaf —"]')).toBeNull()
+    await enter('Inner package')
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(2)
+    expect(host.querySelectorAll('.agent-node.selected')).toHaveLength(0)
+    await click(host.querySelector('.navigator-node[title^="Deep leaf —"]')!)
+    const node = host.querySelector('[data-node-id="deep-leaf"]') as HTMLElement
+    expect(node.classList.contains('selected')).toBe(false)
+    const stage = host.querySelector('.canvas-inner') as HTMLElement
+    const x = 350 - (4000 + parseFloat(node.style.width) / 2), y = 250 - (2000 + parseFloat(node.style.height) / 2)
+    expect(stage.style.transform).toBe(`translate(${x}px, ${y}px) scale(1)`)
+    await act(async () => { host.querySelector('.navigator-node[title^="Deep leaf —"]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })) })
+    expect(node.classList.contains('selected')).toBe(true)
+    expect(host.querySelector('.node-inspector')).not.toBeNull()
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(2)
+    await blank(); expect(host.querySelector('.node-inspector')).toBeNull()
+    expect(button('Expand All')).toBeUndefined(); expect(button('Collapse All')).toBeUndefined(); expect(button('Tuval hiyerarşisi')).toBeUndefined()
+    await click(host.querySelector('button[aria-label="Dışarı"]')!)
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(3)
+    expect(host.querySelectorAll('.agent-node.selected')).toHaveLength(0)
+    await click(host.querySelector('button[aria-label="Geri"]')!)
+    expect(host.querySelector('[data-node-id="deep-leaf"]')).not.toBeNull()
+    expect(host.querySelectorAll('.agent-node.selected')).toHaveLength(0)
+    await click(host.querySelector('button[aria-label="İleri"]')!)
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(3)
     await click(button('Tuvaller', '.tabs button'))
     expect((host.querySelector('.canvas-tab-content') as HTMLElement).style.display).not.toBe('none')
     expect(host.querySelector('.canvas-tab-content')!.lastElementChild?.className).toBe('library-brand')
+  })
+  it('double clicking a package opens its settings instead of entering or hitting a child row', async () => {
+    seed(); await act(async () => root.render(createElement(App)))
+    await click(host.querySelectorAll('.welcome-card')[0]); await click(button('Aç', '.workspace-picker button')); await blank()
+    const row = host.querySelector('.navigator-node[title^="Outer package —"]')!
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }))
+      vi.advanceTimersByTime(301)
+    })
+    expect(host.querySelectorAll('.navigator-node')).toHaveLength(2)
+    expect(host.querySelector('[data-node-id="outer"].selected')).not.toBeNull()
+    expect(host.querySelector('.node-inspector')).not.toBeNull()
   })
   it('opens an automation from the welcome picker and creates a new canvas from its card', async () => {
     seed(); await act(async () => root.render(createElement(App)))

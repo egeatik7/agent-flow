@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { DEFAULT_FIND_OFF, normalizeFind } from '../../electron/llm-flow'
 import {
   DEFAULT_PROMPTS,
   EXTRA_PROMPTS,
@@ -24,13 +25,14 @@ function move(list: FindStageId[], index: number, dir: -1 | 1): FindStageId[] {
 }
 
 export default function LlmPanel(p: Props) {
-  const [order, setOrder] = useState<FindStageId[]>(p.settings.findOrder)
-  const [off, setOff] = useState<FindStageId[]>(p.settings.findOff)
+  const [order, setOrder] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).order)
+  const [off, setOff] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).off)
   const [prompts, setPrompts] = useState<LlmPrompts>({ ...p.settings.llmPrompts })
 
   useEffect(() => {
-    setOrder(p.settings.findOrder)
-    setOff(p.settings.findOff)
+    const find = normalizeFind(p.settings.findOrder, p.settings.findOff)
+    setOrder(find.order)
+    setOff(find.off)
     setPrompts({ ...p.settings.llmPrompts })
   }, [p.settings])
 
@@ -49,7 +51,7 @@ export default function LlmPanel(p: Props) {
     })
     setOff((prev) => {
       const without = prev.filter((x) => x !== id)
-      return id === 'list' ? [...without, id] : without
+      return DEFAULT_FIND_OFF.includes(id) ? [...without, id] : without
     })
     setOrder((prev) => {
       const rest = prev.filter((x) => x !== id)
@@ -61,7 +63,7 @@ export default function LlmPanel(p: Props) {
 
   const resetAll = () => {
     setOrder(FIND_STAGES.map((s) => s.id))
-    setOff(['list'])
+    setOff([...DEFAULT_FIND_OFF])
     setPrompts({})
   }
 

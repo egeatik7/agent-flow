@@ -460,8 +460,10 @@ export default function NodeCanvas(p: Props) {
   useEffect(() => {
     if (!p.focus) return
     const el = scrollRef.current
+    if (!el) return
+    if (!p.focus.nodeId) { setViewNow({ x: 24, y: 24, z: 1 }); return }
     const node = byId.get(p.focus.nodeId)
-    if (!el || !node) return
+    if (!node) return
     const z = viewRef.current.z
     // A loop failure points at its visible header, not the empty centre of
     // a potentially enormous frame. Regular nodes are centred as a whole.

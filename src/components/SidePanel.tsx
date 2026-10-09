@@ -2,7 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import AgentTab from './AgentTab'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
-import NodeHierarchy from './NodeHierarchy'
+import NodeNavigator from './NodeNavigator'
 import TemplateInput from './TemplateInput'
 import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
 import {
@@ -17,6 +17,7 @@ import {
   type PathStep,
   type ClickMode,
   type ModelInfo,
+  type StepStatus,
 } from '../types'
 
 export type SideTab = 'node' | 'llm' | 'settings' | 'agent' | 'canvases'
@@ -26,8 +27,19 @@ type Props = {
   canvasPanel?: ReactNode
   canvasName?: string
   canvasKey?: string
-  onNavigateNode?: (id: string, path: string[]) => void
-  onShowHierarchy?: () => void
+  onNavigateNode?: (id: string, inspect: boolean) => void
+  locationName?: string
+  locationKey?: string
+  navigationDisabled?: boolean
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  onNavigateOut?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
+  canNavigateOut?: boolean
+  stepStatus?: Record<string, StepStatus>
+  highlightedNodeIds?: string[]
+  runPhase?: 'idle' | 'running' | 'stopped'
   onTab: (t: SideTab) => void
   settings: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
@@ -887,17 +899,18 @@ export default function SidePanel(p: Props) {
           </button>
         ))}
       </div>
-      <div className="panel-body">
-        {p.tab === 'node' && (p.selected || p.selectedEdge) && <>
-          <button className="xp-btn hierarchy-back" onClick={p.onShowHierarchy}>Tuval hiyerarşisi</button>
-          <NodeInspector {...p} />
-        </>}
-        <div className="hierarchy-content" style={{ display: p.tab === 'node' && !p.selected && !p.selectedEdge ? undefined : 'none' }}>
-          <NodeHierarchy key={p.canvasKey} graph={p.rootGraph ?? p.graph} name={p.canvasName} onNavigate={p.onNavigateNode} />
+      <div className="panel-body" style={{ overflow: p.tab === 'node' ? 'hidden' : undefined }}>
+        <div className="node-tab-content" style={{ display: p.tab === 'node' ? undefined : 'none' }}>
+          <NodeNavigator graph={p.graph} name={p.locationName ?? p.canvasName} locationKey={p.locationKey ?? p.canvasKey}
+            disabled={p.navigationDisabled} active={p.tab === 'node'} inspecting={!!p.selected || !!p.selectedEdge} onNavigate={p.onNavigateNode}
+            onBack={p.onNavigateBack} onForward={p.onNavigateForward} onOut={p.onNavigateOut}
+            canBack={p.canNavigateBack} canForward={p.canNavigateForward} canOut={p.canNavigateOut}
+            stepStatus={p.stepStatus} highlightedNodeIds={p.highlightedNodeIds} runPhase={p.runPhase} />
+          {p.tab === 'node' && (p.selected || p.selectedEdge) && <fieldset className="node-inspector" disabled={p.disabled}><NodeInspector {...p} /></fieldset>}
         </div>
-        {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
-        {p.tab === 'settings' && <Settings {...p} />}
-        {p.tab === 'agent' && <AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} />}
+        {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} onSave={p.onSaveSettings} /></fieldset>}
+        {p.tab === 'settings' && <fieldset className="panel-fields" disabled={p.disabled}><Settings {...p} /></fieldset>}
+        {p.tab === 'agent' && <fieldset className="panel-fields" disabled={p.disabled}><AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} /></fieldset>}
         {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}<div className="library-brand"><NubboMascot /></div></div>}
       </div>
     </aside>

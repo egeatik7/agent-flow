@@ -223,29 +223,50 @@ async function select(renderer: ReactTestRenderer, path: string[], id: string) {
 }
 const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
 
-describe('App hierarchy navigation preserves canvas work', () => {
-  it('jumps through nested packages, recenters repeated selections and restores hierarchy on blank clicks', async () => {
+describe('App scoped navigation preserves canvas work', () => {
+  it('retains the Start marker in a newly created empty package and resets history when switching canvases', async () => {
+    scenario(0); const r = await mount()
+    await act(async () => { r.root.findByType(NodeCanvas).props.onAddAt('package', 2000, 1000) })
+    const pack = r.root.findByType(NodeCanvas).props.graph.nodes.find((n: AgentNode) => n.kind === 'package')!
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(pack.id, false) })
+    expect(r.root.findByType(NodeCanvas).props.graph.nodes.map((n: AgentNode) => n.kind)).toEqual(['start'])
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBeNull()
+    expect(r.root.findByType(SidePanel).props.canNavigateBack).toBe(true)
+    await act(async () => { r.root.findByType(CanvasTabs).props.onSelect(book.tabs[2].id) })
+    expect(r.root.findByType(SidePanel).props.canNavigateBack).toBe(false)
+    expect(r.root.findByType(SidePanel).props.canNavigateForward).toBe(false)
+    expect(r.root.findByType(SidePanel).props.canNavigateOut).toBe(false)
+  })
+  it('enters packages unselected, centers single-clicked nodes and opens double-clicked settings', async () => {
     const fixture = scenario(2), r = await mount()
     const original = structuredClone(r.root.findByType(SidePanel).props.rootGraph)
-    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
-    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBe(fixture.selected.id)
+    for (const id of fixture.path) {
+      await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(id, false) })
+      expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBeNull()
+    }
     expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey).slice(1)).toEqual(fixture.path)
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, false) })
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBeNull()
+    expect(r.root.findByType(NodeCanvas).props.focus.nodeId).toBe(fixture.selected.id)
     const firstFocus = r.root.findByType(NodeCanvas).props.focus.at
-    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, true) })
     expect(r.root.findByType(NodeCanvas).props.focus.at).toBeGreaterThan(firstFocus)
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBe(fixture.selected.id)
     expect(r.root.findByType(SidePanel).props.rootGraph).toEqual(original)
     await act(async () => { r.root.findByType(NodeCanvas).props.onMoveNodes({ [fixture.selected.id]: { x: 4242, y: 2222 } }) })
-    const rootNodeId = original.nodes[0].id
-    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(rootNodeId, []) })
-    expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey)).toEqual([book.activeId])
-    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateOut() })
+    expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey).slice(1)).toEqual(fixture.path.slice(0, -1))
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBeNull()
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateBack() })
     const selected = r.root.findByType(NodeCanvas).props.graph.nodes.find((n: AgentNode) => n.id === fixture.selected.id)
     expect(selected).toMatchObject({ x: 4242, y: 2222 })
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBeNull()
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateForward() })
+    expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey).slice(1)).toEqual(fixture.path.slice(0, -1))
     await act(async () => { r.root.findByType(SidePanel).props.onTab('canvases') })
     await act(async () => { r.root.findByType(NodeCanvas).props.onSelectNode(null) })
     expect(r.root.findByType(SidePanel).props.tab).toBe('node')
     expect(r.root.findByType(SidePanel).props.selected).toBeNull()
-    expect(r.root.findByType(SidePanel).props.rootGraph.nodes).toHaveLength(original.nodes.length)
   })
 })
 
@@ -388,11 +409,16 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     let canvas = r.root.findByType(NodeCanvas)
     expect(canvas.props.runPhase).toBe('running')
     expect(canvas.props.highlightedNodeIds).toEqual([s.path[0]])
+    expect(r.root.findByType(SidePanel).props.navigationDisabled).toBe(false)
+    expect(r.root.findByType(SidePanel).props.highlightedNodeIds).toEqual(canvas.props.highlightedNodeIds)
     const seenEdges = [...canvas.props.traversedEdges]
     for (let i = 0; i < s.path.length; i++) {
-      await act(async () => { r.root.findByType(NodeCanvas).props.onEnterPackage(s.path[i]) })
+      await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(s.path[i], false) })
       canvas = r.root.findByType(NodeCanvas)
       expect(canvas.props.highlightedNodeIds).toEqual([s.path[i + 1] ?? s.selected.id])
+      expect(r.root.findByType(SidePanel).props.highlightedNodeIds).toEqual(canvas.props.highlightedNodeIds)
+      expect(r.root.findByType(SidePanel).props.runPhase).toBe('running')
+      expect(canvas.props.selectedNodeId).toBeNull()
       expect([...canvas.props.traversedEdges]).toEqual(seenEdges)
     }
     const exit = () => r.root.findAllByType('button').find(b => b.props.className?.includes('package-exit'))!
@@ -402,6 +428,8 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     await act(async () => { r.root.findByType(Toolbar).props.onStop(); release(); await Promise.resolve() })
     canvas = r.root.findByType(NodeCanvas)
     expect(canvas.props.runPhase).toBe('stopped')
+    expect(r.root.findByType(SidePanel).props.runPhase).toBe('stopped')
+    expect(r.root.findByType(SidePanel).props.highlightedNodeIds).toEqual(canvas.props.highlightedNodeIds)
     expect(canvas.props.highlightedNodeIds).toEqual([s.selected.id])
     expect(canvas.props.selectedNodeId).toBe(s.selected.id)
     expect(canvas.props.focus.nodeId).toBe(s.selected.id)
