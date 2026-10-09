@@ -58,17 +58,21 @@ describe('Condition uses the shared resolver without desktop input', () => {
     const n = { ...condition('İş bitti mi?'), locator: { controlType: 'Button', name: 'Saved', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
     expect(await make().exists(n.text, n)).toBe(false)
   })
-  it('a visual-only condition can find its target but never click or dismiss', async () => {
-    respond({ intent: 'target', x: 500, y: 500, reason: 'completion evidence' })
+  it('a visual-only configuration uses OCR/text evidence instead of screenshot analysis', async () => {
+    state.items = [row('Bitti')]; respond({ id: 1, reason: 'completion evidence' })
     expect(await make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).toBe(true)
-    expect(state.scans[0]).toMatchObject({ readOnly: true, ocr: false })
-    expect(state.requests[0]).toContain('Dismissals enabled: NO')
+    expect(state.scans[0]).toMatchObject({ readOnly: true, uia: false, image: 'none', ocrEngine: 'combined' })
+    expect(state.requests[0]).toContain('READ-ONLY existence condition')
+    expect(state.requests[0]).not.toContain('image_url')
   })
-  it('missing visual target returns false without opening a menu', async () => {
-    respond({ intent: 'missing', reason: 'not visible' })
+  it('missing OCR evidence returns false without opening a menu or using visual fallback', async () => {
+    state.items = [row('BAŞLAMADI')]; respond({ id: null, reason: 'not finished' })
     expect(await make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).toBe(false)
+    expect(state.requests).toHaveLength(1)
+    expect(state.requests[0]).not.toContain('image_url')
   })
-  it('visual API failures propagate instead of being reported as absence', async () => {
+  it('text API failures propagate instead of being reported as absence', async () => {
+    state.items = [row('Bitti')]
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, text: async () => 'invalid key' })))
     await expect(make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).rejects.toThrow('401')
   })
@@ -93,9 +97,39 @@ describe('Condition uses the shared resolver without desktop input', () => {
     await expect(make().exists('"Done"', condition('"Done"'))).rejects.toThrow('capture failed')
     await expect(make(undefined, '').exists('İş bitti mi?', condition('İş bitti mi?'))).rejects.toThrow('API anahtarı')
   })
-  it('captured targets without a text instruction retain read-only lookup', async () => {
+  it('captured text without an instruction is found by OCR, never by UIA', async () => {
+    state.items = [row('Saved')]
     const n = { ...condition(''), locator: { controlType: 'Button', name: 'Saved', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
     expect(await make(undefined, '').exists('', n)).toBe(true)
-    expect(state.scans).toEqual([])
+    expect(state.scans[0]).toMatchObject({ readOnly: true, uia: false, image: 'none' })
+    state.items = [{ ...row('Saved'), src: 'uia', type: 'Button' }]
+    expect(await make(undefined, '').exists('', n)).toBe(false)
+  })
+  it('BAŞLAMADI cannot turn into Yes through UI-TARS after the text model says No', async () => {
+    state.items = [row('BAŞLAMADI')]
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      state.requests.push(String(init.body))
+      const content = state.requests.length === 1
+        ? JSON.stringify({ id: null, reason: 'BAŞLAMADI is not BİTTİ' })
+        : "Thought: I see BAŞLAMADI\nIntent: target\nAction: click(start_box='(644,215)')"
+      return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) }
+    }))
+    expect(await make(['windows', 'onnx', 'list', 'tars', 'offset']).exists('BİTTİ', condition('BİTTİ'))).toBe(false)
+    expect(state.requests).toHaveLength(1)
+  })
+  it('quoted and semantic conditions ignore UIA-only text and never send screenshots', async () => {
+    state.items = [{ ...row('Bitti'), src: 'uia', type: 'Pane' }]
+    respond({ id: 1, reason: 'UIA says finished' })
+    expect(await make().exists('"Bitti"', condition('"Bitti"'))).toBe(false)
+    expect(await make(['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset']).exists('Bitti', condition('Bitti'))).toBe(false)
+    expect(state.requests).toHaveLength(1)
+    expect(state.requests[0]).not.toContain('#1 Pane')
+    expect(state.requests[0]).not.toContain('image_url')
+    expect(state.scans.every(s => (s as {image: string; uia: boolean}).image === 'none' && (s as {uia: boolean}).uia === false)).toBe(true)
+  })
+  it('fast/local-only stages do not re-enable model calls for semantic conditions', async () => {
+    state.items = [row('Bitti')]; respond({ id: 1 })
+    expect(await make(['uia', 'windows', 'onnx']).exists('Bitti', condition('Bitti'))).toBe(false)
+    expect(state.requests).toHaveLength(0)
   })
 })

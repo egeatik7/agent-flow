@@ -196,7 +196,7 @@ export function createAgent(ctx: AgentContext) {
     log('warn', `Hedef pencere “${res.missingWindow}” açık değil, tüm ekran okunuyor. Kalıcı çözüm: Ayarlar > Hedef pencere > “Tüm ekran” > Kaydet.`)
   }
 
-  async function scanFor(withImage: boolean, wide = false, deferOnnx = false, readOnly = false, targetTrace = false): Promise<ScanResult & { shot?: string }> {
+  async function scanFor(withImage: boolean, wide = false, deferOnnx = false, readOnly = false, targetTrace = false, ocrOnly = false): Promise<ScanResult & { shot?: string }> {
     const s = getSettings()
     const res = await bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
@@ -206,6 +206,7 @@ export function createAgent(ctx: AgentContext) {
       ocrEngine: 'combined',
       deferOnnx,
       readOnly,
+      ...(ocrOnly ? { uia: false } : {}),
     })
     warnMissingWindow(res)
     noteCjk(res, 'scan')
@@ -262,7 +263,7 @@ export function createAgent(ctx: AgentContext) {
         kind: node.kind,
         scan: scopedScan,
         stepTitle: NODE_SPECS[node.kind].label,
-        sendImage: s.sendScreenshot && !!scan.image,
+        sendImage: node.kind !== 'condition' && s.sendScreenshot && !!scan.image,
         onImageFallback: (m) => log('warn', m),
         hint: describeMemory(mem) || undefined,
         system: promptOf(s.llmPrompts, 'list'),
@@ -304,7 +305,7 @@ export function createAgent(ctx: AgentContext) {
             kind: node.kind,
             scan: scopedScan,
             stepTitle: NODE_SPECS[node.kind].label,
-            sendImage: s.sendScreenshot && !!scan.image,
+            sendImage: node.kind !== 'condition' && s.sendScreenshot && !!scan.image,
             hint: `${describeMemory(mem)}. Bu tur yazı eşleşmesi #${hit.item.id} “${hit.item.text}” öğesini buldu ama ${why}. Talimata göre doğru öğe hangisi?`,
             system: promptOf(s.llmPrompts, 'list'),
           })
@@ -350,7 +351,14 @@ export function createAgent(ctx: AgentContext) {
     // Quotes embedded inside a descriptive condition must not erase its numbers/negations.
     const marked = node.kind === 'condition' ? null : extractTarget(prompt)
     const quoted = marked?.quoted ? marked.text : ''
-    const order = activeFindOrder(s.findOrder, s.findOff)
+    const requestedOrder = activeFindOrder(s.findOrder, s.findOff)
+    // Conditions reuse the Click resolver and its OCR/list handlers, but may never
+    // use a picture, UIA/DOM control, saved icon or coordinate as state evidence.
+    const ocrOnly = node.kind === 'condition'
+    const order = ocrOnly ? requestedOrder.filter(stage => ['windows', 'onnx', 'list'].includes(stage)) : requestedOrder
+    // A visual-only configuration still has an OCR/text alternative for conditions.
+    // Fast find removes tars before this point, so it does not enable a model call.
+    if (ocrOnly && requestedOrder.includes('tars') && !order.includes('list')) order.push('list')
     trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey, memory: memoFor(node) })
     const resolved = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved => {
       if (asksDesktopShortcut(prompt) && winScan && taskbarItem(winScan, { x: target.x, y: target.y, w: 0, h: 0 })) {
@@ -375,12 +383,12 @@ export function createAgent(ctx: AgentContext) {
 
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(false, wide, false, readOnly, true)
+        winScan = await scanFor(false, wide, false, readOnly, !ocrOnly, ocrOnly)
         const { shot: _temporary, ...snapshot } = winScan
         trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
         // A diagnostic screenshot must not become a new model input. This path
         // normally scans with image:none; keep the live resolver's inputs identical.
-        winScan = { ...winScan, image: null }
+        winScan = { ...winScan, image: null, ...(ocrOnly ? { items: winScan.items.filter(item => item.src === 'ocr') } : {}) }
         shotFile = winScan.shot || ''
         seenItems = winScan.items
       }
@@ -1619,21 +1627,17 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      if (!instruction && node.locator) {
-        const how = await savedTargetVisible(node)
-        checkStopped()
-        return how ? found(how) : false
-      }
-      if (!instruction) return false
       const literal = instruction.match(/^(?:"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“)$/)
-      if (literal) {
-        const wanted = literal.slice(1).find(Boolean)!.trim()
-        const res = await bridge.scan({ image: 'none', fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
+      const savedText = !instruction ? (node.locator?.text || node.locator?.name || '').trim() : ''
+      if (literal || savedText) {
+        const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
+        const res = await bridge.scan({ image: 'none', uia: false, fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
         checkStopped()
         noteCjk(res, node.id)
-        const hit = containsTextStrict(res.items, wanted)
+        const hit = containsTextStrict(res.items.filter(item => item.src === 'ocr'), wanted)
         return hit ? found(`birleşik OCR “${hit.text}”`) : false
       }
+      if (!instruction) return false
       if (!getSettings().apiKey) throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
       try {
         // Same target resolver as Click, without dispatch, popup recovery or memory writes.

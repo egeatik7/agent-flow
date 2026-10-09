@@ -223,17 +223,22 @@ function openFailure(nodeId: string, kind: 'step' | 'run', message?: string): vo
   // Adım olayı yolu da buradan geçer, o yüzden koruma tek yerde durur.
   if (stopReason() === 'user') return
   const snap = snapshot()
+  // A failed output can arrive after done cleared current. Resolve the failure's
+  // explicit ID rather than losing its title, package path and current loop item.
+  const failedId = nodeId || snap.nodeId || ''
+  const place = failedId ? findPlace(run.graph, failedId) : null
+  const context = failedId ? contextOf(run.graph, failedId) : null
   frozen = {
     runId: run.id,
     failureId: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     kind,
     at: Date.now(),
-    nodeId: nodeId || snap.nodeId || '',
-    nodeTitle: snap.nodeTitle ?? '',
+    nodeId: failedId,
+    nodeTitle: place?.node.title ?? snap.nodeTitle ?? '',
     error: message ?? '',
     errorPending: !message,
-    loops: snap.loops,
-    packagePath: snap.packagePath,
+    loops: context?.loops ?? snap.loops,
+    packagePath: context?.packagePath ?? snap.packagePath,
     steps: [...steps].slice(-20),
     log: [...lines].slice(-40),
     shot: '',

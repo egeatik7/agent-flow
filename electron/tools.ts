@@ -1053,7 +1053,7 @@ const stepRun: ToolDef = {
           // Only the transient step highlight reaches the canvas: a probe writes nothing.
           if (channel === 'agent:step' && !onBranch) ctx.sendStep(payload)
         },
-        settings: ctx.getSettings,
+        settings: () => fast ? withFastFind(ctx.getSettings()) : ctx.getSettings(),
         shouldStop: () => timedOut || ctx.userStop(),
         setLoop: () => {},
         setMethod: () => {},

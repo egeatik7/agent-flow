@@ -20,6 +20,7 @@ import {
   noteReview,
   noteRunFailed,
   noteStep,
+  noteUserStop,
   probing,
   setDebugRun,
   setErrorStopHook,
@@ -580,6 +581,7 @@ async function runFlow(
     }
     agent.beginRun(shotDir)
     globalShortcut.register(STOP_HOTKEY, () => {
+      if (running) noteUserStop()
       stopRequested = true
     })
     awake = powerSaveBlocker.start('prevent-display-sleep')
@@ -901,6 +903,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return dir
   })
   ipcMain.handle('agent:stop', () => {
+    if (running) noteUserStop()
     stopRequested = true
     return true
   })

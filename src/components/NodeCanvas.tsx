@@ -18,6 +18,7 @@ import {
 } from '../types'
 import { allMembers, ancestors, frameInput, frameOutput, frameRect, ownerOf, type Rect } from '../../electron/groups'
 import ProbeMark from './ProbeMark'
+import { packageAppearances } from '../lib/package-appearance'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
 
@@ -143,6 +144,7 @@ export default function NodeCanvas(p: Props) {
   graphRef.current = p.graph
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
+  const packageLooks = useMemo(() => packageAppearances(p.graph), [p.graph.nodes])
   const hasStart = p.graph.nodes.some((n) => n.kind === 'start')
   const addableKinds = NODE_KINDS.filter((k) => k !== 'package' && k !== 'browser' && k !== 'waitFile' && k !== 'moveFile' && (k !== 'start' || !hasStart))
 
@@ -704,6 +706,7 @@ export default function NodeCanvas(p: Props) {
         {p.graph.nodes.map((n) => {
           if (n.kind === 'loop') return null
           const spec = NODE_SPECS[n.kind]
+          const packageLook = packageLooks.get(n.id)
           const st = p.stepStatus[n.id] ?? 'idle'
           const cls = [
             'agent-node',
@@ -731,8 +734,13 @@ export default function NodeCanvas(p: Props) {
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
               }}
             >
-              <div className="node-head" style={{ background: headerGradient(spec.color) }}>
-                <span className="node-icon">{spec.icon}</span>
+              <div className="node-head" style={{ background: headerGradient(packageLook?.color ?? spec.color) }}>
+                <span className="node-icon">{packageLook ? (
+                  <svg className="package-symbol" viewBox="0 0 16 16" role="img" aria-label={`Paket simgesi ${packageLook.badge}`}>
+                    <path d={packageLook.symbol} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+                  </svg>
+                ) : spec.icon}</span>
+                {packageLook && <span className="package-badge" title="Bu tuvaldeki paket ayıracı">{packageLook.badge}</span>}
                 <span className="node-title">{n.title}</span>
                 {statusLabel(n.id, st) && <span className={`status-chip ${statusClass(n.id, st)}`}>{statusLabel(n.id, st)}</span>}
               </div>

@@ -210,9 +210,13 @@ export default function App() {
   const patchNode = useCallback((id: string, patch: Partial<AgentNode>) => {
     // Agent events arrive before runAgent resolves: retain their changes synchronously
     // before a sequence switches the editor to the next canvas.
-    const next = mapNodes(graphRef.current, n => n.id === id ? { ...n, ...patch } : n)
-    graphRef.current = next
-    setGraph(next)
+    const full = rooted(graphRef.current, stackRef.current)
+    const next = mapNodes(full, n => n.id === id ? { ...n, ...patch } : n)
+    const projected = projectView(next, stackRef.current)
+    graphRef.current = projected.view
+    stackRef.current = projected.stack
+    setGraph(projected.view)
+    setStack(projected.stack)
   }, [])
 
   const refreshWindows = useCallback(async () => {

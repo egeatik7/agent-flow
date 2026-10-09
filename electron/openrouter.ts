@@ -330,7 +330,7 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
       content: img
         ? [
             { type: 'text', text: `${listText}\n\nScreenshot labels may show original phrase/control IDs; use the list coordinates to select an OCR word ID.` },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${scan.image!.data}` } },
+            imagePart(scan.image!),
           ]
         : listText,
     },

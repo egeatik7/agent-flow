@@ -21,6 +21,7 @@ vi.mock('../src/components/ConfirmDialog', () => ({ default: () => null }))
 
 let App: typeof import('../src/App').default
 let book: CanvasBook
+let lastSaved: CanvasBook | undefined
 let mounted: ReactTestRenderer | undefined
 let stopped = false
 let onPatch = (_p: unknown) => {}
@@ -32,7 +33,7 @@ const dispatched: { graph: AgentGraph; startId?: string; packagePath?: string[] 
 const api = {
   getSettings: async () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, maxSteps: 100 }),
   getCanvases: async () => structuredClone(book),
-  saveCanvases: async (_b: CanvasBook) => true,
+  saveCanvases: async (b: CanvasBook) => { lastSaved = structuredClone(b); return true },
   listWindows: async () => [],
   bootReady: () => {},
   onAgentLog: (_cb: (p: unknown) => void) => () => {},
@@ -78,6 +79,7 @@ afterEach(() => {
   dispatched.length = 0
   stopped = false
   beforeAction = undefined
+  lastSaved = undefined
 })
 
 let edgeId = 0
@@ -123,6 +125,27 @@ async function select(renderer: ReactTestRenderer, path: string[], id: string) {
 const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
 
 describe('Seçiliden Çalıştır: real App → bridge arguments → runner → next canvas', () => {
+  it.each([1, 2])('keeps outer loop patches and hidden sibling memory while inspecting %i package levels', async depth => {
+    const s = scenario(depth, true)
+    const sibling = { ...createNode('click', 0, 0), id: 'hidden-sibling' }
+    book.tabs[1].graph.nodes.push(sibling)
+    const view = await mount()
+    await select(view, s.path, s.selected.id)
+    const memory = [{ text: 'Saved', win: 'Fixture', type: 'Text', src: 'ocr' as const, rx: .3, ry: .4, at: 1 }]
+    await act(async () => {
+      onPatch({ id: s.loop!.id, patch: { startIndex: 2, loopIndex: 2 } })
+      onPatch({ id: sibling.id, patch: { memory } })
+      onPatch({ id: s.selected.id, patch: { text: 'UPDATED' } })
+    })
+    expect(view.root.findByType(NodeCanvas).props.graph.nodes.find((n: AgentNode) => n.id === s.selected.id).text).toBe('UPDATED')
+    await act(async () => { view.root.findByType(CanvasTabs).props.onSelect('right'); await Promise.resolve() })
+    const saved = lastSaved!.tabs.find(t => t.id === 'active')!.graph
+    expect(saved.nodes.find(n => n.id === s.loop!.id)?.startIndex).toBe(2)
+    expect(saved.nodes.find(n => n.id === sibling.id)?.memory).toEqual(memory)
+    let inner = saved
+    for (const id of s.path) inner = inner.nodes.find(n => n.id === id)!.inner!
+    expect(inner.nodes.find(n => n.id === s.selected.id)?.text).toBe('UPDATED')
+  })
   it.each([1, 2])('keeps %i package levels, skips prior actions, then runs only the canvas on the right', async depth => {
     const s = scenario(depth), r = await mount()
     await select(r, s.path, s.selected.id)
