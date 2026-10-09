@@ -235,31 +235,40 @@
   background-size: 11px 11px;
 }
 
-*::-webkit-scrollbar {
-  width: 16px;
-  height: 16px;
-}
-
-*::-webkit-scrollbar-track {
-  background: linear-gradient(90deg, #efece0, #e4e0d2);
-}
-
+/* XP scrollbars: one working arrow at each end, never empty double buttons. */
+*::-webkit-scrollbar { width:16px; height:16px; }
+*::-webkit-scrollbar-track { background:#f1efe2; box-shadow:inset 1px 0 #e2dfd1; }
 *::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #f4f8ff 0%, #b9cfee 45%, #7ea4d8 100%);
-  border: 1px solid #6e8ebc;
-  border-radius: 2px;
+  background:linear-gradient(90deg,#e5edfc,#c0d3f2 45%,#a6bee7);
+  border:1px solid #8da8d1; border-radius:2px; box-shadow:inset 1px 1px #f5f9ff;
 }
-
-*::-webkit-scrollbar-corner {
-  background: #ece9d8;
+*::-webkit-scrollbar-thumb:horizontal { background:linear-gradient(#e5edfc,#c0d3f2 45%,#a6bee7); }
+*::-webkit-scrollbar-thumb:hover { border-color:#6586ba; background:#b2caef; }
+*::-webkit-scrollbar-thumb:active { background:#91b1e3; }
+*::-webkit-scrollbar-corner { background:#ece9d8; }
+*::-webkit-scrollbar-button { display:none; width:16px; height:16px; }
+*::-webkit-scrollbar-button:vertical:decrement:start,
+*::-webkit-scrollbar-button:vertical:increment:end,
+*::-webkit-scrollbar-button:horizontal:decrement:start,
+*::-webkit-scrollbar-button:horizontal:increment:end {
+  display:block; border:1px solid #93acd3; border-radius:2px;
+  background-color:#d5e1f7; background-repeat:no-repeat; background-position:center; background-size:16px 16px;
+  box-shadow:inset 1px 1px #fff,inset -1px -1px #bdd0ed;
 }
-
-*::-webkit-scrollbar-button {
-  height: 16px;
-  width: 16px;
-  background: linear-gradient(180deg, #fff, #d7e4f7);
-  border: 1px solid #7f9db9;
+*::-webkit-scrollbar-button:vertical:decrement:start {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 10L8 5l5 5z' fill='%234d6185'/%3E%3C/svg%3E");
 }
+*::-webkit-scrollbar-button:vertical:increment:end {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 6h10l-5 5z' fill='%234d6185'/%3E%3C/svg%3E");
+}
+*::-webkit-scrollbar-button:horizontal:decrement:start {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M10 3v10L5 8z' fill='%234d6185'/%3E%3C/svg%3E");
+}
+*::-webkit-scrollbar-button:horizontal:increment:end {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3l5 5-5 5z' fill='%234d6185'/%3E%3C/svg%3E");
+}
+*::-webkit-scrollbar-button:hover { background-color:#e7efff; border-color:#6a8fc6; }
+*::-webkit-scrollbar-button:active { background-color:#b6ccee; box-shadow:inset 1px 1px #849ec4; }
 /* Package identities are drawn, not font glyphs: old flows work without a
    schema change and running/stopped outline colors keep their own meaning. */
 .package-symbol {

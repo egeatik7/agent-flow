@@ -223,6 +223,32 @@ async function select(renderer: ReactTestRenderer, path: string[], id: string) {
 }
 const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
 
+describe('App hierarchy navigation preserves canvas work', () => {
+  it('jumps through nested packages, recenters repeated selections and restores hierarchy on blank clicks', async () => {
+    const fixture = scenario(2), r = await mount()
+    const original = structuredClone(r.root.findByType(SidePanel).props.rootGraph)
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
+    expect(r.root.findByType(NodeCanvas).props.selectedNodeId).toBe(fixture.selected.id)
+    expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey).slice(1)).toEqual(fixture.path)
+    const firstFocus = r.root.findByType(NodeCanvas).props.focus.at
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
+    expect(r.root.findByType(NodeCanvas).props.focus.at).toBeGreaterThan(firstFocus)
+    expect(r.root.findByType(SidePanel).props.rootGraph).toEqual(original)
+    await act(async () => { r.root.findByType(NodeCanvas).props.onMoveNodes({ [fixture.selected.id]: { x: 4242, y: 2222 } }) })
+    const rootNodeId = original.nodes[0].id
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(rootNodeId, []) })
+    expect(JSON.parse(r.root.findByType(NodeCanvas).props.canvasKey)).toEqual([book.activeId])
+    await act(async () => { r.root.findByType(SidePanel).props.onNavigateNode(fixture.selected.id, fixture.path) })
+    const selected = r.root.findByType(NodeCanvas).props.graph.nodes.find((n: AgentNode) => n.id === fixture.selected.id)
+    expect(selected).toMatchObject({ x: 4242, y: 2222 })
+    await act(async () => { r.root.findByType(SidePanel).props.onTab('canvases') })
+    await act(async () => { r.root.findByType(NodeCanvas).props.onSelectNode(null) })
+    expect(r.root.findByType(SidePanel).props.tab).toBe('node')
+    expect(r.root.findByType(SidePanel).props.selected).toBeNull()
+    expect(r.root.findByType(SidePanel).props.rootGraph.nodes).toHaveLength(original.nodes.length)
+  })
+})
+
 describe('Seçiliden Çalıştır: real App → bridge arguments → runner → next canvas', () => {
   it('real Ctrl+C/Ctrl+V consumes the canvas point, selects fresh copies and creates no external edges', async () => {
     const s = scenario(1), r = await mount()

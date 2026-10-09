@@ -1,0 +1,52 @@
+/* XP workspace: opaque surfaces, Luna selection and warm folder icons. */
+.workspace-welcome { height:100%; overflow:auto; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; box-sizing:border-box; background:#eef3fb; }
+.welcome-heading { text-align:center; margin-bottom:22px; }
+.welcome-heading h2 { color:#17498b; font-size:21px; margin:0 0 8px; font-weight:500; }
+.welcome-heading p { color:#5c7089; margin:0; font-size:12px; }
+.welcome-cards { display:flex; flex-wrap:wrap; justify-content:center; gap:14px; width:100%; max-width:680px; }
+.welcome-card { flex:1 1 170px; max-width:212px; min-height:177px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; padding:20px 12px; border:1px solid #94accb; border-radius:4px; background:linear-gradient(#fff,#f2f5fb); box-shadow:0 2px 3px #b5c3d54d,inset 0 0 0 2px #fff; color:#17498b; cursor:pointer; font-family:Tahoma,sans-serif; }
+.welcome-card:not(:disabled):hover { border-color:#e4a032; box-shadow:inset 0 0 0 2px #ffd78b,0 2px 3px #b5c3d54d; }
+.welcome-card:focus-visible { outline:2px solid #316ac5; outline-offset:3px; }
+.welcome-card strong { font-size:13px; }
+.welcome-card > span { color:#67748b; font-size:11px; line-height:1.5; }
+.workspace-icon { width:64px; height:64px; flex-shrink:0; }
+.workspace-picker { width:440px; max-width:calc(100vw - 32px); }
+.workspace-picker-body { padding:12px; }
+.workspace-picker-body > p { margin:0 0 10px; }
+.workspace-picker-list { background:#fff; border:1px solid #7f9db9; padding:3px; min-height:140px; max-height:45vh; overflow:auto; }
+.workspace-picker-list > .hint { padding:10px; }
+.workspace-picker-row { display:flex; gap:9px; align-items:center; text-align:left; border:1px solid transparent; background:#fff; color:#172b48; padding:6px; width:100%; cursor:pointer; font:12px Tahoma,sans-serif; }
+.workspace-picker-row .workspace-icon { width:32px; height:32px; }
+.workspace-picker-row span { flex:1; overflow:hidden; text-overflow:ellipsis; }
+.workspace-picker-row small { font-size:10px; }
+.workspace-picker-row.selected { background:#316ac5; color:#fff; border-color:#204f9b; }
+.workspace-picker-row:focus-visible { outline:1px dotted currentColor; outline-offset:-3px; }
+.workspace-picker-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+.workspace-picker-actions button { min-width:75px; }
+.canvas-tab-content { flex-direction:column; }
+.library-brand { flex-shrink:0; display:flex; align-items:flex-end; justify-content:center; padding:4px 4px 0; margin-top:auto; }
+.hierarchy-content { flex:1; min-height:0; }
+.node-hierarchy h3 { margin:2px 0 9px; color:#17498b; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+.hierarchy-actions { display:flex; gap:5px; margin-bottom:10px; }
+.hierarchy-actions button { flex:1; font-size:11px; }
+.hierarchy-tree, .hierarchy-tree ul { list-style:none; padding:0; margin:0; }
+.hierarchy-tree { background:#fff; border:1px solid #7f9db9; padding:5px 3px; }
+.hierarchy-tree ul { padding-left:15px; }
+.hierarchy-row { display:flex; align-items:center; min-height:28px; }
+.hierarchy-toggle { border:1px solid #8293a7; background:#fff; color:#223c5c; width:13px; height:13px; flex-shrink:0; padding:0; margin:0 3px; line-height:10px; font:11px Tahoma,sans-serif; cursor:pointer; }
+.hierarchy-spacer { width:19px; flex-shrink:0; }
+.hierarchy-node { min-width:0; flex:1; border:0; background:transparent; display:flex; gap:5px; align-items:center; padding:5px 3px; color:#16283f; text-align:left; cursor:pointer; font:11px Tahoma,sans-serif; }
+.hierarchy-node > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hierarchy-node:hover { background:#e8f0ff; }
+.hierarchy-node:focus-visible { background:#316ac5; color:#fff; outline:1px dotted #fff; outline-offset:-2px; }
+.hierarchy-icon { min-width:16px; text-align:center; font-size:14px; }
+.hierarchy-icon.folder { color:#ba841b !important; text-shadow:0 -1px #ffdf7b; }
+.hierarchy-empty { padding:5px 0 5px 38px; color:#8090a4; font-size:11px; }
+.hierarchy-back { align-self:flex-start; margin-bottom:8px; }
+@media (max-height:650px) { .workspace-welcome { justify-content:flex-start; padding:20px 12px; } .welcome-heading { margin-bottom:14px; } .welcome-card { min-height:140px; padding:12px; } }
+
+@media (max-width:1000px) {
+  .library-brand .nubbo-brand { width:130px; }
+  .library-brand .nubbo-mascot { width:80px; height:80px; }
+  .library-brand .nubbo-ver { font-size:10px; }
+}

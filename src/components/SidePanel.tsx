@@ -2,6 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import AgentTab from './AgentTab'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
+import NodeHierarchy from './NodeHierarchy'
 import TemplateInput from './TemplateInput'
 import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
 import {
@@ -23,6 +24,10 @@ export type SideTab = 'node' | 'llm' | 'settings' | 'agent' | 'canvases'
 type Props = {
   tab: SideTab
   canvasPanel?: ReactNode
+  canvasName?: string
+  canvasKey?: string
+  onNavigateNode?: (id: string, path: string[]) => void
+  onShowHierarchy?: () => void
   onTab: (t: SideTab) => void
   settings: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
@@ -628,16 +633,7 @@ function NodeInspector(p: Props) {
       </div>
     )
   }
-  if (!n) {
-    return (
-      <div className="hint-block">
-        <p className="hint">Düzenlemek için bir node seç.</p>
-        <div className="nubbo-slot">
-          <NubboMascot />
-        </div>
-      </div>
-    )
-  }
+  if (!n) return null
   const spec = NODE_SPECS[n.kind]
 
   return (
@@ -892,11 +888,17 @@ export default function SidePanel(p: Props) {
         ))}
       </div>
       <div className="panel-body">
-        {p.tab === 'node' && <NodeInspector {...p} />}
+        {p.tab === 'node' && (p.selected || p.selectedEdge) && <>
+          <button className="xp-btn hierarchy-back" onClick={p.onShowHierarchy}>Tuval hiyerarşisi</button>
+          <NodeInspector {...p} />
+        </>}
+        <div className="hierarchy-content" style={{ display: p.tab === 'node' && !p.selected && !p.selectedEdge ? undefined : 'none' }}>
+          <NodeHierarchy key={p.canvasKey} graph={p.rootGraph ?? p.graph} name={p.canvasName} onNavigate={p.onNavigateNode} />
+        </div>
         {p.tab === 'llm' && <LlmPanel settings={p.settings} onSave={p.onSaveSettings} />}
         {p.tab === 'settings' && <Settings {...p} />}
         {p.tab === 'agent' && <AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} />}
-        {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}</div>}
+        {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}<div className="library-brand"><NubboMascot /></div></div>}
       </div>
     </aside>
   )

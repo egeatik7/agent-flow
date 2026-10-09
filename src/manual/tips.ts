@@ -383,12 +383,6 @@ function regionTip(el: Element): Tip | null {
       text: 'Her sekme ayrı bir akıştır. Ajan açık olanı çalıştırır. Çift tıklayınca adını değiştirirsin. Ctrl+A tuvaldeki her node’u seçer. Ctrl+C kopyalar, Ctrl+X keser, Ctrl+V yapıştırır. İki seçili node’un arasındaki ok durur; seçimin dışına çıkan ok kopar. Kopya başka bir tuvale ya da bir paketin içine de yapışır.',
     }
   }
-  if (el.classList.contains('ocr-pick') || el.classList.contains('ocr-opt')) {
-    return {
-      title: 'OCR',
-      text: 'Ekrandaki yazıyı hangi okuyucu versin. Windows: sistemin okuyucusu, ONNX yalnızca Çince ve kaçan İngilizceyi ekler. ONNX: ekran yazısı yalnızca ondan gelir; Windows’un Çinceye uydurduğu satır kullanılmaz. Uygulamanın kendi bildirdiği isimler iki seçenekte de durur. Yan duran yazı, önizleme kopyalandıktan sonra ayrı bir kareden okunur. Düz okumada kutusu olan satır tekrar eklenmez.',
-    }
-  }
   const kind = kindOfNode(el)
   if (kind && KIND[kind]) return KIND[kind]
   const port = portOf(el)

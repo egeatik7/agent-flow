@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
-import { useTheme } from './lib/theme'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
@@ -8,6 +7,8 @@ import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCa
 import { CanvasSequence } from './lib/canvas-sequence'
 import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
 import NodeCanvas from './components/NodeCanvas'
+import WorkspaceWelcome, { WorkspacePicker } from './components/WorkspaceWelcome'
+import { hierarchyTarget } from './lib/canvas-hierarchy'
 import SidePanel, { type SideTab } from './components/SidePanel'
 import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
@@ -143,7 +144,6 @@ function projectView(full: AgentGraph, stack: Crumb[]): { view: AgentGraph; stac
 }
 
 export default function App() {
-  const [theme, selectTheme] = useTheme()
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [graph, setGraph] = useState<AgentGraph>({ nodes: [], edges: [] })
@@ -163,6 +163,7 @@ export default function App() {
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   const [runProgress, setRunProgress] = useState<RunProgress>(() => finishProgress(beginProgress(''), false))
   const stopRequested = useRef(false)
+  const [workspacePicker, setWorkspacePicker] = useState<'canvas' | 'automation' | null>(null)
   const [canvasFocus, setCanvasFocus] = useState<{ nodeId: string; at: number }>()
   const [sideTab, setSideTab] = useState<SideTab>('canvases')
   const [fileOpen, setFileOpen] = useState(false)
@@ -432,6 +433,7 @@ export default function App() {
   const selectNode = (id: string | null, additive = false) => {
     setSelectedEdgeId(null)
     if (!id) {
+      if (activeIdRef.current) setSideTab('node')
       setSelectedNodeId(null)
       setSelectedIds([])
       selectedIdsRef.current = []
@@ -460,8 +462,19 @@ export default function App() {
     setSelectedIds(next)
     const cur = selectedRef.current
     setSelectedNodeId(cur && next.includes(cur) ? cur : (next[next.length - 1] ?? null))
-    if (next.length) setSideTab('node')
+    if (activeIdRef.current) setSideTab('node')
   }
+  const navigateHierarchy = (id: string, path: string[]) => {
+    if (!activeIdRef.current || runningRef.current || libraryBusyRef.current || closingRef.current) return
+    const target = hierarchyTarget(rooted(graphRef.current, stackRef.current), id, path)
+    if (!target) return
+    graphRef.current = target.graph; stackRef.current = target.stack
+    setGraph(target.graph); setStack(target.stack)
+    selectedRef.current = id; selectedIdsRef.current = [id]
+    setSelectedNodeId(id); setSelectedIds([id]); setSelectedEdgeId(null); setSideTab('node')
+    setCanvasFocus(previous => ({ nodeId: id, at: (previous?.at ?? 0) + 1 }))
+  }
+
   const selectEdge = (id: string | null) => {
     setSelectedEdgeId(id)
     if (id) {
@@ -613,17 +626,18 @@ export default function App() {
     return ok ? libraryOf(bookRef.current).automations.find(a => a.id === savedId) ?? null : null
   }
   const loadAutomation = async (id: string) => {
-    if (runningRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return
+    if (runningRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return false
     const a = libraryOf(bookRef.current).automations.find(a => a.id === id)
-    if (!a?.entries.length) return
+    if (!a?.entries.length) return false
     libraryBusyRef.current = true; setLibraryBusy(true)
     try {
-      if (!await settleChanges()) return
+      if (!await settleChanges()) return false
       const next = openAutomation(commitActive(), id)
-      if (!await persistBook(next)) return
+      if (!await persistBook(next)) return false
       showCanvas(next, next.activeId, false)
       pushLog('success', `“${a.name}” tuval listesi açıldı.`)
-    } catch (e) { pushLog('error', errText(e)) }
+      return true
+    } catch (e) { pushLog('error', errText(e)); return false }
     finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
   const removeAutomation = async (id: string) => {
@@ -751,7 +765,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
-      if (!activeIdRef.current || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
+      if (!activeIdRef.current || workspacePicker || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (scanner && mod) return
@@ -1233,7 +1247,7 @@ export default function App() {
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const counts = graph.nodes.filter((n) => n.kind !== 'start').length
   const hasCanvas = !!activeId
-  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion
+  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion || !!workspacePicker
 
   const closeProgram = async (requestId?: number) => {
     if (closingRef.current) return
@@ -1348,8 +1362,6 @@ export default function App() {
           </span>
         </div>
         <Toolbar
-          theme={theme}
-          onTheme={selectTheme}
           running={running}
           busy={editorLocked || !loaded || !hasCanvas}
           hasStart={hasStart}
@@ -1393,7 +1405,7 @@ export default function App() {
                 Paketten çık
               </button>
             )}
-            {hasCanvas && <NodeCanvas
+            {hasCanvas ? <NodeCanvas
               graph={graph}
               canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}
               pasteRevision={pasteRevision}
@@ -1455,7 +1467,7 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-            />}
+            /> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
           </div>
           <div className="right-sidebar">
             <fieldset className="canvas-editor-fields" disabled={running || editorLocked}>
@@ -1527,6 +1539,10 @@ export default function App() {
             }}
             graph={graph}
             rootGraph={rooted(graph, stack)}
+            canvasName={tabList.find(t => t.id === activeId)?.name}
+            canvasKey={activeId}
+            onNavigateNode={navigateHierarchy}
+            onShowHierarchy={() => selectNode(null)}
             selected={selected}
             selectedCount={selectedIds.length}
             selectedEdge={selectedEdge}
@@ -1564,6 +1580,8 @@ export default function App() {
       {confirmQuestion && (
         <ConfirmDialog question={confirmQuestion} onYes={() => answerSure(true)} onNo={() => answerSure(false)} />
       )}
+      {workspacePicker && <WorkspacePicker kind={workspacePicker} library={library} onCancel={() => setWorkspacePicker(null)}
+        onOpen={async id => workspacePicker === 'automation' ? loadAutomation(id) : await openLibraryCanvas(library.canvases.find(c => c.id === id)!)} />}
       {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion} onAnswer={answerCanvasSave} />}
       {scanner && (
         <ScreenScanner

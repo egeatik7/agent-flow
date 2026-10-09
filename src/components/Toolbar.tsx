@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { NODE_KINDS, NODE_SPECS, type NodeKind } from '../types'
-import type { Theme } from '../lib/theme'
 
 type Props = {
-  theme: Theme
-  onTheme: (theme: Theme) => void
   running: boolean
   busy?: boolean
   hasStart: boolean
@@ -131,16 +128,7 @@ export default function Toolbar(p: Props) {
         Döngüleri Sıfırla
       </button>
 
-      <div className="theme-picker" role="group" aria-label="Arayüz teması">
-        {(['aero', 'xp'] as const).map(theme => (
-          <button key={theme} type="button" className={`xp-btn theme-option${p.theme === theme ? ' active' : ''}`}
-            aria-pressed={p.theme === theme} onClick={() => p.onTheme(theme)}
-            title={theme === 'aero' ? 'Aero: her basışta lila, gök mavisi, su yeşili ve şeftali renkleri arasında geçiş' : 'Klasik Windows XP arayüzü'}>
-            {theme === 'aero' && <span className="theme-orb" aria-hidden="true" />}
-            {theme === 'aero' ? 'Aero' : 'XP'}
-          </button>
-        ))}
-      </div>
+
     </div>
   )
 }

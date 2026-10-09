@@ -3,7 +3,6 @@ import type { AgentGraph } from '../../electron/graph-types'
 // UI-only: legacy packages need no saved fields or migration. IDs survive rename,
 // movement, save/reload and moving a package into a loop on the same canvas.
 const COLORS = ['#24406e', '#6e354b', '#3c6550', '#70532c', '#514477', '#28636b', '#705342', '#5c6032']
-const AERO_COLORS = ['#4e86cf', '#bc6387', '#4d9d83', '#d09a43', '#9270bf', '#3b9ead', '#bf805e', '#8da453']
 const SYMBOLS = [
   'M3 3H13V13H3Z',
   'M8 2L14 8L8 14L2 8Z',
@@ -15,7 +14,7 @@ const SYMBOLS = [
   'M3 4H13M3 8H13M3 12H13',
 ]
 
-export type PackageAppearance = { color: string; aeroColor: string; symbol: string; badge: string }
+export type PackageAppearance = { color: string; symbol: string; badge: string }
 
 function hashId(id: string): number {
   let hash = 2166136261
@@ -36,7 +35,7 @@ export function packageAppearances(graph: AgentGraph): Map<string, PackageAppear
       while (used.has(slot)) slot = (slot + 1) % combinations
       used.add(slot)
     }
-    result.set(id, { color: COLORS[slot % COLORS.length], aeroColor: AERO_COLORS[slot % COLORS.length], symbol: SYMBOLS[Math.floor(slot / COLORS.length)], badge: `P${String(index + 1).padStart(2, '0')}` })
+    result.set(id, { color: COLORS[slot % COLORS.length], symbol: SYMBOLS[Math.floor(slot / COLORS.length)], badge: `P${String(index + 1).padStart(2, '0')}` })
   })
   return result
 }
