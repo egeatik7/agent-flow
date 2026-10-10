@@ -59,6 +59,10 @@ export type XpAgentApi = {
   onRecoveryReport?: (cb: (report: import('../electron/recovery').RecoveryReport) => void) => () => void
   onRecoveryStatus?: (cb: (status: { active: boolean; nodeTitle: string; message: string }) => void) => () => void
   recoveryReports?: () => Promise<import('../electron/recovery').RecoveryReport[]>
+  removeRecoveryReport?: (id: string) => Promise<boolean>
+  clearRecoveryReports?: () => Promise<boolean>
+  copyRecoveryReportText?: (text: string) => Promise<boolean>
+  onRecoveryReportsRemoved?: (cb: (ids: string[]) => void) => () => void
   openRecoveryReports?: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>

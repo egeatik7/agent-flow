@@ -1,5 +1,6 @@
 import type { AgentGraph } from '../../electron/graph-types'
 import type { RecoveryReport } from '../../electron/recovery'
+import type { NodeContext } from '../../electron/tool-context'
 
 /** Read-only projection: reports never become nodes or graph metadata. */
 export function recoveryReportIndex(graph: AgentGraph, reports: RecoveryReport[], canvasId?: string): Map<string, RecoveryReport[]> {
@@ -24,4 +25,23 @@ export function recoveryOutcome(report: RecoveryReport): string {
   if (report.result === 'stopped') return 'Kullanıcı durdurdu.'
   if (report.result === 'failed') return 'Kurtarma başarısız; akış toparlanamadı.'
   return 'Devam sonucu henüz kaydedilmedi.'
+}
+
+/** Plain-text equivalent of the visible report, suitable for pasting into chat. */
+export function recoveryReportText(report: RecoveryReport): string {
+  const context = report.context as NodeContext | null
+  return [
+    `Kurtarma notu · ${report.nodeTitle}`,
+    new Date(report.startedAt).toLocaleString('tr-TR'),
+    `Sonuç: ${recoveryOutcome(report)}`,
+    context?.loop?.item ? `Öğe: ${context.loop.item}` : '',
+    `Hata: ${report.error}`,
+    `Olası neden: ${report.probableCause || 'Belirlenemedi.'}`,
+    report.evidence ? `Gözlem: ${report.evidence}` : '',
+    report.completionBasis === 'model-observed' ? 'Hedefin gerçekleştiğine model ekran gözlemine göre karar verdi.' : '',
+    report.summary,
+    report.resumeError ? `Devam hatası: ${report.resumeError}` : '',
+    'Yapılanlar',
+    report.actions.length ? report.actions.map((action, index) => `${index + 1}. ${action.tool} · ${action.message}`).join('\n') : 'Eylem kaydı yok.',
+  ].filter(Boolean).join('\n\n')
 }

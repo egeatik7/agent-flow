@@ -43,6 +43,10 @@ contextBridge.exposeInMainWorld('xpAgent', {
   toolEndpointOpen: () => ipcRenderer.invoke('tools:endpointOpen'),
   openLogs: () => ipcRenderer.invoke('logs:open'),
   recoveryReports: () => ipcRenderer.invoke('recovery:reports'),
+  removeRecoveryReport: (id: string) => ipcRenderer.invoke('recovery:removeReport', id),
+  clearRecoveryReports: () => ipcRenderer.invoke('recovery:clearReports'),
+  copyRecoveryReportText: (text: string) => ipcRenderer.invoke('recovery:copyText', text),
+  onRecoveryReportsRemoved: on('recovery:removed'),
   openRecoveryReports: () => ipcRenderer.invoke('recovery:openReports'),
 
   testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),

@@ -104,12 +104,9 @@
 .recovery-note-paper p { margin: 0 0 9px; }
 .recovery-note-paper ol { padding-left: 23px; margin-top: 5px; }
 .recovery-note-date { color: #766479; font-size: 11px; }
-.recovery-status {
-  position: absolute; z-index: 190; left: 12px; bottom: 12px;
-  width: min(450px,calc(100% - 24px)); box-sizing: border-box; padding: 8px 10px;
-  border: 1px solid #7955a8; border-radius: 4px; background: #f3eaff;
-  color: #493166; box-shadow: 0 1px 5px #0003; font: 11px Tahoma,sans-serif;
-  pointer-events: none; overflow-wrap: anywhere;
-}
-.recovery-status b, .recovery-status span { display: block; }
-.recovery-status span { margin-top: 4px; max-height: 70px; overflow: hidden; }
+
+.recovery-note-actions { padding: 6px; border-top: 1px solid #b8a4d0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.recovery-note-actions p { margin: 0; width: 100%; }
+.recovery-copy { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; }
+.recovery-note-paper { user-select: text; }
+.recovery-note > header, .recovery-note > nav, .recovery-note > footer { flex-shrink: 0; }

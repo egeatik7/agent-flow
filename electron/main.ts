@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { WindowCloseGuard } from './window-close'
@@ -11,6 +11,7 @@ import { bayatCikarmaKlasorleri, geciciGirdileriTopla } from './temp-sweep'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource, type ToolContext } from './tools'
 import { recoverySettings } from './recovery-settings'
+import { removeRecoveryReportFiles } from './recovery-report-files'
 import { runRecovery, type RecoveryReport } from './recovery'
 import { recoveryExecutor } from './recovery-runtime'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
@@ -156,7 +157,10 @@ function recoveryReportsDir(): string {
   return dir
 }
 
+const removedRecoveryReportIds = new Set<string>()
 function saveRecoveryReport(report: RecoveryReport) {
+  // A retry may finish after its note was deleted; do not recreate that report.
+  if (removedRecoveryReportIds.has(report.id)) return
   const dir = recoveryReportsDir()
   const file = path.join(dir, `${report.id}.json`)
   fs.writeFileSync(`${file}.tmp`, JSON.stringify(report, null, 2), 'utf8')
@@ -900,6 +904,23 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   }
   recoveryToolContext = toolContext
   ipcMain.handle('recovery:reports', () => readRecoveryReports())
+  const removeReports = (ids?: string[]) => {
+    removeRecoveryReportFiles(recoveryReportsDir(), ids, removed => {
+      removed.forEach(id => removedRecoveryReportIds.add(id))
+      send('recovery:removed', removed)
+    })
+    return true
+  }
+  ipcMain.handle('recovery:removeReport', (_e, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Geçersiz kurtarma raporu kimliği.')
+    return removeReports([id])
+  })
+  ipcMain.handle('recovery:clearReports', () => removeReports())
+  ipcMain.handle('recovery:copyText', (_e, text: unknown) => {
+    if (typeof text !== 'string' || text.length > 2_000_000) throw new Error('Geçersiz rapor metni.')
+    clipboard.writeText(text)
+    return true
+  })
   ipcMain.handle('recovery:openReports', async () => {
     const dir = recoveryReportsDir()
     await shell.openPath(dir)

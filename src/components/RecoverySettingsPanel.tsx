@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '../types'
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
@@ -17,12 +17,32 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
   const s = recoverySettings(settings.recovery)
   const [reports, setReports] = useState<RecoveryReport[]>([])
   const [reportError, setReportError] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const removedIds = useRef(new Set<string>())
   const update = (patch: Partial<RecoverySettings>) => setSettings(prev => ({ ...prev, recovery: { ...recoverySettings(prev.recovery), ...patch } }))
   const refresh = async () => {
-    try { setReports(await window.xpAgent?.recoveryReports?.() ?? []); setReportError('') }
+    try { const snapshot = await window.xpAgent?.recoveryReports?.() ?? []; setReports(snapshot.filter(r => !removedIds.current.has(r.id))); setReportError('') }
     catch { setReportError('Raporlar okunamadı.') }
   }
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => {
+    const off = window.xpAgent?.onRecoveryReportsRemoved?.(ids => {
+      ids.forEach(id => removedIds.current.add(id))
+      setReports(prev => prev.filter(report => !removedIds.current.has(report.id)))
+    })
+    void refresh()
+    return () => off?.()
+  }, [])
+  const clear = async () => {
+    if (clearing || !window.xpAgent?.clearRecoveryReports) return
+    setClearing(true); setReportError('')
+    try {
+      if (!await window.xpAgent.clearRecoveryReports()) throw new Error('Silinemedi')
+      setConfirmClear(false)
+      await refresh()
+    } catch { setReportError('Raporlar temizlenemedi. Tekrar deneyebilirsin.') }
+    finally { setClearing(false) }
+  }
   const nodes: { id: string; title: string; kind: string; path: string }[] = []
   const titles = new Map<string, string>()
   walkGraph(graph, ({ node }) => titles.set(node.id, node.title))
@@ -77,6 +97,13 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     <button type="button" className="xp-btn save block" onClick={() => onSave({ recovery: s })}>Kurtarma Ayarlarını Kaydet</button>
     </fieldset>
     <fieldset><legend>Kurtarma raporları</legend>
+      {window.xpAgent?.clearRecoveryReports && <div className="recovery-note-actions">
+        {confirmClear ? <>
+          <p>Tüm kurtarma raporları kalıcı olarak silinsin mi? Tuval ve node'lar korunur.</p>
+          <button type="button" className="xp-btn" disabled={clearing} onClick={() => void clear()}>Evet, tümünü sil</button>
+          <button type="button" className="xp-btn" disabled={clearing} onClick={() => setConfirmClear(false)}>Vazgeç</button>
+        </> : <button type="button" className="xp-btn" disabled={!reports.length} onClick={() => setConfirmClear(true)}>Tüm raporları temizle</button>}
+      </div>}
       <div className="field-row"><button type="button" className="xp-btn" onClick={() => void refresh()}>Yenile</button><button type="button" className="xp-btn" onClick={() => void window.xpAgent?.openRecoveryReports?.()}>Rapor klasörünü aç</button></div>
       {reportError && <p>{reportError}</p>}
       {!reports.length && <p className="hint">Henüz kurtarma raporu yok.</p>}

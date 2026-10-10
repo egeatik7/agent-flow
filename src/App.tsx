@@ -157,10 +157,6 @@ export default function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const recoveryReports = useRecoveryReports(running)
-  const [recoveryStatus, setRecoveryStatus] = useState<{ active: boolean; nodeTitle: string; message: string } | null>(null)
-  useEffect(() => api?.onRecoveryStatus?.(setRecoveryStatus), [])
-  useEffect(() => { if (running) setRecoveryStatus(null) }, [running])
-  useEffect(() => { setRecoveryStatus(null) }, [activeId])
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
@@ -1436,10 +1432,6 @@ export default function App() {
         />
         <div className="workspace">
           <div className="canvas-wrap">
-            {recoveryStatus && <div className="recovery-status" role="status" aria-live="polite">
-              <b>{recoveryStatus.active ? 'Kurtarma ajanı devrede' : 'Kurtarma sonucu'} · {recoveryStatus.nodeTitle}</b>
-              <span>{recoveryStatus.message}</span>
-            </div>}
             {stack.length > 0 && (
               <button type="button" className="xp-btn package-exit" disabled={editorLocked} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
                 Paketten çık

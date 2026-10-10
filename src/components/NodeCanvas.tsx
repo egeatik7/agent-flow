@@ -151,6 +151,7 @@ export default function NodeCanvas(p: Props) {
   const [reportNodeId, setReportNodeId] = useState<string | null>(null)
   const reportIndex = useMemo(() => recoveryReportIndex(p.graph, p.recoveryReports ?? [], p.reportCanvasId), [p.graph, p.recoveryReports, p.reportCanvasId])
   useEffect(() => { setReportNodeId(null) }, [p.canvasKey])
+  useEffect(() => { if (reportNodeId && !reportIndex.get(reportNodeId)?.length) setReportNodeId(null) }, [reportNodeId, reportIndex])
   const reportBadge = (id: string) => {
     const count = reportIndex.get(id)?.length ?? 0
     return count ? <button type="button" className="recovery-report-badge" aria-label={`${count} kurtarma raporunu aç`}

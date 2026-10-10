@@ -6,17 +6,23 @@ export function useRecoveryReports(running: boolean): RecoveryReport[] {
   useEffect(() => {
     let alive = true
     const liveIds = new Set<string>()
+    const removedIds = new Set<string>()
     const api = window.xpAgent
     const off = api?.onRecoveryReport?.(report => {
+      if (removedIds.has(report.id)) return
       liveIds.add(report.id)
       if (alive) setReports(prev => [report, ...prev.filter(r => r.id !== report.id)].slice(0,100))
+    })
+    const offRemoved = api?.onRecoveryReportsRemoved?.(ids => {
+      ids.forEach(id => removedIds.add(id))
+      if (alive) setReports(prev => prev.filter(r => !removedIds.has(r.id)))
     })
     // Subscribe first; an initial snapshot must not overwrite a newer live update.
     void api?.recoveryReports?.().then(snapshot => {
       if (alive) setReports(prev => [...new Map([...prev, ...snapshot, ...prev.filter(r => liveIds.has(r.id))].map(r => [r.id,r])).values()]
-        .sort((a,b) => b.startedAt-a.startedAt).slice(0,100))
+        .filter(r => !removedIds.has(r.id)).sort((a,b) => b.startedAt-a.startedAt).slice(0,100))
     }).catch(() => {})
-    return () => { alive = false; off?.() }
+    return () => { alive = false; off?.(); offRemoved?.() }
   }, [running])
   return reports
 }
