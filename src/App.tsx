@@ -1439,6 +1439,8 @@ export default function App() {
             )}
             {hasCanvas ? <NodeCanvas
               graph={graph}
+              onExitPackage={exitPackage}
+              canExitPackage={stack.length > 0}
               recoveryReports={recoveryReports}
               reportCanvasId={bookRef.current.tabs.find(t => t.id === activeId)?.savedId ?? activeId}
               canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}

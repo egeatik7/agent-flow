@@ -74,6 +74,9 @@ type Props = {
   onRunFrom: (id: string) => void
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
+  /** Right-click on the canvas leaves the open package; only offered while inside one. */
+  onExitPackage?: () => void
+  canExitPackage?: boolean
 }
 
 type Linking = { from: string; port: string; mx: number; my: number; sx: number; sy: number; moved: boolean }
@@ -608,6 +611,8 @@ export default function NodeCanvas(p: Props) {
       }}
       onContextMenu={(e) => {
         e.preventDefault()
+        // Paket içindeyken sağ tık doğrudan bir üst pakete çıkar. Gezinti koşu sürerken de serbesttir.
+        if (p.canExitPackage && p.onExitPackage) { p.onExitPackage(); return }
         if (!innerRef.current || lockedRef.current) return
         const c = toCanvas(e.clientX, e.clientY)
         setMenu({ mode: 'canvas', x: c.x, y: c.y })
@@ -799,6 +804,12 @@ export default function NodeCanvas(p: Props) {
               className={cls}
               style={{ '--node-color': packageLook?.color ?? spec.color, left: n.x, top: n.y, width: nodeWidth(n.kind), height: nodeHeight(n.kind), zIndex: 20 + ancestors(p.graph, n.id).length } as React.CSSProperties}
               onMouseDown={(e) => startNodeDrag(e, n)}
+              onDoubleClick={(e) => {
+                // Paket node'una çift tık: doğrudan içine gir. Diğer node'larda var olan davranış korunur.
+                if (n.kind !== 'package') return
+                e.stopPropagation()
+                p.onEnterPackage(n.id)
+              }}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
