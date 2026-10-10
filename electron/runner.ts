@@ -78,7 +78,7 @@ type Budget = { used: number }
 type Tally = { n: number; failed: number }
 
 /** What a run reports when it ends without being stopped: steps taken, and loop items or laps that ended on an error. */
-export type RunSummary = { steps: number; failed: number; reachedEnd?: boolean }
+export type RunSummary = { steps: number; failed: number; reachedEnd?: boolean; packageExitReached?: boolean }
 
 /** At most this many item names are listed in the end-of-loop summary. */
 const FAILED_NAMES_SHOWN = 5
@@ -147,12 +147,17 @@ export async function runGraph(
     packagePath?: string[]
     /** This node already finished. Continue from its sonraki step, then climb out of the boxes around it. */
     afterNodeId?: string
+    /** Runtime-only boundary evidence; never written into a canvas JSON. */
+    packageExit?: AgentNode['packageExit']
+    afterNodePort?: 'next' | 'blocked'
+    resumeState?: { identityUsed: boolean }
     /** Shared step and failure count when a run climbs out of packages. */
     tally?: Tally
     /** Variables the run starts with. A package gets those of the loop lap it runs in. */
     vars?: Record<string, string>
   }
 ): Promise<RunSummary> {
+  const resumeState = opts.resumeState ?? { identityUsed: false }
   if (opts.packagePath?.length) {
     const layers: { parent: AgentGraph; pkg: AgentNode }[] = []
     let cursor = graph
@@ -170,12 +175,15 @@ export async function runGraph(
       reportEnd: opts.reportEnd,
       resumeLoopId: opts.resumeLoopId,
       resumeItem: opts.resumeItem,
+      resumeState,
       tally: opts.tally ?? { n: 0, failed: 0 },
     }
-    let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
+    let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true, packageExit: layers[layers.length - 1].pkg.packageExit })
     for (let i = layers.length - 1; i >= 0; i--) {
       const { parent, pkg } = layers[i]
-      summary = await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id })
+      summary = await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id,
+        afterNodePort: pkg.packageExit && !summary.packageExitReached ? 'blocked' : 'next',
+        packageExit: i > 0 ? layers[i - 1].pkg.packageExit : opts.packageExit })
     }
     // The final summary belongs to the outer canvas. A package-local End is not
     // enough to start the next canvas, and legacy runs retain their result shape.
@@ -184,6 +192,12 @@ export async function runGraph(
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const entry = opts.afterNodeId ? undefined : findEntry(graph, opts.startId)
   if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
+  let packageExitReached = false
+  const observeExit = (node: AgentNode, port: string, scope: AgentNode | null) => {
+    // An edge from a loop member to outside its scope does not leave the loop.
+    if (!scope && opts.packageExit?.from === node.id) packageExitReached = opts.packageExit.fromPort === port
+  }
+  const exitEvidence = () => opts.packageExit ? { packageExitReached } : {}
   const root = opts.root ?? graph
 
   // A run that starts inside a package, or climbs back out through one, has no caller handing it variables.
@@ -308,11 +322,15 @@ export async function runGraph(
         const inner = node.inner
         if (!inner?.nodes.length) {
           ex.log('warn', `“${node.title}” boş.`)
-          return 'next'
+          return node.packageExit ? 'blocked' : 'next'
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
+        const result = await runGraph(inner, ex, { packageExit: node.packageExit, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
+        if (node.packageExit && !result.packageExitReached) {
+          ex.log('info', `“${node.title}” kayıtlı çıkışına ulaşmadı; dışarıdaki sonraki adım çalıştırılmıyor.`)
+          return 'blocked'
+        }
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'
@@ -327,7 +345,8 @@ export async function runGraph(
    * Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes.
    * Steps count against `budget`: the whole top level, or one lap of a box.
    */
-  const runChain = async (start: AgentNode, scope: AgentNode | null, stopAt?: Set<string>, budget: Budget = topBudget): Promise<void> => {
+  const runChain = async (start: AgentNode, scope: AgentNode | null, stopAt?: Set<string>, budget: Budget = topBudget, firstLapPath?: AgentNode[]): Promise<void> => {
+    let resumeRoute = firstLapPath
     let cur: AgentNode | null = start
     while (cur) {
       const node: AgentNode = cur
@@ -336,7 +355,10 @@ export async function runGraph(
 
       let port: string
       if (node.kind === 'loop') {
-        port = await runLoop(node, scope)
+        const route = resumeRoute?.[0]?.id === node.id ? resumeRoute : undefined
+        // Consume before invoking: a self/back edge must not replay the chosen entry.
+        if (route) resumeRoute = undefined
+        port = await runLoop(node, scope, route?.[1], false, undefined, route?.slice(1))
       } else {
         if (budget.used >= opts.maxSteps) {
           if (budget === topBudget) {
@@ -388,8 +410,12 @@ export async function runGraph(
       if (NODE_SPECS[node.kind].outputs.length === 0) return
       const waitedOut = node.kind === 'condition' && port === 'timeout'
       if (waitedOut) port = 'false'
+      observeExit(node, port, scope)
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {
+        // Packaging removed this external edge. A chosen failure/timeout exit is
+        // connected at the caller and must not become an unconnected-step error.
+        if (!scope && opts.packageExit?.from === node.id && opts.packageExit.fromPort === port) return
         // Bağlanmamış başarısızlık çıkışı da bir node hatasıdır: araç katmanı hatayı yalnız bu olayla
         // öğrenir. Yoksa node "done" görünür, debug koşusu durmaz ve donmuş kayıt oluşmaz (ölçüldü:
         // node iki turda da "done" bildirildi, hiç "error" gönderilmedi).
@@ -422,7 +448,7 @@ export async function runGraph(
   // Ölçüldü: 197 saniyede 114 geçiş, 115 aynı hata — ve araç katmanı "0 hata" görüyordu.
   const turImzalari = new Map<string, string>()
 
-  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false, incomingEdge?: { id: string; from: string }): Promise<string> => {
+  const runLoop = async (loop: AgentNode, scope: AgentNode | null, startAt?: AgentNode, skipItem = false, incomingEdge?: { id: string; from: string }, firstLapPath?: AgentNode[]): Promise<string> => {
     ex.step(loop.id, 'running')
     if (startAt && incomingEdge) ex.edge?.(incomingEdge.id, incomingEdge.from, startAt.id)
     const first = lapStart(loop)
@@ -474,12 +500,13 @@ export async function runGraph(
     let from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
     // Devam KİMLİKLE yapılır: klasör/liste yeniden okununca indeks başka dosyayı gösterir.
     // Ölçüldü: kayıtlı öğe "b.glb" iken liste başına "a.glb" eklenince koşu a.glb ile başlıyordu.
-    if (opts.resume && opts.resumeItem && opts.resumeLoopId === loop.id) {
+    if (opts.resume && !resumeState.identityUsed && opts.resumeItem && opts.resumeLoopId === loop.id) {
       const kimlik = keys.indexOf(opts.resumeItem)
       if (kimlik < 0) {
         throw new Error(`“${loop.title}”: kayıtlı öğe (“${opts.resumeItem}”) yeni listede yok; aynı dosyadan devam edilemez.`)
       }
       from = skipItem ? Math.min(keys.length, kimlik + 1) : kimlik
+      resumeState.identityUsed = true
     }
     const noun = isList ? 'öğe' : 'tur'
     const fromWord = isList ? 'öğeden' : 'turdan'
@@ -510,7 +537,7 @@ export async function runGraph(
         ex.setLoop?.(loopNotes.join('   ·   '))
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         try {
-          await runChain(entry ?? first, loop, undefined, { used: 0 })
+          await runChain(entry ?? first, loop, undefined, { used: 0 }, entry ? firstLapPath : undefined)
           succeeded++
           // A lap that finished cleanly breaks the chain: only two failures in a row
           // mean the loop should stand still, not two failures far apart.
@@ -579,10 +606,18 @@ export async function runGraph(
   /** After a box started from inside, continue by its “bitti” exit on the level above. */
   const continueAfter = async (loop: AgentNode) => {
     const scope = ownerOf(graph, loop.id) ?? null
+    observeExit(loop, 'done', scope)
     const edge = graph.edges.find((e) => e.from === loop.id && e.fromPort === 'done')
     const nxt = edge ? enterable(edge.to, scope) : null
-    if (nxt && edge) { ex.edge?.(edge.id, edge.from, nxt.id); await runChain(nxt, scope) }
-    if (scope) await continueAfter(scope)
+    if (scope) {
+      // Manual package entry bypassed the caller's loop stack. Finish this
+      // outer lap from the actual continuation, then run its remaining items.
+      await runLoop(scope, ownerOf(graph, scope.id) ?? null, nxt ?? undefined, !nxt, edge)
+      await continueAfter(scope)
+    } else if (nxt && edge) {
+      ex.edge?.(edge.id, edge.from, nxt.id)
+      await runChain(nxt, null)
+    }
   }
 
   try {
@@ -590,7 +625,9 @@ export async function runGraph(
     if (opts.afterNodeId && !done) throw new Error('Paketin devamı bu akışta yok.')
     if (done) {
       const owner = ownerOf(graph, done.id) ?? null
-      const edge = graph.edges.find((e) => e.from === done.id && e.fromPort === 'next')
+      const port = opts.afterNodePort ?? 'next'
+      observeExit(done, port, owner)
+      const edge = graph.edges.find((e) => e.from === done.id && e.fromPort === port)
       const nxt = edge ? enterable(edge.to, owner) : null
       if (owner && nxt) {
         ex.log('info', `“${done.title}” bitti. “${owner.title}” “${nxt.title}” ile sürüyor.`)
@@ -627,16 +664,16 @@ export async function runGraph(
             ? `“${entry.title}” ${zincir.length} kutu içinde. Kutular dıştan içe açılıyor: “${disKutu.title}” → “${zincir[1].title}”.`
             : `“${entry.title}”, “${owner?.title}” kutusunun içinde. Kutu bu node'dan başlıyor.`
         )
-        await runLoop(disKutu, ownerOf(graph, disKutu.id) ?? null, baslangic)
+        await runLoop(disKutu, ownerOf(graph, disKutu.id) ?? null, baslangic, false, undefined, [...zincir.slice(1), entry])
         await continueAfter(disKutu)
       } else {
         await runChain(entry, null)
       }
     }
   } catch (e) {
-    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed, ...(opts.reportEnd ? { reachedEnd: true } : {}) }
+    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed, ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
     throw e
   }
   if (!opts.nested) ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
-  return { steps: tally.n, failed: tally.failed, ...(opts.reportEnd ? { reachedEnd: false } : {}) }
+  return { steps: tally.n, failed: tally.failed, ...exitEvidence(), ...(opts.reportEnd ? { reachedEnd: false } : {}) }
 }

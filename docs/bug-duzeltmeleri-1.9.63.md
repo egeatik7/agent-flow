@@ -1,5 +1,7 @@
 # Nubbo 1.9.63 — temkinli hata düzeltme raporu
 
+Bu tarihsel rapordaki açık iki hata için sonraki [1.9.64 raporuna](paket-dongu-duzeltmeleri-1.9.64.md) bakın.
+
 Tarih: 10 Ekim 2026. Önceki sürüm: 1.9.62 (`45f1c1a`).
 Kullanıcının isteği: programı bozma riski olan düzeltmeleri yapmamak ve sonuçları ayrı raporlamak.
 
