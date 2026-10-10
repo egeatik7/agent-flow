@@ -93,6 +93,8 @@ export async function attachUserChrome(): Promise<Browser | null> {
 type DomBox = { text: string; type: string; x: number; y: number; w: number; h: number }
 
 async function pageOnScreen(p: Page): Promise<DomBox[]> {
+  const foreground = await p.evaluate(`document.visibilityState === 'visible' && document.hasFocus()`)
+  if (foreground !== true) return []
   const data = (await p.evaluate(COLLECT)) as { out: { text: string; type: string; x: number; y: number; w: number; h: number }[]; vw: number; vh: number }
   const m = (await p.evaluate(`(() => ({
     sx: window.screenX || 0,
@@ -103,6 +105,8 @@ async function pageOnScreen(p: Page): Promise<DomBox[]> {
   const dpr = m.dpr || 1
   const ox = m.sx * dpr
   const oy = (m.sy + m.top) * dpr
+  // Focus can change while collecting: discard coordinates from the old tab.
+  if (await p.evaluate(`document.visibilityState === 'visible' && document.hasFocus()`) !== true) return []
   return data.out.map((d) => ({
     text: d.text,
     type: d.type,

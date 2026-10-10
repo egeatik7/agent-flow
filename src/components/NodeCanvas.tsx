@@ -129,6 +129,20 @@ function overlaps(a: Rect, b: Rect) {
 }
 
 export default function NodeCanvas(p: Props) {
+  // Consult a live ref: a drag/link begun before Run must not write after Run.
+  const lockedRef = useRef(p.running)
+  lockedRef.current = p.running
+  const guard = <A extends unknown[]>(callback: (...args: A) => void) => (...args: A) => {
+    if (!lockedRef.current) callback(...args)
+  }
+  p = { ...p,
+    onMoveNodes: guard(p.onMoveNodes), onSetMembership: guard(p.onSetMembership),
+    onWrap: guard(p.onWrap), onConnect: guard(p.onConnect),
+    onAddAfter: guard(p.onAddAfter), onAddAt: guard(p.onAddAt),
+    onDeleteNode: guard(p.onDeleteNode), onDeleteEdge: guard(p.onDeleteEdge),
+    onDuplicate: guard(p.onDuplicate), onUnpackPackage: guard(p.onUnpackPackage),
+    onRunFrom: guard(p.onRunFrom),
+  }
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [linking, setLinking] = useState<Linking | null>(null)
@@ -146,6 +160,16 @@ export default function NodeCanvas(p: Props) {
   graphRef.current = p.graph
   const pasteClick = useRef<{ canvasKey: string | undefined; point: { x: number; y: number } } | null>(null)
   const previousPasteRevision = useRef(p.pasteRevision)
+
+  useEffect(() => {
+    if (!p.running) return
+    linkRef.current = null
+    dragRef.current = null
+    setLinking(null)
+    setDrag(null)
+    setMenu(null)
+    setHoverTarget(null)
+  }, [p.running])
 
   const byId = useMemo(() => new Map(p.graph.nodes.map((n) => [n.id, n])), [p.graph.nodes])
   const packageLooks = useMemo(() => packageAppearances(p.graph), [p.graph.nodes])
@@ -320,6 +344,7 @@ export default function NodeCanvas(p: Props) {
    * so a node can be pulled out of its box; on release it joins the box under it.
    */
   const beginDrag = (e: React.MouseEvent, ids: string[], lead: string) => {
+    if (lockedRef.current) return
     const g = graphRef.current
     const moving = new Set<string>()
     for (const id of ids) {
@@ -342,6 +367,7 @@ export default function NodeCanvas(p: Props) {
     let moved = false
 
     const move = (ev: MouseEvent) => {
+      if (lockedRef.current || !dragRef.current) return
       autoScroll(ev.clientX, ev.clientY)
       const c = toCanvas(ev.clientX, ev.clientY)
       const dx = Math.round((c.x - start.x) / 8) * 8
@@ -408,7 +434,7 @@ export default function NodeCanvas(p: Props) {
   }
 
   const startLink = (e: React.MouseEvent, n: AgentNode, port: string) => {
-    if (e.button !== 0) return
+    if (e.button !== 0 || lockedRef.current) return
     e.stopPropagation()
     e.preventDefault()
     setMenu(null)
@@ -418,6 +444,7 @@ export default function NodeCanvas(p: Props) {
 
   const openAfterMenu = (e: React.MouseEvent, n: AgentNode, port: string) => {
     e.stopPropagation()
+    if (lockedRef.current) return
     const c = toCanvas(e.clientX, e.clientY)
     setMenu({ mode: 'after', x: c.x + 8, y: c.y - 10, fromId: n.id, port })
   }
@@ -563,7 +590,7 @@ export default function NodeCanvas(p: Props) {
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        if (!innerRef.current) return
+        if (!innerRef.current || lockedRef.current) return
         const c = toCanvas(e.clientX, e.clientY)
         setMenu({ mode: 'canvas', x: c.x, y: c.y })
       }}
@@ -630,6 +657,7 @@ export default function NodeCanvas(p: Props) {
                 onContextMenu={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
+                  if (lockedRef.current) return
                   p.onSelectNode(f.loop.id)
                   const c = toCanvas(e.clientX, e.clientY)
                   setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: f.loop.id })
@@ -753,6 +781,7 @@ export default function NodeCanvas(p: Props) {
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
+                if (lockedRef.current) return
                 if (!p.selectedIds.includes(n.id)) p.onSelectNode(n.id)
                 const c = toCanvas(e.clientX, e.clientY)
                 setMenu({ mode: 'node', x: c.x, y: c.y, nodeId: n.id })
@@ -852,7 +881,7 @@ export default function NodeCanvas(p: Props) {
           />
         )}
 
-        {menu && (
+        {menu && !p.running && (
           <div
             className="ctx-menu"
             style={{ left: menu.x, top: menu.y }}

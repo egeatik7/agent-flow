@@ -122,7 +122,7 @@ test('ONNX fallback preserves a Windows status and adds the missing other label'
 function page(label, title) {
   return {
     isClosed: () => false, title: async () => title,
-    evaluate: async source => source.includes('INTERACTIVE')
+    evaluate: async source => source.includes('document.hasFocus()') ? true : source.includes('INTERACTIVE')
       ? { out: [{ text: label, type: 'Button', x: 10, y: 10, w: 100, h: 20 }], vw: 1920, vh: 1080 }
       : { sx: 0, sy: 0, dpr: 1, top: 80 },
   };

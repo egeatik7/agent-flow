@@ -585,11 +585,15 @@ export default function App() {
     setSaveQuestion(null)
     done?.(answer)
   }
-  const settleChanges = (ids?: string[]) => settleCanvasChanges(commitActive, askCanvasSave, async book => {
-    if (!await persistBook(book)) return false
-    adoptBook(book)
-    return true
-  }, ids)
+  const settleChanges = async (ids?: string[]) => {
+    try {
+      return await settleCanvasChanges(commitActive, askCanvasSave, async book => {
+        if (!await persistBook(book)) return false
+        adoptBook(book)
+        return true
+      }, ids)
+    } catch (e) { pushLog('error', errText(e)); return false }
+  }
 
   const canvasName = () => bookRef.current.tabs.find((t) => t.id === activeIdRef.current)?.name ?? 'Tuval'
 
@@ -913,44 +917,57 @@ export default function App() {
 
   const openScanner = (nodeId: string | null) => setScanner({ nodeId })
 
-  const loopFolderGen = useRef(0)
-  const loopFolderTimer = useRef<number | null>(null)
+  const loopFolderPending = useRef(new Map<string, { timer?: number }>())
   const templateFillGen = useRef(0)
   const templateSeen = useRef(new Map<string, string>())
 
+  useEffect(() => () => {
+    for (const entry of loopFolderPending.current.values()) if (entry.timer !== undefined) window.clearTimeout(entry.timer)
+    loopFolderPending.current.clear()
+  }, [])
+
   const syncLoopFolder = (nodeId: string, folder: string, immediate = false) => {
-    const gen = ++loopFolderGen.current
-    if (loopFolderTimer.current) window.clearTimeout(loopFolderTimer.current)
+    if (runningRef.current) return
+    const canvasId = activeIdRef.current
+    const key = JSON.stringify([canvasId, nodeId])
+    const previous = loopFolderPending.current.get(key)
+    if (previous?.timer !== undefined) window.clearTimeout(previous.timer)
+    const pending: { timer?: number } = {}
+    loopFolderPending.current.set(key, pending)
     const trimmed = folder.trim()
-    if (!trimmed) {
+    // Apply to the initiating canvas even when the user has navigated elsewhere.
+    const apply = (patch: Partial<AgentNode>) => {
+      if (activeIdRef.current === canvasId) patchNode(nodeId, patch)
+      else {
+        const book = commitActive()
+        void rememberBook({ ...book, tabs: book.tabs.map(tab => tab.id === canvasId
+          ? { ...tab, graph: mapNodes(tab.graph, n => n.id === nodeId ? { ...n, ...patch } : n) } : tab) })
+      }
+    }
+    if (!trimmed || hasTemplate(folder)) {
+      loopFolderPending.current.delete(key)
       templateSeen.current.delete(nodeId)
-      patchAnywhere(nodeId, { folder, items: [], startIndex: 0, loopIndex: undefined })
+      apply({ folder, ...(!trimmed ? { items: [], startIndex: 0, loopIndex: undefined } : {}) })
       return
     }
-    if (hasTemplate(folder)) {
-      templateSeen.current.delete(nodeId)
-      patchAnywhere(nodeId, { folder })
-      return
-    }
-    patchAnywhere(nodeId, { folder })
+    apply({ folder })
     const run = async () => {
       if (!api?.listDir) return
       try {
         const files = await api.listDir(trimmed)
-        if (gen !== loopFolderGen.current) return
-        patchAnywhere(nodeId, { folder, items: files ?? [], startIndex: 0, loopIndex: undefined })
+        if (loopFolderPending.current.get(key) !== pending) return
+        apply({ folder, items: files ?? [], startIndex: 0, loopIndex: undefined })
         if (!immediate) return
-        pushLog(
-          files && files.length ? 'success' : 'warn',
-          files == null ? `Klasör yok: ${trimmed}` : `Klasörden ${files.length} öğe listeye eklendi: ${trimmed}`
-        )
+        pushLog(files && files.length ? 'success' : 'warn',
+          files == null ? `Klasör yok: ${trimmed}` : `Klasörden ${files.length} öğe listeye eklendi: ${trimmed}`)
       } catch (e) {
-        if (gen !== loopFolderGen.current) return
-        pushLog('error', errText(e))
+        if (loopFolderPending.current.get(key) === pending) pushLog('error', errText(e))
+      } finally {
+        if (loopFolderPending.current.get(key) === pending) loopFolderPending.current.delete(key)
       }
     }
     if (immediate) void run()
-    else loopFolderTimer.current = window.setTimeout(() => void run(), 400)
+    else pending.timer = window.setTimeout(() => void run(), 400)
   }
 
   useEffect(() => {

@@ -168,6 +168,8 @@ export async function runGraph(
       root: opts.root ?? graph,
       resume: opts.resume,
       reportEnd: opts.reportEnd,
+      resumeLoopId: opts.resumeLoopId,
+      resumeItem: opts.resumeItem,
       tally: opts.tally ?? { n: 0, failed: 0 },
     }
     let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true })
@@ -310,7 +312,7 @@ export async function runGraph(
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, tally, vars })
+        await runGraph(inner, ex, { maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
         ex.log('success', `“${node.title}” bitti, sıradaki node’a geçiliyor.`)
         await settle()
         return 'next'

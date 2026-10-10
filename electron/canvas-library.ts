@@ -27,6 +27,11 @@ export function saveCanvas(book: CanvasBook, tabId: string): CanvasBook {
   if (!tab) throw new Error('Kaydedilecek tuval bulunamadı.')
   const lib = libraryOf(book)
   const existing = lib.canvases.find(c => c.id === tab.savedId)
+  if (existing && tab.baseline && (
+    existing.name !== tab.baseline.name || JSON.stringify(existing.graph) !== JSON.stringify(tab.baseline.graph)
+  )) {
+    throw new Error('Bu tuval başka bir sekmeden kaydedildi; eski kopya yeni kaydı ezmemesi için kaydedilmedi. Değişikliklerin bu sekmede duruyor. Güncel tuvali Tuvaller’den yeniden aç.')
+  }
   const id = existing?.id ?? newId()
   const record: SavedCanvas = { id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
   return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id, baseline: { name: tab.name, graph: copy(tab.graph) } } : t), library: { ...lib,
