@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import AgentTab from './AgentTab'
+import RecoverySettingsPanel from './RecoverySettingsPanel'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import NodeNavigator from './NodeNavigator'
@@ -683,6 +684,18 @@ function NodeInspector(p: Props) {
 }
 
 function Settings(p: Props) {
+  const [section, setSection] = useState<'general' | 'recovery'>('general')
+  return <>
+    <div className="tabs settings-subtabs" role="tablist" aria-label="Ayar bölümleri">
+      <button type="button" role="tab" aria-selected={section === 'general'} className={`tab ${section === 'general' ? 'active' : ''}`} onClick={() => setSection('general')}>Genel</button>
+      <button type="button" role="tab" aria-selected={section === 'recovery'} className={`tab ${section === 'recovery' ? 'active' : ''}`} onClick={() => setSection('recovery')}>Kurtarma Ajanı</button>
+    </div>
+    {section === 'general' ? <fieldset className="panel-fields" disabled={p.disabled}><GeneralSettings {...p} /></fieldset> : <RecoverySettingsPanel settings={p.settings} setSettings={p.setSettings}
+      disabled={p.disabled} onSave={p.onSaveSettings} graph={p.rootGraph ?? p.graph} models={p.models} onLoadModels={p.onLoadModels} />}
+  </>
+}
+
+function GeneralSettings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
   const model = p.models.find((m) => m.id === s.model.trim())
@@ -909,7 +922,7 @@ export default function SidePanel(p: Props) {
           {p.tab === 'node' && (p.selected || p.selectedEdge) && <fieldset className="node-inspector" disabled={p.disabled}><NodeInspector {...p} /></fieldset>}
         </div>
         {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} onSave={p.onSaveSettings} /></fieldset>}
-        {p.tab === 'settings' && <fieldset className="panel-fields" disabled={p.disabled}><Settings {...p} /></fieldset>}
+        {p.tab === 'settings' && <Settings {...p} />}
         {p.tab === 'agent' && <fieldset className="panel-fields" disabled={p.disabled}><AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} /></fieldset>}
         {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}<div className="library-brand"><NubboMascot /></div></div>}
       </div>

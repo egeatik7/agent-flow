@@ -18,12 +18,13 @@ export function setStopCheck(fn: () => boolean) {
 class TransientError extends Error {}
 
 /** fetch + body read, with a time limit and the stop hotkey. */
-async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<{ ok: boolean; status: number; text: string }> {
+async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS, localStop: () => boolean = () => false): Promise<{ ok: boolean; status: number; text: string }> {
+  if (stopCheck() || localStop()) throw new StoppedError()
   const ctrl = new AbortController()
   let byUser = false
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   const poll = setInterval(() => {
-    if (stopCheck()) {
+    if (stopCheck() || localStop()) {
       byUser = true
       ctrl.abort()
     }
@@ -40,6 +41,67 @@ async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_
     clearTimeout(timer)
     clearInterval(poll)
   }
+}
+
+export type ModelTool = {
+  type: 'function'
+  function: { name: string; description: string; parameters: Record<string, unknown> }
+}
+export type ModelToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } }
+export type ToolMessage = {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | object[] | null
+  tool_calls?: ModelToolCall[]
+  tool_call_id?: string
+  /** Some providers need their opaque reasoning fields replayed with a tool call. */
+  reasoning_details?: unknown
+}
+
+/** A bounded tool-calling turn. Model fallback happens before any action is executed. */
+export async function recoveryToolTurn(args: {
+  apiKey: string
+  models: string[]
+  messages: ToolMessage[]
+  tools: ModelTool[]
+  shouldStop: () => boolean
+  timeoutMs: number
+}): Promise<ToolMessage> {
+  const deadline = Date.now() + args.timeoutMs
+  let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
+  for (const model of asModelChain(args.models)) {
+    if (args.shouldStop() || stopCheck()) throw new StoppedError()
+    if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
+    try {
+      chatLogger?.(`Kurtarma API → ${model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
+      const res = await guardedFetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST', headers: HEADERS(args.apiKey),
+        body: JSON.stringify({ model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false }),
+      }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+      if (args.shouldStop() || stopCheck()) throw new StoppedError()
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 402) throw new FatalApiError(`OpenRouter kurtarma çağrısı (${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}.`)
+        throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
+      }
+      const data = JSON.parse(res.text)
+      if (data.error) throw new Error(`OpenRouter: ${String(data.error.message ?? 'Yanıt hatası').slice(0, 300)}`)
+      const choice = data.choices?.[0]
+      if (!choice?.message || choice.finish_reason === 'length') throw new Error('Kurtarma modelinin yanıtı boş veya kesilmiş.')
+      const m = choice.message
+      if (m.tool_calls !== undefined && (!Array.isArray(m.tool_calls) || m.tool_calls.some((c: ModelToolCall) =>
+        !c || typeof c.id !== 'string' || !c.id || c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string'))) {
+        throw new Error('Kurtarma modeli geçersiz araç çağrısı verdi.')
+      }
+      reportIn(JSON.stringify({ content: m.content, tool_calls: m.tool_calls }))
+      return { role: 'assistant', content: typeof m.content === 'string' ? m.content : null,
+        ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+        ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}) }
+    } catch (error) {
+      if (error instanceof StoppedError || error instanceof FatalApiError) throw error
+      last = error
+      chatLogger?.(`Kurtarma modeli ${model} yanıtlayamadı: ${brief(error)}`)
+    }
+  }
+  throw last
 }
 
 async function stoppableWait(ms: number) {

@@ -370,6 +370,10 @@ export function recentSteps(n = 6): { id: string; status: string }[] {
   return steps.slice(-n).map((s) => ({ id: s.id, status: s.status }))
 }
 
+export function recentLogLines(n = 60): { level: string; text: string; at: number }[] {
+  return lines.slice(-Math.max(0, Math.min(200, n))).map(line => ({ ...line }))
+}
+
 /** The reports of earlier runs, newest first: a new run must not overwrite what the last one found. */
 export function recentReports(): FrozenReport[] {
   return [...(frozen ? [frozen] : []), ...archive]

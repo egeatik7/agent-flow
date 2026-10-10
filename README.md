@@ -118,6 +118,8 @@ Güvenceler:
 
 ## Ajan sekmesi (araç katmanı)
 
+**Ayarlar → Kurtarma Ajanı:** akış bir temel eylemde takıldığında ayrı bir OpenRouter modeli, tuval JSON'u, mevcut döngü öğesi, ekran ve günlüklerle hatayı toparlayabilir. Yalnız Tıkla/Yazı Yaz/Tuş Gönder/Zamanlayıcı araçları ve seçtiğin eylem node'ları açıktır; İnisiyatif ve Koşul çağrılamaz, tuval düzenlenmez veya baştan başlatılmaz. Kurtarma raporları aynı sekmede saklanır. Varsayılan kapalıdır. [Kurulum ve davranış](docs/kurtarma-ajani.md).
+
 Sağ paneldeki **Ajan** sekmesi, akışı bir ajanın kullanabileceği araçlara açar. Araçlar ayrı bir
 tıklayıcı değildir: hepsi **mevcut motoru** kullanır — aynı hedef bulma, aynı odak, aynı tuş
 koruması (başka program öndeyse uygulama tuşu gönderilmez), aynı hafıza ve aynı durdurma.

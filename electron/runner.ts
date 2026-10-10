@@ -20,7 +20,22 @@ import { outsideFolder, outsideVars, packageHost } from './enclosing'
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
 
+export type RecoveryRequest = {
+  graph: AgentGraph
+  node: AgentNode
+  live: AgentNode
+  error: Error
+  stepNo: number
+  ahead: StepAhead
+  vars: Record<string, string>
+}
+
+export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
+
 export type Executor = {
+  /** Runs only at a failed action boundary; the existing loop stack remains paused. */
+  recover?: (request: RecoveryRequest) => Promise<RecoveryDecision>
+  recoveryFinished?: (nodeId: string, ok: boolean, error?: string) => void
   log: (level: LogLevel, message: string) => void
   step: (id: string, status: StepStatus) => void
   /** Display-only telemetry: an actual chosen connection, never a look-ahead. */
@@ -332,13 +347,34 @@ export async function runGraph(
         budget.used++
         tally.n++
         ex.step(node.id, 'running')
+        let recovering = false
         try {
           const live = renderNode(node, vars)
-          port = await execStep(node, live, tally.n, peekAhead(node, scope))
+          const ahead = peekAhead(node, scope)
+          try {
+            port = await execStep(node, live, tally.n, ahead)
+          } catch (error) {
+            if (isFatal(error) || !ex.recover || !['click', 'type', 'key', 'wait'].includes(node.kind)) throw error
+            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars } })
+            recovering = decision === 'retry' || decision === 'completed'
+            if (ex.shouldStop()) throw new StoppedError()
+            if (decision === 'completed') port = 'next'
+            else if (decision === 'retry') {
+              ex.log('info', `Kurtarma sonrası “${node.title}” aynı öğede yeniden deneniyor.`)
+              try { port = await execStep(node, live, tally.n, ahead) }
+              catch (again) {
+                if (isFatal(again)) throw again
+                throw new LoopHalted(`Kurtarma sonrası “${node.title}” yine hata verdi: ${(again as Error).message}`)
+              }
+            } else if (decision === 'stop') throw new LoopHalted(`Kurtarma ajanı “${node.title}” adımını toparlayamadı: ${(error as Error).message}`)
+            else throw error
+          }
         } catch (e) {
+          if (recovering) ex.recoveryFinished?.(node.id, false, (e as Error).message)
           ex.step(node.id, 'error')
           throw e
         }
+        if (recovering) ex.recoveryFinished?.(node.id, true)
         ex.step(node.id, 'done')
         if (port === 'end') {
           if (opts.nested) ex.log('success', `Bitiş node’una ulaşıldı: “${node.title}”. Bu başlık, önceki adımların doğrulanmış sonucu değildir.`)

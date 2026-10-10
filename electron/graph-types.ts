@@ -160,6 +160,7 @@ export type CanvasBook = {
 }
 
 export type AppSettings = {
+  recovery?: import('./recovery-settings').RecoverySettings
   apiKey: string
   model: string
   /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */

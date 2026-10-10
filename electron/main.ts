@@ -9,7 +9,10 @@ import { windowEventAllowed } from './run-events'
 import { isTestProfile, storeCwd, testToolsEnabled } from './profile'
 import { bayatCikarmaKlasorleri, geciciGirdileriTopla } from './temp-sweep'
 import { withFastFind } from './tools'
-import { callTool, toolList, type ToolSource } from './tools'
+import { callTool, toolList, type ToolSource, type ToolContext } from './tools'
+import { recoverySettings } from './recovery-settings'
+import { runRecovery, type RecoveryReport } from './recovery'
+import { recoveryExecutor } from './recovery-runtime'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import {
   beginRun,
@@ -23,11 +26,12 @@ import {
   noteStep,
   noteUserStop,
   probing,
+  recentLogLines,
   setDebugRun,
   setErrorStopHook,
   setStopAtHook,
 } from './tool-state'
-import { listModels, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, recoveryToolTurn, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -70,6 +74,9 @@ let running = false
 let stopRequested = false
 /** "Bu oturumda hep izin ver" from the approval dialog; the app restart clears it. */
 let sessionApproved = false
+let recoveryToolContext: ToolContext | undefined
+let recoveryAbort: () => boolean = () => false
+let recoveryActive = false
 
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
@@ -86,6 +93,7 @@ function getSettings(): AppSettings {
   s.modelBackups = cleanBackups(s.modelBackups)
   s.visionBackups = cleanBackups(s.visionBackups)
   s.agentBackups = cleanBackups(s.agentBackups)
+  s.recovery = recoverySettings(s.recovery)
   bridge.setOcrEngine(s.ocrEngine)
   return s
 }
@@ -140,6 +148,31 @@ function openRunLog() {
     .filter((f) => f.startsWith('hata-'))
     .sort()
   for (const old of shots.slice(0, Math.max(0, shots.length - 100))) fs.rmSync(path.join(dir, old), { force: true })
+}
+
+function recoveryReportsDir(): string {
+  const dir = path.join(logsRoot(), 'kurtarma')
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function saveRecoveryReport(report: RecoveryReport) {
+  const dir = recoveryReportsDir()
+  const file = path.join(dir, `${report.id}.json`)
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(report, null, 2), 'utf8')
+  fs.renameSync(`${file}.tmp`, file)
+  const reports = fs.readdirSync(dir).filter(name => /^recovery-[\w-]+\.json$/.test(name)).sort().reverse()
+  for (const name of reports.slice(100)) fs.rmSync(path.join(dir, name), { force: true })
+}
+
+function readRecoveryReports(): RecoveryReport[] {
+  try {
+    const dir = recoveryReportsDir()
+    return fs.readdirSync(dir).filter(name => /^recovery-[\w-]+\.json$/.test(name)).sort().reverse().slice(0, 20).flatMap(name => {
+      try { return [JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as RecoveryReport] }
+      catch { return [] }
+    })
+  } catch { return [] }
 }
 
 /**
@@ -268,16 +301,19 @@ setVoiceLogger((line) => {
   voiceHoldUntil = Date.now() + 1800
   log('info', line, true)
 })
-setStopCheck(() => running && stopRequested)
+setStopCheck(() => running && (stopRequested || recoveryAbort()))
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const agent = createAgent({
-  log,
-  send,
+  log: (level, message) => log(recoveryActive && level === 'error' ? 'warn' : level, recoveryActive ? `Kurtarma · ${message}` : message),
+  send: (channel, payload) => {
+    if (recoveryActive && ['agent:patch', 'agent:step', 'agent:edge'].includes(channel)) return
+    send(channel, payload)
+  },
   // A fast run keeps to the screen stages: same engine, same checks, no model call in the ladder.
   settings: () => (fastRun ? withFastFind(getSettings()) : getSettings()),
-  shouldStop: () => stopRequested,
+  shouldStop: () => stopRequested || recoveryAbort(),
   setLoop: (text) => pushLoop(text),
   setMethod: (text) => pushMethod(text),
   // The screenshot writer hands its path over as data; nothing has to be read out of a log line.
@@ -602,7 +638,59 @@ async function runFlow(
       hidden = await hideSelf()
       revealHud()
     }
-    const summary = await runGraph(graph, agent.executor, {
+    let recoveries = 0
+    const pendingReports = new Map<string, RecoveryReport>()
+    const executor = { ...agent.executor,
+      recover: async (request: import('./runner').RecoveryRequest) => {
+        const settings = recoverySettings(getSettings().recovery)
+        if (!settings.enabled || opts?.fast || opts?.debug) return undefined
+        if (++recoveries > settings.maxRecoveries) {
+          log('warn', `Bu koşunun ${settings.maxRecoveries} kurtarma sınırı doldu; mevcut öğede kalınıyor.`)
+          return 'stop' as const
+        }
+        pushMethod('Kurtarma ajanı')
+        if (!hidden) {
+          hidden = await hideSelf()
+          revealHud()
+        }
+        recoveryActive = true
+        try {
+          const result = await runRecovery(request, {
+            settings, shouldStop: () => stopRequested, log,
+            recentLog: recentLogLines(),
+            previousReports: readRecoveryReports().slice(0, 5).map(({ nodeTitle, error, probableCause, evidence, summary, result, resumed, actions }) => ({ nodeTitle, error, probableCause, evidence, summary, result, resumed, actions: actions?.slice(-10) })),
+            saveReport: saveRecoveryReport,
+            makeExecute: (shouldStop) => {
+              recoveryAbort = shouldStop
+              if (!recoveryToolContext) return async () => { throw new Error('Kurtarma araçları henüz hazır değil.') }
+              return recoveryExecutor(request, recoveryToolContext, shouldStop, agent.executor)
+            },
+            turn: (args) => {
+              if (!s.apiKey) throw new Error('OpenRouter API anahtarı gerekli.')
+              if (!settings.model) throw new Error('Kurtarma sekmesinden bir model seç.')
+              return recoveryToolTurn({ ...args, apiKey: s.apiKey, models: modelChain(settings.model, settings.backups) })
+            },
+          })
+          if (result.report) pendingReports.set(request.node.id, result.report)
+          return result.decision
+        } finally {
+          recoveryAbort = () => false
+          recoveryActive = false
+          pushMethod('')
+        }
+      },
+      recoveryFinished: (nodeId: string, ok: boolean, error?: string) => {
+        const report = pendingReports.get(nodeId)
+        if (!report) return
+        report.resumed = ok
+        report.resumeError = error
+        try { saveRecoveryReport(report) }
+        catch (e) { log('warn', `Kurtarma sonucu kaydedilemedi: ${(e as Error).message}`) }
+        pendingReports.delete(nodeId)
+        log(ok ? 'success' : 'warn', ok ? `Kurtarma: “${report.nodeTitle}” ${report.completionBasis === 'model-observed' ? 'hedefinin gerçekleştiği model gözlemine göre bildirildi' : 'tamamlandı'}; aynı öğenin sıradaki adımından devam ediliyor.` : `Kurtarma: “${report.nodeTitle}” devam denemesi başarısız: ${error}`)
+      },
+    }
+    const summary = await runGraph(graph, executor, {
       maxSteps: Math.max(1, s.maxSteps),
       ...(opts?.requireEnd ? { reportEnd: true } : {}),
       stepDelayMs: Math.max(0, s.stepDelayMs),
@@ -699,6 +787,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
     next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
+    next.recovery = recoverySettings(next.recovery)
     store.set('settings', next)
     bridge.setOcrEngine(next.ocrEngine)
     void syncEndpoint()
@@ -783,6 +872,13 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     peekMergeUndo: () => null,
     commitMergeUndo: () => false,
   }
+  recoveryToolContext = toolContext
+  ipcMain.handle('recovery:reports', () => readRecoveryReports())
+  ipcMain.handle('recovery:openReports', async () => {
+    const dir = recoveryReportsDir()
+    await shell.openPath(dir)
+    return dir
+  })
   const toolsEnabled = testToolsEnabled(process.env.NUBBO_PROFILE, process.env.NUBBO_TEST_TOOLS)
   ipcMain.handle('tools:call', (_e, name: string, args?: unknown, source?: ToolSource) => {
     if (!toolsEnabled) return { ok: false, tool: name, outcome: 'hata', message: 'Geliştirme araçları yalnız ayrı test oturumunda kullanılabilir.' }

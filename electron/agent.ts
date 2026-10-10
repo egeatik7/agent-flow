@@ -917,6 +917,9 @@ export function createAgent(ctx: AgentContext) {
 
   /** The click/type target was not on screen. Wait, ask for a plan, then look once more before the step fails. */
   async function recoverTarget(node: AgentNode, ahead: StepAhead | undefined): Promise<Resolved | null> {
+    // The dedicated recovery agent receives the original goal and full run context.
+    // Do not let the legacy plan replace it with the next node's target first.
+    if (getSettings().recovery?.enabled) return null
     await pause(2000)
     const plan = await askPlan(node, ahead, `“${node.title}” istediği öğeyi ekranda bulamadı`)
     if (!plan) return null

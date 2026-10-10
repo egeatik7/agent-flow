@@ -963,6 +963,21 @@ body {
   flex-direction: column;
 }
 
+.settings-subtabs { margin-bottom: 12px; }
+.recovery-edit { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.recovery-settings textarea { width: 100%; resize: vertical; box-sizing: border-box; }
+.recovery-settings .check { display: flex; align-items: flex-start; gap: 5px; margin: 7px 0; }
+.recovery-settings .check input { flex-shrink: 0; }
+.recovery-node-list { max-height: 250px; overflow: auto; margin-top: 8px; padding: 4px; background: #fff; border: 1px solid #aca899; }
+.recovery-node-list small { display: block; color: #716f64; margin-top: 2px; }
+.recovery-node-list .check span { min-width: 0; overflow-wrap: anywhere; }
+.recovery-limits { flex-wrap: wrap; }
+.recovery-limits label { flex: 1 1 95px; }
+.recovery-limits input { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.recovery-report { margin-top: 10px; padding: 6px; background: #fff; border: 1px solid #aca899; overflow-wrap: anywhere; }
+.recovery-report summary { cursor: pointer; }
+.recovery-report p { white-space: pre-wrap; }
+
 /* ---------- Nodes ---------- */
 
 .edge-layer {
