@@ -1052,6 +1052,18 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
     runFlow(raw, startId, packagePath, opts)
   )
+  // Döngü listesindeki bir öğe için: "Yolu aç" (bulunduğu klasör + seçim) ve çift tık (öğeyi aç).
+  ipcMain.handle('shell:showItem', (_e, target: unknown) => {
+    const p = String(target ?? '').trim()
+    if (!p) return false
+    shell.showItemInFolder(p)
+    return true
+  })
+  ipcMain.handle('shell:openPath', async (_e, target: unknown) => {
+    const p = String(target ?? '').trim()
+    if (!p) return false
+    return (await shell.openPath(p)) === ''
+  })
   ipcMain.handle('logs:open', async () => {
     const dir = ensureLogsDir()
     await shell.openPath(dir)

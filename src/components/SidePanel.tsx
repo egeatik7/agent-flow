@@ -148,7 +148,18 @@ function TemplateField(p: Props & { n: AgentNode; field: 'prompt' | 'text' | 'ke
     onChange={value => p.field === 'folder' ? p.onLoopFolder(p.n.id, value) : p.onUpdateNode({ [p.field]: value })} />
 }
 
+/** Döngü öğesi mutlak yol değilse klasör alanıyla birleştirir; şablonlu/boş klasörde yol çözülemez. */
+function fullItemPath(item: string, folder?: string): string {
+  const value = item.trim()
+  if (!value) return ''
+  if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\')) return value
+  const base = (folder ?? '').trim().replace(/[\\/]+$/, '')
+  if (!base || /\{\{/.test(base)) return ''
+  return `${base}\\${value}`
+}
+
 function LoopEditor(p: Props & { n: AgentNode }) {
+  const [pathMenu, setPathMenu] = useState<{ x: number; y: number; item: string; full: string } | null>(null)
   const { n } = p
   const items = listItems(n)
   const members = (n.members ?? []).length
@@ -180,7 +191,17 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         {items.length > 0 ? (
           <div className="xp-tick-list">
             {items.map((item, i) => (
-              <div className={'xp-tick-row' + (i === mark ? ' on' : '')} key={i}>
+              <div className={'xp-tick-row' + (i === mark ? ' on' : '')} key={i}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  const full = fullItemPath(item, n.folder)
+                  setPathMenu({ x: e.clientX, y: e.clientY, item, full })
+                }}
+                onDoubleClick={() => {
+                  const full = fullItemPath(item, n.folder)
+                  if (full && window.xpAgent?.openPath) void window.xpAgent.openPath(full)
+                }}
+                title="Sağ tık: bulunduğu klasörü aç · Çift tık: öğeyi aç">
                 <label className="xp-tick">
                   <input
                     type="checkbox"
@@ -208,6 +229,30 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             placeholder={'C:\\Klasör\\kedi.png\nC:\\Klasör\\alt-klasör\n…'}
             onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
           />
+        )}
+        {pathMenu && (
+          <div className="ctx-menu" style={{ position: 'fixed', left: pathMenu.x, top: pathMenu.y, zIndex: 60 }}
+            onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+            <div className="ctx-title">{pathMenu.item}</div>
+            <button
+              type="button"
+              disabled={!pathMenu.full}
+              title={pathMenu.full || 'Yol çözülemedi: öğe göreli ve klasör alanı boş ya da şablon ({{öğe}}) içeriyor.'}
+              onClick={() => {
+                if (pathMenu.full) void window.xpAgent?.showInFolder?.(pathMenu.full)
+                setPathMenu(null)
+              }}
+            >
+              Yolu aç
+            </button>
+            <button type="button" disabled={!pathMenu.full} onClick={() => {
+              if (pathMenu.full) void window.xpAgent?.openPath?.(pathMenu.full)
+              setPathMenu(null)
+            }}>
+              Öğeyi aç
+            </button>
+            <button type="button" onClick={() => setPathMenu(null)}>Kapat</button>
+          </div>
         )}
       </div>
 

@@ -56,6 +56,10 @@ export type XpAgentApi = {
   toolEndpoint: () => Promise<{ port: number; file: string; startedAt: number } | null>
   toolEndpointOpen: () => Promise<string | null>
   openLogs: () => Promise<string>
+  /** Döngü öğesi gibi bir yolun BULUNDUĞU klasörü açar ve öğeyi seçer. */
+  showInFolder?: (path: string) => Promise<boolean>
+  /** Öğeyi kabuğun varsayılanıyla açar: klasör → Gezgin, dosya → kendi uygulaması. */
+  openPath?: (path: string) => Promise<boolean>
   onRecoveryReport?: (cb: (report: import('../electron/recovery').RecoveryReport) => void) => () => void
   onRecoveryStatus?: (cb: (status: { active: boolean; nodeTitle: string; message: string }) => void) => () => void
   recoveryReports?: () => Promise<import('../electron/recovery').RecoveryReport[]>
