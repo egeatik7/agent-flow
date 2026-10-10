@@ -961,7 +961,20 @@ body {
 .settings-grid {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow-x: hidden;
 }
+
+/* 1.9.81: yerel model kutusu taşmasın - yatay kaydırma olmasın */
+.settings-grid .field,
+.settings-grid .field-row,
+.settings-grid .xp-group { min-width: 0; }
+.settings-grid .field-row { flex-wrap: wrap; }
+.local-model { display: grid; gap: 6px; min-width: 0; }
+.local-model .field-row { flex-wrap: wrap; align-items: center; }
+.local-model select,
+.local-model input { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.local-model input.mono { width: 100%; }
 
 .settings-subtabs { margin-bottom: 12px; }
 .recovery-edit { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }

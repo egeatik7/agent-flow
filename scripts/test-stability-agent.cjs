@@ -37,7 +37,7 @@ function agent(overrides = {}, settings = {}) {
   const models = { isTarsModel: () => false, ...overrides.models };
   for (const [name, exports] of Object.entries({
     'a11y-bridge': bridge, browser: { userChromeItems: async () => null },
-    shots: { rememberShot: () => {} }, openrouter: models,
+    shots: { rememberShot: () => {} }, openrouter: { ...models, localConfigured: () => false },
   })) {
     const file = path.join(dist, name + '.js');
     require.cache[file] = { id: file, filename: file, loaded: true, exports };

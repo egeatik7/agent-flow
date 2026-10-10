@@ -60,7 +60,7 @@ async function replayTrace(bundle, observer) {
     'a11y-bridge': bridge,
     browser: { userChromeItems: async () => chrome ? { items: chrome.items, area: chrome.area, host: chrome.window } : null },
     shots: { rememberShot: () => {} },
-    openrouter: { isTarsModel: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
+    openrouter: { isTarsModel: () => false, localConfigured: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
       const value = nextModel('tars');
       if (value.intent) return value;
       // Legacy diagnostic traces used GuiAction. Replay their recorded target interpretation

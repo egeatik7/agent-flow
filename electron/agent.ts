@@ -40,6 +40,7 @@ import {
   planStall,
   type ReactionVerdict,
 } from './openrouter'
+import { localConfigured } from './openrouter'
 import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { type Point } from './input-policy'
 import { rememberShot } from './shots'
@@ -240,7 +241,7 @@ export function createAgent(ctx: AgentContext) {
     const mem = node.templated ? undefined : memoFor(node)
     const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, area, win)) : undefined
     const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
-    const useLlm = allowLlm && !!s.apiKey && !!prompt
+    const useLlm = allowLlm && (!!s.apiKey || localConfigured()) && !!prompt
 
     let hit: Target | null = null
     let how = ''
@@ -359,7 +360,7 @@ export function createAgent(ctx: AgentContext) {
     // A visual-only configuration still has an OCR/text alternative for conditions.
     // Fast find removes tars before this point, so it does not enable a model call.
     if (ocrOnly && requestedOrder.includes('tars') && !order.includes('list')) order.push('list')
-    trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey, memory: memoFor(node) })
+    trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey || localConfigured(), memory: memoFor(node) })
     const resolved = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved => {
       if (asksDesktopShortcut(prompt) && winScan && taskbarItem(winScan, { x: target.x, y: target.y, w: 0, h: 0 })) {
         throw new NotFoundError('Masaüstü kısayolu istendi, ancak hedef görev çubuğunda bulundu; tıklama gönderilmedi.')
@@ -551,7 +552,7 @@ export function createAgent(ctx: AgentContext) {
 
     const explicit = extractTarget(prompt)
     const seen = sampleTexts(seenItems)
-    const message = `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey ? '' : ' (API anahtarı yok, sadece yazı eşleşmesi denendi.)'}${
+    const message = `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey || localConfigured() ? '' : ' (API anahtarı ya da yerel adres yok, sadece yazı eşleşmesi denendi.)'}${
         seen ? ` Ekranda görülenlerden bazıları: ${seen}` : ''
       }`
     trace(node, { kind: 'failure', message })
@@ -575,7 +576,7 @@ export function createAgent(ctx: AgentContext) {
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
   async function locateWithTars(node: AgentNode, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
-    if (!s.apiKey) throw new NotFoundError('Görsel hedefleme için API anahtarı yok.')
+    if (!s.apiKey && !localConfigured()) throw new NotFoundError('Görsel hedefleme için API anahtarı yok.')
     const model = agentModels(s)
     const prompt = visionPrompt(node)
     const canDismiss = !readOnly && node.kind === 'click' && node.clickMode !== 'move'
@@ -718,7 +719,7 @@ export function createAgent(ctx: AgentContext) {
   async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
     const s = getSettings()
     const model = visionModels(s)
-    if (!s.apiKey || !model.length || !before.image || !after.image) return v
+    if ((!s.apiKey && !localConfigured()) || !model.length || !before.image || !after.image) return v
     if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
     try {
       const r = await judgeReaction({
@@ -772,7 +773,7 @@ export function createAgent(ctx: AgentContext) {
   async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
     const s = getSettings()
     const model = visionModels(s)
-    if (!s.apiKey || !model.length) return null
+    if ((!s.apiKey && !localConfigured()) || !model.length) return null
     let image: { data: string; w: number; h: number } | null = null
     try {
       const shot = await snap(`${node.title} plan`)
@@ -1075,7 +1076,7 @@ export function createAgent(ctx: AgentContext) {
 
   async function initiative(node: AgentNode, _stepNo: number, ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
     const s = getSettings()
-    if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
+    if (!s.apiKey && !localConfigured()) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
     const model = visionModels(s)
     const goal = node.prompt!.trim()
     const max = Math.min(40, Math.max(1, Math.floor(node.maxActions ?? 12)))
@@ -1386,7 +1387,7 @@ export function createAgent(ctx: AgentContext) {
 
   async function initiativeScreen(node: AgentNode, _stepNo: number, _ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
     const s = getSettings()
-    if (!s.apiKey) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
+    if (!s.apiKey && !localConfigured()) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
     const configured = agentModels(s)
     const model = initiativeDecisionModels(configured)
     if (model[0] !== configured[0]) log('info', `İnisiyatif görev kararı için yapılandırılmış görsel model öne alındı: ${model[0]}. UI-TARS yedekte; normal hedef bulma sırası değiştirilmedi.`)
@@ -1635,7 +1636,7 @@ export function createAgent(ctx: AgentContext) {
         return hit ? found(`birleşik OCR “${hit.text}”`) : false
       }
       if (!instruction) return false
-      if (!getSettings().apiKey) throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
+      if (!getSettings().apiKey && !localConfigured()) throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
       try {
         // Same target resolver as Click, without dispatch, popup recovery or memory writes.
         // A text edit cannot inherit an old recorded target as positive evidence.

@@ -145,6 +145,8 @@ export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vi
 }
 /** Kullanıcı yerel modelin görüntü desteklediğini beyan etti mi. */
 export function localVisionDeclared() { return localVision }
+/** Yerel yol kullanılabilir mi: adres var ve "OpenRouter'a dön" kapalı. */
+export function localConfigured() { return !!localBase && !localOff }
 /**
  * Zincirdeki bir satırın nereye gideceğini söyler. `local:<model>` yerel tabana,
  * diğer her şey OpenRouter'a gider; böylece aynı listede ikisi birlikte durabilir.
@@ -306,6 +308,8 @@ async function chatOnce(
 ): Promise<string> {
   const once = async (json: boolean) => {
     const target = targetFor(model)
+    // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
+    if (!target.local && !String(apiKey ?? '').trim()) throw new ModelFailed('OpenRouter anahtarı yok; satır atlandı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     reportOut(target.model, messages)
     const res = await guardedFetch(target.url, {
