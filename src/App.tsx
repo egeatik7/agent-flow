@@ -7,6 +7,7 @@ import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCa
 import { CanvasSequence } from './lib/canvas-sequence'
 import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
 import NodeCanvas from './components/NodeCanvas'
+import { useRecoveryReports } from './hooks/useRecoveryReports'
 import WorkspaceWelcome, { WorkspacePicker } from './components/WorkspaceWelcome'
 import { canvasView, emptyNavigation, visitLocation, type CanvasLocation } from './lib/canvas-navigation'
 import SidePanel, { type SideTab } from './components/SidePanel'
@@ -155,6 +156,11 @@ export default function App() {
   const [pasteRevision, setPasteRevision] = useState(0)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const recoveryReports = useRecoveryReports(running)
+  const [recoveryStatus, setRecoveryStatus] = useState<{ active: boolean; nodeTitle: string; message: string } | null>(null)
+  useEffect(() => api?.onRecoveryStatus?.(setRecoveryStatus), [])
+  useEffect(() => { if (running) setRecoveryStatus(null) }, [running])
+  useEffect(() => { setRecoveryStatus(null) }, [activeId])
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
@@ -1104,7 +1110,7 @@ export default function App() {
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (api) {
-        const result = await api.runAgent(full, startId, path)
+        const result = await api.runAgent(full, startId, path, { canvasId: bookRef.current.tabs.find(t => t.id === activeIdRef.current)?.savedId })
         halted = !!result.stopped || !result.ok
         failed = !result.ok && !result.stopped
         // The agent log already explains each error; this one line says the run did not end clean.
@@ -1168,7 +1174,7 @@ export default function App() {
         pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true })
+        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId })
           : await runDemo(prepared.graph, settingsRef.current, pushLog, recordStep, ilk, patchNode, path, true, recordEdge)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
@@ -1430,6 +1436,10 @@ export default function App() {
         />
         <div className="workspace">
           <div className="canvas-wrap">
+            {recoveryStatus && <div className="recovery-status" role="status" aria-live="polite">
+              <b>{recoveryStatus.active ? 'Kurtarma ajanı devrede' : 'Kurtarma sonucu'} · {recoveryStatus.nodeTitle}</b>
+              <span>{recoveryStatus.message}</span>
+            </div>}
             {stack.length > 0 && (
               <button type="button" className="xp-btn package-exit" disabled={editorLocked} onMouseDown={(e) => e.stopPropagation()} onClick={exitPackage}>
                 Paketten çık
@@ -1437,6 +1447,8 @@ export default function App() {
             )}
             {hasCanvas ? <NodeCanvas
               graph={graph}
+              recoveryReports={recoveryReports}
+              reportCanvasId={bookRef.current.tabs.find(t => t.id === activeId)?.savedId ?? activeId}
               canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}
               pasteRevision={pasteRevision}
               onPasteTarget={registerPasteTarget}

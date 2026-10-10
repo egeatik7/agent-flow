@@ -13,6 +13,7 @@ export default function Hud() {
   )
   const [loop, setLoop] = useState(() => (window.xpAgent ? '' : 'Modeller · 3/12 · kedi.png'))
   const [method, setMethod] = useState(() => (window.xpAgent ? '' : 'Windows OCR'))
+  const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
   useEffect(() => {
@@ -39,11 +40,16 @@ export default function Hud() {
       const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
       setMethod(text)
     })
+    const offRecovery = window.xpAgent?.onRecoveryStatus?.(payload => {
+      setRecovering(payload.active)
+      setStatus({ level: payload.active ? 'warn' : 'info', text: `${payload.nodeTitle}: ${payload.message}` })
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
       offLoop?.()
       offMethod?.()
+      offRecovery?.()
     }
   }, [])
 
@@ -60,7 +66,7 @@ export default function Hud() {
         </div>
         <p className="hud-text">{status.text}</p>
       </div>
-      <p className={`hud-line hud-method${method ? ' on' : ''}`}>{method}</p>
+      <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
       <p className={`hud-line hud-loop${loop ? ' on' : ''}`}>{loop}</p>
     </div>
   )

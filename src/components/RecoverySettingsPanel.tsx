@@ -2,6 +2,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '../types'
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
+import ModelChain from './ModelChain'
 import type { RecoveryReport } from '../../electron/recovery'
 
 export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled }: {
@@ -34,15 +35,21 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     <fieldset className="recovery-edit" disabled={disabled}>
     <p className="hint">Akış bir eylemde hata verince bu model devreye girer. Tuvalin JSON'unu, mevcut öğeyi, günlükleri ve önceki kurtarma raporlarını okur; düzeltmeden sonra aynı yerden devam edilir.</p>
     <label className="check"><input type="checkbox" checked={s.enabled} onChange={e => update({ enabled: e.target.checked })} /> Hata olduğunda kurtarma ajanını kullan</label>
-    <div className="field"><label htmlFor="recovery-model">Kurtarma modeli (OpenRouter)</label>
-      <input id="recovery-model" className="xp-input" list="recovery-models" value={s.model} placeholder="Sağlayıcı/model kimliği" onChange={e => update({ model: e.target.value })} />
-      <datalist id="recovery-models">{models.map(m => <option key={m.id} value={m.id}>{m.vision ? 'Görsel' : 'Metin'}</option>)}</datalist>
-      <button type="button" className="xp-btn" onClick={onLoadModels}>Model listesini getir</button>
-      <p className="hint">Genel ayarlardaki API anahtarını kullanır. Ekran görüntüsü ve araç çağırma desteği olan bir model seç.</p>
-      {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
+    <div className="field"><label htmlFor="recovery-api-key">Kurtarma ajanı OpenRouter API Key</label>
+      <div className="save-row">
+        <input id="recovery-api-key" className="xp-input" type="password" value={settings.recovery?.apiKey ?? ''} placeholder="sk-or-v1-..." onChange={e => update({ apiKey: e.target.value })} />
+        <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Kaydet</button>
+      </div>
+      <p className="hint">Genel sekmeden bağımsızdır. Kurtarma ajanı yalnız burada kaydettiğin anahtarı kullanır.</p>
     </div>
-    <div className="field"><label htmlFor="recovery-backups">Yedek modeller (her satıra bir tane, en fazla 4)</label>
-      <textarea id="recovery-backups" className="xp-input" rows={3} value={(settings.recovery?.backups ?? []).join('\n')} onChange={e => update({ backups: e.target.value.split('\n') })} />
+    <div className="field"><label htmlFor="recovery-model">Kurtarma modelleri (OpenRouter)</label>
+      <ModelChain primary={settings.recovery?.model ?? s.model} backups={settings.recovery?.backups ?? []}
+        inputId="recovery-model" listId="recovery-models" placeholder="Sağlayıcı/model kimliği"
+        onChange={(model, backups) => update({ model, backups })} />
+      <datalist id="recovery-models">{models.map(m => <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />)}</datalist>
+      <button type="button" className="xp-btn" onClick={onLoadModels}>Model listesini getir</button>
+      <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
+      {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
     </div>
     <div className="field"><label htmlFor="recovery-task">Akışın amacı ve çalışma bilgileri</label>
       <textarea id="recovery-task" className="xp-input" rows={6} value={s.task} placeholder="Ne yapılmalı? Hangi uygulamalar, klasörler ve sonuçlar önemli? Tamamlanan hangi işlemler tekrarlanmamalı?" onChange={e => update({ task: e.target.value })} />

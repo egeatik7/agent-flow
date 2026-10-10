@@ -11,6 +11,7 @@ export type RecoveryReport = {
   startedAt: number
   endedAt: number
   model: string
+  canvasId?: string
   nodeId: string
   nodeTitle: string
   error: string

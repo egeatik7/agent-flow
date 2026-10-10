@@ -29,6 +29,35 @@ describe('recovery settings UI', () => {
     expect(onSave.mock.calls[0][0].recovery).toMatchObject({ model: 'fixture/smart-model', task: 'Open Blender and process the current GLB.', allowedNodeIds: ['click'] })
     expect(JSON.stringify(mounted!.toJSON())).not.toContain('FORBIDDEN')
   })
+  it('keeps a masked dedicated key and saves reordered backup models without changing the general key', async () => {
+    vi.stubGlobal('window', { xpAgent: { recoveryReports: async () => [] } })
+    const onSave = vi.fn(), onLoadModels = vi.fn()
+    function Harness() {
+      const [settings, setSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS, apiKey: 'general-fixture',
+        recovery: { ...DEFAULT_RECOVERY, apiKey: 'recovery-fixture', model: 'first', backups: ['second'] } })
+      return createElement(RecoverySettingsPanel, { settings, setSettings, onSave, graph: { nodes: [], edges: [] },
+        models: [{ id: 'first', vision: true }], onLoadModels })
+    }
+    await act(async () => { mounted = create(createElement(Harness)) })
+    expect(mounted!.root.findByProps({ id: 'recovery-api-key' }).props.type).toBe('password')
+    expect(mounted!.root.findByProps({ id: 'recovery-api-key' }).props.value).toBe('recovery-fixture')
+    act(() => mounted!.root.findByProps({ id: 'recovery-api-key' }).props.onChange({ target: { value: ' new-recovery-fixture ' } }))
+    const rows = () => mounted!.root.findAllByProps({ className: 'backup-row' })
+    act(() => rows()[1].findAllByType('button').find(b => b.props.title === 'Yukarı')!.props.onClick())
+    expect(rows().map(row => row.findByType('input').props.value)).toEqual(['second', 'first'])
+    act(() => mounted!.root.findByProps({ className: 'xp-btn backup-add' }).props.onClick())
+    expect(rows()).toHaveLength(3)
+    act(() => rows()[2].findByType('input').props.onChange({ target: { value: 'third' } }))
+    act(() => rows()[1].findAllByType('button').find(b => b.props.title === 'Aşağı')!.props.onClick())
+    expect(rows().map(row => row.findByType('input').props.value)).toEqual(['second', 'third', 'first'])
+    act(() => rows()[2].findAllByType('button').find(b => b.props.title === 'Bu modeli sil')!.props.onClick())
+    expect(mounted!.root.findByProps({ id: 'recovery-model' }).props.list).toBe('recovery-models')
+    act(() => mounted!.root.findAllByType('button').find(b => b.children.includes('Model listesini getir'))!.props.onClick())
+    expect(onLoadModels).toHaveBeenCalledOnce()
+    act(() => mounted!.root.findAllByType('button').find(b => b.children.includes('Kurtarma Ayarlarını Kaydet'))!.props.onClick())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ recovery: { apiKey: 'new-recovery-fixture', model: 'second', backups: ['third'] } })
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('apiKey')
+  })
   it('shows saved probable cause, evidence, actions and the actual resume result', async () => {
     vi.stubGlobal('window', { xpAgent: { recoveryReports: async () => [{ id: 'r', startedAt: 1, nodeTitle: 'Open Blender', error: 'Missing target',
       probableCause: 'Chrome may have covered the shortcut', evidence: 'Chrome was in front', summary: 'Returned to desktop', result: 'completed', resumed: true, completionBasis: 'model-observed',

@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
-const { normalizeGraph } = require('../dist-electron/graph-types.js');
-const { StoppedError } = require('../dist-electron/runner.js');
+const { normalizeGraph, createNode } = require('../dist-electron/graph-types.js');
+const { StoppedError, runGraph } = require('../dist-electron/runner.js');
+const { recoverySettings } = require('../dist-electron/recovery-settings.js');
+const { runRecovery } = require('../dist-electron/recovery.js');
 
 // Extract the real run path; its dependencies are test doubles. We do not boot
 // Electron, patch the desktop, or rewrite a second copy of the runner.
@@ -24,7 +26,12 @@ const compiled = ts.transpileModule('const handler = ' + callback.getText(source
 function harness(overrides = {}) {
   const events = [];
   const context = {
-    running: false, stopRequested: false, runLog: 'old', StoppedError,
+    running: false, stopRequested: false, runLog: 'old', recoveryActive: false, StoppedError,
+    recoverySettings, runRecovery, modelChain: (primary, backups) => [primary, ...backups],
+    recoveryStatus: (active, title, message) => events.push({ active, title, message }),
+    pushMethod: () => {}, recentLogLines: () => [], readRecoveryReports: () => [],
+    saveRecoveryReport: () => {}, recoveryToolContext: {}, recoveryAbort: () => false,
+    recoveryExecutor: () => async () => ({ ok: true, outcome: 'tamam', message: 'Done' }),
     // The code legitimately reads the environment (which profile this instance is), so the sandbox
     // provides one instead of the run failing on a missing global.
     process: { env: { ...process.env } },
@@ -71,6 +78,44 @@ test('normalization failure releases run state and a later valid run succeeds', 
   assert.equal(result.ok, true);
   assert.equal(h.context.running, false);
   assert(h.events.includes('awake-stopped'), 'resource ID 0 is still cleaned');
+});
+
+test('normal action failure waits for recovery, uses its own key, and only then resumes or fails', async () => {
+  for (const mode of ['retry', 'stop', 'disabled']) {
+    const action = createNode('click', 0, 0);
+    const reports = [], calls = [], order = [];
+    let attempts = 0;
+    const ex = { log: () => {}, step: (_id, status) => order.push(status), shouldStop: () => false,
+      click: async () => { attempts++; if (attempts === 1) throw new Error('missing target'); },
+      type: async () => {}, key: async () => {}, exists: async () => true };
+    const h = harness({
+      agent: { beginRun: () => {}, executor: ex }, runGraph,
+      getSettings: () => ({ apiKey: 'general-fixture', hideWhileRunning: false, maxSteps: 20, stepDelayMs: 0,
+        recovery: recoverySettings({ enabled: mode !== 'disabled', apiKey: 'dedicated-fixture', model: 'fixture/model' }) }),
+      recoveryToolTurn: async args => {
+        order.push('recover'); calls.push(args);
+        return { role: 'assistant', content: null, tool_calls: [{ id: 'r', type: 'function', function: {
+          name: mode === 'retry' ? 'recovery_retry' : 'recovery_stop',
+          arguments: JSON.stringify({ probableCause: 'Covered', evidence: 'Window', summary: 'Repair result' }) } }] };
+      },
+      saveRecoveryReport: report => reports.push(structuredClone(report)),
+      showSelf: () => order.push('ui-return'), hideSelf: async () => true,
+    });
+    if (mode === 'retry') {
+      assert.equal((await h.run({ nodes: [action], edges: [] }, undefined, undefined, { canvasId: 'saved' })).ok, true);
+      // normalizeGraph adds Start to legacy graphs; inspect the failed action's tail.
+      assert.deepEqual(order.slice(-4), ['running', 'recover', 'done', 'ui-return']);
+      assert.equal(attempts, 2); assert.equal(reports.at(-1).resumed, true);
+      assert.equal(reports.at(-1).canvasId, 'saved');
+    } else {
+      await assert.rejects(h.run({ nodes: [action], edges: [] }), /missing target/);
+      assert.equal(attempts, 1);
+      assert(mode === 'stop' ? order.indexOf('recover') < order.indexOf('error') : !order.includes('recover'));
+    }
+    assert(calls.every(call => call.apiKey === 'dedicated-fixture'));
+    assert.equal(h.context.running, false); assert.equal(h.context.recoveryActive, false);
+    assert(h.events.some(event => event?.active === (mode !== 'disabled')));
+  }
 });
 
 test('store or run preparation failure cannot leave the agent permanently busy', async () => {

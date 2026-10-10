@@ -18,6 +18,9 @@ import {
   type StepStatus,
 } from '../types'
 import { allMembers, ancestors, frameInput, frameOutput, frameRect, ownerOf, type Rect } from '../../electron/groups'
+import RecoveryNote from './RecoveryNote'
+import { recoveryReportIndex } from '../lib/recovery-report-view'
+import type { RecoveryReport } from '../../electron/recovery'
 import { packageAppearances } from '../lib/package-appearance'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
@@ -40,6 +43,8 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 
 type Props = {
   graph: AgentGraph
+  recoveryReports?: RecoveryReport[]
+  reportCanvasId?: string
   canvasKey?: string
   pasteRevision?: number
   onPasteTarget?: (readPoint: (() => { x: number; y: number }) | null) => void
@@ -142,6 +147,16 @@ export default function NodeCanvas(p: Props) {
     onDeleteNode: guard(p.onDeleteNode), onDeleteEdge: guard(p.onDeleteEdge),
     onDuplicate: guard(p.onDuplicate), onUnpackPackage: guard(p.onUnpackPackage),
     onRunFrom: guard(p.onRunFrom),
+  }
+  const [reportNodeId, setReportNodeId] = useState<string | null>(null)
+  const reportIndex = useMemo(() => recoveryReportIndex(p.graph, p.recoveryReports ?? [], p.reportCanvasId), [p.graph, p.recoveryReports, p.reportCanvasId])
+  useEffect(() => { setReportNodeId(null) }, [p.canvasKey])
+  const reportBadge = (id: string) => {
+    const count = reportIndex.get(id)?.length ?? 0
+    return count ? <button type="button" className="recovery-report-badge" aria-label={`${count} kurtarma raporunu aç`}
+      title={`${count} kurtarma raporu · Mor işaret rapor bulunduğunu gösterir`}
+      onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); setReportNodeId(id) }}>▤ {count}</button> : null
   }
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -313,6 +328,7 @@ export default function NodeCanvas(p: Props) {
     const el = scrollRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
+      if ((e.target as Element | undefined)?.closest?.('.recovery-note')) return
       e.preventDefault()
       const v = viewRef.current
       const z = Math.min(MAX_Z, Math.max(MIN_Z, v.z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)))
@@ -515,6 +531,7 @@ export default function NodeCanvas(p: Props) {
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
       onMouseDownCapture={(e) => {
+        if ((e.target as Element | undefined)?.closest?.('.recovery-note, .recovery-report-badge')) return
         if (e.button === 0 || e.button === 2) pasteClick.current = { canvasKey: p.canvasKey, point: toCanvas(e.clientX, e.clientY) }
       }}
       onMouseDown={(e) => {
@@ -621,6 +638,7 @@ export default function NodeCanvas(p: Props) {
           const empty = !(f.loop.members ?? []).length
           const cls = [
             'loop-frame',
+            reportIndex.get(f.loop.id)?.length ? 'has-recovery-report' : '',
             p.selectedIds.includes(f.loop.id) ? 'selected' : '',
             drag?.over === f.loop.id ? 'drop' : '',
             st === 'running' && p.runPhase === 'running' ? 'running' : '',
@@ -666,6 +684,7 @@ export default function NodeCanvas(p: Props) {
               >
                 <span className="frame-in node-port in" title="Giriş: akış kutuya buradan girer" />
                 <span className="frame-title">↻ {f.label}</span>
+                {reportBadge(f.loop.id)}
                 {f.sub && <span className="frame-sub">{f.sub}</span>}
                 {statusLabel(f.loop.id, st) && <span className={`status-chip ${statusClass(f.loop.id, st)}`}>{statusLabel(f.loop.id, st)}</span>}
               </div>
@@ -762,6 +781,7 @@ export default function NodeCanvas(p: Props) {
           const st = p.stepStatus[n.id] ?? 'idle'
           const cls = [
             'agent-node',
+            reportIndex.get(n.id)?.length ? 'has-recovery-report' : '',
             `kind-${n.kind}`,
             p.selectedIds.includes(n.id) ? 'selected' : '',
             hoverTarget === n.id ? 'drop-target' : '',
@@ -795,6 +815,7 @@ export default function NodeCanvas(p: Props) {
                 ) : spec.icon}</span>
                 {packageLook && <span className="package-badge" title="Bu tuvaldeki paket ayıracı">{packageLook.badge}</span>}
                 <span className="node-title">{n.title}</span>
+                {reportBadge(n.id)}
                 {statusLabel(n.id, st) && <span className={`status-chip ${statusClass(n.id, st)}`}>{statusLabel(n.id, st)}</span>}
               </div>
               <div className="node-body">
@@ -958,6 +979,7 @@ export default function NodeCanvas(p: Props) {
           </div>
         )}
       </div>
+      {reportNodeId && <RecoveryNote title={byId.get(reportNodeId)?.title ?? 'Node'} reports={reportIndex.get(reportNodeId) ?? []} onClose={() => setReportNodeId(null)} />}
       <button type="button" className="canvas-zoom" title="Tekerlek: yakınlaştır · Orta tuş: kaydır · Tıkla: 100%" onMouseDown={(e) => e.stopPropagation()} onClick={resetZoom}>
         {Math.round(view.z * 100)}%
       </button>

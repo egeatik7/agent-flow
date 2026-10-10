@@ -161,6 +161,7 @@ function saveRecoveryReport(report: RecoveryReport) {
   const file = path.join(dir, `${report.id}.json`)
   fs.writeFileSync(`${file}.tmp`, JSON.stringify(report, null, 2), 'utf8')
   fs.renameSync(`${file}.tmp`, file)
+  send('recovery:report', report)
   const reports = fs.readdirSync(dir).filter(name => /^recovery-[\w-]+\.json$/.test(name)).sort().reverse()
   for (const name of reports.slice(100)) fs.rmSync(path.join(dir, name), { force: true })
 }
@@ -168,7 +169,7 @@ function saveRecoveryReport(report: RecoveryReport) {
 function readRecoveryReports(): RecoveryReport[] {
   try {
     const dir = recoveryReportsDir()
-    return fs.readdirSync(dir).filter(name => /^recovery-[\w-]+\.json$/.test(name)).sort().reverse().slice(0, 20).flatMap(name => {
+    return fs.readdirSync(dir).filter(name => /^recovery-[\w-]+\.json$/.test(name)).sort().reverse().slice(0, 100).flatMap(name => {
       try { return [JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as RecoveryReport] }
       catch { return [] }
     })
@@ -496,7 +497,13 @@ function pushLoop(text: string) {
 
 function pushMethod(text: string) {
   if (!running || !hudWindow || hudWindow.isDestroyed()) return
-  deliverHud('hud:method', { text }, false)
+  deliverHud('hud:method', { text: recoveryActive ? `Kurtarma ajanı${text ? ` · ${text}` : ''}` : text }, false)
+}
+
+function recoveryStatus(active: boolean, nodeTitle: string, message: string) {
+  const payload = { active, nodeTitle, message }
+  send('recovery:status', payload)
+  deliverHud('recovery:status', payload, false)
 }
 
 function pushHud(level: LogLevel, message: string) {
@@ -591,7 +598,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean }
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean; canvasId?: string }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string; reachedEnd?: boolean }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -643,36 +650,52 @@ async function runFlow(
     const executor = { ...agent.executor,
       recover: async (request: import('./runner').RecoveryRequest) => {
         const settings = recoverySettings(getSettings().recovery)
-        if (!settings.enabled || opts?.fast || opts?.debug) return undefined
+        if (!settings.enabled || opts?.fast || opts?.debug) {
+          const reason = !settings.enabled ? 'Kurtarma sekmesinde kapalı.' : opts?.fast ? 'Hızlı koşu model çağırmaz.' : 'Hata ayıklama koşusu hata anında durur.'
+          log('warn', `Kurtarma ajanı devreye girmedi: ${reason}`)
+          recoveryStatus(false, request.node.title, `Kurtarma devreye girmedi: ${reason}`)
+          return undefined
+        }
         if (++recoveries > settings.maxRecoveries) {
           log('warn', `Bu koşunun ${settings.maxRecoveries} kurtarma sınırı doldu; mevcut öğede kalınıyor.`)
+          recoveryStatus(false, request.node.title, 'Koşunun kurtarma sınırı doldu; akış tamamlanamadı.')
           return 'stop' as const
         }
-        pushMethod('Kurtarma ajanı')
-        if (!hidden) {
-          hidden = await hideSelf()
-          revealHud()
-        }
+        recoveryStatus(true, request.node.title, 'Hata inceleniyor; akış kurtarma sonucunu bekliyor.')
         recoveryActive = true
         try {
+          if (!hidden) {
+            hidden = await hideSelf()
+            revealHud()
+          }
+          pushMethod('')
           const result = await runRecovery(request, {
-            settings, shouldStop: () => stopRequested, log,
+            settings, shouldStop: () => stopRequested, log: (level, message) => {
+              log(level, message)
+              recoveryStatus(true, request.node.title, message)
+            },
             recentLog: recentLogLines(),
             previousReports: readRecoveryReports().slice(0, 5).map(({ nodeTitle, error, probableCause, evidence, summary, result, resumed, actions }) => ({ nodeTitle, error, probableCause, evidence, summary, result, resumed, actions: actions?.slice(-10) })),
-            saveReport: saveRecoveryReport,
+            saveReport: report => { report.canvasId = opts?.canvasId; saveRecoveryReport(report) },
             makeExecute: (shouldStop) => {
               recoveryAbort = shouldStop
               if (!recoveryToolContext) return async () => { throw new Error('Kurtarma araçları henüz hazır değil.') }
               return recoveryExecutor(request, recoveryToolContext, shouldStop, agent.executor)
             },
             turn: (args) => {
-              if (!s.apiKey) throw new Error('OpenRouter API anahtarı gerekli.')
+              if (!settings.apiKey) throw new Error('Kurtarma sekmesinden ayrı OpenRouter API anahtarını kaydet.')
               if (!settings.model) throw new Error('Kurtarma sekmesinden bir model seç.')
-              return recoveryToolTurn({ ...args, apiKey: s.apiKey, models: modelChain(settings.model, settings.backups) })
+              return recoveryToolTurn({ ...args, apiKey: settings.apiKey, models: modelChain(settings.model, settings.backups) })
             },
           })
           if (result.report) pendingReports.set(request.node.id, result.report)
+          recoveryStatus(false, request.node.title, result.decision === 'retry' || result.decision === 'completed'
+            ? 'Kurtarma tamamlandı; aynı öğede devam sonucu bekleniyor.'
+            : result.report?.summary || 'Kurtarma ajanı sorunu çözemedi.')
           return result.decision
+        } catch (error) {
+          recoveryStatus(false, request.node.title, stopRequested ? 'Kurtarma kullanıcı tarafından durduruldu.' : `Kurtarma başarısız: ${(error as Error).message}`)
+          throw error
         } finally {
           recoveryAbort = () => false
           recoveryActive = false
@@ -688,6 +711,7 @@ async function runFlow(
         catch (e) { log('warn', `Kurtarma sonucu kaydedilemedi: ${(e as Error).message}`) }
         pendingReports.delete(nodeId)
         log(ok ? 'success' : 'warn', ok ? `Kurtarma: “${report.nodeTitle}” ${report.completionBasis === 'model-observed' ? 'hedefinin gerçekleştiği model gözlemine göre bildirildi' : 'tamamlandı'}; aynı öğenin sıradaki adımından devam ediliyor.` : `Kurtarma: “${report.nodeTitle}” devam denemesi başarısız: ${error}`)
+        recoveryStatus(false, report.nodeTitle, ok ? 'Kurtarma başarılı; akış aynı öğede devam ediyor.' : `Kurtarma sonrası devam başarısız: ${error}`)
       },
     }
     const summary = await runGraph(graph, executor, {
@@ -723,6 +747,8 @@ async function runFlow(
     // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
     // still ask how the run ended after it is over.
     endRun(outcome)
+    if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
+    recoveryActive = false
     running = false
     derivedRun = false
     fastRun = false

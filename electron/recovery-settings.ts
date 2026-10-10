@@ -1,5 +1,7 @@
 export type RecoverySettings = {
   enabled: boolean
+  /** Dedicated OpenRouter credential; never falls back to the general key. */
+  apiKey?: string
   model: string
   backups: string[]
   task: string
@@ -22,6 +24,7 @@ Düzeltme sonrası recovery_retry ile aynı node'a dön. Hedefi alternatif bir y
 
 export const DEFAULT_RECOVERY: RecoverySettings = {
   enabled: false,
+  apiKey: '',
   model: '',
   backups: [],
   task: '',
@@ -42,6 +45,7 @@ export function recoverySettings(value?: Partial<RecoverySettings>): RecoverySet
     : []
   return {
     enabled: value?.enabled === true,
+    apiKey: typeof value?.apiKey === 'string' ? value.apiKey.trim() : '',
     model: typeof value?.model === 'string' ? value.model.trim() : '',
     backups: strings(value?.backups, 4),
     task: typeof value?.task === 'string' ? value.task.slice(0, 30_000) : '',

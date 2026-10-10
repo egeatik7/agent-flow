@@ -48,7 +48,7 @@ export type XpAgentApi = {
     startId?: string,
     packagePath?: string[],
     /** `derived`: this graph is a branch being tried, not the saved flow; do not store it. */
-    opts?: { derived?: boolean; requireEnd?: boolean }
+    opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string }
   ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number; reachedEnd?: boolean }>
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
@@ -56,6 +56,8 @@ export type XpAgentApi = {
   toolEndpoint: () => Promise<{ port: number; file: string; startedAt: number } | null>
   toolEndpointOpen: () => Promise<string | null>
   openLogs: () => Promise<string>
+  onRecoveryReport?: (cb: (report: import('../electron/recovery').RecoveryReport) => void) => () => void
+  onRecoveryStatus?: (cb: (status: { active: boolean; nodeTitle: string; message: string }) => void) => () => void
   recoveryReports?: () => Promise<import('../electron/recovery').RecoveryReport[]>
   openRecoveryReports?: () => Promise<string>
   testOpenRouter: () => Promise<string>
