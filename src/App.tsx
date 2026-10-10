@@ -1548,6 +1548,16 @@ export default function App() {
                 pushLog('error', errText(e))
               }
             }}
+            onLoadLocalModels={async () => {
+              try {
+                const base = (settings.localBaseUrl ?? '').trim()
+                const list = (await api?.listLocalModels?.(base)) ?? []
+                setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision }))])
+                pushLog('success', `Yerel model listesi: ${list.length} model${base ? ` · ${base}` : ''}.`)
+              } catch (e) {
+                pushLog('error', errText(e))
+              }
+            }}
             onTestApi={async () => {
               if (!api) {
                 pushLog('info', 'Önizlemede API testi yapılmaz.')

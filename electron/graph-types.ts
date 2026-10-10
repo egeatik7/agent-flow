@@ -165,6 +165,11 @@ export type AppSettings = {
   model: string
   /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */
   modelBackups: string[]
+  /**
+   * OpenAI uyumlu YEREL sunucu adresi (llama.cpp / Ollama / LM Studio). Boş = yalnız OpenRouter.
+   * Zincirde `local:<model>` yazan satır bu adrese gider; diğer bütün satırlar OpenRouter'da kalır.
+   */
+  localBaseUrl?: string
   targetWindow: string
   stepDelayMs: number
   maxSteps: number
@@ -241,6 +246,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   model: 'openai/gpt-4o-mini',
   modelBackups: [],
+  localBaseUrl: '',
   targetWindow: '',
   stepDelayMs: 800,
   maxSteps: 2000,

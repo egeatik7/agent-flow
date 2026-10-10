@@ -32,7 +32,7 @@ import {
   setErrorStopHook,
   setStopAtHook,
 } from './tool-state'
-import { listModels, recoveryToolTurn, setChatLogger, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, listLocalModels, recoveryToolTurn, setChatLogger, setLocalEndpoint, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -81,6 +81,8 @@ let recoveryActive = false
 
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
+  // Yerel (OpenAI uyumlu) adres tek yerden uygulanır: boşsa her istek OpenRouter'da kalır.
+  setLocalEndpoint(s.localBaseUrl)
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
   s.ocrEngine = 'combined'
   const ramp = clampRamp(s.valueLo, s.valueHi)
@@ -1081,6 +1083,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return testKey(s.apiKey)
   })
   ipcMain.handle('openrouter:models', () => listModels())
+  ipcMain.handle('local:models', (_e, base?: string) => listLocalModels(base))
   ipcMain.handle('openrouter:testVision', async () => {
     const s = getSettings()
     if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')

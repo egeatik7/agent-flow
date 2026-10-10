@@ -129,6 +129,36 @@ const HEADERS = (apiKey: string) => ({
   'X-Title': 'Nubbo Agent Studio',
 })
 
+/** Yerel (OpenAI uyumlu) taban adres. Boşken her istek OpenRouter'da kalır - davranış değişmez. */
+let localBase = ''
+export function setLocalEndpoint(url: string | undefined) {
+  const raw = String(url ?? '').trim().replace(/\/+$/, '')
+  if (!raw) { localBase = ''; return }
+  localBase = /\/v1$/i.test(raw) ? raw : `${raw}/v1`
+}
+/**
+ * Zincirdeki bir satırın nereye gideceğini söyler. `local:<model>` yerel tabana,
+ * diğer her şey OpenRouter'a gider; böylece aynı listede ikisi birlikte durabilir.
+ */
+function targetFor(model: string): { url: string; model: string; local: boolean } {
+  const openRouter = 'https://openrouter.ai/api/v1/chat/completions'
+  if (!localBase || !/^local:/i.test(model)) return { url: openRouter, model, local: false }
+  return { url: `${localBase}/chat/completions`, model: model.replace(/^local:/i, '').trim(), local: true }
+}
+/** Yerel sunucunun model listesi. Aynı zamanda "adres açık mı" sınaması olarak kullanılır. */
+export async function listLocalModels(base?: string): Promise<{ id: string; vision: boolean }[]> {
+  const raw = String(base ?? localBase).trim().replace(/\/+$/, '')
+  if (!raw) throw new Error('Yerel adres boş.')
+  const root = /\/v1$/i.test(raw) ? raw : `${raw}/v1`
+  const res = await guardedFetch(`${root}/models`, {}, 15000)
+  if (!res.ok) throw new Error(`Yerel model listesi alınamadı (${res.status}). Sunucu açık mı?`)
+  const data = JSON.parse(res.text) as { data?: { id?: string; architecture?: { input_modalities?: string[] } }[] }
+  return (data.data ?? [])
+    .filter((m) => typeof m.id === 'string' && m.id)
+    .map((m) => ({ id: String(m.id), vision: !!m.architecture?.input_modalities?.includes('image') }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
 type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }
 
 let chatLogger: ((line: string) => void) | null = null
@@ -264,12 +294,14 @@ async function chatOnce(
   opts: { json?: boolean } = {}
 ): Promise<string> {
   const once = async (json: boolean) => {
-    reportOut(model, messages)
-    const res = await guardedFetch('https://openrouter.ai/api/v1/chat/completions', {
+    const target = targetFor(model)
+    const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
+    reportOut(target.model, messages)
+    const res = await guardedFetch(target.url, {
       method: 'POST',
       headers: HEADERS(apiKey),
       body: JSON.stringify({
-        model,
+        model: target.model,
         temperature: 0,
         // Leave output/reasoning token limits to the provider's model defaults.
         messages,
@@ -278,24 +310,25 @@ async function chatOnce(
     })
     if (!res.ok) {
       reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
-      if (res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
-      if (res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
+      // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
+      if (!target.local && res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
+      if (!target.local && res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
       if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
-      const message = `OpenRouter ${res.status}: ${res.text.slice(0, 200)}`
+      const message = `${where} ${res.status}: ${res.text.slice(0, 200)}`
       throw [400, 404, 422].includes(res.status) ? new ModelRejected(message) : new ModelFailed(message)
     }
     let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; error?: { message?: string } }
     try {
       data = JSON.parse(res.text)
     } catch {
-      throw new ModelRejected('OpenRouter yanıtı okunamadı.')
+      throw new ModelRejected(`${where} yanıtı okunamadı.`)
     }
     if (data.error?.message) {
       const msg = data.error.message
       reportIn(`hata: ${msg}`)
-      if (/invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
-      if (/insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
-      throw new ModelFailed(`OpenRouter: ${msg.slice(0, 200)}`)
+      if (!target.local && /invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
+      if (!target.local && /insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
+      throw new ModelFailed(`${where}: ${msg.slice(0, 200)}`)
     }
     const content = data.choices?.[0]?.message?.content ?? ''
     reportIn(content)

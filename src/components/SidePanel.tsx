@@ -65,6 +65,8 @@ type Props = {
   onOpenScanner: () => void
   onFillFromFolder: (nodeId: string) => void
   onLoopFolder: (nodeId: string, folder: string) => void
+  /** Yerel (OpenAI uyumlu) sunucudan model listesi çeker; satırlar "local:model" olarak eklenir. */
+  onLoadLocalModels?: () => Promise<void>
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
   onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
@@ -681,11 +683,29 @@ function Settings(p: Props) {
   </>
 }
 
+const LOCAL_PRESETS = [
+  { title: 'llama.cpp (8080)', url: 'http://127.0.0.1:8080/v1' },
+  { title: 'Ollama (11434)', url: 'http://127.0.0.1:11434/v1' },
+  { title: 'LM Studio (1234)', url: 'http://127.0.0.1:1234/v1' },
+]
+
 function GeneralSettings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
   const model = p.models.find((m) => m.id === s.model.trim())
   const visionInfo = p.models.find((m) => m.id === s.visionModel.trim())
+  const localUrl = (s.localBaseUrl ?? '').trim()
+  const [localOpen, setLocalOpen] = useState(false)
+  const [localNote, setLocalNote] = useState('')
+  const loadLocal = async () => {
+    setLocalNote('Yerel liste alınıyor…')
+    try {
+      await p.onLoadLocalModels?.()
+      setLocalNote('Liste güncellendi; yerel satırlar "local:model" olarak eklendi.')
+    } catch (e) {
+      setLocalNote(`Yerel listeye ulaşılamadı: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
   return (
     <div className="settings-grid">
 
@@ -717,7 +737,7 @@ function GeneralSettings(p: Props) {
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
           ))}
         </datalist>
-        {model && (
+        {model && !model.id.startsWith('local:') && (
           <p className={`hint ${model.vision ? 'ok' : 'warn'}`}>
             {model.vision ? 'Bu model ekran görüntüsünü görebilir.' : 'Bu model ekran görüntüsü göremez; sadece yazı listesiyle seçer.'}
           </p>
@@ -729,7 +749,42 @@ function GeneralSettings(p: Props) {
           <button type="button" className="xp-btn primary" onClick={p.onTestApi}>
             API Test
           </button>
+          <button type="button" className="xp-btn" onClick={() => setLocalOpen((v) => !v)}>
+            {localOpen ? 'Yerel modeli kapat' : '+ Yerel model'}
+          </button>
         </div>
+        {localOpen && (
+          <div className="local-model">
+            <div className="field-row">
+              <select
+                className="xp-input"
+                value={LOCAL_PRESETS.some((l) => l.url === localUrl) ? localUrl : ''}
+                onChange={(e) => e.target.value && set({ localBaseUrl: e.target.value })}
+              >
+                <option value="">Sunucu seç…</option>
+                {LOCAL_PRESETS.map((l) => (
+                  <option key={l.url} value={l.url}>{l.title}</option>
+                ))}
+              </select>
+              <input
+                className="xp-input mono"
+                value={s.localBaseUrl ?? ''}
+                placeholder="http://127.0.0.1:8080/v1"
+                onChange={(e) => set({ localBaseUrl: e.target.value })}
+              />
+            </div>
+            <div className="field-row">
+              <button type="button" className="xp-btn save" onClick={() => p.onSaveSettings({ localBaseUrl: (s.localBaseUrl ?? '').trim() })}>
+                Adresi kaydet
+              </button>
+              <button type="button" className="xp-btn" onClick={() => void loadLocal()}>
+                Yerel listeyi getir
+              </button>
+            </div>
+            <p className="hint">Adres boşsa her şey OpenRouter'da kalır. Yerel satırlar aynı listede <b>local:model</b> olarak durur; ↑ ↓ ile sırasını değiştir, × ile sil.</p>
+            {localNote && <p className="hint">{localNote}</p>}
+          </div>
+        )}
       </div>
       </fieldset>
 

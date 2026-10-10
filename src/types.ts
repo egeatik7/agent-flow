@@ -70,6 +70,8 @@ export type XpAgentApi = {
   openRecoveryReports?: () => Promise<string>
   testOpenRouter: () => Promise<string>
   listModels: () => Promise<ModelInfo[]>
+  /** Yerel (OpenAI uyumlu) sunucunun model listesi; adres açık mı sınaması olarak da kullanılır. */
+  listLocalModels?: (base?: string) => Promise<ModelInfo[]>
   testVision: () => Promise<{ model: string; text: string }>
   onAgentLog: (cb: (payload: unknown) => void) => () => void
   onAgentStep: (cb: (payload: unknown) => void) => () => void
