@@ -774,14 +774,45 @@ function GeneralSettings(p: Props) {
               />
             </div>
             <div className="field-row">
-              <button type="button" className="xp-btn save" onClick={() => p.onSaveSettings({ localBaseUrl: (s.localBaseUrl ?? '').trim() })}>
-                Adresi kaydet
+              <button
+                type="button"
+                className="xp-btn save"
+                onClick={() => p.onSaveSettings({
+                  localBaseUrl: (s.localBaseUrl ?? '').trim(),
+                  localTimeoutMs: s.localTimeoutMs ?? 180_000,
+                  localVision: s.localVision === true,
+                  localOff: s.localOff === true,
+                })}
+              >
+                Yerel ayarları kaydet
               </button>
               <button type="button" className="xp-btn" onClick={() => void loadLocal()}>
                 Yerel listeyi getir
               </button>
             </div>
-            <p className="hint">Adres boşsa her şey OpenRouter'da kalır. Yerel satırlar aynı listede <b>local:model</b> olarak durur; ↑ ↓ ile sırasını değiştir, × ile sil.</p>
+            <div className="field-row">
+              <label className="check">
+                <input type="checkbox" checked={s.localVision === true} onChange={(e) => set({ localVision: e.target.checked })} />
+                Yerel model ekran görüntüsü destekliyor
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={s.localOff === true} onChange={(e) => set({ localOff: e.target.checked })} />
+                Şimdilik OpenRouter'a dön
+              </label>
+            </div>
+            <div className="field-row">
+              <label htmlFor="local-timeout">Yerel zaman aşımı (sn)</label>
+              <input
+                id="local-timeout"
+                className="xp-input"
+                type="number"
+                min={10}
+                max={900}
+                value={Math.round((s.localTimeoutMs ?? 180_000) / 1000)}
+                onChange={(e) => set({ localTimeoutMs: Math.max(10, Math.min(900, Math.floor(Number(e.target.value) || 180))) * 1000 })}
+              />
+            </div>
+            <p className="hint">Adres boşsa her şey OpenRouter'da kalır. Yerel satırlar aynı listede <b>local:model</b> olarak durur; ↑ ↓ ile sırasını değiştir, × ile sil. “Şimdilik OpenRouter'a dön” açıkken yerel satırlar atlanır (adres saklı kalır).</p>
             {localNote && <p className="hint">{localNote}</p>}
           </div>
         )}

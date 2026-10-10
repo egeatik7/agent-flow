@@ -131,18 +131,29 @@ const HEADERS = (apiKey: string) => ({
 
 /** Yerel (OpenAI uyumlu) taban adres. Boşken her istek OpenRouter'da kalır - davranış değişmez. */
 let localBase = ''
-export function setLocalEndpoint(url: string | undefined) {
+let localTimeoutMs = 180_000
+let localVision = false
+let localOff = false
+export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vision?: boolean, off?: boolean) {
   const raw = String(url ?? '').trim().replace(/\/+$/, '')
-  if (!raw) { localBase = ''; return }
-  localBase = /\/v1$/i.test(raw) ? raw : `${raw}/v1`
+  localBase = raw ? (/\/v1$/i.test(raw) ? raw : `${raw}/v1`) : ''
+  localTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
+    ? Math.min(900_000, Math.max(10_000, Math.floor(timeoutMs)))
+    : 180_000
+  localVision = vision === true
+  localOff = off === true
 }
+/** Kullanıcı yerel modelin görüntü desteklediğini beyan etti mi. */
+export function localVisionDeclared() { return localVision }
 /**
  * Zincirdeki bir satırın nereye gideceğini söyler. `local:<model>` yerel tabana,
  * diğer her şey OpenRouter'a gider; böylece aynı listede ikisi birlikte durabilir.
  */
 function targetFor(model: string): { url: string; model: string; local: boolean } {
   const openRouter = 'https://openrouter.ai/api/v1/chat/completions'
-  if (!localBase || !/^local:/i.test(model)) return { url: openRouter, model, local: false }
+  if (!/^local:/i.test(model)) return { url: openRouter, model, local: false }
+  // "Şimdilik OpenRouter'a dön" açıkken veya adres boşken yerel satır ATLANIR; zincir sıradakine geçer.
+  if (localOff || !localBase) throw new ModelFailed('Yerel model kapalı; satır atlandı (adres boş ya da "OpenRouter\'a dön" açık).')
   return { url: `${localBase}/chat/completions`, model: model.replace(/^local:/i, '').trim(), local: true }
 }
 /** Yerel sunucunun model listesi. Aynı zamanda "adres açık mı" sınaması olarak kullanılır. */
@@ -307,7 +318,7 @@ async function chatOnce(
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
-    })
+    }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS)
     if (!res.ok) {
       reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.

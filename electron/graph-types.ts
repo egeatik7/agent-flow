@@ -170,6 +170,12 @@ export type AppSettings = {
    * Zincirde `local:<model>` yazan satır bu adrese gider; diğer bütün satırlar OpenRouter'da kalır.
    */
   localBaseUrl?: string
+  /** Yerel çağrılar için zaman aşımı (ms). Varsayılan 180000 (OpenRouter yolu 90000'de kalır). */
+  localTimeoutMs?: number
+  /** Yerel modelin ekran görüntüsünü (görsel) desteklediğini kullanıcı beyan eder. */
+  localVision?: boolean
+  /** "Şimdilik OpenRouter'a dön": yerel satırlar atlanır, adres saklı kalır. */
+  localOff?: boolean
   targetWindow: string
   stepDelayMs: number
   maxSteps: number
@@ -247,6 +253,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: 'openai/gpt-4o-mini',
   modelBackups: [],
   localBaseUrl: '',
+  localTimeoutMs: 180_000,
+  localVision: false,
+  localOff: false,
   targetWindow: '',
   stepDelayMs: 800,
   maxSteps: 2000,

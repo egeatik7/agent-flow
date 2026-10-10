@@ -1,6 +1,6 @@
 {
   "name": "xp-agent-studio",
-  "version": "1.9.79",
+  "version": "1.9.80",
   "description": "Nubbo Agent Studio — Windows XP tarzı node-based accessibility agent",
   "main": "dist-electron/boot.js",
   "author": "Nubbo Agent Studio",

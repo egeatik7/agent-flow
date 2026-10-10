@@ -1552,7 +1552,7 @@ export default function App() {
               try {
                 const base = (settings.localBaseUrl ?? '').trim()
                 const list = (await api?.listLocalModels?.(base)) ?? []
-                setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision }))])
+                setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision || settings.localVision === true }))])
                 pushLog('success', `Yerel model listesi: ${list.length} model${base ? ` · ${base}` : ''}.`)
               } catch (e) {
                 pushLog('error', errText(e))

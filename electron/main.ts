@@ -82,7 +82,7 @@ let recoveryActive = false
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   // Yerel (OpenAI uyumlu) adres tek yerden uygulanır: boşsa her istek OpenRouter'da kalır.
-  setLocalEndpoint(s.localBaseUrl)
+  setLocalEndpoint(s.localBaseUrl, s.localTimeoutMs, s.localVision, s.localOff)
   if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
   s.ocrEngine = 'combined'
   const ramp = clampRamp(s.valueLo, s.valueHi)
