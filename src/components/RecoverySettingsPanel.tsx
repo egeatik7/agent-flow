@@ -50,7 +50,8 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     if (['click', 'type', 'key', 'wait'].includes(node.kind)) nodes.push({ id: node.id, title: node.title,
       kind: NODE_SPECS[node.kind].label, path: [...packagePath.map(id => titles.get(id) ?? 'Paket'), ...loops.map(loop => loop.title)].join(' › ') })
   })
-  const vision = models.find(m => m.id === s.model)?.vision
+  const info = models.find(m => m.id === s.model)
+  const vision = info?.vision
   return <div className="settings-grid recovery-settings">
     <fieldset className="recovery-edit" disabled={disabled}>
     <p className="hint">Akış bir eylemde hata verince bu model devreye girer. Tuvalin JSON'unu, mevcut öğeyi, günlükleri ve önceki kurtarma raporlarını okur; düzeltmeden sonra aynı yerden devam edilir.</p>
@@ -70,6 +71,7 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <button type="button" className="xp-btn" onClick={onLoadModels}>Model listesini getir</button>
       <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
       {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
+      {info && <p className="hint">{info.vision ? 'Görsel giriş: destekli.' : 'Görsel giriş: desteklenmiyor.'}{info.pricing ? ` Girdi ≈ $${info.pricing.promptPerM.toFixed(2)}/M · çıktı ≈ $${info.pricing.completionPerM.toFixed(2)}/M (OpenRouter listesi; sağlayıcıya göre değişir).` : ' Fiyat bilgisi listede yok.'} Destek işareti doğru kararı garanti etmez; gerçek ölçüm kendi hatalı akışında yapılır.</p>}
     </div>
     <div className="field"><label htmlFor="recovery-task">Akışın amacı ve çalışma bilgileri</label>
       <textarea id="recovery-task" className="xp-input" rows={6} value={s.task} placeholder="Ne yapılmalı? Hangi uygulamalar, klasörler ve sonuçlar önemli? Tamamlanan hangi işlemler tekrarlanmamalı?" onChange={e => update({ task: e.target.value })} />

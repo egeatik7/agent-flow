@@ -21,6 +21,10 @@ export type RecoveryReport = {
   evidence: string
   summary: string
   actions: { tool: string; args: Record<string, unknown>; outcome: string; message: string }[]
+  /** Models that really answered, in order. `model` above is only the configured chain, not the responder. */
+  modelsUsed?: string[]
+  /** Provider-reported spend for the whole recovery. Cost is present only when the provider reported it. */
+  usage?: { prompt: number; completion: number; total: number; costUsd?: number }
   resumed?: boolean
   resumeError?: string
   completionBasis?: 'node-executed' | 'model-observed'
@@ -93,6 +97,10 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
   let failedNodeSent = false
   let freshScreen = false
+  const modelsUsed: string[] = []
+  const usage = { prompt: 0, completion: 0, total: 0 }
+  let costUsd = 0
+  let costKnown = true
   const messages: ToolMessage[] = [{ role: 'system', content: `Nubbo kurtarma ajanısın. Yalnız hata sınırında devreye girdin; normal akış sen çalışırken bekliyor.
 Akışı/JSON'u değiştirme veya baştan başlatma. Döngü öğesi ve yürütme yığını korunuyor. Yeni kod veya komut betiği üretme.
 Yalnız Tıkla, Tuş Gönder, Yazı Yaz ve Zamanlayıcı eylemlerini kullan. İnisiyatif, Koşul, Paket ve Döngü çalıştıramazsın.
@@ -114,6 +122,15 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
       check()
       const answer = await deps.turn({ messages, tools, shouldStop: stopped, timeoutMs: Math.max(1, deadline - Date.now()) })
       check()
+      // The chain is a wish list: record who actually answered and what the provider billed.
+      if (answer.model && modelsUsed[modelsUsed.length - 1] !== answer.model) modelsUsed.push(answer.model)
+      if (answer.usage) {
+        usage.prompt += answer.usage.prompt_tokens ?? 0
+        usage.completion += answer.usage.completion_tokens ?? 0
+        usage.total += answer.usage.total_tokens ?? ((answer.usage.prompt_tokens ?? 0) + (answer.usage.completion_tokens ?? 0))
+        if (typeof answer.usage.cost === 'number' && Number.isFinite(answer.usage.cost)) costUsd += answer.usage.cost
+        else costKnown = false
+      } else costKnown = false
       if (typeof answer.content === 'string' && answer.content.trim()) deps.log('info', `Kurtarma ajanı: ${answer.content.slice(0, 1200)}`)
       messages.push(answer)
       if (!answer.tool_calls?.length) {
@@ -195,6 +212,9 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
     return { decision: 'stop', report }
   } finally {
     report.endedAt = Date.now()
+    if (modelsUsed.length) report.modelsUsed = modelsUsed
+    report.usage = { ...usage, ...(costKnown && costUsd > 0 ? { costUsd } : {}) }
+    deps.log('info', `Kurtarma harcaması: ${modelsUsed.join(' → ') || 'cevap veren model yok'} · ${usage.total} token (giriş ${usage.prompt} · çıkış ${usage.completion}) · ${((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn${costKnown && costUsd > 0 ? ` · $${costUsd.toFixed(4)} (sağlayıcı bildirimi)` : ' · maliyet bildirilmedi'}`)
     try { deps.saveReport(report) } catch (error) { deps.log('warn', `Kurtarma raporu kaydedilemedi: ${(error as Error).message}`) }
     deps.log(report.result === 'retry' || report.result === 'completed' ? 'info' : 'warn', `Kurtarma raporu: ${report.summary || report.result}${report.probableCause ? ` Olası neden: ${report.probableCause}` : ''}`)
   }

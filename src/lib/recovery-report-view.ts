@@ -34,6 +34,11 @@ export function recoveryReportText(report: RecoveryReport): string {
     `Kurtarma notu · ${report.nodeTitle}`,
     new Date(report.startedAt).toLocaleString('tr-TR'),
     `Sonuç: ${recoveryOutcome(report)}`,
+    report.modelsUsed?.length ? `Cevap veren model: ${report.modelsUsed.join(' → ')}` : '',
+    `Ayarlı model zinciri: ${report.model}`,
+    report.usage
+      ? `Harcama: ${report.usage.total} token (giriş ${report.usage.prompt} · çıkış ${report.usage.completion}) · ${((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn${typeof report.usage.costUsd === 'number' ? ` · $${report.usage.costUsd.toFixed(4)} (sağlayıcı bildirimi)` : ' · maliyet bildirilmedi'}`
+      : `Süre: ${((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn`,
     context?.loop?.item ? `Öğe: ${context.loop.item}` : '',
     `Hata: ${report.error}`,
     `Olası neden: ${report.probableCause || 'Belirlenemedi.'}`,

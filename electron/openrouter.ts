@@ -55,6 +55,11 @@ export type ToolMessage = {
   tool_call_id?: string
   /** Some providers need their opaque reasoning fields replayed with a tool call. */
   reasoning_details?: unknown
+  /** Which model ACTUALLY answered (the configured chain is only tried; a model may be unavailable).
+   *  `data.model` is what the provider reports, so it survives routing. */
+  model?: string
+  /** Provider-reported spend for this turn (OpenRouter `usage.include`). Never guessed. */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number }
 }
 
 /** A bounded tool-calling turn. Model fallback happens before any action is executed. */
@@ -75,7 +80,7 @@ export async function recoveryToolTurn(args: {
       chatLogger?.(`Kurtarma API → ${model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
       const res = await guardedFetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST', headers: HEADERS(args.apiKey),
-        body: JSON.stringify({ model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false }),
+        body: JSON.stringify({ model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
       }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (!res.ok) {
@@ -91,10 +96,15 @@ export async function recoveryToolTurn(args: {
         !c || typeof c.id !== 'string' || !c.id || c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string'))) {
         throw new Error('Kurtarma modeli geçersiz araç çağrısı verdi.')
       }
-      reportIn(JSON.stringify({ content: m.content, tool_calls: m.tool_calls }))
+      reportIn(JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
+      const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
+      const answered = typeof data.model === 'string' && data.model ? data.model : model
+      chatLogger?.(`Kurtarma API ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
       return { role: 'assistant', content: typeof m.content === 'string' ? m.content : null,
         ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
-        ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}) }
+        ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
+        model: answered,
+        ...(billed && (billed.total_tokens || typeof billed.cost === 'number') ? { usage: billed } : {}) }
     } catch (error) {
       if (error instanceof StoppedError || error instanceof FatalApiError) throw error
       last = error
@@ -998,16 +1008,22 @@ export async function testKey(apiKey: string): Promise<string> {
   return summary
 }
 
-export async function listModels(): Promise<{ id: string; vision: boolean }[]> {
+export async function listModels(): Promise<{ id: string; vision: boolean; pricing?: { promptPerM: number; completionPerM: number } }[]> {
   chatLogger?.('API → GET /api/v1/models')
   const res = await guardedFetch('https://openrouter.ai/api/v1/models', {}, 30000)
   if (!res.ok) {
     chatLogger?.(`API ← hata ${res.status}`)
     throw new Error(`Model listesi alınamadı (${res.status}).`)
   }
-  const data = JSON.parse(res.text) as { data?: { id: string; architecture?: { input_modalities?: string[] } }[] }
+  const data = JSON.parse(res.text) as { data?: { id: string; architecture?: { input_modalities?: string[] }; pricing?: { prompt?: string; completion?: string } }[] }
   const list = (data.data ?? [])
-    .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
+    .map((m) => {
+      // OpenRouter prices are USD per token as strings; the panel shows per million. Unknown stays unknown.
+      const promptPerM = Number(m.pricing?.prompt) * 1_000_000
+      const completionPerM = Number(m.pricing?.completion) * 1_000_000
+      const known = Number.isFinite(promptPerM) && Number.isFinite(completionPerM) && (promptPerM > 0 || completionPerM > 0)
+      return { id: m.id, vision: !!m.architecture?.input_modalities?.includes('image'), ...(known ? { pricing: { promptPerM, completionPerM } } : {}) }
+    })
     .sort((a, b) => a.id.localeCompare(b.id))
   chatLogger?.(`API ← ${list.length} model`)
   return list

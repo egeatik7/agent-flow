@@ -21,7 +21,7 @@ export type LogEntry = {
   at: number
 }
 
-export type ModelInfo = { id: string; vision: boolean }
+export type ModelInfo = { id: string; vision: boolean; pricing?: { promptPerM: number; completionPerM: number } }
 
 export type XpAgentApi = {
   /** Empty for the person's own instance; the profile name for a test instance. */

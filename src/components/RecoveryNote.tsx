@@ -53,6 +53,9 @@ export default function RecoveryNote({ reports, title, onClose }: { reports: Rec
     <div className="recovery-note-paper" tabIndex={0}>
       <p className="recovery-note-date">{new Date(report.startedAt).toLocaleString('tr-TR')} · {report.nodeTitle}</p>
       <p><b>Sonuç:</b> {recoveryOutcome(report)}</p>
+      {report.modelsUsed?.length ? <p><b>Cevap veren model:</b> {report.modelsUsed.join(' → ')}</p> : <p><b>Ayarlı model zinciri:</b> {report.model}</p>}
+      {report.usage ? <p><b>Harcama:</b> {report.usage.total} token (giriş {report.usage.prompt} · çıkış {report.usage.completion}) · {((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn{typeof report.usage.costUsd === 'number' ? ` · $${report.usage.costUsd.toFixed(4)} (sağlayıcı bildirimi)` : ' · maliyet bildirilmedi'}</p>
+        : <p><b>Süre:</b> {((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn</p>}
       {context?.loop?.item && <p><b>Öğe:</b> {context.loop.item}</p>}
       <p><b>Hata:</b> {report.error}</p>
       <p><b>Olası neden:</b> {report.probableCause || 'Belirlenemedi.'}</p>

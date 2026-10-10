@@ -39,6 +39,33 @@ describe('recovery controller', () => {
     expect(h.reports[0].probableCause).toContain('olabilir')
     expect(h.reports[0].actions).toHaveLength(1)
   })
+  it('reports which model actually answered and what the provider billed, not just the configured chain', async () => {
+    const h = harness([])
+    const answers: ToolMessage[] = [
+      { ...call('act_key', { keys: 'win+d' }), model: 'cheap/model-a', usage: { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000, cost: 0.0012 } },
+      { ...finish(), model: 'strong/model-b', usage: { prompt_tokens: 2000, completion_tokens: 400, total_tokens: 2400, cost: 0.009 } },
+    ]
+    h.deps.turn = vi.fn(async () => answers.shift()!)
+    const result = await runRecovery(request, h.deps)
+    expect(result.decision).toBe('retry')
+    // The configured chain is a wish list; the report must name the responders.
+    expect(h.reports[0].model).toBe('fixture/model')
+    expect(h.reports[0].modelsUsed).toEqual(['cheap/model-a', 'strong/model-b'])
+    expect(h.reports[0].usage?.prompt).toBe(2900)
+    expect(h.reports[0].usage?.completion).toBe(500)
+    expect(h.reports[0].usage?.total).toBe(3400)
+    expect(h.reports[0].usage?.costUsd).toBeCloseTo(0.0102, 6)
+  })
+  it('never invents a cost when the provider reports none', async () => {
+    const h = harness([])
+    h.deps.turn = vi.fn(async () => ({ ...finish(), model: 'x/y', usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }))
+    const result = await runRecovery(request, h.deps)
+    expect(result.decision).toBe('retry')
+    expect(h.reports[0].model).toBe('fixture/model')
+    expect(h.reports[0].modelsUsed).toEqual(['x/y'])
+    expect(h.reports[0].usage?.total).toBe(15)
+    expect(h.reports[0].usage?.costUsd).toBeUndefined()
+  })
   it('does not accept a dispatched node as goal completion, but lets the agent correct the click visually', async () => {
     const done = call('recovery_complete', { probableCause: 'Wrong point', evidence: 'Blender is now open', summary: 'Corrected through the pointer' })
     const h = harness([call('step_run', { nodeId: leaf.id }), finish(), done, call('step_run', { nodeId: leaf.id }),
