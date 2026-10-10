@@ -13,7 +13,7 @@ const finish = () => call('recovery_retry', { probableCause: 'Chrome önde kalm�
 afterEach(() => { vi.restoreAllMocks() })
 
 function harness(answers: ToolMessage[], patch = {}) {
-  const execute = vi.fn(async () => ({ ok: true, outcome: 'tamam', message: 'Gönderildi.' }))
+  const execute = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ ok: true, outcome: 'tamam', message: 'Gönderildi.' }))
   const reports: RecoveryReport[] = []
   const turns: ToolMessage[][] = []
   const deps = { settings: { ...DEFAULT_RECOVERY, enabled: true, model: 'fixture/model', ...patch }, shouldStop: () => false,
@@ -39,11 +39,14 @@ describe('recovery controller', () => {
     expect(h.reports[0].probableCause).toContain('olabilir')
     expect(h.reports[0].actions).toHaveLength(1)
   })
-  it('does not replay the failed node after step_run already executed it', async () => {
-    const h = harness([call('step_run', { nodeId: leaf.id }), call('step_run', { nodeId: leaf.id }), finish()])
+  it('does not accept a dispatched node as goal completion, but lets the agent correct the click visually', async () => {
+    const done = call('recovery_complete', { probableCause: 'Wrong point', evidence: 'Blender is now open', summary: 'Corrected through the pointer' })
+    const h = harness([call('step_run', { nodeId: leaf.id }), finish(), done, call('step_run', { nodeId: leaf.id }),
+      call('screen_read'), call('act_move', { x: 0.4, y: 0.8 }), call('screen_read'), call('act_click_current', { mode: 'double' }), done, call('screen_read'), done])
     expect((await runRecovery(request, h.deps)).decision).toBe('completed')
-    expect(h.execute).toHaveBeenCalledTimes(1)
-    expect(h.reports[0].actions[1].message).toContain('zaten tamamlandı')
+    expect(h.execute.mock.calls.map(([name]) => name)).toEqual(['step.run', 'screen.read', 'act.move', 'screen.read', 'act.clickCurrent', 'screen.read'])
+    expect(h.reports[0].actions.filter(a => a.outcome === 'hata')).toHaveLength(4)
+    expect(h.reports[0].completionBasis).toBe('model-observed')
   })
   it('can finish the current goal through alternative actions after observing the new screen', async () => {
     const done = call('recovery_complete', { probableCause: 'Shortcut obscured', evidence: 'Blender is now open', summary: 'Blender launched using Run' })

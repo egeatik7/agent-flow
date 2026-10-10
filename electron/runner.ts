@@ -42,6 +42,9 @@ export type Executor = {
   edge?: (id: string, from: string, to: string) => void
   shouldStop: () => boolean
   click: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
+  /** Ephemeral pointer input; does not add fields or nodes to the saved graph. */
+  pointerAction?: (action: { mode: 'move' | 'left' | 'double' | 'right'; x?: number; y?: number; current?: boolean }) => Promise<{ x: number; y: number; sent: boolean }>
+  pointerPosition?: () => Promise<{ x: number; y: number } | undefined>
   type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
   key: (node: AgentNode, ahead?: StepAhead) => Promise<void>
   exists: (text: string, node: AgentNode) => Promise<boolean>

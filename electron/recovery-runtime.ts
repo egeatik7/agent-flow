@@ -11,6 +11,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
   const graph = structuredClone(request.graph)
   const allowed = new Set([request.node.id, ...recoverySettings(base.getSettings().recovery).allowedNodeIds])
   const check = () => { if (shouldStop()) throw new StoppedError() }
+  let area: { x: number; y: number; w: number; h: number } | undefined
   const isolated = sharedExecutor ? { executor: sharedExecutor } : createAgent({
     log: (level, message) => base.log(level === 'error' ? 'warn' : level, `Kurtarma · ${message}`),
     send: () => {}, // Probe memory/paths and step telemetry must not overwrite the live run.
@@ -30,7 +31,36 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       }
       const result = await callTool(name, { ...args, ...(name === 'screen.read' ? { image: true } : {}), ...(name === 'target.preview' ? { fast: true } : {}) }, readContext, 'panel')
       check()
+      if (name === 'screen.read') {
+        const shotArea = result.data?.area as typeof area
+        const image = result.data?.image as { data?: string } | undefined
+        area = result.ok && result.outcome === 'tamam' && image?.data && shotArea && [shotArea.x, shotArea.y, shotArea.w, shotArea.h].every(Number.isFinite) && shotArea.w > 0 && shotArea.h > 0
+          ? { ...shotArea } : undefined
+        const cursor = await (sharedExecutor ?? isolated.executor).pointerPosition?.()
+        check()
+        if (cursor) result.data = { cursor: { ...cursor, ...(area ? { rx: (cursor.x - area.x) / Math.max(1, area.w - 1), ry: (cursor.y - area.y) / Math.max(1, area.h - 1) } : {}) }, ...result.data }
+      }
       return result
+    }
+    if (['act.move', 'act.clickPoint', 'act.clickCurrent'].includes(name)) {
+      if (!recoverySettings(base.getSettings().recovery).allowDesktop) throw new Error('Ekran eylemleri kapalı.')
+      const source = sharedExecutor ?? isolated.executor
+      if (!source.pointerAction) throw new Error('Fare eylem altyapısı hazır değil.')
+      const mode = name === 'act.move' ? 'move' : args.mode ?? 'left'
+      if (!['move', 'left', 'double', 'right'].includes(String(mode)) || name !== 'act.move' && mode === 'move') throw new Error('Geçersiz tıklama modu.')
+      let point: { x?: number; y?: number; current?: boolean }
+      if (name === 'act.clickCurrent') point = { current: true }
+      else {
+        if (!area) throw new Error('Önce screen_read ile güncel ekranı oku.')
+        const x = args.x, y = args.y
+        if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) throw new Error('Koordinatlar ekran görüntüsüne göre 0–1 arasında olmalı.')
+        point = { x: area.x + x * Math.max(0, area.w - 1), y: area.y + y * Math.max(0, area.h - 1) }
+      }
+      check()
+      const input = await source.pointerAction({ ...point, mode: mode as 'move' | 'left' | 'double' | 'right' })
+      check()
+      const position = `@${Math.round(input.x)},${Math.round(input.y)} · ${mode}`
+      return { ok: true, outcome: 'tamam', message: input.sent ? `Tıklama gönderildi ${position}; hedefin gerçekleştiğini screen_read ile gözle.` : `Fare taşındı ${position}, tıklanmadı. screen_read ile hizalamayı incele; sonra tıkla veya yeniden taşı.`, data: input }
     }
     let node: AgentNode
     if (name === 'step.run') {

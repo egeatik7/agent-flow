@@ -1516,6 +1516,28 @@ export function createAgent(ctx: AgentContext) {
 
   const executor: Executor = {
     log,
+    pointerPosition: () => bridge.cursorPos(),
+    pointerAction: async (action) => {
+      await waitUnlocked()
+      checkStopped()
+      const point = action.current ? await bridge.cursorPos() : { x: action.x!, y: action.y! }
+      checkStopped()
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('Fare konumu okunamadı; girdi gönderilmedi.')
+      clearHover()
+      if (action.mode === 'move') {
+        const moved = await bridge.moveMouse(point.x, point.y)
+        checkStopped()
+        if (moved.warning) log('warn', moved.warning)
+        recordHover(point, moved.hwnd)
+        log('info', `Fare hizalandı @${Math.round(point.x)},${Math.round(point.y)} (tıklama yok). Güncel ekranla hedefe bak.`)
+      } else {
+        await bridge.clickAt(point.x, point.y, action.mode)
+        checkStopped()
+        log('info', `${action.mode === 'double' ? 'Çift tıklama' : action.mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi @${Math.round(point.x)},${Math.round(point.y)}. Sonuç henüz gözlenmedi.`)
+      }
+      lastClickPoint = action.mode === 'right' || action.mode === 'double' ? undefined : point
+      return { ...point, sent: action.mode !== 'move' }
+    },
     step: (id, status) => send('agent:step', { id, status }),
     edge: (id, from, to) => send('agent:edge', { id, from, to }),
     patchNode: (id, patch) => send('agent:patch', { id, patch }),

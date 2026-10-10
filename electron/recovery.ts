@@ -55,6 +55,9 @@ export function recoveryTools(settings: RecoverySettings): ModelTool[] {
   ]
   if (settings.allowDesktop) tools.push(
     tool('act_click', 'Ekrandaki hedefe tıkla.', { target: str, mode: { type: 'string', enum: ['left', 'double', 'right', 'move'] } }, ['target']),
+    tool('act_move', 'Fareyi son screen_read görüntüsünde gördüğün noktaya hizala; tıklamaz. x/y görüntüye göre 0–1: sol üst 0/0, sağ alt 1/1. Sonra screen_read ile hizalamayı incele.', { x: { type: 'number' }, y: { type: 'number' } }, ['x', 'y']),
+    tool('act_click_current', 'Gerçek fare konumundan tıkla. Önce act_move ve screen_read ile hedefe hizalan; çift tık için mode double kullan.', { mode: { type: 'string', enum: ['left', 'double', 'right'] } }),
+    tool('act_click_point', 'Son screen_read görüntüsünde gördüğün noktaya tıkla. x/y görüntüye göre 0–1. Tercihen önce act_move ile hizala ve screen_read ile incele.', { x: { type: 'number' }, y: { type: 'number' }, mode: { type: 'string', enum: ['left', 'double', 'right'] } }, ['x', 'y']),
     tool('act_type', 'Metni hedef alana veya odaktaki alana yaz.', { text: str, into: str, enter: { type: 'boolean' }, clear: { type: 'boolean' } }, ['text']),
     tool('act_key', 'Klavye kısayolu gönder. Gönderilmesi pencerenin kapandığını doğrulamaz.', { keys: str }, ['keys']),
     tool('act_wait', 'En fazla 10 saniye bekle.', { ms: { type: 'integer', minimum: 0, maximum: 10_000 } }, ['ms']),
@@ -68,7 +71,7 @@ export function recoveryGraphJson(graph: AgentGraph): string {
   return JSON.stringify(graph, (key, value) => key === 'icon' || key === 'patch' || key === 'sig' ? undefined : value)
 }
 
-const names: Record<string, string> = { screen_read: 'screen.read', flow_read: 'flow.read', flow_context: 'flow.context', target_preview: 'target.preview', step_run: 'step.run', act_click: 'act.click', act_type: 'act.type', act_key: 'act.key', act_wait: 'act.wait' }
+const names: Record<string, string> = { screen_read: 'screen.read', flow_read: 'flow.read', flow_context: 'flow.context', target_preview: 'target.preview', step_run: 'step.run', act_click: 'act.click', act_move: 'act.move', act_click_current: 'act.clickCurrent', act_click_point: 'act.clickPoint', act_type: 'act.type', act_key: 'act.key', act_wait: 'act.wait' }
 
 export async function runRecovery(request: RecoveryRequest, deps: Dependencies): Promise<{ decision: RecoveryDecision; report?: RecoveryReport }> {
   const settings = recoverySettings(deps.settings)
@@ -88,14 +91,15 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const allowedTools = new Set(tools.map(t => t.function.name))
   const execute = deps.makeExecute(stopped)
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
-  let completed = false
+  let failedNodeSent = false
   let freshScreen = false
   const messages: ToolMessage[] = [{ role: 'system', content: `Nubbo kurtarma ajanısın. Yalnız hata sınırında devreye girdin; normal akış sen çalışırken bekliyor.
 Akışı/JSON'u değiştirme veya baştan başlatma. Döngü öğesi ve yürütme yığını korunuyor. Yeni kod veya komut betiği üretme.
 Yalnız Tıkla, Tuş Gönder, Yazı Yaz ve Zamanlayıcı eylemlerini kullan. İnisiyatif, Koşul, Paket ve Döngü çalıştıramazsın.
 step_run yalnız izinli eylem node'larını mevcut öğeyle çalıştırır. Bitmiş işi tekrar etme. İşlem gönderildi ile sonuç gözlendi ayrımını koru.
 Hata fırlaması, eylemin hiç gönderilmediğini kanıtlamaz. Kısmen veya tamamen yapılmış bir işlemi yeniden göndermeden güncel durumu ve günlüğü dikkate al.
-Hata veren node step_run ile tamamlandıysa recovery_retry, motorun onu atlayıp sonraki adımı çalıştırmasını sağlar; bu node'u tekrar çağırma.
+step_run tamam/sent:true yalnız girdinin gönderildiğini gösterir; hedefin gerçekleştiğini göstermez. Bu node'u körlemesine tekrar çağırma. Sonra screen_read ile sonucu incele; yanlış noktaya basılmışsa görsel koordinat araçlarıyla düzelt. Node gönderilmişken recovery_retry ile tekrar göndertme; hedefi gördükten sonra recovery_complete kullan.
+Görselde hedefi görüyorsan metin araması yanlış yere basınca aynı aramayı tekrarlama. act_move ile hedefe hizala, screen_read ile yeni ekranı ve gerçek cursor konumunu incele, gerekiyorsa tekrar hizala; ardından act_click_current ile tıkla (kısayol açmak için mode double). Koordinatlar görüntüye göre 0–1 arasıdır; masaüstü konumuna dönüşüm motor tarafından yapılır. Pencere/ölçek/screen_read area değişiminde yeni görüntüyü kullan.
 Hedefi alternatif hareketlerle gerçekleştirdiysen son hareketten sonra screen_read ile güncel ekranı gör ve recovery_complete çağır. Bu, mevcut hedefin tamamlandığına ilişkin model gözlemidir; raporda bu ayrımı koru.
 Sırf metinle 'tamam' demek akışı ilerletmez. Sonunda recovery_retry, recovery_complete veya recovery_stop çağır; olası nedeni kesin kanıttan ayır ve Türkçe raporla.
 ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
@@ -139,20 +143,21 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
               (spec.type !== 'integer' && typeof value !== spec.type) || (spec.enum && !spec.enum.includes(String(value)))) throw new Error(`Geçersiz araç alanı: ${key}`)
           }
           if (name === 'recovery_retry' || name === 'recovery_complete' || name === 'recovery_stop') {
-            if (name === 'recovery_complete' && !completed && !freshScreen) throw new Error('Hedefin tamamlandığını bildirmeden önce son eylemden sonraki güncel ekranı screen_read ile gör.')
+            if (name === 'recovery_complete' && !freshScreen) throw new Error('Hedefin tamamlandığını bildirmeden önce son eylemden sonraki güncel ekranı screen_read ile gör.')
+            if (name === 'recovery_retry' && failedNodeSent) throw new Error('Hata veren node girdisi zaten gönderildi; körlemesine tekrar edilmez. Güncel ekranı oku, gerekirse koordinatla düzelt, hedefi gördükten sonra recovery_complete kullan veya recovery_stop ile raporla.')
             report.probableCause = String(args.probableCause ?? '').slice(0, 6000)
             report.evidence = String(args.evidence ?? '').slice(0, 6000)
             report.summary = String(args.summary ?? '').slice(0, 6000)
-            const done = completed || name === 'recovery_complete'
+            const done = name === 'recovery_complete'
             report.result = name === 'recovery_stop' ? 'failed' : done ? 'completed' : 'retry'
-            if (done) report.completionBasis = completed ? 'node-executed' : 'model-observed'
+            if (done) report.completionBasis = 'model-observed'
             return { decision: name === 'recovery_stop' ? 'stop' : done ? 'completed' : 'retry', report }
           }
           if (name === 'step_run' || name === 'target_preview') {
             const id = String(args.nodeId ?? '')
             const node = findPlace(request.graph, id)?.node
             if ((name === 'step_run' && !allowedNodes.has(id)) || !node || !RECOVERY_ACTION_KINDS.includes(node.kind)) throw new Error('Yalnız Tıkla, Tuş Gönder, Yazı Yaz ve Zamanlayıcı node’ları kullanılabilir; bu node için yetki yok.')
-            if (name === 'step_run' && id === request.node.id && completed) throw new Error('Hata veren node zaten tamamlandı; tekrar çalıştırılmaz.')
+            if (name === 'step_run' && id === request.node.id && failedNodeSent) throw new Error('Hata veren node girdisi zaten gönderildi; tekrar çalıştırılmaz. Güncel ekranı inceleyip gerekirse koordinatla düzelt.')
           }
           // No injected graph, branch, timeout or settings arguments reach the tool layer.
           const keys = Object.keys(schema.properties as Record<string, unknown>)
@@ -163,7 +168,7 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
           result = await execute(names[name], args)
           check()
           if (name === 'screen_read') freshScreen = result.ok && result.outcome === 'tamam'
-          if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam') completed = true
+          if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam') failedNodeSent = true
         } catch (error) {
           if (error instanceof StoppedError) throw error
           result = { ok: false, outcome: 'hata', message: (error as Error).message }
