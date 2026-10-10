@@ -78,9 +78,6 @@ export default function LlmPanel(p: Props) {
 
   return (
     <div className="llm-panel">
-      <p className="hint">
-        Hedef yukarıdan aşağı aranır. İşareti kalkan aşama atlanır. Kelime listesi yazı modeline, UI-TARS ise düz ekran görüntüsüne gider. Kaydet’e basınca kalır.
-      </p>
       <ol className="llm-stages">
         {order.map((id, index) => {
           const spec = FIND_STAGES.find((s) => s.id === id)

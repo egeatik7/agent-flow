@@ -688,7 +688,6 @@ function GeneralSettings(p: Props) {
   const visionInfo = p.models.find((m) => m.id === s.visionModel.trim())
   return (
     <div className="settings-grid">
-      <p className="hint">Her ayarın yanındaki <b>Kaydet</b> ile kalıcı olarak saklanır.</p>
 
       <div className="field">
         <label htmlFor="apiKey">OpenRouter API Key</label>
@@ -697,6 +696,8 @@ function GeneralSettings(p: Props) {
         </SaveRow>
       </div>
 
+      <fieldset className="xp-group">
+        <legend>Metin Modeli</legend>
       <div className="field">
         <label htmlFor="model">Model adı</label>
         <ModelChain
@@ -710,7 +711,7 @@ function GeneralSettings(p: Props) {
         <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
           Kaydet
         </button>
-        <p className="hint">Listedeki 1. model önce denenir. Olmazsa 2, 3, 4, 5. Hepsi susarsa sıra başa döner. Durdurmak için Ctrl+Shift+Q.</p>
+        <p className="hint">Listedeki 1. model önce denenir; yedekler sırayla. Hepsi susarsa sıra başa döner.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
@@ -730,6 +731,7 @@ function GeneralSettings(p: Props) {
           </button>
         </div>
       </div>
+      </fieldset>
 
       <label className="check">
         <input
@@ -742,10 +744,6 @@ function GeneralSettings(p: Props) {
 
       <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
-        <p className="hint">
-          Ekran görüntüsünden hedef bulma bu modeli kullanır. Aynı OpenRouter anahtarı kullanılır; model
-          görsel destekli olmalı.
-        </p>
         <div className="field">
           <label htmlFor="visionModel">Görsel model adı</label>
           <ModelChain
@@ -786,10 +784,6 @@ function GeneralSettings(p: Props) {
       </fieldset>
       <fieldset className="xp-group">
         <legend>İnisiyatif modeli</legend>
-        <p className="hint">
-          “Ekrana bakarak” çalışan İnisiyatif bu modeli kullanır (aynı OpenRouter anahtarı). UI-TARS ekran görüntüsünden doğrudan koordinat verir;
-          başka bir görsel model de yazabilirsin (Gemini, Claude, GPT). Bitti kontrolü yukarıdaki görsel modelle yapılır.
-        </p>
         <div className="field">
           <label htmlFor="agentModel">Model adı</label>
           <ModelChain
