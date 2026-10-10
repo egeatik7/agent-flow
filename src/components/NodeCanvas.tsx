@@ -178,6 +178,8 @@ export default function NodeCanvas(p: Props) {
   const graphRef = useRef(p.graph)
   graphRef.current = p.graph
   const pasteClick = useRef<{ canvasKey: string | undefined; point: { x: number; y: number } } | null>(null)
+  /** Last pointer position over the canvas; Shift+A opens the node palette there (null when the pointer is outside). */
+  const pointerRef = useRef<{ x: number; y: number } | null>(null)
   const previousPasteRevision = useRef(p.pasteRevision)
 
   useEffect(() => {
@@ -353,7 +355,20 @@ export default function NodeCanvas(p: Props) {
         setLink(null)
         setMenu(null)
         setHoverTarget(null)
+        return
       }
+      // Shift+A: "Node ekle" penceresi. Fare tuvalin üzerindeyse imlecin olduğu yerde, değilse görünümün ortasında açılır.
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'a') return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return
+      if (lockedRef.current) return
+      const r = scrollRef.current?.getBoundingClientRect()
+      if (!r) return
+      const at = pointerRef.current ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+      e.preventDefault()
+      const v = viewRef.current
+      setMenu({ mode: 'canvas', x: (at.x - r.left - v.x) / v.z, y: (at.y - r.top - v.y) / v.z })
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
@@ -611,12 +626,12 @@ export default function NodeCanvas(p: Props) {
       }}
       onContextMenu={(e) => {
         e.preventDefault()
+        // Sağ tık artık "Node ekle" penceresini AÇMAZ (istek: 1.9.76); o pencere Shift+A ile açılır.
         // Paket içindeyken sağ tık doğrudan bir üst pakete çıkar. Gezinti koşu sürerken de serbesttir.
         if (p.canExitPackage && p.onExitPackage) { p.onExitPackage(); return }
-        if (!innerRef.current || lockedRef.current) return
-        const c = toCanvas(e.clientX, e.clientY)
-        setMenu({ mode: 'canvas', x: c.x, y: c.y })
       }}
+      onMouseMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY } }}
+      onMouseLeave={() => { pointerRef.current = null }}
     >
       <div
         ref={innerRef}
