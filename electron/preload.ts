@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('xpAgent', {
   saveSettings: (partial: unknown) => ipcRenderer.invoke('settings:save', partial),
   getGraph: () => ipcRenderer.invoke('graph:get'),
   saveGraph: (graph: unknown) => ipcRenderer.invoke('graph:save', graph),
+  libraryInfo: () => ipcRenderer.invoke('library:info'),
+  manageLibrary: (mode: string) => ipcRenderer.invoke('library:manage', mode),
   getCanvases: () => ipcRenderer.invoke('canvases:get'),
   saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
 

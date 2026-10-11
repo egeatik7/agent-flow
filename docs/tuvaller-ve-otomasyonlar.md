@@ -1,52 +1,48 @@
-# Tuvaller ve Otomasyonlar — tek depo
+# Tuvaller ve taşınabilir kütüphane
 
-Sağdaki **Node / LLM / Ayarlar / Ajan / Tuvaller** sekmelerinden **Tuvaller**’e geç. Ayrı bir sabit kutu yoktur. Bu sekmede iki ekran vardır: **Tuval Deposu** ve **Otomasyonlar**.
+Sağ panelin **Tuvaller** sekmesindeki **Tuvaller / Otomasyonlar** aynı klasör ağacını kullanır. Maskot, kaydırılan listeden ayrı alt bölmede durur.
 
-## Tuval Deposu
+## Klasörleri düzenleme
 
-**Tuvali Kaydet**, aktif üst sekmenin çalışma kopyasını depoya kaydeder. Kayda bağlı bir sekmede tekrar kaydetmek aynı kaydı günceller. Aynı adı taşıyan farklı kayıtlar birbirini ezmez. **Dosya → İçe Aktar** ile tek tuval JSON’u da eklenebilir; mevcut sekme ezilmez.
+- Boş alana veya klasöre **sağ tık → Yeni Klasör…**. Klasörden çağırırsan alt klasör oluşur.
+- Tuvali, otomasyonu veya klasörü başka klasöre sürükle. Boş liste alanına bırakmak ana klasöre taşır. Ctrl ile çoklu, Shift ile aralık seçilir. Klasör ve çocukları birlikte seçilirse hiyerarşi korunur.
+- Klasöre çift tıklamak veya **+ / −** açıp kapatır. Tuvale çift tıklamak yeni çalışma sekmesi açar.
+- **Sağ tık → Arşivle**, klasörü içeriğiyle **Arşiv** görünümüne alır. Bağlantılar korunur. **Arşivden Geri Al** geri döndürür; arşivli klasörün tek çocuğunu geri almak ana klasörde görünmesini sağlar.
+- **Boş Klasörü Sil** dolu klasörü silmez. Diğer işlemler de sağ tık menüsündedir. Sekmeyi kapatmak kütüphane kaydını silmez.
 
-Her kaydın yanında:
+## Konum seçme ve paylaşma
 
-- **+**: Yeni üst sekmede aç. Açılan sekme aynı depo kaydına bağlıdır; düzenlemeleri kayda aktarmak için **Tuvali Kaydet** kullan.
-- **Kapat**: Açık çalışma sekmesini kapat; depo kaydı kalır. Birden çok açıksa aktif olan, o aktif değilse son açılan kopya kapatılır. Son üst sekme kapatılamaz. Kaydedilmeyen içerik değişikliğinde uyarı gelir.
-- **✎**: Depodaki adı değiştir. Aynı kaydın adı bütün otomasyonlarda ve bağlı açık sekmelerde değişir.
-- **Kırmızı ×**: Onayla kaydı depodan sil. Bu kaydı kullanan otomasyonların listelerinden de çıkarılır. Açık çalışma kopyaları kaybolmaz; kayıt bağlantıları kaldırılır. Daha sonra Tuvali Kaydet ile yeni kayıt olarak saklanabilirler.
+1. **Sağ tık → Farklı Klasöre Kaydet…** ile klasör seç. Kütüphane oraya kopyalanır; program bundan sonra oradan okur ve yazar. Açık sekmeler korunur, eski klasör bırakılır.
+2. Seçilen klasördeki **nubbo-library.json** dosyasını paylaş. İstersen **Backups** ile bütün klasörü gönder.
+3. Alan kişi dosyayı bir klasöre koyup **Başka Kütüphane Aç…** ile o klasörü seçer. Açık değişiklikler önce gözden geçirilir.
 
-Üst sekmedeki **×** yalnız çalışma sekmesini kapatır. Depoyu silmez. Üst sekmeye çift tıklayıp adını değiştirdiğinde yeni adı depoya aktarmak için Tuvali Kaydet kullan. **Dosya → Dışa Aktar** aktif çalışma kopyasının JSON’unu indirir.
+Kütüphane; klasörleri, arşiv durumunu, tuval içeriklerini ve otomasyon sıralarını taşır. API anahtarları, ayarlar, çalışma sekmeleri ve kurtarma taslakları yerel profilde kalır. Tuvallerde yazılı dosya yolları ve komutlar aynen taşınır; başka bilgisayarda ilgili kaynaklar da bulunmalıdır.
+
+Mevcut kütüphane içeren klasörün üzerine kopyalanmaz; **Başka Kütüphane Aç** kullan. Klasör sonradan taşınmışsa açılış hatası ekranındaki **Kütüphane Aç…** ile yeni konum seçilebilir. Eksik veya bozuk dosya boş kayıtla değiştirilmez.
+
+## Kaydetme ve yedekler
+
+Node değişiklikleri çalışma taslağına kaydedilir. Asıl kütüphane içeriğini güncellemek için **Ctrl+S**, **Dosya → Tuvali Kaydet** veya **sağ tık → Açık Tuvali Kaydet** kullan. Bağlı otomasyonlar güncel kaydı kullanır. **Farklı Kaydet** yeni kimlik oluşturur; eski otomasyon bağlantıları korunur.
+
+Kütüphane değişiklikleri atomik yazılır; önceki sürüm **Backups** altına alınır. Otomatik kayıtlarda son 30 yedek korunur. **Kütüphaneyi Yedekle** elle yedek oluşturur. **Yedekten Geri Yükle…** mevcut kütüphaneyi de yedekleyerek seçilen yedeği açar.
+
+Başka bir program aynı dosyayı değiştirirse eski kopya üzerine yazılmaz. Kütüphaneyi yeniden açarak güncel kaydı yükle; kaydedilmemiş içeriği önce ayrı dosyaya dışa aktarabilirsin.
 
 ## Otomasyonlar
 
-Bir otomasyon ayrı tuval kopyaları saklamaz. Depodaki kayıtların **sıralı listesidir**. Bu yüzden aynı tuval birden çok otomasyonda kullanılabilir; depoda kaydedilen içerik ve ad değişikliği hepsinde geçerlidir.
+1. **Otomasyonlar → sağ tık → Yeni Otomasyon**. Klasörden çağırırsan otomasyon o klasörde kaydedilir. Adı sağ tıktan değiştirilir.
+2. Kayıtlı otomasyona çift tıklamak listesini adının hemen altında açar veya kapatır; taslak silinmez.
+3. **Tuval Ekle…** ile klasör ağacından seçip **Ekle**. Ctrl ile birden çok tuval seçilebilir; zaten eklenmiş kayıtlar tekrar gösterilmez.
+4. Satırları sürükleyerek veya **sağ tık → Yukarı Taşı / Aşağı Taşı** ile sırala. **Listeden Çıkar** kütüphanedeki tuvali silmez.
+5. **Kaydet**, adı ve listeyi kaydeder. Node içerikleri için tuvali ayrıca kaydet veya **Tümünü Kaydet** kullan. Kapanışta taslak için kaydet, vazgeç veya iptal seçilebilir.
+6. **Sağ tık → Otomasyonu Aç** kayıtlı sırayı üst sekmelere yükler. Üst sekme sırası ile kayıtlı otomasyon sırası ayrı çalışma durumlarıdır.
 
-1. **Otomasyonlar → + Yeni** ile boş düzenleyici aç. Adını yaz.
-2. **Depodan tuval seç → Ekle** ile kayıtları ekle. Listede zaten bulunan kayıt ekleme seçeneklerinden çıkarılır.
-3. **↑ / ↓** ile sırala; kırmızı **×** ile yalnız bu otomasyon listesinden çıkar. Depodaki kayıt ve başka otomasyonlar korunur.
-4. **Kaydet** ile adı, üyeleri ve sıralamayı sakla. Bu aşamaya kadar değişiklikler taslaktır; kayıtlı otomasyon değiştirilmez.
-5. Kayıtlı otomasyonun **Aç** düğmesi bu listeyi üstte soldan sağa açar. Açık çalışma sekmelerini değiştireceği için onay ister.
+Otomasyon, tuval kopyaları yerine kütüphane kimliklerine bağlı liste tutar. Tuvali taşımak veya arşivlemek bağlantıyı değiştirmez. Silmek onay ister ve otomasyonlardan ilgili bağlantıyı kaldırır; açık çalışma kopyaları kalır. Dışarıdan değiştirilmiş kayıt eski taslakla ezilmez; sağ tıktan **Yeniden Yükle** kullanılabilir.
 
-Var olan bir otomasyon için **Düzenle** kullan. Listeye daha önce dahil olmayan kayıtlı tuvalleri aynı seçim alanından ekleyebilirsin. **Kaydet** açık üst sekmelerden yeni bir liste tahmin etmez; düzenlediğin listeyi kaydeder. Liste değişikliğinden sonra üst çalışma sekmelerini yeni sıraya geçirmek için **Aç** kullan.
+**Dışa Aktar…** tek otomasyonu ve kullandığı tuvalleri v2 JSON yapar. **Dosya → İçe Aktar** eski v1/v2 otomasyonları ve tek tuval JSON’larını kabul eder. Bütün klasör yapısı için **nubbo-library.json** paylaşılır.
 
-**Vazgeç** kayıtlı listeye döner ve kaydedilmeyen değişiklikler varsa onay ister. Başka bir otomasyona geçerken de taslağı bırakmak için onay istenir. Tuval Deposu ekranına veya Node/LLM/Ayarlar/Ajan sekmelerine geçmek taslağı silmez. Uygulama kapatılırsa kaydedilmemiş otomasyon taslağı saklanmaz.
+## Eski kayıtlar ve çalışma
 
-Kayıtlı listeden farklı bir taslak açıkken o otomasyonun Aç/Export düğmeleri pasiftir; önce Kaydet veya Vazgeç. Tuvalin **node içeriğini** değiştirdiğinde de önce Tuvali Kaydet kullan: otomasyonun Kaydet düğmesi üyeleri/sırayı kaydeder, çalışma kopyalarının içeriklerini otomatik kaydetmez.
+İlk açılışta mevcut kütüphane varsayılan olarak **%APPDATA%\xp-agent-studio\Library** altına aktarılır; farklı profiller kendi profil dizinini kullanır. Mevcut kimlikler korunur. Profil ayarları ve çalışma durumu yerel kalır. Yeni kütüphaneyi eski EXE ile düzenleme; eski sürüm klasör ve arşiv alanlarını tanımaz.
 
-Otomasyonun kırmızı **×** düğmesi yalnız grubu siler; tuval deposunu veya açık sekmeleri silmez. Boş otomasyon kaydedilebilir; çalıştırmak üzere açılmaz.
-
-## Export / import
-
-**Export**, kayıtlı sırayı ve kullandığı depo tuvalleriyle birlikte taşınabilir JSON üretir. **Dosya → İçe Aktar** bu dosyayı gruplara ve depoya ekler; mevcut çalışma sekmelerini değiştirmez. Aynı ad/içeriğe sahip depo kayıtları yeniden kullanılabilir; farklı içerik var olan kaydın üzerine yazılmaz.
-
-Eski v1 otomasyon JSON’ları da içe aktarılır. Yeni export biçimi v2’dir: içerikler tek listede, sıra ise kayıtlara referansla tutulur. Eski EXE’ye dönerek aynı profil verisini kaydetme; eski sürüm bu yeni biçimi anlamayabilir. Önce profil yedeğini al.
-
-## Eski kayıtların taşınması
-
-Önceki patch otomasyonların içinde ayrı tuval kopyaları tutuyordu. İlk yüklemede bunlar depoya taşınır ve gruplar depo kayıtlarına bağlanır. Aynı ad/içerikteki kopyalar aynı kaydı kullanır. Bir eski kopyanın içeriği depodakinden farklıysa **veri kaybolmaması için ayrı bir depo kaydı** oluşturulur; ada bakılarak biri diğerinin üzerine yazılmaz. İsimler aynı görünebilir; bunları depoda yeniden adlandırabilirsin. Sonraki yüklemelerde yeniden kopya üretilmez.
-
-Depoda silinen tuval otomasyon açılırken yeniden oluşturulmaz. Kayıtlar ortak bir kaynakta tutulur. Liste üzerinde çalışırken kayıt başka bir yoldan değişmiş/silinmişse eski taslak onu ezmez; Düzenle ile yeniden yüklemen istenir.
-
-## Sırayla oynatma
-
-Üstte en soldaki **▶ / ■** önceki patch’teki gibi çalışır. Açık üst sekmeler soldan sağa, her biri Başlangıç node’undan yürür. Önceki tuval kendi Bitti node’una hatasız ulaşmadan sonraki başlamaz. Durdur veya hata kalan sırayı başlatmaz. Sekme sırası ile otomasyonun kayıtlı sırası ayrı çalışma durumlarıdır; otomasyonun sırasını üstte açmak için Aç kullan.
-
-Bu düzeltme OCR, tıklama, yazma, inisiyatif ve koşu motorunu değiştirmez. Masaüstü eylemlerine yeni kontrol eklemez.
+Üstteki **▶ / ■** açık sekmeleri soldan sağa çalıştırır. Önceki tuval **Bitti** node’una hatasız ulaşmadan sonraki başlamaz. Durdurma veya hata kalan sırayı başlatmaz.

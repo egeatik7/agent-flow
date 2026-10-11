@@ -34,7 +34,7 @@ export function saveCanvas(book: CanvasBook, tabId: string): CanvasBook {
     throw new Error('Bu tuval başka bir sekmeden kaydedildi; eski kopya yeni kaydı ezmemesi için kaydedilmedi. Değişikliklerin bu sekmede duruyor. Farklı Kaydet ile ayrı bir kayıt oluşturabilir veya güncel tuvali Tuvaller’den yeniden açabilirsin.')
   }
   const id = existing?.id ?? newId()
-  const record: SavedCanvas = { id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
+  const record: SavedCanvas = { ...existing, id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
   return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id, baseline: { name: tab.name, graph: copy(tab.graph) } } : t), library: { ...lib,
     canvases: existing ? lib.canvases.map(c => c.id === id ? record : c) : [...lib.canvases, record] } }
 }
@@ -68,7 +68,7 @@ export function moveCanvasTab(book: CanvasBook, id: string, delta: -1 | 1): Canv
   const tabs = [...book.tabs]; [tabs[index], tabs[next]] = [tabs[next], tabs[index]]
   return { ...book, tabs }
 }
-export type AutomationDraft = { id?: string; name: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
+export type AutomationDraft = { id?: string; name: string; folderId?: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
 export function automationDraftDirty(draft: AutomationDraft): boolean {
   return draft.expected ? draft.name !== draft.expected.name || JSON.stringify(draft.entries) !== JSON.stringify(draft.expected.entries)
     : !!draft.name.trim() || draft.entries.length > 0
@@ -92,7 +92,8 @@ export function saveAutomation(book: CanvasBook, draft: AutomationDraft): Canvas
   if (existing && (!draft.expected || JSON.stringify(existing) !== JSON.stringify(draft.expected))) throw new Error('Otomasyon kaydı değişti; yeniden yükle ve tekrar düzenle.')
   if (draft.entries.some(e => !lib.canvases.some(c => c.id === e.canvasId))) throw new Error('Listedeki bir tuval artık depoda yok; otomasyon kaydedilmedi.')
   if (new Set(draft.entries.map(e => e.id)).size !== draft.entries.length || draft.entries.some(e => !e.id)) throw new Error('Otomasyon listesinde geçersiz satır kimliği var.')
-  const record: CanvasAutomation = { id: existing?.id ?? newId(), name, entries: copy(draft.entries), updatedAt: Date.now() }
+  if (!existing && draft.folderId && !lib.folders?.some(f => f.id === draft.folderId)) throw new Error('Otomasyonun oluşturulduğu klasör artık yok.')
+  const record: CanvasAutomation = { ...existing, ...(!existing && draft.folderId ? { folderId: draft.folderId } : {}), id: existing?.id ?? newId(), name, entries: copy(draft.entries), updatedAt: Date.now() }
   return { ...book, library: { ...lib, automations: existing ? lib.automations.map(a => a.id === record.id ? record : a) : [...lib.automations, record] } }
 }
 export function deleteAutomation(book: CanvasBook, id: string): CanvasBook {

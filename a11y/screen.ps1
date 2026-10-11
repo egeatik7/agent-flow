@@ -762,9 +762,23 @@ function Invoke-Scan($P) {
   if ($P.fresh -eq $true) { $fresh = $true }
   $win = $null
   $missing = ''
+  if ($P.strictWindow -and $P.windowTitle) {
+    $title = ([string]$P.windowTitle).Trim()
+    $wins = @(Get-TopWindows ([int]$P.ownPid) | Where-Object {
+      (Test-UsableWindow $_) -and $(if ($P.strictWindow -eq 'exact') {
+        $_.Current.Name.Equals($title, [StringComparison]::OrdinalIgnoreCase)
+      } else { $_.Current.Name.IndexOf($title, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+    })
+    if ($wins.Count -gt 1) { throw "WINDOW_AMBIGUOUS: $title" }
+    if ($wins.Count -eq 0) {
+      return [pscustomobject]@{ area = @{x=0;y=0;w=0;h=0}; items=@(); ocr=$false; uiaCount=0; ocrCount=0; image=$null; window=''; missingWindow=$title }
+    }
+    $win = $wins[0]
+    if ($P.readOnly -ne $true) { Enter-Window $win; Start-Sleep -Milliseconds 150 }
+  }
   # A fresh scan ignores the pinned target window and does not steal focus,
   # so a dialog or page that just appeared is part of the tree and the OCR.
-  if (-not $fresh -and $P.windowTitle) {
+  if (-not $P.strictWindow -and -not $fresh -and $P.windowTitle) {
     $win = Find-WindowOrNull ([string]$P.windowTitle)
     if ($null -eq $win) {
       $missing = [string]$P.windowTitle

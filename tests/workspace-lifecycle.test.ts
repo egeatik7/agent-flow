@@ -3,12 +3,14 @@ import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createNode, DEFAULT_SETTINGS, normalizeCanvasBook, type CanvasBook } from '../electron/graph-types'
+import LibraryTree from '../src/components/LibraryTree'
 import CanvasLibrary from '../src/components/CanvasLibrary'
 import CanvasTabs from '../src/components/CanvasTabs'
 import SaveCanvasDialog from '../src/components/SaveCanvasDialog'
 import WorkspaceNameDialog from '../src/components/WorkspaceNameDialog'
 import NodeCanvas from '../src/components/NodeCanvas'
 
+vi.mock('react-dom',()=>({createPortal:(children:unknown)=>children}))
 vi.mock('../src/components/TitleBar', () => ({ default: () => null }))
 vi.mock('../src/components/Toolbar', () => ({ default: () => null }))
 vi.mock('../src/components/NodeCanvas', () => ({ default: () => null }))
@@ -34,6 +36,7 @@ const api = {
     disk = structuredClone(book); return true
   },
   listWindows: async () => [], bootReady: () => {},
+  manageLibrary: vi.fn(),
   onCloseRequested: (cb: (id: unknown) => void) => { requestClose = cb; return () => { requestClose = () => {} } },
   finishClose: async (id: number, allow: boolean) => { replies.push({ id, allow }) },
   onAgentLog: () => () => {}, onAgentStep: () => () => {}, onAgentEdge: () => () => {}, onAgentPatch: () => () => {},
@@ -41,15 +44,16 @@ const api = {
 const text = (node: ReactTestInstance): string => node.children.map(c => typeof c === 'string' ? c : text(c)).join('')
 const button = (label: string) => renderer!.root.findAllByType('button').find(b => text(b) === label)!
 const click = async (label: string) => {
+  if(label==='Tuvali Kaydet'){await context();label='Açık Tuvali Kaydet'}
   const target = button(label); expect(target, label).toBeDefined(); expect(target.props.disabled, label).not.toBe(true)
   await act(async () => { await target.props.onClick() })
 }
 const mount = async () => { await act(async () => { renderer = create(createElement(App)) }) }
-const draft = async (name = 'Pipeline') => {
-  await click('Otomasyonlar'); await click('+ Yeni')
-  await act(async () => renderer!.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: name } }))
-  await act(async () => renderer!.root.findByProps({ 'aria-label': 'Depodan tuval seç' }).props.onChange({ target: { value: 'saved' } }))
-  await click('Ekle')
+const context=async()=>{await act(async()=>renderer!.root.findByType(LibraryTree).props.onContext({preventDefault:()=>{},stopPropagation:()=>{},clientX:10,clientY:10}))}
+const draft = async (name='Pipeline') => {
+ await click('Otomasyonlar');await context();await click('Yeni Otomasyon');await context();await click('Yeniden Adlandır…')
+ await act(async()=>renderer!.root.findByType(WorkspaceNameDialog).props.onAnswer(name))
+ await click('Tuval Ekle…');await act(async()=>renderer!.root.findAllByType(LibraryTree).at(-1)!.props.onSelect([{kind:'canvas',id:'saved'}]));await click('Ekle')
 }
 const tick = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(401) }) }
 const close = async (id = 1) => { await act(async () => requestClose(id)) }
@@ -65,6 +69,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.useFakeTimers(); replies.length = 0; writes.length = 0; disk = undefined
   fail = false; loadFail = false; saveOverride = undefined
+  api.manageLibrary.mockReset()
   seed = normalizeCanvasBook({ activeId: '', tabs: [], library: { canvases: [{ id: 'saved', name: 'Shared', updatedAt: 1, graph: { nodes: [createNode('start', 0, 0)], edges: [] } }], automations: [] } })
 })
 afterEach(() => { if (renderer) act(() => renderer!.unmount()); renderer = undefined; vi.useRealTimers() })
@@ -79,8 +84,8 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     seed = structuredClone(disk!)
     act(() => renderer!.unmount()); renderer = undefined
     await mount()
-    expect(renderer!.root.findByProps({ id: 'automation-name' }).props.value).toBe('Pipeline')
-    expect(text(renderer!.root)).toContain('1. Shared')
+    expect(renderer!.root.findByType(CanvasLibrary).props.draft.name).toBe('Pipeline')
+    expect(text(renderer!.root)).toContain('Shared')
     expect(disk!.library!.automations).toEqual([])
     await click('Kaydet')
     expect(disk!.library!.automations[0].name).toBe('Pipeline')
@@ -90,7 +95,7 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     expect(renderer!.root.findByType(SaveCanvasDialog).props.kind).toBe('automation')
     await answer('cancel')
     expect(replies).toEqual([{ id: 1, allow: false }])
-    expect(renderer!.root.findByProps({ id: 'automation-name' }).props.value).toBe('Pipeline')
+    expect(renderer!.root.findByType(CanvasLibrary).props.draft.name).toBe('Pipeline')
     expect(disk!.library!.automations).toEqual([])
   })
   it('Discard on native close removes only the draft and never creates a saved automation', async () => {
@@ -105,7 +110,7 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     fail = true; await answer('save')
     expect(replies).toEqual([{ id: 1, allow: false }])
     expect(text(renderer!.root)).toContain('Taslak korunuyor')
-    expect(renderer!.root.findByProps({ id: 'automation-name' }).props.value).toBe('Pipeline')
+    expect(renderer!.root.findByType(CanvasLibrary).props.draft.name).toBe('Pipeline')
     expect(disk!.library!.automations).toEqual([])
     fail = false; await click('Tekrar Dene')
     expect(disk!.library!.automations[0].name).toBe('Pipeline')
@@ -144,6 +149,15 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     expect(writes).toEqual([])
     expect(text(renderer!.root)).toContain('Kayıtlar açılamadı')
     expect(replies).toEqual([{ id: 1, allow: true }])
+  })
+  it('can choose a moved library after startup fails without writing over the missing catalog', async () => {
+    loadFail=true;await mount();await tick();expect(writes).toEqual([])
+    api.manageLibrary.mockResolvedValue({directory:'D:\\My Library',book:structuredClone(seed)})
+    await click('Kütüphane Aç…')
+    expect(api.manageLibrary).toHaveBeenCalledWith('open')
+    expect(text(renderer!.root)).not.toContain('Kayıtlar açılamadı')
+    expect(renderer!.root.findByType(CanvasLibrary).props.disabled).toBe(false)
+    expect(renderer!.root.findByType(CanvasLibrary).props.library.canvases[0].id).toBe('saved')
   })
   it('an older pending autosave finishes before explicit Save and cannot later undo it', async () => {
     await mount(); await draft()

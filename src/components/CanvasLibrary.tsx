@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState, type SetStateAction } from 'react'
 import { newId, type CanvasLibrary as Library, type CanvasAutomation, type CanvasTab, type SavedCanvas, type AutomationEditor, type RecoveredCanvas } from '../types'
 import { addAutomationEntry, automationDraftDirty, editAutomationEntries, type AutomationDraft } from '../../electron/canvas-library'
+import { createPortal } from 'react-dom'
+import LibraryTree, { FileIcon, refKey, type LibraryItem } from './LibraryTree'
+import WorkspaceNameDialog from './WorkspaceNameDialog'
+import { type LibraryRef, type LibraryChange } from '../../electron/library-tree'
 import type { SaveDecision } from '../../electron/canvas-session'
 type Props = {
+  directory?: string
+  onLibraryChange?: (change: LibraryChange) => Promise<boolean>
+  onManageLibrary?: (mode: 'open' | 'copy' | 'backup' | 'restore' | 'reveal') => void
+  onNewCanvas?: (folderId?: string) => void
+  onDuplicateCanvas?: (id: string) => void
+  onExportCanvas?: (id: string) => void
   library: Library; tabs: CanvasTab[]; disabled: boolean
   hasCanvas?: boolean
   draft?: AutomationEditor | null
@@ -44,9 +54,15 @@ export default function CanvasLibrary(p: Props) {
   }
   // Kullanıcı isteği: "Genişlet" tuvalleri açar, "Daralt" yeniden gizler. Taslak kaybolmaz.
   const [collapsed, setCollapsed] = useState(false)
-  const [adding, setAdding] = useState('')
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [name, setName] = useState('')
+  const [archived, setArchived] = useState(false)
+  const [selection, setSelection] = useState<LibraryRef[]>([])
+  const [menu, setMenu] = useState<{x:number;y:number;item?:LibraryItem;entryId?:string;automation?:CanvasAutomation} | null>(null)
+  const [question, setQuestion] = useState<{title:string;initial:string;answer:(name:string)=>void} | null>(null)
+  const [pickerArchived, setPickerArchived] = useState(false)
+  const [picker, setPicker] = useState(false)
+  const [pickerRefs, setPickerRefs] = useState<LibraryRef[]>([])
+  useEffect(()=>{if(!picker)return;const dialog=document.querySelector<HTMLElement>('.library-canvas-picker');const before=document.activeElement as HTMLElement|null;dialog?.querySelector<HTMLElement>('[role=treeitem],button')?.focus();const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();setPicker(false)}if(e.key==='Tab'&&dialog){const nodes=Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled),[tabindex="0"]'));const at=nodes.indexOf(document.activeElement as HTMLElement);e.preventDefault();nodes[(at+(e.shiftKey?-1:1)+nodes.length)%nodes.length]?.focus()}};window.addEventListener('keydown',key);return()=>{window.removeEventListener('keydown',key);before?.focus()}},[picker])
+  useEffect(()=>{if(!menu)return;const close=(e:PointerEvent)=>{if(!(e.target as Element)?.closest('.library-context-menu'))setMenu(null)};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')setMenu(null)};window.addEventListener('pointerdown',close);window.addEventListener('keydown',key);return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',key)}},[menu])
   const [pending, setPending] = useState(false)
   const [failed, setFailed] = useState(false)
   const busy = useRef(false)
@@ -69,17 +85,17 @@ export default function CanvasLibrary(p: Props) {
     })
   }, [p.library.automations])
 
-  const choose = async (automation?: CanvasAutomation) => {
+  const choose = async (automation?: CanvasAutomation, folderId?: string) => {
     if (locked || busy.current) return
     if (!await reviewDraft()) return
     if (automation) setEditor(editorFor(automation))
     else {
       let n = 1
       while (p.library.automations.some(a => a.name === `Otomasyon ${n}`)) n++
-      setEditor({ key: newId(), name: `Otomasyon ${n}`, entries: [] })
+      setEditor({ key: newId(), name: `Otomasyon ${n}`, folderId, entries: [] })
     }
     setCollapsed(false)
-    setAdding(''); setView('automations')
+    setView('automations')
   }
   const change = (fn: (e: Editor) => Editor) => setEditor(e => e ? fn(e) : null)
   const persist = async (next: Editor, reviewingClose = false): Promise<boolean> => {
@@ -90,7 +106,7 @@ export default function CanvasLibrary(p: Props) {
     setEditor(next); setFailed(false)
     try {
       const saved = await p.onSaveAutomation(next)
-      if (saved) { setEditor(editorFor(saved)); setAdding(''); return true }
+      if (saved) { setEditor(editorFor(saved)); return true }
       setFailed(true); return false
     } catch { setFailed(true); return false
     } finally { busy.current = false; setPending(false) }
@@ -100,20 +116,8 @@ export default function CanvasLibrary(p: Props) {
     setEditor({ ...editor, entries: editAutomationEntries(editor.entries, id, 'delete') })
     setFailed(false)
   }
-  const rename = async () => {
-    if (!renaming || !name.trim() || locked || busy.current) return
-    busy.current = true; setPending(true)
-    try { if (await p.onRenameCanvas(renaming, name)) setRenaming(null) }
-    finally { busy.current = false; setPending(false) }
-  }
-
   const reviewDraft = async (): Promise<boolean> => {
-    if (renaming && name.trim() !== p.library.canvases.find(c => c.id === renaming)?.name) {
-      const answer = p.onAskCanvasSave ? await p.onAskCanvasSave(name || 'Tuval adı') : 'save'
-      if (answer === 'cancel') return false
-      if (answer === 'save' && (!name.trim() || !await p.onRenameCanvas(renaming, name, true))) return false
-      setRenaming(null)
-    }
+    if (question) return false
     const current = editorRef.current
     if (!current || !automationDraftDirty(current)) return true
     const answer = p.onAskSave ? await p.onAskSave(current.name) : 'save'
@@ -134,88 +138,79 @@ export default function CanvasLibrary(p: Props) {
     return () => p.onCloseReview?.(null)
   })
 
-  return <section className="canvas-library" aria-label="Tuval deposu ve otomasyonlar">
-    <div className="library-views" role="tablist" aria-label="Tuval yönetimi">
-      <button className={`xp-btn ${view === 'canvases' ? 'primary' : ''}`} role="tab" aria-selected={view === 'canvases'} onClick={() => setView('canvases')}>Tuval Deposu</button>
-      <button className={`xp-btn ${view === 'automations' ? 'primary' : ''}`} role="tab" aria-selected={view === 'automations'} onClick={() => setView('automations')}>Otomasyonlar</button>
+  const context = (e: React.MouseEvent, item?:LibraryItem, entryId?:string, automation?:CanvasAutomation) => {
+    e.preventDefault(); e.stopPropagation(); if(locked)return
+    setMenu({x:Math.max(0,Math.min(e.clientX,window.innerWidth-242)),y:Math.max(0,Math.min(e.clientY,window.innerHeight-330)),item,entryId,automation})
+  }
+  const askName = (title:string,initial:string,answer:(name:string)=>void) => {setMenu(null);setQuestion({title,initial,answer})}
+  const action = (fn:()=>void) => {setMenu(null);fn()}
+  const refs = menu?.item ? (selection.some(r=>refKey(r)===refKey(menu.item!))?selection:[{kind:menu.item.kind,id:menu.item.id}]) : selection
+  const parent = menu?.item?.kind==='folder' ? menu.item.id : menu?.item?.folderId
+  const addPicked = () => {
+    if(!editor || locked || stale || missing)return
+    let entries=editor.entries
+    for(const ref of pickerRefs)if(ref.kind==='canvas' && p.library.canvases.some(c=>c.id===ref.id))entries=addAutomationEntry(entries,ref.id)
+    setEditor({...editor,entries});setPicker(false);setPickerRefs([]);setFailed(false)
+  }
+  const editView = editor && !collapsed ? <div className="automation-editor">
+    <div className="automation-editor-status" role="status">{pending?'Kaydediliyor…':failed?'Değişiklik kaydedilemedi. Taslak korunuyor.':dirty?'Kaydedilmemiş değişiklikler *':`Kayıt güncel. ${editor.entries.length} tuval`}</div>
+    {stale && <p className="hint library-warning">Kayıt değişti veya silindi. Sağ tıktan yeniden yükle.</p>}
+    {missing && <p className="hint library-warning">Bir tuval silinmiş; sağ tıktan satırı çıkar.</p>}
+    <ol className="automation-canvases">
+      {editor.entries.map((e,i)=>{const c=p.library.canvases.find(c=>c.id===e.canvasId);return <li key={e.id} tabIndex={0} className="automation-entry" onDoubleClick={()=>!locked&&c&&p.onOpenCanvas(c)} onContextMenu={event=>context(event,undefined,e.id)}
+        draggable={!locked&&!stale&&!missing} onDragStart={event=>event.dataTransfer.setData('application/x-nubbo-entry',e.id)} onDragOver={event=>{if(!locked)event.preventDefault()}} onDrop={event=>{event.preventDefault();if(locked||stale||missing)return;const id=event.dataTransfer.getData('application/x-nubbo-entry');const from=editor.entries.findIndex(v=>v.id===id);if(from<0)return;const entries=[...editor.entries];const [moved]=entries.splice(from,1);entries.splice(i,0,moved);setEditor({...editor,entries})}}>
+        <span className="automation-entry-number">{i+1}.</span><FileIcon kind="canvas"/><span className="library-canvas-name">{c?.name??'Silinmiş tuval'}</span></li>})}
+    </ol>
+    <div className="automation-editor-footer"><button className="xp-btn" disabled={locked||stale||missing} onClick={()=>{setPicker(true);setPickerRefs([])}}>Tuval Ekle…</button><button className="xp-btn primary" disabled={locked||!dirty||stale||missing||!editor.name.trim()} onClick={()=>void persist(editor)}>{failed&&dirty?'Tekrar Dene':'Kaydet'}</button></div>
+  </div>:null
+  const autoCard = (a?:CanvasAutomation) => {
+    const active=a?editor?.id===a.id:!!editor&&!editor.id
+    const title=active?editor!.name:a!.name
+    return <div className={`automation-card${active?' selected':''}`} key={a?.id??'new'} onContextMenu={e=>context(e,undefined,undefined,a)}>
+      <button type="button" className="automation-header" disabled={locked} onClick={async()=>{if(active)setCollapsed(!collapsed);else if(a)await choose(a)}}><span className="automation-disclosure">{active&&!collapsed?'−':'+'}</span><FileIcon kind="automation"/><strong title={title}>{title}</strong>{active&&dirty&&<span>*</span>}</button>
+      {active&&editView}
     </div>
-    <div className="canvas-library-scroll">
-      {view === 'canvases' && <>
-        <div className="library-view-heading"><h3>Tuval Deposu</h3><button className="xp-btn" disabled={locked || p.hasCanvas === false} onClick={p.onSaveCanvas}>Tuvali Kaydet</button></div>
-        {p.onSaveAll && <button className="xp-btn" disabled={locked} onClick={p.onSaveAll}>Tümünü Kaydet</button>}
-        <p className="hint">Otomasyonlar aynı tuval kayıtlarını kullanır. Otomatik taslak kaydı, Tuvali Kaydet yerine geçmez.</p>
-        {!!p.recovery?.length && <div className="workspace-recovery" aria-label="Kurtarılan çalışmalar"><h3>Kurtarılan çalışmalar</h3>
-          <p className="hint">Yarım kalan düzenlemeler burada. Kayıtlı tuvaller değiştirilmedi.</p>
-          {p.recovery.map(d => <div className="workspace-recovery-row" key={d.id}><span title={d.name}>{d.name}</span>
-            <button className="xp-btn" disabled={locked} onClick={() => p.onRestoreDraft?.(d.id)}>Taslağı Aç</button>
-            <button className="library-mini library-delete" title="Kurtarma taslağını sil" disabled={locked} onClick={() => p.onDiscardDraft?.(d.id)}>×</button>
-          </div>)}
-        </div>}
-        {!p.library.canvases.length && <p className="hint">Tuvali Kaydet veya Dosya → İçe Aktar ile ekle.</p>}
-        <ul className="saved-canvases">
-          {p.library.canvases.map(c => {
-            const openCount = p.tabs.filter(t => t.savedId === c.id).length
-            return <li key={c.id}>
-              {renaming === c.id ? <>
-                <input className="xp-input library-name-input" aria-label="Kayıtlı tuval adı" value={name} maxLength={48} disabled={locked} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void rename() } if (e.key === 'Escape') setRenaming(null) }} />
-                <button className="library-mini" disabled={locked || !name.trim()} title="Tuval adını kaydet" onClick={() => void rename()}>✓</button>
-                <button className="library-mini" disabled={locked} title="Ad değişikliğini iptal et" onClick={() => setRenaming(null)}>↩</button>
-              </> : <><span className="library-canvas-name" title={c.name}>{c.name}</span><button className="library-mini" disabled={locked} title={`“${c.name}” adını değiştir`} onClick={() => { setRenaming(c.id); setName(c.name) }}>✎</button></>}
-              <button className="library-mini" title={`“${c.name}” tuvalini yeni sekmede aç`} disabled={locked} onClick={() => p.onOpenCanvas(c)}>+</button>
-              <button className="library-close" title="Açık sekmesini kapat; kayıt depoda kalır" disabled={locked || !openCount} onClick={() => p.onCloseCanvas(c.id)}>Kapat{openCount > 1 ? ` (${openCount})` : ''}</button>
-              <button className="library-mini library-delete" title={`“${c.name}” tuvalini depodan sil`} disabled={locked} onClick={() => p.onDeleteCanvas(c.id)}>×</button>
-            </li>
-          })}
-        </ul>
-      </>}
-      {view === 'automations' && <>
-        <div className="library-view-heading"><h3>Otomasyonlar</h3><button className="xp-btn" disabled={locked} onClick={() => void choose()}>+ Yeni</button></div>
-        {p.onSaveSequence && <button className="xp-btn" disabled={locked || !p.tabs.length} onClick={p.onSaveSequence}>Açık Sırayı Kaydet</button>}
-        {!p.library.automations.length && <p className="hint">Yeni otomasyon oluştur ve depodan tuvaller ekle. Kaydet ile listeyi sakla.</p>}
-        {p.library.automations.map(a => <div className={`automation-card${editor?.id === a.id ? ' selected' : ''}`} key={a.id}>
-          <div className="automation-name-row"><strong title={a.name}>{a.name}</strong><span>{a.entries.length} tuval</span>
-            <button className="library-mini library-delete" title={`“${a.name}” otomasyonunu sil`} disabled={locked} onClick={() => p.onDeleteAutomation(a.id)}>×</button></div>
-          <div className="automation-actions">
-            <button className="xp-btn" disabled={locked} onClick={async () => { if (editor?.id === a.id) setCollapsed(!collapsed); else await choose(a) }}>{editor?.id === a.id && !collapsed ? 'Daralt' : 'Genişlet'}</button>
-            <button className="xp-btn" disabled={locked || !a.entries.length || (editor?.id === a.id && dirty)} title="Kayıtlı sırayı üstteki çalışma sekmelerinde aç" onClick={async () => { if (await reviewDraft()) p.onOpenAutomation(a.id) }}>Aç</button>
-            <button className="xp-btn" disabled={locked || (editor?.id === a.id && dirty)} onClick={() => p.onExportAutomation(a.id)}>Export</button>
-          </div>
-        </div>)}
-        {editor && !collapsed && <div className="automation-editor">
-          <label className="field-label" htmlFor="automation-name">Otomasyon adı</label>
-          <input id="automation-name" className="xp-input" value={editor.name} placeholder="Otomasyon adı" maxLength={48} disabled={locked} onChange={e => { change(d => ({ ...d, name: e.target.value })); setFailed(false) }}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void persist(editor) } }} />
-          <div className="automation-editor-status" role="status">{pending ? 'Kaydediliyor…' : failed && dirty ? 'Değişiklik kaydedilemedi. Taslak korunuyor.' : dirty ? 'Kaydedilmemiş değişiklikler *' : 'Kayıt güncel.'}</div>
-          {stale && <p className="hint library-warning">Kayıt değişti veya silindi. Düzenle ile yeniden yükle; eski taslak kaydın üzerine yazılmaz.</p>}
-          {missing && <p className="hint library-warning">Listedeki bir tuval depodan silinmiş. Bu satırı çıkar veya listeyi yeniden yükle.</p>}
-          <ol className="automation-canvases">
-            {editor.entries.map((e, i) => {
-              const c = p.library.canvases.find(c => c.id === e.canvasId)
-              return <li key={e.id}>
-                <span className="library-canvas-name" title={c?.name}>{i + 1}. {c?.name ?? 'Silinmiş tuval'}</span>
-                <button className="library-mini" title="Tuvali yeni sekmede aç" disabled={locked || !c} onClick={() => c && p.onOpenCanvas(c)}>+</button>
-                <button className="library-mini" title="Yukarı taşı" disabled={locked || stale || missing || i === 0} onClick={() => { setEditor({ ...editor, entries: editAutomationEntries(editor.entries, e.id, 'up') }); setFailed(false) }}>↑</button>
-                <button className="library-mini" title="Aşağı taşı" disabled={locked || stale || missing || i === editor.entries.length - 1} onClick={() => { setEditor({ ...editor, entries: editAutomationEntries(editor.entries, e.id, 'down') }); setFailed(false) }}>↓</button>
-                <button className="library-mini library-delete" title="Tuvali otomasyon listesinden çıkar" disabled={locked} onClick={() => void removeEntry(e.id)}>×</button>
-              </li>
-            })}
-          </ol>
-          <div className="automation-add-row">
-            <select className="xp-input" aria-label="Depodan tuval seç" disabled={locked || !available.length} value={available.some(c => c.id === adding) ? adding : ''} onChange={e => setAdding(e.target.value)}>
-              <option value="">Depodan tuval seç…</option>
-              {available.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <button className="xp-btn" disabled={locked || stale || missing || !available.some(c => c.id === adding)} onClick={() => { setEditor({ ...editor, entries: addAutomationEntry(editor.entries, adding) }); setAdding(''); setFailed(false) }}>Ekle</button>
-          </div>
-          {!available.length && <p className="hint">Depodaki bütün tuvaller bu listede. Yeni bir tuvali önce Tuvaller ekranında kaydet.</p>}
-          <div className="automation-actions"><button className="xp-btn primary" disabled={locked || !dirty || !editor.name.trim() || stale || missing} onClick={() => void persist(editor)}>{failed && dirty ? 'Tekrar Dene' : 'Kaydet'}</button>
-            <button className="xp-btn" disabled={locked || !dirty} onClick={() => void discard()}>Vazgeç</button></div>
-          {stale && <button className="xp-btn" disabled={locked} onClick={async () => {
-            if (dirty && !await p.onConfirm('Güncel kaydı yüklemek için otomasyon taslağındaki değişikliklerden vazgeçilsin mi?')) return
-            setEditor(source ? editorFor(source) : null); setFailed(false)
-          }}>Yeniden Yükle</button>}
-        </div>}
-      </>}
+  }
+  return <section className="canvas-library" aria-label="Tuval kütüphanesi ve otomasyonlar" onContextMenu={e=>context(e)}>
+    <div className="library-views" role="tablist" aria-label="Tuval yönetimi"><button className={`xp-btn ${view==='canvases'?'primary':''}`} role="tab" aria-selected={view==='canvases'} onClick={()=>{setView('canvases');setSelection([])}}>Tuvaller</button><button className={`xp-btn ${view==='automations'?'primary':''}`} role="tab" aria-selected={view==='automations'} onClick={()=>{setView('automations');setSelection([])}}>Otomasyonlar</button></div>
+    <div className="library-explorer-toolbar"><button className="xp-btn" onClick={()=>{setArchived(false);setSelection([])}} aria-pressed={!archived}>Kütüphane</button><button className="xp-btn" onClick={()=>{setArchived(true);setSelection([])}} aria-pressed={archived}>Arşiv</button><span title={p.directory||'Kütüphane'}>{p.directory?.split(/[\\/]/).slice(-1)[0]||'Nubbo'}</span></div>
+    <div className="canvas-library-scroll" onContextMenu={e=>context(e)}>
+      {view==='canvases'&&!!p.recovery?.length&&<div className="workspace-recovery"><h3>Kurtarılan çalışmalar</h3>{p.recovery.map(d=><div className="workspace-recovery-row" key={d.id}><span>{d.name}</span><button className="xp-btn" disabled={locked} onClick={()=>p.onRestoreDraft?.(d.id)}>Taslağı Aç</button><button className="xp-btn" disabled={locked} onClick={()=>p.onDiscardDraft?.(d.id)}>Sil</button></div>)}</div>}
+      <LibraryTree library={p.library} mode={view==='canvases'?'canvas':'automation'} archived={archived} disabled={locked} selected={selection} onSelect={setSelection} onContext={(e,item)=>context(e,item)} onMove={(refs,parentId)=>void p.onLibraryChange?.({action:'move',refs,parentId})} onOpen={item=>{if(item.kind==='canvas'){const c=p.library.canvases.find(c=>c.id===item.id);if(c)p.onOpenCanvas(c)}else if(item.kind==='automation'){const a=p.library.automations.find(a=>a.id===item.id);if(a){if(editor?.id===a.id)setCollapsed(!collapsed);else void choose(a)}}}} itemName={item=>item.kind==='automation'&&editor?.id===item.id?editor.name+(dirty?' *':''):item.name} renderAfter={item=>view==='automations'&&editor?.id===item.id&&!collapsed?<div className="automation-editor-attached">{editView}</div>:null}/>
+      {view==='automations'&&<div className="automation-expanded-area">
+        {editor&&!editor.id&&autoCard()}
+
+      </div>}
     </div>
+    <div className="library-statusbar">{archived?'Arşiv':'Kütüphane'} · {selection.length?`${selection.length} öğe seçili`:'Sağ tık: işlemler'}</div>
+    {menu&&createPortal(<div className="library-context-menu" role="menu" style={{left:menu.x,top:menu.y}}><fieldset disabled={locked} style={{border:0,padding:0,margin:0}}>
+      {menu.entryId ? <>
+        <button role="menuitem" onClick={()=>action(()=>{const c=p.library.canvases.find(c=>c.id===editor?.entries.find(e=>e.id===menu.entryId)?.canvasId);if(c)p.onOpenCanvas(c)})}>Tuvali Aç</button>
+        <button role="menuitem" onClick={()=>action(()=>editor&&setEditor({...editor,entries:editAutomationEntries(editor.entries,menu.entryId!,'up')}))}>Yukarı Taşı</button>
+        <button role="menuitem" onClick={()=>action(()=>editor&&setEditor({...editor,entries:editAutomationEntries(editor.entries,menu.entryId!,'down')}))}>Aşağı Taşı</button>
+        <button role="menuitem" onClick={()=>action(()=>void removeEntry(menu.entryId!))}>Listeden Çıkar</button>
+      </> : <>
+        {menu.item?.kind==='canvas'&&<><button role="menuitem" onClick={()=>action(()=>{const c=p.library.canvases.find(c=>c.id===menu.item!.id);if(c)p.onOpenCanvas(c)})}>Aç</button><button role="menuitem" onClick={()=>askName('Tuvali Yeniden Adlandır',menu.item!.name,name=>void p.onRenameCanvas(menu.item!.id,name))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>p.onDuplicateCanvas?.(menu.item!.id))}>Çoğalt</button><button role="menuitem" onClick={()=>action(()=>p.onExportCanvas?.(menu.item!.id))}>Dışa Aktar…</button><button role="menuitem" onClick={()=>action(()=>p.onCloseCanvas(menu.item!.id))}>Açık Sekmesini Kapat</button><button role="menuitem" onClick={()=>action(()=>p.onDeleteCanvas(menu.item!.id))}>Sil…</button><hr/></>}
+        {(menu.item?.kind==='automation'||menu.automation||(!menu.item&&editor))&&<>
+          <button role="menuitem" onClick={()=>action(()=>{const a=p.library.automations.find(a=>a.id===(menu.item?.id??menu.automation?.id??editor?.id));if(a)void choose(a)})}>Düzenle / Genişlet</button><button role="menuitem" disabled={dirty} onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onOpenAutomation(id)})}>Otomasyonu Aç</button>
+          <button role="menuitem" onClick={()=>askName('Otomasyonu Yeniden Adlandır',menu.item?.name??menu.automation?.name??editor?.name??'',async name=>{const id=menu.item?.id??menu.automation?.id??editor?.id;const a=p.library.automations.find(a=>a.id===id);if(id&&editor?.id!==id&&a){if(await reviewDraft())setEditor({...editorFor(a),name})}else change(e=>({...e,name}))})}>Yeniden Adlandır…</button>
+          <button role="menuitem" onClick={()=>action(()=>{if(editor)void persist(editor)})}>Değişiklikleri Kaydet</button><button role="menuitem" onClick={()=>action(()=>void discard())}>Değişikliklerden Vazgeç…</button>
+          <button role="menuitem" disabled={dirty} onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onExportAutomation(id)})}>Dışa Aktar…</button>
+          <button role="menuitem" onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onDeleteAutomation(id)})}>Sil…</button>
+          {stale&&<button role="menuitem" onClick={()=>action(()=>void(async()=>{if(!dirty||await p.onConfirm('Güncel kaydı yüklemek için taslaktan vazgeçilsin mi?')){setEditor(source?editorFor(source):null);setFailed(false)}})())}>Yeniden Yükle</button>}<hr/>
+        </>}
+        {menu.item?.kind==='folder'&&<><button role="menuitem" onClick={()=>askName('Klasörü Yeniden Adlandır',menu.item!.name,name=>void p.onLibraryChange?.({action:'renameFolder',id:menu.item!.id,name}))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'deleteFolder',id:menu.item!.id}))}>Boş Klasörü Sil</button><hr/></>}
+        {refs.length>0&&<><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'archive',refs,archived:!archived}))}>{archived?'Arşivden Geri Al':'Arşivle'}</button><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'move',refs,parentId:undefined}))}>Ana Klasöre Taşı</button><hr/></>}
+        <button role="menuitem" onClick={()=>askName('Yeni Klasör','Yeni Klasör',name=>void p.onLibraryChange?.({action:'newFolder',name,parentId:parent}))}>Yeni Klasör…</button>
+        <button role="menuitem" onClick={()=>action(()=>p.onNewCanvas?.(parent))}>Yeni Tuval</button>
+        <button role="menuitem" onClick={()=>action(()=>void choose(undefined,parent))}>Yeni Otomasyon</button>
+        {p.hasCanvas&&<button role="menuitem" onClick={()=>action(p.onSaveCanvas)}>Açık Tuvali Kaydet</button>}
+        {p.onSaveSequence&&<button role="menuitem" onClick={()=>action(p.onSaveSequence!)}>Açık Sırayı Otomasyon Kaydet…</button>}
+        {p.onSaveAll&&<button role="menuitem" onClick={()=>action(p.onSaveAll!)}>Tümünü Kaydet</button>}
+        {p.onManageLibrary&&<><hr/>{([['reveal','Kütüphane Klasörünü Aç'],['open','Başka Kütüphane Aç…'],['copy','Farklı Klasöre Kaydet…'],['backup','Kütüphaneyi Yedekle'],['restore','Yedekten Geri Yükle…']]as const).map(([mode,label])=><button role="menuitem" key={mode} onClick={()=>action(()=>p.onManageLibrary?.(mode))}>{label}</button>)}</>}
+      </>}
+    </fieldset></div>,document.body)}
+    {question&&<WorkspaceNameDialog title={question.title} initial={question.initial} onAnswer={name=>{const answer=question.answer;setQuestion(null);if(name!==null)answer(name)}}/>}
+    {picker&&createPortal(<div className="modal-backdrop"><div className="xp-dialog library-canvas-picker" role="dialog" aria-modal="true" aria-label="Otomasyona Tuval Ekle"><div className="xp-dialog-title">Otomasyona Tuval Ekle</div><div className="library-picker-body"><div className="library-explorer-toolbar"><button className="xp-btn" onClick={()=>{setPickerArchived(false);setPickerRefs([])}}>Kütüphane</button><button className="xp-btn" onClick={()=>{setPickerArchived(true);setPickerRefs([])}}>Arşiv</button></div><LibraryTree archived={pickerArchived} library={{...p.library,canvases:available}} selected={pickerRefs} onSelect={setPickerRefs}/><div className="workspace-picker-actions"><button className="xp-btn" disabled={!pickerRefs.some(r=>r.kind==='canvas')} onClick={addPicked}>Ekle</button><button className="xp-btn" onClick={()=>setPicker(false)}>İptal</button></div></div></div></div>,document.body)}
   </section>
 }

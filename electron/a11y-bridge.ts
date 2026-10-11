@@ -244,6 +244,7 @@ function readPreview(file: string, w: number, h: number, mime?: string): ScanRes
 
 export async function scan(opts: {
   windowTitle?: string
+  strictWindow?: 'exact' | 'contains'
   image?: 'none' | 'plain' | 'marked'
   maxImageW?: number
   /** Set false to skip UI Automation / OCR when only the screenshot is needed. */
@@ -285,6 +286,7 @@ export async function scan(opts: {
     'scan',
     withHud({
       windowTitle: opts.windowTitle || '',
+      strictWindow: opts.strictWindow || '',
       image: opts.image ?? 'none',
       maxImageW: opts.maxImageW ?? 1400,
       ownPid: process.pid,

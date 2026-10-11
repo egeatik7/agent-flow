@@ -1176,6 +1176,21 @@ export function createAgent(ctx: AgentContext) {
       }
       const literal = instruction.match(/^(?:"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“)$/)
       const savedText = !instruction ? (node.locator?.text || node.locator?.name || '').trim() : ''
+      if (node.conditionWindow?.trim()) {
+        if (!literal && !savedText) throw new Error('Pencereye bağlı koşul için aranan metni tırnak içine al.')
+        const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
+        const windowTitle = node.conditionWindow.trim()
+        const match = node.conditionWindowMatch || 'exact'
+        const native = node.conditionSource === 'uia'
+        const res = await bridge.scan({ windowTitle, strictWindow: match, image: 'none', uia: native, ocr: !native, fresh: false, readOnly: false, tilt: !native, ocrEngine: 'combined' })
+        checkStopped()
+        if (res.missingWindow || !res.window) return false
+        const a = res.window.toLocaleLowerCase(), b = windowTitle.toLocaleLowerCase()
+        if (match === 'exact' ? a !== b : !a.includes(b)) return false
+        const items = res.items.filter(item => item.src === (native ? 'uia' : 'ocr'))
+        const hit = native ? items.find(item => item.type === 'Text' && item.text.trim() === wanted) : containsTextStrict(items, wanted)
+        return hit ? found(`${res.window}: “${hit.text}”`) : false
+      }
       if (literal || savedText) {
         const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
         const res = await bridge.scan({ image: 'none', uia: false, fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })

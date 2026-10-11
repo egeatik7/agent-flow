@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScanResult } from '../electron/matcher'
-const state = vi.hoisted(() => ({ stopped: false, scans: [] as unknown[], actions: [] as string[], items: [] as unknown[], scanError: null as Error | null, requests: [] as string[] }))
+const state = vi.hoisted(() => ({ stopped: false, missingWindow: '', scans: [] as unknown[], actions: [] as string[], items: [] as unknown[], scanError: null as Error | null, requests: [] as string[] }))
 vi.mock('electron', () => ({ screen: { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 700 }, scaleFactor: 1 }) } }))
 vi.mock('../electron/a11y-bridge', () => ({
   isLocked: async () => false,
-  scan: async (opts: unknown) => { state.scans.push(opts); if (state.scanError) throw state.scanError; return { items: state.items, area: { x: 0, y: 0, w: 1000, h: 700 }, image: { data: 'test', w: 1000, h: 700 }, window: 'Fixture', ocr: true, ocrCount: state.items.length, uiaCount: 0, ocrEngine: 'combined' } },
+  scan: async (opts: unknown) => { state.scans.push(opts); if (state.scanError) throw state.scanError; return { missingWindow: state.missingWindow, items: state.items, area: { x: 0, y: 0, w: 1000, h: 700 }, image: { data: 'test', w: 1000, h: 700 }, window: 'Fixture', ocr: true, ocrCount: state.items.length, uiaCount: 0, ocrEngine: 'combined' } },
   discardShot: () => {},
   applyOnnx: async (s: ScanResult) => s,
   locate: async (_loc: unknown, _win: unknown, readOnly: unknown) => { if (readOnly !== true) state.actions.push('focus-window'); return { x: 0, y: 0, w: 50, h: 30, enabled: true, name: 'Saved' } },
@@ -25,7 +25,7 @@ const row = (text: string) => ({ id: 1, text, type: 'Text', src: 'ocr', x: 20, y
 function respond(value: unknown) {
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => { state.requests.push(String(init.body)); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }) } }))
 }
-beforeEach(() => { state.stopped = false; state.scans = []; state.actions = []; state.items = []; state.scanError = null; state.requests = []; setStopCheck(() => false) })
+beforeEach(() => { state.stopped = false; state.missingWindow = ''; state.scans = []; state.actions = []; state.items = []; state.scanError = null; state.requests = []; setStopCheck(() => false) })
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false); expect(state.actions).toEqual([]) })
 describe('Condition uses the shared resolver without desktop input', () => {
   it('quoted-only conditions use local combined OCR without a model/key', async () => {
@@ -131,5 +131,35 @@ describe('Condition uses the shared resolver without desktop input', () => {
     state.items = [row('Bitti')]; respond({ id: 1 })
     expect(await make(['uia', 'windows', 'onnx']).exists('Bitti', condition('Bitti'))).toBe(false)
     expect(state.requests).toHaveLength(0)
+  })
+})
+
+describe('Window-scoped waiting evidence', () => {
+  const scoped = () => ({ ...condition('"Toplama tamamlandı"'), conditionWindow: 'Fixture', conditionSource: 'uia' as const })
+  it('accepts only the exact native status in the requested window', async () => {
+    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia', type: 'Text' }]
+    expect(await make(undefined, '').exists('', scoped())).toBe(true)
+    expect(state.scans[0]).toMatchObject({ windowTitle: 'Fixture', strictWindow: 'exact', fresh: false, uia: true, ocr: false })
+    expect(state.requests).toEqual([])
+  })
+  it('rejects the same words in OCR logs and longer native log rows', async () => {
+    state.items = [row('Toplama tamamlandı'), { ...row('Log: Toplama tamamlandı yazısını bekle'), src: 'uia' }]
+    expect(await make(undefined, '').exists('', scoped())).toBe(false)
+  })
+  it('missing windows and different titles never fall back to desktop evidence', async () => {
+    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia' }]
+    state.missingWindow = 'Fixture'
+    expect(await make(undefined, '').exists('', scoped())).toBe(false)
+    state.missingWindow = ''
+    expect(await make(undefined, '').exists('', { ...scoped(), conditionWindow: 'Another' })).toBe(false)
+  })
+  it('ambiguity is an error and does not turn into completion', async () => {
+    state.scanError = new Error('WINDOW_AMBIGUOUS: Fixture')
+    await expect(make().exists('', scoped())).rejects.toThrow('WINDOW_AMBIGUOUS')
+  })
+  it('scoped Chrome OCR keeps its unique title constraint', async () => {
+    state.items = [row('下载')]
+    expect(await make(undefined, '').exists('', { ...condition('"下载"'), conditionWindow: 'Fix', conditionSource: 'ocr', conditionWindowMatch: 'contains' })).toBe(true)
+    expect(state.scans[0]).toMatchObject({ strictWindow: 'contains', uia: false, ocr: true, readOnly: false })
   })
 })

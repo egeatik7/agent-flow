@@ -52,6 +52,8 @@ import {
 } from './graph-types'
 import { toolLayerSave } from './tool-branch'
 import { readWorkspace, writeWorkspace } from './workspace-store'
+import { LibraryStorage, librarySession } from './library-storage'
+import type { CanvasLibrary } from './graph-types'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -61,7 +63,7 @@ const APPROVAL_TIMEOUT_MS = 120_000
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook }>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook; libraryPath?: string; libraryMigrated?: boolean }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
   // The real profile keeps the file exactly where it has always lived. A test profile
@@ -69,6 +71,8 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
   ...(storeCwd(process.env.NUBBO_PROFILE, app.getPath('userData')) ? { cwd: app.getPath('userData') } : {}),
 })
 
+let libraryStorage: LibraryStorage | undefined
+let savedLibrary: CanvasLibrary | undefined
 let mainWindow: BrowserWindow | null = null
 const closeGuard = new WindowCloseGuard()
 let hudWindow: BrowserWindow | null = null
@@ -917,7 +921,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     // Branch records are the only thing the tool layer writes here. The active flow is left
     // exactly as it was, which is why an agent can never reach the user's canvas this way.
     saveCanvases: (book: CanvasBook) => {
-      store.set('canvases', toolLayerSave(loadCanvases(), book.branches ?? []))
+      storeWorkspace(toolLayerSave(loadCanvases(), book.branches ?? []))
     },
     // Suggestions are no longer displayed or merged through the user window.
     // Keep explicit failure replies so legacy test callers do not hang or report success.
@@ -1006,14 +1010,59 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   void syncEndpoint()
   /** An explicitly empty session must not fall back to the old graph and resurrect a tab. */
   function loadCanvases(): CanvasBook {
-    return readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')))
+    const session = readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')))
+    if (!libraryStorage || !savedLibrary) {
+      libraryStorage = new LibraryStorage(store.get('libraryPath') || path.join(app.getPath('userData'), 'Library'))
+      savedLibrary = libraryStorage.load(store.get('libraryMigrated') ? undefined : session.library)
+      store.set('libraryMigrated', true)
+    }
+    return { ...session, library: structuredClone(savedLibrary) }
   }
+  function storeWorkspace(book: CanvasBook) {
+    const current = loadCanvases()
+    writeWorkspace({ set: ({ canvases, graph }) => {
+      libraryStorage!.save(canvases.library!)
+      store.set({ canvases: librarySession(canvases), graph })
+      savedLibrary = structuredClone(canvases.library!)
+    } }, book, current)
+  }
+  ipcMain.handle('library:info', () => {
+    loadCanvases(); return { directory: libraryStorage!.directory, file: libraryStorage!.file }
+  })
+  ipcMain.handle('library:manage', async (_e, mode: string) => {
+    if (running || recoveryActive || !mainWindow) throw Error('Çalışma sürerken kütüphane değiştirilemez.')
+    // Opening another catalog must also work when the previously chosen folder is missing.
+    const current = mode === 'open' ? undefined : loadCanvases(), active = libraryStorage
+    if (mode !== 'open' && !active) throw Error('Kütüphane açılamadı.')
+    if (mode === 'reveal') { await shell.openPath(active!.directory); return { directory: active!.directory } }
+    if (mode === 'backup') { active!.backup(); return { directory: active!.directory } }
+    if (!['open', 'copy', 'restore'].includes(mode)) throw Error('Geçersiz kütüphane işlemi.')
+    if (mode === 'restore') {
+      const answer = await dialog.showOpenDialog(mainWindow, { title: 'Kütüphane yedeğini seç', defaultPath: path.join(active!.directory, 'Backups'), properties: ['openFile'], filters: [{ name: 'Nubbo kütüphanesi', extensions: ['json'] }] })
+      if (answer.canceled) return null
+      const library = active!.restore(answer.filePaths[0])
+      const book: CanvasBook = { tabs: [], activeId: '', library }
+      store.set({ canvases: librarySession(book), graph: { nodes: [], edges: [] } }); savedLibrary = library
+      return { directory: active!.directory, book }
+    }
+    const answer = await dialog.showOpenDialog(mainWindow, { title: mode === 'copy' ? 'Kütüphaneyi kaydedeceğin klasörü seç' : 'Nubbo kütüphanesi bulunan klasörü seç', properties: ['openDirectory', 'createDirectory'] })
+    if (answer.canceled) return null
+    const target = new LibraryStorage(answer.filePaths[0])
+    if (mode === 'copy' && target.directory === active!.directory) return { directory: active!.directory }
+    if (mode === 'copy' && fs.existsSync(target.file)) throw Error('Bu klasörde kütüphane zaten var. Aç seçeneğini kullan; üzerine yazılmadı.')
+    const library = target.load(mode === 'copy' ? current!.library : undefined)
+    const book: CanvasBook = mode === 'copy' ? { ...current!, library } : { tabs: [], activeId: '', library }
+    const graph = book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] }
+    store.set({ libraryPath: target.directory, libraryMigrated: true, canvases: librarySession(book), graph })
+    libraryStorage = target; savedLibrary = library
+    return { directory: target.directory, book }
+  })
 
   ipcMain.handle('canvases:get', () => loadCanvases())
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
-    writeWorkspace(store, book, loadCanvases())
+    storeWorkspace(book)
     return true
   })
 

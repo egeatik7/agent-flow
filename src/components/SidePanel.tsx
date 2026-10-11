@@ -473,6 +473,11 @@ function NodeFields(p: Props & { n: AgentNode }) {
             <TemplateField {...p} n={n} field="text" label="Ekranda aranacak yazı / durum" placeholder="Örn: job finished 60/60 yazıyorsa evet ver" />
           </div>
           <TargetBox {...p} n={n} />
+          <div className="field"><label>Koşul penceresi (boş = tüm ekran)</label><input className="xp-input" value={n.conditionWindow || ''} onChange={e => upd({ conditionWindow: e.target.value })} /></div>
+          {n.conditionWindow?.trim() && <>
+            <div className="field"><label>Pencere başlığı</label><select className="xp-input" value={n.conditionWindowMatch || 'exact'} onChange={e => upd({ conditionWindowMatch: e.target.value as 'exact' | 'contains' })}><option value="exact">Tam eşleşme</option><option value="contains">Başlığı içerir (tek pencere)</option></select></div>
+            <div className="field"><label>Metin kaynağı</label><select className="xp-input" value={n.conditionSource || 'ocr'} onChange={e => upd({ conditionSource: e.target.value as 'uia' | 'ocr' })}><option value="ocr">Pencerenin OCR metni</option><option value="uia">Yerel durum alanı (tam metin)</option></select></div>
+          </>}
           <div className="field">
             <label>Görünene kadar bekle (saniye, 0 = bir kez bak)</label>
             <input

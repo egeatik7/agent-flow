@@ -17,27 +17,23 @@ describe('canvas library is a peer side-panel tab, not a separate fixed panel', 
     const html = renderToStaticMarkup(createElement(SidePanel, sideProps))
     expect(html).toContain('tab active">Tuvaller</button>')
     for (const label of ['Node', 'LLM', 'Ayarlar', 'Ajan']) expect(html).toContain(`>${label}</button>`)
-    expect(html).toContain('Tuval Deposu')
+    expect(html).toContain('Tuval klasörleri')
     expect(html).toContain('aria-label="Tuval yönetimi"')
     expect(html).toContain('>Otomasyonlar</button>')
   })
   it('retains the mounted library under other tabs so an unsaved draft is not discarded', () => {
     const html = renderToStaticMarkup(createElement(SidePanel, { ...sideProps, tab: 'node' }))
     expect(html).toContain('canvas-tab-content" style="display:none"')
-    expect(html).toContain('Tuval Deposu')
+    expect(html).toContain('Tuval klasörleri')
   })
-  it('depot offers opening, closing, renaming and red delete controls', () => {
-    const html = renderToStaticMarkup(createElement(CanvasLibrary, libraryProps))
-    expect(html.indexOf('First Canvas')).toBeLessThan(html.indexOf('Second Canvas'))
-    expect((html.match(/tuvalini yeni sekmede aç/g) ?? []).length).toBe(2)
-    expect(html).toContain('adını değiştir'); expect(html).toContain('>Kapat</button>')
-    expect(html).toContain('library-mini library-delete')
+  it('shows a clean tree without per-row settings columns', () => {
+    const html=renderToStaticMarkup(createElement(CanvasLibrary,libraryProps))
+    expect(html).toContain('First Canvas');expect(html).toContain('role="treeitem"')
+    expect(html).not.toContain('library-mini');expect(html).not.toContain('>Kapat</button>')
   })
-  it('locks every data-changing depot control when busy, retaining read-only view navigation', () => {
-    const html = renderToStaticMarkup(createElement(CanvasLibrary, { ...libraryProps, disabled: true }))
-    const buttons = (html.match(/<button\b[^>]*>/g) ?? []).filter(b => !b.includes('role="tab"'))
-    expect(buttons.length).toBeGreaterThan(5)
-    expect(buttons.every(button => button.includes('disabled=""'))).toBe(true)
+  it('disables drag while busy and keeps read-only navigation available',()=>{
+    const html=renderToStaticMarkup(createElement(CanvasLibrary,{...libraryProps,disabled:true}))
+    expect(html).not.toContain('draggable="true"');expect(html).toContain('role="tab"')
   })
   it('sequence Play and Stop stay before the tabs with Stop enabled during a run', () => {
     const html = renderToStaticMarkup(createElement(CanvasTabs, { ...tabProps, disabled: true, running: true, sequenceLabel: '2/2 · Second Canvas' }))

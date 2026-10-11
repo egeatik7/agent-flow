@@ -75,6 +75,10 @@ export type AgentNode = {
   ms?: number
   count?: number
   timeoutMs?: number
+  /** Condition: restrict evidence to one uniquely matching window. */
+  conditionWindow?: string
+  conditionSource?: 'uia' | 'ocr'
+  conditionWindowMatch?: 'exact' | 'contains'
   pressEnter?: boolean
   clearFirst?: boolean
   clickMode?: ClickMode
@@ -143,12 +147,13 @@ export type CanvasTab = {
   baseline?: { name: string; graph: AgentGraph }
 }
 
-export type SavedCanvas = { id: string; name: string; graph: AgentGraph; updatedAt: number }
+export type LibraryFolder = { id: string; name: string; parentId?: string; archived?: boolean }
+export type SavedCanvas = { folderId?: string; archived?: boolean; id: string; name: string; graph: AgentGraph; updatedAt: number }
 export type AutomationEntry = { id: string; canvasId: string }
-export type CanvasAutomation = { id: string; name: string; entries: AutomationEntry[]; updatedAt: number }
-export type CanvasLibrary = { schemaVersion?: 2; canvases: SavedCanvas[]; automations: CanvasAutomation[] }
+export type CanvasAutomation = { folderId?: string; archived?: boolean; id: string; name: string; entries: AutomationEntry[]; updatedAt: number }
+export type CanvasLibrary = { folders?: LibraryFolder[]; schemaVersion?: 2; canvases: SavedCanvas[]; automations: CanvasAutomation[] }
 /** A working automation is a draft, never a second owner of canvas contents. */
-export type AutomationEditor = { key: string; id?: string; name: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
+export type AutomationEditor = { key: string; id?: string; name: string; folderId?: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
 export type RecoveredCanvas = CanvasTab & { recoveredAt: number }
 
 export type CanvasBook = {
@@ -859,7 +864,7 @@ function normalizeSavedCanvases(raw: unknown): SavedCanvas[] {
     if (seen.has(id)) id = rid()
     seen.add(id)
     return [{ id, name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
-      graph: normalizeGraph(r.graph), updatedAt: Number.isFinite(r.updatedAt) && r.updatedAt! >= 0 ? r.updatedAt! : 0 }]
+      graph: normalizeGraph(r.graph), ...(typeof r.folderId === 'string' ? { folderId: r.folderId } : {}), ...(r.archived === true ? { archived: true } : {}), updatedAt: Number.isFinite(r.updatedAt) && r.updatedAt! >= 0 ? r.updatedAt! : 0 }]
   })
 }
 
@@ -879,13 +884,13 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
   const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0]?.id ?? ''
   let library: CanvasLibrary
   if (rec?.library && typeof rec.library === 'object') {
-    const lib = rec.library as { canvases?: unknown; automations?: unknown }
+    const lib = rec.library as { canvases?: unknown; automations?: unknown; folders?: LibraryFolder[] }
     const catalog = normalizeSavedCanvases(lib.canvases)
     const legacyMembers = new Set<string>()
     const ids = new Set<string>()
     const automations: CanvasAutomation[] = Array.isArray(lib.automations) ? lib.automations.flatMap(value => {
       if (!value || typeof value !== 'object') return []
-      const a = value as { id?: unknown; name?: unknown; entries?: unknown; canvases?: unknown; updatedAt?: unknown }
+      const a = value as { id?: unknown; name?: unknown; entries?: unknown; canvases?: unknown; updatedAt?: unknown; folderId?: string; archived?: boolean }
       if (!Array.isArray(a.entries) && !Array.isArray(a.canvases)) return []
       let id = typeof a.id === 'string' && a.id ? a.id : rid()
       if (ids.has(id)) id = rid()
@@ -913,10 +918,10 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
         legacyMembers.add(canvasId)
         return makeEntry(snapshot.id, canvasId)
       })
-      return [{ id, name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon', entries,
+      return [{ id, ...(typeof a.folderId === 'string' ? { folderId: a.folderId } : {}), ...(a.archived === true ? { archived: true } : {}), name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon', entries,
         updatedAt: typeof a.updatedAt === 'number' && Number.isFinite(a.updatedAt) && a.updatedAt >= 0 ? a.updatedAt : 0 }]
     }) : []
-    library = { schemaVersion: 2, canvases: catalog, automations }
+    library = { schemaVersion: 2, canvases: catalog, automations, ...(Array.isArray(lib.folders) ? { folders: structuredClone(lib.folders) } : {}) }
     // Old group-open tabs had no savedId. Reattach an exact, unambiguous
     // legacy working copy so its next Save updates the shared group record.
     for (const tab of tabs) if (!tab.savedId) {
@@ -945,6 +950,7 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
   const draft = rec?.automationDraft as Partial<AutomationEditor> | undefined
   const automationDraft = draft && typeof draft.key === 'string' && typeof draft.name === 'string' && Array.isArray(draft.entries)
     ? { key: draft.key, name: draft.name.slice(0, 48), ...(typeof draft.id === 'string' ? { id: draft.id } : {}),
+      ...(typeof draft.folderId === 'string' ? { folderId: draft.folderId } : {}),
       entries: draft.entries.filter(e => e && typeof e.id === 'string' && typeof e.canvasId === 'string').map(e => ({ id: e.id, canvasId: e.canvasId })),
       // Preserve the expected revision, including references deleted since the draft was made.
       // Replacing it with the current record would turn a stale draft into an overwrite.

@@ -1,6 +1,10 @@
+// @vitest-environment jsdom
 import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+vi.mock('react-dom',()=>({createPortal:(children:unknown)=>children}))
+import LibraryTree from '../src/components/LibraryTree'
+import WorkspaceNameDialog from '../src/components/WorkspaceNameDialog'
 import CanvasLibrary from '../src/components/CanvasLibrary'
 import { createNode, normalizeCanvasBook, type CanvasBook, type CanvasAutomation } from '../electron/graph-types'
 import { automationCanvases, deleteSavedCanvas, saveAutomation, type AutomationDraft } from '../electron/canvas-library'
@@ -26,15 +30,23 @@ function setup(failSave = false) {
     } })
   act(() => { renderer = create(createElement(CanvasLibrary, props())) }); mounted.push(renderer)
   const button = (name: string) => renderer.root.findAllByType('button').find(n => text(n) === name)!
-  const click = async (name: string) => { const b = button(name); expect(b, name).toBeDefined(); expect(b.props.disabled, name).not.toBe(true); await act(async () => { await b.props.onClick() }) }
-  const add = async (id: string) => {
-    await act(async () => { renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' }).props.onChange({ target: { value: id } }) })
-    await click('Ekle')
+  const event=()=>({preventDefault:()=>{},stopPropagation:()=>{},clientX:10,clientY:10})
+  const context=async(entry?:number)=>{await act(async()=>{if(entry!==undefined)renderer.root.findAllByProps({className:'automation-entry'})[entry].props.onContextMenu(event());else renderer.root.findByType(LibraryTree).props.onContext(event())})}
+  const click = async (name: string) => {
+    if(name==='Genişlet'||name==='Daralt'){await act(async()=>renderer.root.findByType(LibraryTree).props.onOpen({kind:'automation',id:book.library!.automations[0].id}));return}
+    if(name==='+ Yeni'){await context();name='Yeni Otomasyon'}
+    if(name==='Tuval Deposu')name='Tuvaller'
+    if(name==='Yeniden Yükle')await context()
+    const b=button(name);expect(b,name).toBeDefined();expect(b.props.disabled,name).not.toBe(true);await act(async()=>{await b.props.onClick()})
   }
-  return { renderer, click, add, button, get book() { return book }, get saves() { return saves }, set confirm(value: boolean) { confirm = value },
+  const add=async(id:string)=>{await click('Tuval Ekle…');await act(async()=>renderer.root.findAllByType(LibraryTree).at(-1)!.props.onSelect([{kind:'canvas',id}]));await click('Ekle')}
+  const rename=async(name:string)=>{await context();await click('Yeniden Adlandır…');await act(async()=>renderer.root.findByType(WorkspaceNameDialog).props.onAnswer(name))}
+  const entryAction=async(i:number,label:string)=>{await context(i);await click(label)}
+  return { renderer, click, add, button, rename, entryAction, get book() { return book }, get saves() { return saves }, set confirm(value: boolean) { confirm = value },
     reviewClose: () => reviewClose!(),
     set saveOverride(value: ((draft: AutomationDraft) => Promise<CanvasAutomation | null>) | undefined) { saveOverride = value },
     mutate(fn: (b: CanvasBook) => CanvasBook) { act(() => { book = fn(book); renderer.update(createElement(CanvasLibrary, props())) }) } }
+
 }
 
 describe('automation containers use explicit Save and recoverable drafts', () => {
@@ -52,7 +64,7 @@ describe('automation containers use explicit Save and recoverable drafts', () =>
     await h.click('Tuval Deposu'); await h.click('Otomasyonlar'); await h.click('Daralt'); await h.click('Genişlet')
     expect(h.saves).toBe(0)
     await h.click('Kaydet')
-    expect(text(h.renderer.root)).toContain('2. B')
+    expect(text(h.renderer.root).replace(/\s+/g,'')).toContain('2.B')
     expect(h.book.library!.automations[0].entries).toHaveLength(2)
   })
   it('creates a draft and saves an empty container only when requested', async () => {
@@ -64,7 +76,7 @@ describe('automation containers use explicit Save and recoverable drafts', () =>
   })
   it('saves membership removal without deleting the shared canvas', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
-    await act(async () => { h.renderer.root.findByProps({ title: 'Tuvali otomasyon listesinden çıkar' }).props.onClick() })
+    await h.entryAction(0,'Listeden Çıkar')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
     await h.click('Kaydet')
     expect(h.book.library!.automations[0].entries).toEqual([])
@@ -73,7 +85,7 @@ describe('automation containers use explicit Save and recoverable drafts', () =>
   it('a failed write retains the attempted list and provides a retry', async () => {
     const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B'); await h.click('Kaydet')
     expect(text(h.renderer.root)).toContain('Değişiklik kaydedilemedi.')
-    expect(text(h.renderer.root)).toContain('2. B')
+    expect(text(h.renderer.root).replace(/\s+/g,'')).toContain('2.B')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
     expect(h.button('Tekrar Dene').props.disabled).toBe(false)
     await h.click('Tekrar Dene'); expect(h.saves).toBe(2)
@@ -83,32 +95,31 @@ describe('automation containers use explicit Save and recoverable drafts', () =>
     h.mutate(b => deleteSavedCanvas(b, 'A'))
     expect(text(h.renderer.root)).toContain('Kayıt değişti veya silindi.')
     expect(h.button('Tekrar Dene').props.disabled).toBe(true)
-    await h.click('Yeniden Yükle'); expect(text(h.renderer.root)).not.toContain('2. B')
+    await h.click('Yeniden Yükle'); expect(text(h.renderer.root).replace(/\s+/g,'')).not.toContain('2.B')
     expect(h.saves).toBe(1)
   })
   it('excludes already-added members and prevents duplicate adds', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    const select = h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' })
-    expect(select.findAllByType('option').map(o => o.props.value)).toEqual(['', 'C'])
+    await h.click('Tuval Ekle…')
+    expect(h.renderer.root.findAllByType(LibraryTree).at(-1)!.props.library.canvases.map((c:{id:string})=>c.id)).toEqual(['C'])
     expect(h.button('Ekle').props.disabled).toBe(true)
   })
   it('locks changes until an asynchronous explicit Save is acknowledged', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
     let release!: (value: null) => void
     h.saveOverride = () => new Promise(resolve => { release = resolve })
-    await act(async () => { h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' }).props.onChange({ target: { value: 'B' } }) })
-    await act(async () => { h.button('Ekle').props.onClick() })
+    await h.add('B')
     await act(async () => { h.button('Kaydet').props.onClick() })
-    expect(h.button('Daralt').props.disabled).toBe(true)
-    expect(h.button('Ekle').props.disabled).toBe(true)
+    expect(h.renderer.root.findByType(LibraryTree).props.disabled).toBe(true)
+    expect(h.button('Tuval Ekle…').props.disabled).toBe(true)
     await act(async () => release(null))
     expect(h.button('Tekrar Dene').props.disabled).toBe(false)
   })
   it('keeps name and order edits in the same draft until Save', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
-    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Renamed' } }) })
+    await h.rename('Renamed')
     expect(h.book.library!.automations[0].name).toBe('Models')
-    await act(async () => { h.renderer.root.findAllByProps({ title: 'Yukarı taşı' })[1].props.onClick() })
+    await h.entryAction(1,'Yukarı Taşı')
     expect(h.saves).toBe(0)
     await h.click('Kaydet')
     expect(h.book.library!.automations[0].name).toBe('Renamed')
@@ -116,11 +127,11 @@ describe('automation containers use explicit Save and recoverable drafts', () =>
   })
   it('flushes an unfinished name on close and blocks closure when the write fails', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
-    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Pending name' } }) })
+    await h.rename('Pending name')
     await act(async () => { expect(await h.reviewClose()).toBe(true) })
     expect(h.book.library!.automations[0].name).toBe('Pending name')
     h.saveOverride = async () => null
-    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Failed name' } }) })
+    await h.rename('Failed name')
     await act(async () => { expect(await h.reviewClose()).toBe(false) })
     expect(h.book.library!.automations[0].name).toBe('Pending name')
   })

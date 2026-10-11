@@ -3,6 +3,7 @@ import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
+import { changeLibrary, type LibraryChange } from '../electron/library-tree'
 import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, saveCanvasAs, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, automationDraftDirty, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
 import { saveWorkspace, saveOpenSequence } from '../electron/workspace-save'
 import { CanvasSequence } from './lib/canvas-sequence'
@@ -177,6 +178,7 @@ export default function App() {
   const [sideTab, setSideTab] = useState<SideTab>('canvases')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [libraryDirectory, setLibraryDirectory] = useState('')
   const [library, setLibrary] = useState(() => libraryOf(book0))
   const [automationDraft, setAutomationDraft] = useState<AutomationEditor | null>(null)
   const [recovery, setRecovery] = useState<RecoveredCanvas[]>([])
@@ -345,6 +347,7 @@ export default function App() {
       try {
         if (api) {
           setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
+          if(api.libraryInfo)setLibraryDirectory((await api.libraryInfo()).directory)
           const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
           showCanvas(book, '', false)
           await persistBook(book)
@@ -764,6 +767,31 @@ export default function App() {
       pushLog('info', `“${file.name}” otomasyonu dışa aktarıldı.`)
     } catch (e) { pushLog('error', errText(e)) }
   }
+
+  const manageLibrary = async (mode: 'open'|'copy'|'backup'|'restore'|'reveal') => {
+    if(!api?.manageLibrary || runningRef.current || libraryBusyRef.current)return
+    try {
+      if(loaded && ['open','copy','restore'].includes(mode)) {
+        if(automationCloseReview.current && !await automationCloseReview.current())return
+        if(!await settleChanges())return
+      }
+      await writeQueue.current
+      libraryBusyRef.current=true;setLibraryBusy(true)
+      const result=await api.manageLibrary(mode)
+      if(result){setLibraryDirectory(result.directory);if(result.book){showCanvas(normalizeCanvasBook(result.book),result.book.activeId,false);setLoadError('');setLoaded(true)};pushLog('success',mode==='backup'?'Kütüphane yedeklendi.':'Kütüphane işlemi tamamlandı.')}
+    } catch(e){pushLog('error',errText(e))}
+    finally{libraryBusyRef.current=false;setLibraryBusy(false)}
+  }
+  const organizeLibrary = (change:LibraryChange) => saveLibraryChange(b=>changeLibrary(b,change),'Kütüphane düzenlendi.')
+  const newLibraryCanvas = (folderId?:string) => saveLibraryChange(b=>{
+    const next=addCanvasTab(b,nextCanvasName(b.tabs),initialGraph()),saved=saveCanvas(next,next.activeId)
+    const id=saved.tabs.find(t=>t.id===saved.activeId)!.savedId!
+    return changeLibrary(saved,{action:'move',refs:[{kind:'canvas',id}],parentId:folderId})
+  },'Yeni tuval oluşturuldu.',true)
+  const duplicateLibraryCanvas = (id:string) => saveLibraryChange(b=>{
+    const c=libraryOf(b).canvases.find(c=>c.id===id);if(!c)throw Error('Tuval bulunamadı.')
+    return {...b,library:{...libraryOf(b),canvases:[...libraryOf(b).canvases,{...structuredClone(c),id:newId(),name:(c.name.slice(0,38)+' (Kopya)'),updatedAt:Date.now()}]}}
+  },'Tuval çoğaltıldı.')
 
   const unpack = async (id: string) => {
     const yes = await askSure('Paketi çıkarmak istediğinize emin misiniz?')
@@ -1602,13 +1630,16 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-            /> : loadError ? <div className="workspace-load-error" role="alert"><h2>Kayıtlar açılamadı</h2><p>{loadError}</p><p>Mevcut kayıtlar değiştirilmedi. Programı yeniden açıp tekrar deneyin.</p></div> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
+            /> : loadError ? <div className="workspace-load-error" role="alert"><h2>Kayıtlar açılamadı</h2><p>{loadError}</p><p>Mevcut kayıtlar korunuyor. Kütüphane klasörünü taşıdıysan yeni konumundan açabilirsin.</p>{api?.manageLibrary && <button className="xp-btn" disabled={libraryBusy} onClick={()=>void manageLibrary('open')}>Kütüphane Aç…</button>}</div> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
           </div>
           <div className="right-sidebar">
             <fieldset className="canvas-editor-fields" disabled={editorLocked}>
           <SidePanel
             disabled={running || editorLocked}
-            canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
+            canvasPanel={<CanvasLibraryPanel directory={libraryDirectory} onLibraryChange={organizeLibrary}
+              onManageLibrary={api?.manageLibrary ? mode=>void manageLibrary(mode) : undefined}
+              onNewCanvas={folderId=>void newLibraryCanvas(folderId)} onDuplicateCanvas={id=>void duplicateLibraryCanvas(id)}
+              onExportCanvas={id=>{const c=library.canvases.find(c=>c.id===id);if(c)downloadJson(c.graph,c.name)}} library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
               draft={automationDraft}
               onDraftChange={changeAutomationDraft}
               onAskSave={name => askCanvasSave({ name }, 'automation')}
