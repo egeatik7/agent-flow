@@ -18,11 +18,11 @@ sayfanın içine bakar. Emin olamadığı yerde OpenRouter’daki modele sorar.
 
 ## Tuvaller
 
-Araç çubuğunun altında her tuval bir sekmedir ve ayrı bir akıştır. **Ajanı Çalıştır** açık tuvali çalıştırır; sekme çubuğunun en solundaki **▶ / ■** bütün açık tuvallerin soldan sağa sırasını oynatır/durdurur. Sıradaki tuval, önceki tuval hatasız biçimde kendi **Bitti** node'una ulaşınca başlar.
+Araç çubuğunun altında her tuval renkli bir sekmedir ve ayrı bir akıştır. Sekmeler sürüklenerek yeniden sıralanır; üzerlerinde yalnız kapatma çarpısı bulunur. Uzun adlar 24 karakterden sonra kısaltılır, tam ad fareyle üzerine gelince görünür. **Ajanı Çalıştır** açık tuvali çalıştırır; sekme çubuğunun en solundaki **▶ / ■** bütün açık tuvallerin soldan sağa sırasını oynatır/durdurur. Sıradaki tuval, önceki tuval hatasız biçimde kendi **Bitti** node'una ulaşınca başlar.
 
 Sağ panelde **Tuvaller** sekmesi XP tarzı bir klasör ağacıdır. Klasör oluşturma, yeniden adlandırma, arşivleme ve dosya işlemleri **sağ tık menüsündedir**; tuvaller ve otomasyonlar sürüklenerek klasörlere taşınabilir. Otomasyon listesi kendi adının hemen altında açılır. **Tuval Ekle…** aynı klasör ağacını kullanır; sıralama sürüklemeyle veya sağ tıkla yapılır. Maskot ayrı alt bölmede kalır.
 
-Kütüphaneyi istediğin yerde saklamak için **sağ tık → Farklı Klasöre Kaydet…** kullan. Paylaşılabilir `nubbo-library.json` klasörleri, arşivi, tuval içeriklerini ve otomasyon sıralarını taşır. **Başka Kütüphane Aç…** ile mevcut bir klasörden yüklenir. Ayarlar, API anahtarları ve çalışma taslakları yerel profilde kalır. [Kullanım ve taşıma ayrıntıları](docs/tuvaller-ve-otomasyonlar.md).
+Kütüphaneyi istediğin yerde saklamak için **sağ tık → Farklı Klasöre Kaydet…** kullan. Paylaşılabilir `Nubbo.library`, klasörleri, arşivi, tuvallerin içeriklerini ve otomasyon bağlantılarını ayrı tablolarda tutan SQLite veritabanıdır. Eski `nubbo-library.json` açıldığında kimlikler korunarak aktarılır, özgün dosya Backups altında saklanır. **Başka Kütüphane Aç…** ile mevcut bir klasörden yüklenir. Ayarlar, API anahtarları ve çalışma taslakları yerel profilde kalır. Klasör ağacında **Shift** aralık, **Ctrl** çoklu seçim yapar; boş yerde sürükleme kutuyla seçer. Seçili öğeler birlikte klasöre veya boş alana sürüklenebilir. JSON içe/dışa aktarma uyumluluğu korunur. [Kullanım ve taşıma ayrıntıları](docs/tuvaller-ve-otomasyonlar.md).
 
 Tuvalde **Ctrl+A** bütün node’ları seçer. **Ctrl+C** kopyalar, **Ctrl+X** keser (Başlangıç yerinde kalır), **Ctrl+V** yapıştırır. Ok, iki ucu da kopyadaysa durur; seçimin dışına çıkan ok kopar. Aynı kopya başka bir tuvale veya açık bir paketin içine de yapışır.
 

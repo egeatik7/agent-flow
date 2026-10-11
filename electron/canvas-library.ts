@@ -68,6 +68,12 @@ export function moveCanvasTab(book: CanvasBook, id: string, delta: -1 | 1): Canv
   const tabs = [...book.tabs]; [tabs[index], tabs[next]] = [tabs[next], tabs[index]]
   return { ...book, tabs }
 }
+export function reorderCanvasTab(book:CanvasBook,id:string,targetId:string,after=false):CanvasBook{
+ if(id===targetId)return book
+ const moved=book.tabs.find(t=>t.id===id);if(!moved||!book.tabs.some(t=>t.id===targetId))return book
+ const tabs=book.tabs.filter(t=>t.id!==id),at=tabs.findIndex(t=>t.id===targetId);tabs.splice(at+(after?1:0),0,moved)
+ return {...book,tabs}
+}
 export type AutomationDraft = { id?: string; name: string; folderId?: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
 export function automationDraftDirty(draft: AutomationDraft): boolean {
   return draft.expected ? draft.name !== draft.expected.name || JSON.stringify(draft.entries) !== JSON.stringify(draft.expected.entries)

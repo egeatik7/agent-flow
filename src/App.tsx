@@ -5,7 +5,7 @@ import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
 import { changeLibrary, type LibraryChange } from '../electron/library-tree'
-import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, saveCanvasAs, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, automationDraftDirty, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
+import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, saveCanvasAs, deleteSavedCanvas, openSavedCanvas, reorderCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, automationDraftDirty, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
 import { saveWorkspace, saveOpenSequence } from '../electron/workspace-save'
 import { CanvasSequence } from './lib/canvas-sequence'
 import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
@@ -664,7 +664,8 @@ export default function App() {
 
   const renameTab = (id: string, name: string) => {
     if (runningRef.current || libraryBusyRef.current) return
-    const clean = name.trim().slice(0, 48)
+    if(bookRef.current.tabs.find(t=>t.id===id)?.name===name.trim())return
+    const clean = name.trim().slice(0, 24)
     if (!clean) return
     const base = id === activeIdRef.current ? commitActive() : bookRef.current
     if (!base.tabs.some((t) => t.id === id)) return
@@ -728,7 +729,8 @@ export default function App() {
     const ok = await saveLibraryChange(b => {
       const next = saveAutomation(b, draft)
       savedId = draft.id ?? libraryOf(next).automations[libraryOf(next).automations.length - 1].id
-      return next
+      const saved=libraryOf(next).automations.find(a=>a.id===savedId)!
+      return {...next,automationDraft:{key:saved.id,id:saved.id,name:saved.name,folderId:saved.folderId,entries:structuredClone(saved.entries),expected:structuredClone(saved)}}
     }, `“${draft.name.trim()}” otomasyon listesi kaydedildi.`, false, true)
     return ok ? libraryOf(bookRef.current).automations.find(a => a.id === savedId) ?? null : null
   }
@@ -753,9 +755,9 @@ export default function App() {
     if (!a || !await askSure(`“${a.name}” otomasyonunu ve kayıtlı tuval listesini silmek istediğinize emin misiniz? Açık sekmeler ve ayrı tuval kayıtları silinmez.`)) return
     await saveLibraryChange(b => deleteAutomation(b, id), `“${a.name}” otomasyonu silindi.`)
   }
-  const moveTab = (id: string, delta: -1 | 1) => {
+  const moveTab = (id:string,targetId:string,after:boolean) => {
     if (runningRef.current || libraryBusyRef.current) return
-    void rememberBook(moveCanvasTab(commitActive(), id, delta))
+    void rememberBook(reorderCanvasTab(commitActive(),id,targetId,after))
   }
   const downloadJson = (value: unknown, name: string) => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }))
@@ -873,6 +875,7 @@ export default function App() {
         return
       }
       const t = e.target as HTMLElement
+      if(t?.closest?.('.canvas-library,.library-canvas-picker,.library-context-menu'))return
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
       if (!activeIdRef.current || workspacePicker || nameQuestion || confirmQuestion || missingReport || scanner || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
       if (scanner && mod) return
@@ -1555,7 +1558,7 @@ export default function App() {
           sequenceLabel={sequenceLabel}
           onRunAll={() => void runAllCanvases()}
           onStop={stop}
-          onMove={moveTab}
+          onReorder={moveTab}
           onSelect={switchTab}
           onAdd={addTab}
           onClose={(id) => void closeTab(id)}

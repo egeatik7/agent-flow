@@ -53,6 +53,7 @@ import {
 import { toolLayerSave } from './tool-branch'
 import { readWorkspace, writeWorkspace } from './workspace-store'
 import { LibraryStorage, librarySession } from './library-storage'
+import { initializeLibraryDatabase } from './library-database'
 import type { CanvasLibrary } from './graph-types'
 import { randomBytes, createHash } from 'node:crypto'
 import QRCode from 'qrcode'
@@ -838,6 +839,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
 
   report(58, 'Kayıtlar okunuyor…')
+  await initializeLibraryDatabase()
   getSettings()
   try {
     ensureLogsDir()
@@ -1066,7 +1068,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     if (mode === 'backup') { active!.backup(); return { directory: active!.directory } }
     if (!['open', 'copy', 'restore'].includes(mode)) throw Error('Geçersiz kütüphane işlemi.')
     if (mode === 'restore') {
-      const answer = await dialog.showOpenDialog(mainWindow, { title: 'Kütüphane yedeğini seç', defaultPath: path.join(active!.directory, 'Backups'), properties: ['openFile'], filters: [{ name: 'Nubbo kütüphanesi', extensions: ['json'] }] })
+      const answer = await dialog.showOpenDialog(mainWindow, { title: 'Kütüphane yedeğini seç', defaultPath: path.join(active!.directory, 'Backups'), properties: ['openFile'], filters: [{ name: 'Nubbo kütüphanesi', extensions: ['library','json'] }] })
       if (answer.canceled) return null
       const library = active!.restore(answer.filePaths[0])
       const book: CanvasBook = { tabs: [], activeId: '', library }
@@ -1078,7 +1080,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     if (answer.canceled) return null
     const target = new LibraryStorage(answer.filePaths[0])
     if (mode === 'copy' && target.directory === active!.directory) return { directory: active!.directory }
-    if (mode === 'copy' && fs.existsSync(target.file)) throw Error('Bu klasörde kütüphane zaten var. Aç seçeneğini kullan; üzerine yazılmadı.')
+    if (mode === 'copy' && (fs.existsSync(target.file)||fs.existsSync(target.legacyFile))) throw Error('Bu klasörde kütüphane zaten var. Aç seçeneğini kullan; üzerine yazılmadı.')
     const library = target.load(mode === 'copy' ? current!.library : undefined)
     const book: CanvasBook = mode === 'copy' ? { ...current!, library } : { tabs: [], activeId: '', library }
     const graph = book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] }

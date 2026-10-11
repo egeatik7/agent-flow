@@ -76,6 +76,13 @@ afterEach(() => { if (renderer) act(() => renderer!.unmount()); renderer = undef
 afterAll(() => { delete (window as unknown as { xpAgent?: unknown }).xpAgent; vi.unstubAllGlobals() })
 
 describe('real App workspace lifecycle with the real automation editor', () => {
+  it('preserves an unchanged long tab name and isolates library keyboard input from canvas edits',async()=>{
+    const name='An existing canvas with its complete long name';seed.library!.canvases[0].name=name
+    await mount();await act(async()=>renderer!.root.findByType(CanvasLibrary).props.onOpenCanvas(seed.library!.canvases[0]));const tabs=renderer!.root.findByType(CanvasTabs).props
+    const before=writes.length;await act(async()=>tabs.onRename(tabs.activeId,name));expect(writes).toHaveLength(before);expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].name).toBe(name)
+    const id=renderer!.root.findByType(NodeCanvas).props.graph.nodes[0].id;await act(async()=>renderer!.root.findByType(NodeCanvas).props.onSelectNode(id));const target=document.createElement('div');target.className='canvas-library';document.body.append(target)
+    await act(async()=>{target.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}))});expect(renderer!.root.findByType(NodeCanvas).props.graph.nodes[0].id).toBe(id);target.remove()
+  })
   it('autosaves automation typing and membership as a draft, and survives a restart without publishing it', async () => {
     await mount(); await draft(); await tick()
     expect(disk!.library!.automations).toEqual([])
@@ -89,6 +96,9 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     expect(disk!.library!.automations).toEqual([])
     await click('Kaydet')
     expect(disk!.library!.automations[0].name).toBe('Pipeline')
+    // No debounce tick: the same acknowledged write must already contain the saved draft.
+    expect(disk!.automationDraft?.id).toBe(disk!.library!.automations[0].id)
+    expect(disk!.automationDraft?.expected).toEqual(disk!.library!.automations[0])
   })
   it('Cancel on native close keeps the automation draft and rejects the close request', async () => {
     await mount(); await draft(); await close()

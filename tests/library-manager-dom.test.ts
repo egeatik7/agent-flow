@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react'
+import { act, createElement, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import CanvasLibrary from '../src/components/CanvasLibrary'
 import type { CanvasLibrary as Library } from '../electron/graph-types'
+import type { AutomationEditor } from '../electron/graph-types'
 
 let host:HTMLDivElement,root:Root
 beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host)})
@@ -45,4 +46,35 @@ it('drops a canvas on a folder once; dropping on another canvas does not move it
  const drag=async(el:Element,type:string)=>act(async()=>{const e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperty(e,'dataTransfer',{value:dataTransfer});el.dispatchEvent(e)})
  await drag(row('Image 1'),'dragstart');await drag(row('Image 2'),'drop');expect(p.onLibraryChange).not.toHaveBeenCalled()
  await drag(row('Blender'),'drop');expect(p.onLibraryChange).toHaveBeenCalledExactlyOnceWith({action:'move',refs:[{kind:'canvas',id:'one'}],parentId:'target'})
+})
+
+it('selects a Shift range and drags the entire selection together',async()=>{
+ const p=props();await act(async()=>root.render(createElement(CanvasLibrary,p)));await event(host.querySelector('[aria-label="Genişlet Hunyuan"]')!,'click')
+ await event(row('Image 1'),'click');await event(row('Image 2'),'click',{shiftKey:true});expect(host.querySelectorAll('[aria-selected=true][role=treeitem]')).toHaveLength(2)
+ const values=new Map<string,string>(),dataTransfer={setData:(k:string,v:string)=>values.set(k,v),getData:(k:string)=>values.get(k)||'',effectAllowed:'',dropEffect:''}
+ for(const [el,type] of [[row('Image 1'),'dragstart'],[row('Blender'),'drop']] as const)await act(async()=>{const e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperty(e,'dataTransfer',{value:dataTransfer});el.dispatchEvent(e)})
+ expect(p.onLibraryChange).toHaveBeenCalledExactlyOnceWith({action:'move',refs:[{kind:'canvas',id:'one'},{kind:'canvas',id:'two'}],parentId:'target'})
+})
+
+it('draws a selection box from empty space and keeps the selected items after release',async()=>{
+ const p=props();await act(async()=>root.render(createElement(CanvasLibrary,p)));await event(host.querySelector('[aria-label="Genişlet Hunyuan"]')!,'click')
+ const tree=host.querySelector('[role=tree]')!;vi.spyOn(tree,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,260,320))
+ Array.from(tree.querySelectorAll('[role=treeitem]')).forEach((el,i)=>vi.spyOn(el,'getBoundingClientRect').mockReturnValue(new DOMRect(0,i*30,200,25)))
+ await event(tree,'mousedown',{button:0,clientX:240,clientY:70});await act(async()=>window.dispatchEvent(new MouseEvent('mousemove',{clientX:50,clientY:119})))
+ expect(host.querySelector('.library-marquee')).not.toBeNull();expect(row('Image 1').getAttribute('aria-selected')).toBe('true');expect(row('Image 2').getAttribute('aria-selected')).toBe('true');expect(row('Hunyuan').getAttribute('aria-selected')).toBe('false')
+ await act(async()=>window.dispatchEvent(new MouseEvent('mouseup')));expect(host.querySelector('.library-marquee')).toBeNull();expect(host.querySelectorAll('[aria-selected=true][role=treeitem]')).toHaveLength(2)
+})
+
+it('keeps a new automation inside its chosen folder through creation and acknowledged Save',async()=>{
+ const saved=vi.fn()
+ function Harness(){const [lib,setLib]=useState(library()),[draft,setDraft]=useState<AutomationEditor|null>(null);return createElement(CanvasLibrary,{...props(),library:lib,draft,onDraftChange:setDraft,onSaveAutomation:async d=>{saved(d);const record={id:'new-record',name:d.name,folderId:d.folderId,entries:d.entries,updatedAt:2};setLib(current=>({...current,automations:[...current.automations,record]}));return record}})}
+ await act(async()=>root.render(createElement(Harness)));await event(button('Otomasyonlar',host),'click');await event(row('Hunyuan'),'contextmenu');await event(button('Yeni Otomasyon',document.querySelector('[role=menu]')!),'click')
+ const draftRow=host.querySelector('.library-tree-row.draft')!;expect(draftRow.getAttribute('aria-level')).toBe('2');expect(row('Hunyuan').getAttribute('aria-expanded')).toBe('true');expect(draftRow.nextElementSibling?.className).toBe('automation-editor-attached')
+ await event(button('Kaydet',host),'click');expect(saved).toHaveBeenCalledWith(expect.objectContaining({folderId:'folder',name:'Otomasyon 1'}));expect(row('Otomasyon 1').getAttribute('aria-level')).toBe('2');expect(row('Otomasyon 1').nextElementSibling?.className).toBe('automation-editor-attached');expect(host.querySelector('.library-tree-row.draft')).toBeNull();expect(host.textContent).toContain('Kayıt güncel.')
+})
+
+it('does not save a different automation editor from another row context menu',async()=>{
+ const p=props();p.library.automations.push({id:'other',name:'Other',entries:[],updatedAt:1});await act(async()=>root.render(createElement(CanvasLibrary,p)));await event(button('Otomasyonlar',host),'click');await event(row('Production'),'dblclick')
+ await event(row('Production'),'contextmenu');await event(button('Yeniden Adlandır…',document.querySelector('[role=menu]')!),'click');const input=document.querySelector<HTMLInputElement>('[role=dialog] input')!;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;await act(async()=>{setter.call(input,'Changed');input.dispatchEvent(new Event('input',{bubbles:true}))});await event(button('Kaydet',document.querySelector('[role=dialog]')!),'click')
+ await event(row('Other'),'contextmenu');const save=button('Değişiklikleri Kaydet',document.querySelector('[role=menu]')!);expect(save.disabled).toBe(true);await event(save,'click');expect(p.onSaveAutomation).not.toHaveBeenCalled()
 })

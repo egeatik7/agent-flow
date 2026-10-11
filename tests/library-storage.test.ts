@@ -1,19 +1,21 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it,vi } from 'vitest'
+import { initializeLibraryDatabase, decodeLibrary } from '../electron/library-database'
 import { LibraryStorage, librarySession } from '../electron/library-storage'
 import { changeLibrary, isArchived } from '../electron/library-tree'
 import { normalizeCanvasBook, type CanvasBook } from '../electron/graph-types'
 import { saveCanvas, saveAutomation } from '../electron/canvas-library'
 const dirs:string[]=[]
+beforeAll(initializeLibraryDatabase)
 const dir=()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'nubbo-library-test-'));dirs.push(d);return d}
 afterEach(()=>{for(const d of dirs.splice(0))fs.rmSync(d,{recursive:true,force:true})})
 const book=():CanvasBook=>({activeId:'tab',tabs:[{id:'tab',savedId:'c',name:'Canvas',graph:{nodes:[],edges:[]}}],library:{folders:[{id:'f',name:'Hunyuan'}],canvases:[{id:'c',name:'Canvas',folderId:'f',graph:{nodes:[],edges:[]},updatedAt:0}],automations:[{id:'a',name:'Run',folderId:'f',entries:[{id:'entry',canvasId:'c'}],updatedAt:0}]}})
 describe('portable library and recoverable storage',()=>{
  it('migrates without changing IDs; the library contains no open session or settings',()=>{
   const b=book(),store=new LibraryStorage(dir());expect(store.load(b.library)).toEqual(b.library)
-  const raw=JSON.parse(fs.readFileSync(store.file,'utf8'));expect(raw.library.automations[0].entries[0].canvasId).toBe('c');expect(raw.tabs).toBeUndefined();expect(raw.settings).toBeUndefined();expect(librarySession(b).library).toBeUndefined()
+  const bytes=fs.readFileSync(store.file),raw=decodeLibrary(bytes);expect(bytes.subarray(0,16).toString()).toBe('SQLite format 3\0');expect(raw.automations[0].entries[0].canvasId).toBe('c');expect(Object.keys(raw)).not.toContain('tabs');expect(Object.keys(raw)).not.toContain('settings');expect(librarySession(b).library).toBeUndefined()
  })
  it('backs up catalog changes, restores them, and preserves folder metadata on explicit Save',()=>{
   const b=book(),store=new LibraryStorage(dir());store.load(b.library)
@@ -66,5 +68,22 @@ describe('portable library and recoverable storage',()=>{
   const b=book();b.automationDraft={key:'draft',name:'New',folderId:'f',entries:[]}
   const normalized=normalizeCanvasBook(b);const saved=saveAutomation(normalized,normalized.automationDraft!)
   expect(saved.library!.automations.at(-1)!.folderId).toBe('f')
+ })
+ it('migrates an existing JSON catalog once, keeping the exact source as a backup',()=>{
+  const storage=new LibraryStorage(dir()),old=JSON.stringify({format:'nubbo-library',version:1,revision:'old',library:book().library},null,2);fs.writeFileSync(storage.legacyFile,old)
+  expect(storage.load()).toEqual(book().library);expect(fs.existsSync(storage.legacyFile)).toBe(false)
+  const backup=fs.readdirSync(path.join(storage.directory,'Backups')).find(f=>f.startsWith('Legacy-'))!;expect(fs.readFileSync(path.join(storage.directory,'Backups',backup),'utf8')).toBe(old)
+  expect(new LibraryStorage(storage.directory).load()).toEqual(book().library)
+ })
+ it('preserves malformed legacy data and refuses migration or a corrupt database',()=>{
+  const storage=new LibraryStorage(dir());fs.writeFileSync(storage.legacyFile,'broken legacy')
+  expect(()=>storage.load(book().library)).toThrow();expect(fs.existsSync(storage.file)).toBe(false);expect(fs.readFileSync(storage.legacyFile,'utf8')).toBe('broken legacy')
+  fs.writeFileSync(storage.file,'broken database');expect(()=>storage.load(book().library)).toThrow();expect(fs.readFileSync(storage.file,'utf8')).toBe('broken database')
+ })
+ it('retains the previous database and can retry if publishing the new file fails',()=>{
+  const storage=new LibraryStorage(dir()),b=book();storage.load(b.library);const original=fs.readFileSync(storage.file),next=changeLibrary(b,{action:'newFolder',name:'New'})
+  const rename=fs.renameSync,mocked=vi.spyOn(fs,'renameSync').mockImplementation((from,to)=>{if(String(to)===storage.file)throw Error('Disk write failed');return rename(from,to)})
+  try{expect(()=>storage.save(next.library!)).toThrow('Disk write failed');expect(fs.readFileSync(storage.file)).toEqual(original);expect(fs.readdirSync(storage.directory).some(f=>f.endsWith('.tmp'))).toBe(false)}finally{mocked.mockRestore()}
+  storage.save(next.library!);expect(new LibraryStorage(storage.directory).load()).toEqual(next.library)
  })
 })
