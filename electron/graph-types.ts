@@ -182,6 +182,12 @@ export type AppSettings = {
   localVision?: boolean
   /** "Şimdilik OpenRouter'a dön": yerel satırlar atlanır, adres saklı kalır. */
   localOff?: boolean
+  /**
+   * Yerel modelde düşünme (reasoning) modu: 'none' kapatır, 'low'/'medium'/'high' açar.
+   * Boş = otomatik: Ollama adreslerinde kapatılır (ölçüldü: 0,1 sn), diğer sunucularda
+   * alan hiç gönderilmez. Yerel Model sekmesindeki "Düşünme modu" seçicisi bunu yazar.
+   */
+  localThink?: string
   targetWindow: string
   stepDelayMs: number
   maxSteps: number
@@ -262,6 +268,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   localTimeoutMs: 180_000,
   localVision: false,
   localOff: false,
+  localThink: '',
   targetWindow: '',
   stepDelayMs: 800,
   maxSteps: 2000,

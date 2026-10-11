@@ -56,11 +56,21 @@ export default function LocalModelSettings({ settings: s, setSettings, onSave, o
         <p className="hint">Kapalıyken listelerdeki yerel modeller atlanır; varsa sıradaki bulut modeli denenir. Adres ve model sıralaması korunur.</p>
         <label className="check"><input type="checkbox" checked={s.localVision === true} onChange={e => set({ localVision: e.target.checked })} /> Yüklediğim yerel model görüntü destekliyor</label>
         <p className="hint">Görsel model kullanıyorsan sunucuda görüntü desteğini de aç. Bu işaret sunucuya görüntü desteği eklemez.</p>
+        <div className="field"><label htmlFor="local-think">Düşünme modu</label>
+          <select id="local-think" className="xp-select" value={s.localThink ?? ''} onChange={e => set({ localThink: e.target.value })}>
+            <option value="">Otomatik (Ollama'da kapalı)</option>
+            <option value="none">Kapalı — en hızlı</option>
+            <option value="low">Açık — düşük</option>
+            <option value="medium">Açık — orta</option>
+            <option value="high">Açık — yüksek</option>
+          </select>
+        </div>
+        <p className="hint">Düşünme açıkken model cevabı yazmadan önce uzun bir düşünme metni üretir: Ollama'da ölçüm kapalıyken <b>0,1 sn</b>, açıkken <b>1,4 sn</b> ve kısa yanıt bütçesi düşünmeye gidip cevap boş kalabiliyor. Seviyeler (düşük/orta/yüksek) yalnız seviyeli modellerde (örn. gpt-oss) anlam taşır; diğerlerinde "açık" gibi davranır.</p>
         <div className="field"><label htmlFor="local-timeout">Yanıt için bekleme süresi (saniye)</label>
           <input id="local-timeout" className="xp-input" type="number" min={10} max={900} value={Math.round((s.localTimeoutMs ?? 180_000) / 1000)} onChange={e => set({ localTimeoutMs: Math.max(10, Math.min(900, Number(e.target.value) || 180)) * 1000 })} />
         </div>
       </fieldset>
-      <button type="button" className="xp-btn save block" onClick={() => onSave({ localBaseUrl: (s.localBaseUrl ?? '').trim(), localTimeoutMs: s.localTimeoutMs ?? 180_000, localVision: s.localVision === true, localOff: s.localOff === true })}>Yerel ayarları kaydet</button>
+      <button type="button" className="xp-btn save block" onClick={() => onSave({ localBaseUrl: (s.localBaseUrl ?? '').trim(), localTimeoutMs: s.localTimeoutMs ?? 180_000, localVision: s.localVision === true, localOff: s.localOff === true, localThink: s.localThink ?? '' })}>Yerel ayarları kaydet</button>
       <p className="hint">Kurtarma ajanı kendi OpenRouter bağlantısını kullanmaya devam eder.</p>
     </div>
   </fieldset>

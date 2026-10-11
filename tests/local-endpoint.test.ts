@@ -57,4 +57,31 @@ describe('local OpenAI-compatible integration', () => {
     await expect(listLocalModels('127.0.0.1:8080')).rejects.toThrow('adres')
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('Ollama adresinde düşünmeyi kapatır, başka yerel sunucuda gövdeyi değiştirmez', async () => {
+    const bodies: any[] = []
+    server = createServer(async (req, res) => {
+      res.setHeader('Content-Type', 'application/json')
+      let body = ''; for await (const chunk of req) body += chunk
+      bodies.push(JSON.parse(body))
+      res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"text":"tamam"}' } }] }))
+    })
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as any).port
+    // Ollama adresi: düşünme kapatılır (11 Ekim 2026 ölçümü, 10 sn -> 0,15 sn).
+    setLocalEndpoint(`http://127.0.0.1:${port}/ollama/v1`, 30_000, true)
+    await visionDescribe({ apiKey: '', model: 'local:qwen3.5-8k', image })
+    expect(bodies[0].reasoning_effort).toBe('none')
+    // Başka yerel sunucu: alan gönderilmez, istek gövdesi eskisi gibi kalır.
+    setLocalEndpoint(`http://127.0.0.1:${port}/v1`, 30_000, true)
+    await visionDescribe({ apiKey: '', model: 'local:qwen3.5-8k', image })
+    expect('reasoning_effort' in bodies[1]).toBe(false)
+    // Kullanıcı Yerel Model sekmesinden açıkça seçtiyse seçim gönderilir (Ollama olmayan adreste bile).
+    setLocalEndpoint(`http://127.0.0.1:${port}/v1`, 30_000, true, false, 'high')
+    await visionDescribe({ apiKey: '', model: 'local:qwen3.5-8k', image })
+    expect(bodies[2].reasoning_effort).toBe('high')
+    // Geçersiz seviye "otomatik" sayılır; Ollama olmayan adrese alan gönderilmez.
+    setLocalEndpoint(`http://127.0.0.1:${port}/v1`, 30_000, true, false, 'yanlis')
+    await visionDescribe({ apiKey: '', model: 'local:qwen3.5-8k', image })
+    expect('reasoning_effort' in bodies[3]).toBe(false)
+  })
 })

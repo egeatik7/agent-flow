@@ -134,7 +134,10 @@ let localBase = ''
 let localTimeoutMs = 180_000
 let localVision = false
 let localOff = false
-export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vision?: boolean, off?: boolean) {
+let localThink = ''
+/** Ollama'nın kabul ettiği düşünme seviyeleri; boş dize "otomatik" demektir. */
+const THINK_LEVELS = ['none', 'low', 'medium', 'high']
+export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vision?: boolean, off?: boolean, think?: string) {
   const raw = String(url ?? '').trim().replace(/\/+$/, '')
   localBase = raw ? (/\/v1$/i.test(raw) ? raw : `${raw}/v1`) : ''
   localTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
@@ -142,6 +145,8 @@ export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vi
     : 180_000
   localVision = vision === true
   localOff = off === true
+  const secim = String(think ?? '').trim().toLowerCase()
+  localThink = THINK_LEVELS.includes(secim) ? secim : ''
 }
 /** Kullanıcı yerel modelin görüntü desteklediğini beyan etti mi. */
 export function localVisionDeclared() { return localVision }
@@ -164,6 +169,32 @@ function targetFor(model: string): { url: string; model: string; local: boolean 
   if (!name) throw new ModelRejected('Yerel model adı boş.')
   return { url: `${localBase}/chat/completions`, model: name, local: true }
 }
+/**
+ * Yerel adres bir Ollama sunucusu mu. Ollama'nın OpenAI uyumlu ucu düşünmeyi YALNIZCA
+ * `reasoning_effort: "none"` alanıyla kapatıyor (11 Ekim 2026 ölçümü, qwen3.5:9b:
+ * 9995 ms / 289 karakter düşünme -> 151 ms / 0 karakter). Modelfile'da `think`/`thinking`
+ * parametresi reddediliyor ve `/no_think` işe yaramıyor; bu yüzden alanı istek gövdesine
+ * biz ekliyoruz. Başka yerel sunucular bilinmeyen alanı reddedebildiği için yalnız
+ * Ollama adreslerine gönderilir; diğer yerel adreslerde gövde eskisi gibi kalır.
+ */
+function localNeedsNoThinking(): boolean {
+  try {
+    const u = new URL(localBase)
+    return u.port === '11434' || /ollama/i.test(u.hostname) || /ollama/i.test(u.pathname)
+  } catch { return false }
+}
+
+/**
+ * Yerel istekte gönderilecek `reasoning_effort` değeri; null = alan hiç gönderilmez.
+ * Kullanıcı Yerel Model sekmesinden bir seviye seçtiyse o gönderilir (her yerel sunucuya).
+ * Seçim yoksa (otomatik) yalnız Ollama adreslerinde kapatılır; başka yerel sunucular
+ * bilinmeyen alanı reddedebildiği için gövde eskisi gibi kalır.
+ */
+function localReasoningEffort(): string | null {
+  if (localThink) return localThink
+  return localNeedsNoThinking() ? 'none' : null
+}
+
 /** Yerel sunucunun model listesi. Aynı zamanda "adres açık mı" sınaması olarak kullanılır. */
 export async function listLocalModels(base?: string): Promise<{ id: string; vision: boolean }[]> {
   const raw = String(base ?? localBase).trim().replace(/\/+$/, '')
@@ -322,6 +353,8 @@ async function chatOnce(
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
     if (!target.local && !String(apiKey ?? '').trim()) throw new ModelRejected('OpenRouter anahtarı yok; satır atlandı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
+    // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
+    const effort = target.local ? localReasoningEffort() : null
     reportOut(target.model, messages)
     const res = await guardedFetch(target.url, {
       method: 'POST',
@@ -329,6 +362,9 @@ async function chatOnce(
       body: JSON.stringify({
         model: target.model,
         temperature: 0,
+        // Ollama'da düşünme varsayılan açık; kapatılmazsa model cevabı beklerken tokenı
+        // düşünmeye harcıyor (ölçüldü: 1,4-10 sn ve boş cevap; kapalıyken 0,1 sn).
+        ...(effort ? { reasoning_effort: effort } : {}),
         // Leave output/reasoning token limits to the provider's model defaults.
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
