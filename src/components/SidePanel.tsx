@@ -8,6 +8,7 @@ import NubboMascot from './NubboMascot'
 import NodeNavigator from './NodeNavigator'
 import TemplateInput from './TemplateInput'
 import { KEY_PRESETS, winPrefix } from '../lib/key-presets'
+import { fullItemPath } from '../lib/item-paths'
 import {
   NODE_SPECS,
   portLabel,
@@ -149,16 +150,6 @@ function TemplateField(p: Props & { n: AgentNode; field: 'prompt' | 'text' | 'ke
     graph={p.rootGraph ?? p.graph} nodeId={p.n.id} label={p.label}
     placeholder={p.placeholder} multiline={p.multiline} id={p.id} mono={p.mono} disabled={p.disabled}
     onChange={value => p.field === 'folder' ? p.onLoopFolder(p.n.id, value) : p.onUpdateNode({ [p.field]: value })} />
-}
-
-/** Döngü öğesi mutlak yol değilse klasör alanıyla birleştirir; şablonlu/boş klasörde yol çözülemez. */
-function fullItemPath(item: string, folder?: string): string {
-  const value = item.trim()
-  if (!value) return ''
-  if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\')) return value
-  const base = (folder ?? '').trim().replace(/[\\/]+$/, '')
-  if (!base || /\{\{/.test(base)) return ''
-  return `${base}\\${value}`
 }
 
 function LoopEditor(p: Props & { n: AgentNode }) {

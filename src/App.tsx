@@ -17,6 +17,8 @@ import ScreenScanner from './components/ScreenScanner'
 import ConfirmDialog from './components/ConfirmDialog'
 import SaveCanvasDialog from './components/SaveCanvasDialog'
 import WorkspaceNameDialog from './components/WorkspaceNameDialog'
+import MissingPathsNote from './components/MissingPathsNote'
+import { collectLoopPaths, missingLoopPaths, type LoopPathReport } from './lib/item-paths'
 import { canvasDirty, emptyCanvasSession, settleCanvasChanges, startCanvasSession, restoreCanvasDraft, discardCanvasDraft, type SaveDecision } from '../electron/canvas-session'
 import {
   DEFAULT_SETTINGS,
@@ -186,6 +188,8 @@ export default function App() {
   const sequenceRef = useRef(new CanvasSequence())
   const [sequenceLabel, setSequenceLabel] = useState('')
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
+  /** Koşu öncesi eksik döngü yolu raporu; açıkken koşu beklemede kalır. */
+  const [missingReport, setMissingReport] = useState<{ items: LoopPathReport[]; answer: (run: boolean) => void } | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' | 'automation' } | null>(null)
   const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas' | 'sequence'; tabId?: string; initial: string } | null>(null)
@@ -1144,8 +1148,31 @@ export default function App() {
     setGraph(next.view)
   }
 
+  /**
+   * Koşu başlamadan önce döngülerdeki dosya yollarını denetler. Diskte olmayan yol varsa rapor
+   * penceresini açar ve kullanıcının kararını bekler: "Yine de çalıştır" → true, "Vazgeç" → false.
+   * Hiçbir yol yoksa/denetim başarısızsa koşu eskisi gibi hemen başlar (kapı değil, rapor).
+   */
+  const guardMissingPaths = async (tabs: { name: string; graph: AgentGraph }[]): Promise<boolean> => {
+    if (!api?.missingPaths || !tabs.length) return true
+    const candidates = collectLoopPaths(tabs)
+    if (!candidates.length) return true
+    let missing: string[] = []
+    try { missing = await api.missingPaths(candidates.map((c) => c.path)) } catch { return true }
+    const items = missingLoopPaths(candidates, new Set(missing))
+    if (!items.length) return true
+    return await new Promise<boolean>((resolve) => {
+      setMissingReport({ items, answer: (run) => { setMissingReport(null); resolve(run) } })
+    })
+  }
+
   const run = async (startId?: string) => {
-    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || !activeIdRef.current || graphRef.current.nodes.length === 0) return
+    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || missingReport || !activeIdRef.current || graphRef.current.nodes.length === 0) return
+    {
+      const path0 = stackRef.current.map((c) => c.id)
+      const full0 = path0.length ? rooted(graphRef.current, stackRef.current) : graphRef.current
+      if (!(await guardMissingPaths([{ name: canvasName(), graph: full0 }]))) return
+    }
     runningRef.current = true
     if (!startId) writeCanvas(resetLoopTicks(rooted(graphRef.current, stackRef.current)))
     const path = stackRef.current.map((c) => c.id)
@@ -1193,7 +1220,7 @@ export default function App() {
   // "Seçiliden Çalıştır" ise aktif tuvali seçili ADIMDAN başlatır; o tuval Bitti'ye ulaşınca
   // sıra sağındaki tuvallerle devam eder (soldakiler çalıştırılmaz).
   const runAllCanvases = async (startNodeId?: string) => {
-    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current) return
+    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current || missingReport) return
     // showCanvas clears the open package view. Capture its path before switching;
     // the selected node belongs to that package, not to the root canvas.
     const startPath = startNodeId ? stackRef.current.map(c => c.id) : []
@@ -1201,6 +1228,7 @@ export default function App() {
     const from = book.tabs.findIndex(t => t.id === activeId)
     const ordered = from <= 0 ? book.tabs : book.tabs.slice(from)
     if (!ordered.length) { pushLog('warn', 'Oynatılacak tuval yok.'); return }
+    if (!(await guardMissingPaths(ordered.map((t) => ({ name: t.name, graph: t.graph }))))) return
     runningRef.current = true
     setRunning(true)
     stopRequested.current = false
@@ -1724,6 +1752,7 @@ export default function App() {
       )}
       {workspacePicker && <WorkspacePicker kind={workspacePicker} library={library} onCancel={() => setWorkspacePicker(null)}
         onOpen={async id => workspacePicker === 'automation' ? loadAutomation(id) : await openLibraryCanvas(library.canvases.find(c => c.id === id)!)} />}
+      {missingReport && <MissingPathsNote items={missingReport.items} onAnswer={(a) => missingReport.answer(a === 'run')} />}
       {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion.name} kind={saveQuestion.kind} onAnswer={answerCanvasSave} />}
       {nameQuestion && <WorkspaceNameDialog title={nameQuestion.kind === 'canvas' ? 'Tuvali Farklı Kaydet' : 'Açık Sırayı Otomasyon Olarak Kaydet'} initial={nameQuestion.initial} onAnswer={name => void answerName(name)} />}
       {scanner && (

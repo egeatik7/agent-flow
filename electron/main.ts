@@ -1079,6 +1079,13 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
   ipcMain.handle('openrouter:models', () => listModels())
   ipcMain.handle('local:models', (_e, base?: string) => listLocalModels(base))
+  // Koşu öncesi denetim: verilen mutlak yollardan DİSKTE OLMAYANLARI döndürür. Hiçbir şey açmaz/yazmaz.
+  ipcMain.handle('paths:missing', (_e, paths: unknown) => {
+    const liste = Array.isArray(paths) ? paths : []
+    return liste
+      .filter((p): p is string => typeof p === 'string' && !!p.trim())
+      .filter((p) => { try { return !fs.existsSync(p) } catch { return false } })
+  })
   ipcMain.handle('openrouter:testVision', async () => {
     const s = getSettings()
     if (!s.apiKey && !localConfigured()) throw new Error('Görsel test için OpenRouter anahtarını veya yerel sunucu ayarlarını kaydet.')

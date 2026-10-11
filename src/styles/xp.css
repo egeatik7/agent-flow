@@ -976,6 +976,15 @@ body {
 .local-model input { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .local-model input.mono { width: 100%; }
 
+/* 1.9.84: koşu öncesi eksik yol raporu */
+.missing-paths .xp-confirm-body { align-items: flex-start; }
+.missing-paths-list { max-height: 46vh; overflow: auto; margin: 7px 0 0; padding: 4px 4px 4px 0; list-style: none; }
+.missing-paths-list li { display: grid; grid-template-columns: 1fr; gap: 1px; padding: 4px 0; border-bottom: 1px dotted #aca899; }
+.missing-paths-list li:last-child { border-bottom: 0; }
+.missing-paths-where { color: #4a4a3f; }
+.missing-paths-path { overflow-wrap: anywhere; }
+.missing-paths-reason { color: #8a2f2f; }
+
 .settings-subtabs { margin-bottom: 12px; flex-wrap: wrap; }
 .settings-subtabs .tab { flex: 1 1 auto; }
 .settings-grid > .hint { margin: 0 0 12px; }

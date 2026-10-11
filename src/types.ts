@@ -72,6 +72,8 @@ export type XpAgentApi = {
   listModels: () => Promise<ModelInfo[]>
   /** Yerel (OpenAI uyumlu) sunucunun model listesi; adres açık mı sınaması olarak da kullanılır. */
   listLocalModels?: (base?: string) => Promise<ModelInfo[]>
+  /** Verilen mutlak yollardan diskte OLMAYANLARI döndürür (koşu öncesi döngü denetimi). */
+  missingPaths?: (paths: string[]) => Promise<string[]>
   testVision: () => Promise<{ model: string; text: string }>
   onAgentLog: (cb: (payload: unknown) => void) => () => void
   onAgentStep: (cb: (payload: unknown) => void) => () => void
