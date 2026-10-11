@@ -2,6 +2,7 @@ import { useState, type Dispatch, type ReactNode, type SetStateAction } from 're
 import AgentTab from './AgentTab'
 import RecoverySettingsPanel from './RecoverySettingsPanel'
 import ModelChain from './ModelChain'
+import LocalModelSettings from './LocalModelSettings'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
 import NodeNavigator from './NodeNavigator'
@@ -49,7 +50,7 @@ type Props = {
   windows: { title: string; handle: string }[]
   onRefreshWindows: () => void
   models: ModelInfo[]
-  onLoadModels: () => void
+  onLoadModels: () => void | Promise<void>
   onTestApi: () => void
   onTestVision: () => void
   graph: AgentGraph
@@ -66,7 +67,7 @@ type Props = {
   onFillFromFolder: (nodeId: string) => void
   onLoopFolder: (nodeId: string, folder: string) => void
   /** Yerel (OpenAI uyumlu) sunucudan model listesi çeker; satırlar "local:model" olarak eklenir. */
-  onLoadLocalModels?: () => Promise<void>
+  onLoadLocalModels?: () => Promise<ModelInfo[]>
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
   onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
@@ -672,66 +673,68 @@ function NodeInspector(p: Props) {
 }
 
 function Settings(p: Props) {
-  const [section, setSection] = useState<'general' | 'recovery'>('general')
+  const [section, setSection] = useState<'general' | 'local' | 'recovery'>('general')
   return <>
     <div className="tabs settings-subtabs" role="tablist" aria-label="Ayar bölümleri">
       <button type="button" role="tab" aria-selected={section === 'general'} className={`tab ${section === 'general' ? 'active' : ''}`} onClick={() => setSection('general')}>Genel</button>
+      <button type="button" role="tab" aria-selected={section === 'local'} className={`tab ${section === 'local' ? 'active' : ''}`} onClick={() => setSection('local')}>Yerel Model</button>
       <button type="button" role="tab" aria-selected={section === 'recovery'} className={`tab ${section === 'recovery' ? 'active' : ''}`} onClick={() => setSection('recovery')}>Kurtarma Ajanı</button>
     </div>
-    {section === 'general' ? <fieldset className="panel-fields" disabled={p.disabled}><GeneralSettings {...p} /></fieldset> : <RecoverySettingsPanel settings={p.settings} setSettings={p.setSettings}
+    {section === 'general' ? <fieldset className="panel-fields" disabled={p.disabled}><GeneralSettings {...p} /></fieldset> : section === 'local' ? <LocalModelSettings settings={p.settings} setSettings={p.setSettings} onSave={p.onSaveSettings} onLoad={p.onLoadLocalModels} models={p.models} disabled={p.disabled} /> : <RecoverySettingsPanel settings={p.settings} setSettings={p.setSettings}
       disabled={p.disabled} onSave={p.onSaveSettings} graph={p.rootGraph ?? p.graph} models={p.models} onLoadModels={p.onLoadModels} />}
   </>
 }
-
-const LOCAL_PRESETS = [
-  { title: 'llama.cpp (8080)', url: 'http://127.0.0.1:8080/v1' },
-  { title: 'Ollama (11434)', url: 'http://127.0.0.1:11434/v1' },
-  { title: 'LM Studio (1234)', url: 'http://127.0.0.1:1234/v1' },
-]
 
 function GeneralSettings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
   const model = p.models.find((m) => m.id === s.model.trim())
   const visionInfo = p.models.find((m) => m.id === s.visionModel.trim())
-  const localUrl = (s.localBaseUrl ?? '').trim()
-  const [localOpen, setLocalOpen] = useState(false)
-  const [localNote, setLocalNote] = useState('')
-  const loadLocal = async () => {
-    setLocalNote('Yerel liste alınıyor…')
-    try {
-      await p.onLoadLocalModels?.()
-      setLocalNote('Liste güncellendi; yerel satırlar "local:model" olarak eklendi.')
-    } catch (e) {
-      setLocalNote(`Yerel listeye ulaşılamadı: ${e instanceof Error ? e.message : String(e)}`)
-    }
+  const [loading, setLoading] = useState(false)
+  const [modelNote, setModelNote] = useState('')
+  const loadModels = async () => {
+    if (loading) return
+    setLoading(true); setModelNote('OpenRouter modelleri alınıyor…')
+    try { await p.onLoadModels(); setModelNote('OpenRouter listesi güncellendi.') }
+    catch (e) { setModelNote(e instanceof Error ? e.message : String(e)) }
+    finally { setLoading(false) }
   }
+  const localModels = p.models.filter(m => m.id.startsWith('local:'))
   return (
     <div className="settings-grid">
 
+      <fieldset className="xp-group"><legend>OpenRouter bağlantısı</legend>
       <div className="field">
-        <label htmlFor="apiKey">OpenRouter API Key</label>
+        <label htmlFor="apiKey">API anahtarı</label>
         <SaveRow onSave={() => p.onSaveSettings({ apiKey: s.apiKey.trim() })}>
           <input id="apiKey" className="xp-input" type="password" value={s.apiKey} placeholder="sk-or-v1-..." onChange={(e) => set({ apiKey: e.target.value })} />
         </SaveRow>
       </div>
 
+      <div className="settings-actions">
+        <button type="button" className="xp-btn" disabled={loading} onClick={() => void loadModels()}>{loading ? 'Liste alınıyor…' : 'Modelleri getir'}</button>
+        <button type="button" className="xp-btn" onClick={p.onTestApi}>API Test</button>
+      </div>
+      {modelNote && <p className="hint" role="status">{modelNote}</p>}
+      </fieldset>
+      <p className="hint">Yerel sunucu bağlantısını Yerel Model sekmesinden kur. Bulut ve yerel modelleri aşağıdaki listelerde birlikte sıralayabilirsin.</p>
       <fieldset className="xp-group">
         <legend>Metin Modeli</legend>
       <div className="field">
         <label htmlFor="model">Model adı</label>
         <ModelChain
+          localModels={localModels}
           primary={s.model}
           backups={s.modelBackups}
           listId="model-list"
           inputId="model"
-          placeholder="openai/gpt-4o-mini"
+          placeholder="Sağlayıcı/model veya local:model"
           onChange={(model, modelBackups) => set({ model, modelBackups })}
         />
         <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
           Kaydet
         </button>
-        <p className="hint">Listedeki 1. model önce denenir; yedekler sırayla. Hepsi susarsa sıra başa döner.</p>
+        <p className="hint">İlk model önce denenir; yanıt vermezse sıradaki yedek kullanılır. ↑ ↓ ile önceliği değiştir.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
@@ -742,102 +745,24 @@ function GeneralSettings(p: Props) {
             {model.vision ? 'Bu model ekran görüntüsünü görebilir.' : 'Bu model ekran görüntüsü göremez; sadece yazı listesiyle seçer.'}
           </p>
         )}
-        <div className="field-row">
-          <button type="button" className="xp-btn" onClick={p.onLoadModels}>
-            Model listesini getir{p.models.length ? ` (${p.models.length})` : ''}
-          </button>
-          <button type="button" className="xp-btn primary" onClick={p.onTestApi}>
-            API Test
-          </button>
-          <button type="button" className="xp-btn" onClick={() => setLocalOpen((v) => !v)}>
-            {localOpen ? 'Yerel modeli kapat' : '+ Yerel model'}
-          </button>
-        </div>
-        {localOpen && (
-          <div className="local-model">
-            <div className="field-row">
-              <select
-                className="xp-input"
-                value={LOCAL_PRESETS.some((l) => l.url === localUrl) ? localUrl : ''}
-                onChange={(e) => e.target.value && set({ localBaseUrl: e.target.value })}
-              >
-                <option value="">Sunucu seç…</option>
-                {LOCAL_PRESETS.map((l) => (
-                  <option key={l.url} value={l.url}>{l.title}</option>
-                ))}
-              </select>
-              <input
-                className="xp-input mono"
-                value={s.localBaseUrl ?? ''}
-                placeholder="http://127.0.0.1:8080/v1"
-                onChange={(e) => set({ localBaseUrl: e.target.value })}
-              />
-            </div>
-            <div className="field-row">
-              <button
-                type="button"
-                className="xp-btn save"
-                onClick={() => p.onSaveSettings({
-                  localBaseUrl: (s.localBaseUrl ?? '').trim(),
-                  localTimeoutMs: s.localTimeoutMs ?? 180_000,
-                  localVision: s.localVision === true,
-                  localOff: s.localOff === true,
-                })}
-              >
-                Yerel ayarları kaydet
-              </button>
-              <button type="button" className="xp-btn" onClick={() => void loadLocal()}>
-                Yerel listeyi getir
-              </button>
-            </div>
-            <div className="field-row">
-              <label className="check">
-                <input type="checkbox" checked={s.localVision === true} onChange={(e) => set({ localVision: e.target.checked })} />
-                Yerel model ekran görüntüsü destekliyor
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={s.localOff === true} onChange={(e) => set({ localOff: e.target.checked })} />
-                Şimdilik OpenRouter'a dön
-              </label>
-            </div>
-            <div className="field-row">
-              <label htmlFor="local-timeout">Yerel zaman aşımı (sn)</label>
-              <input
-                id="local-timeout"
-                className="xp-input"
-                type="number"
-                min={10}
-                max={900}
-                value={Math.round((s.localTimeoutMs ?? 180_000) / 1000)}
-                onChange={(e) => set({ localTimeoutMs: Math.max(10, Math.min(900, Math.floor(Number(e.target.value) || 180))) * 1000 })}
-              />
-            </div>
-            <p className="hint">Adres boşsa her şey OpenRouter'da kalır. Yerel satırlar aynı listede <b>local:model</b> olarak durur; ↑ ↓ ile sırasını değiştir, × ile sil. “Şimdilik OpenRouter'a dön” açıkken yerel satırlar atlanır (adres saklı kalır).</p>
-            {localNote && <p className="hint">{localNote}</p>}
-          </div>
-        )}
+        <label className="check">
+          <input type="checkbox" checked={s.sendScreenshot} onChange={e => p.onSaveSettings({ sendScreenshot: e.target.checked })} />
+          Metin modeline numaralı ekran görüntüsü gönder
+        </label>
       </div>
       </fieldset>
-
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={s.sendScreenshot}
-          onChange={(e) => p.onSaveSettings({ sendScreenshot: e.target.checked })}
-        />
-        Normal LLM’e de numaralı ekran görüntüsü gönder
-      </label>
 
       <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
         <div className="field">
           <label htmlFor="visionModel">Görsel model adı</label>
           <ModelChain
+            localModels={localModels.filter(m => m.vision)}
             primary={s.visionModel}
             backups={s.visionBackups}
             listId="vision-model-list"
             inputId="visionModel"
-            placeholder="google/gemini-3.8-flash"
+            placeholder="Görsel destekli model kimliği"
             onChange={(visionModel, visionBackups) => set({ visionModel, visionBackups })}
           />
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ visionModel: s.visionModel.trim(), visionBackups: s.visionBackups ?? [] })}>
@@ -873,11 +798,12 @@ function GeneralSettings(p: Props) {
         <div className="field">
           <label htmlFor="agentModel">Model adı</label>
           <ModelChain
+            localModels={localModels.filter(m => m.vision)}
             primary={s.agentModel}
             backups={s.agentBackups}
             listId="agent-model-list"
             inputId="agentModel"
-            placeholder="bytedance/ui-tars-1.5-7b"
+            placeholder="İnisiyatif model kimliği"
             onChange={(agentModel, agentBackups) => set({ agentModel, agentBackups })}
           />
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>

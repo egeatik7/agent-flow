@@ -155,19 +155,30 @@ function targetFor(model: string): { url: string; model: string; local: boolean 
   const openRouter = 'https://openrouter.ai/api/v1/chat/completions'
   if (!/^local:/i.test(model)) return { url: openRouter, model, local: false }
   // "Şimdilik OpenRouter'a dön" açıkken veya adres boşken yerel satır ATLANIR; zincir sıradakine geçer.
-  if (localOff || !localBase) throw new ModelFailed('Yerel model kapalı; satır atlandı (adres boş ya da "OpenRouter\'a dön" açık).')
-  return { url: `${localBase}/chat/completions`, model: model.replace(/^local:/i, '').trim(), local: true }
+  if (localOff || !localBase) throw new ModelRejected('Yerel model kapalı; satır atlandı (adres boş ya da "OpenRouter\'a dön" açık).')
+  try {
+    const url = new URL(localBase)
+    if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash || url.username || url.password) throw new Error('invalid')
+  } catch { throw new ModelRejected('Yerel sunucu adresi geçersiz. http:// veya https:// ile başlayan taban adresi yaz.') }
+  const name = model.replace(/^local:/i, '').trim()
+  if (!name) throw new ModelRejected('Yerel model adı boş.')
+  return { url: `${localBase}/chat/completions`, model: name, local: true }
 }
 /** Yerel sunucunun model listesi. Aynı zamanda "adres açık mı" sınaması olarak kullanılır. */
 export async function listLocalModels(base?: string): Promise<{ id: string; vision: boolean }[]> {
   const raw = String(base ?? localBase).trim().replace(/\/+$/, '')
   if (!raw) throw new Error('Yerel adres boş.')
   const root = /\/v1$/i.test(raw) ? raw : `${raw}/v1`
+  try {
+    const url = new URL(root)
+    if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash || url.username || url.password) throw new Error('invalid')
+  } catch { throw new Error('Yerel sunucu adresi geçersiz. Örnek: http://127.0.0.1:8080/v1') }
   const res = await guardedFetch(`${root}/models`, {}, 15000)
   if (!res.ok) throw new Error(`Yerel model listesi alınamadı (${res.status}). Sunucu açık mı?`)
   const data = JSON.parse(res.text) as { data?: { id?: string; architecture?: { input_modalities?: string[] } }[] }
-  return (data.data ?? [])
-    .filter((m) => typeof m.id === 'string' && m.id)
+  if (!Array.isArray(data.data)) throw new Error('Yerel sunucu geçerli bir model listesi döndürmedi (/v1/models).')
+  return data.data
+    .filter((m) => m && typeof m.id === 'string' && m.id.trim())
     .map((m) => ({ id: String(m.id), vision: !!m.architecture?.input_modalities?.includes('image') }))
     .sort((a, b) => a.id.localeCompare(b.id))
 }
@@ -309,12 +320,12 @@ async function chatOnce(
   const once = async (json: boolean) => {
     const target = targetFor(model)
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
-    if (!target.local && !String(apiKey ?? '').trim()) throw new ModelFailed('OpenRouter anahtarı yok; satır atlandı.')
+    if (!target.local && !String(apiKey ?? '').trim()) throw new ModelRejected('OpenRouter anahtarı yok; satır atlandı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     reportOut(target.model, messages)
     const res = await guardedFetch(target.url, {
       method: 'POST',
-      headers: HEADERS(apiKey),
+      headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
       body: JSON.stringify({
         model: target.model,
         temperature: 0,
@@ -328,6 +339,7 @@ async function chatOnce(
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
       if (!target.local && res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
       if (!target.local && res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
+      if (target.local && [401, 403].includes(res.status)) throw new ModelRejected('Yerel sunucu erişimi reddetti. Sunucunun kimlik doğrulama ayarını kontrol et; OpenRouter anahtarı yerel sunucuya gönderilmez.')
       if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
       const message = `${where} ${res.status}: ${res.text.slice(0, 200)}`
       throw [400, 404, 422].includes(res.status) ? new ModelRejected(message) : new ModelFailed(message)

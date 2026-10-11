@@ -976,7 +976,20 @@ body {
 .local-model input { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .local-model input.mono { width: 100%; }
 
-.settings-subtabs { margin-bottom: 12px; }
+.settings-subtabs { margin-bottom: 12px; flex-wrap: wrap; }
+.settings-subtabs .tab { flex: 1 1 auto; }
+.settings-grid > .hint { margin: 0 0 12px; }
+.settings-grid .xp-group { padding: 10px; margin: 0 0 14px; }
+.settings-grid .xp-group legend { font-weight: bold; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.settings-actions .xp-btn { flex: 1 1 auto; white-space: normal; }
+.settings-status { padding: 8px; background: #f4f8ff; border: 1px solid #b7cbe2; overflow-wrap: anywhere; }
+.local-settings .check { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0; }
+.local-settings .check input { flex: 0 0 auto; }
+.local-model-list { list-style: none; margin: 10px 0 0; padding: 0; border: 1px solid #7f9db9; background: white; max-height: 180px; overflow: auto; }
+.local-model-list li { padding: 7px 8px; overflow-wrap: anywhere; }
+.local-model-list li + li { border-top: 1px solid #e2e8ef; }
+.local-model-list small { display: block; margin-top: 3px; color: #59687b; }
 .recovery-edit { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .recovery-settings textarea { width: 100%; resize: vertical; box-sizing: border-box; }
 .recovery-settings .check { display: flex; align-items: flex-start; gap: 5px; margin: 7px 0; }

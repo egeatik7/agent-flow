@@ -1,4 +1,5 @@
 export default function ModelChain(props: {
+  localModels?: { id: string }[]
   primary: string
   backups: string[] | undefined
   listId: string
@@ -23,11 +24,13 @@ export default function ModelChain(props: {
     <div className="backup-box">
       {rows.map((name, i) => (
         <div className="backup-row" key={i}>
-          <span className="backup-n">{i + 1}</span>
+          <span className="backup-n" title={i === 0 ? 'Ana model' : 'Yedek model'}>{i + 1}</span>
           <input
             className="xp-input"
             id={i === 0 ? props.inputId : undefined}
             list={props.listId}
+            title={name.startsWith('local:') ? 'Yerel sunucu' : 'OpenRouter'}
+            aria-label={i === 0 ? 'Ana model' : `Yedek model ${i}`}
             value={name}
             placeholder={i === 0 ? props.placeholder : 'yedek model adı'}
             onChange={(e) => {
@@ -55,6 +58,19 @@ export default function ModelChain(props: {
       <button type="button" className="xp-btn backup-add" disabled={rows.length >= 5} onClick={() => setRows([...rows, ''])}>
         + Yedek
       </button>
+      {!!props.localModels?.length && <select className="xp-select" aria-label="Yerel model ekle" value=""
+        disabled={rows.length >= 5 && rows.every(row => row.trim())}
+        onChange={e => {
+          if (!e.target.value || rows.includes(e.target.value)) return
+          const empty = rows.findIndex(row => !row.trim())
+          const next = rows.slice()
+          if (empty >= 0) next[empty] = e.target.value
+          else next.push(e.target.value)
+          setRows(next)
+        }}>
+        <option value="">+ Yerel model ekle…</option>
+        {props.localModels.map(m => <option key={m.id} value={m.id} disabled={rows.includes(m.id)}>{m.id.replace(/^local:/, '')}</option>)}
+      </select>}
     </div>
   )
 }

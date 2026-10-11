@@ -32,7 +32,7 @@ import {
   setErrorStopHook,
   setStopAtHook,
 } from './tool-state'
-import { listModels, listLocalModels, recoveryToolTurn, setChatLogger, setLocalEndpoint, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, listLocalModels, recoveryToolTurn, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -1086,7 +1086,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('local:models', (_e, base?: string) => listLocalModels(base))
   ipcMain.handle('openrouter:testVision', async () => {
     const s = getSettings()
-    if (!s.apiKey) throw new Error('Görsel mod için OpenRouter API anahtarı gerekli (Ayarlar > API Key > Kaydet).')
+    if (!s.apiKey && !localConfigured()) throw new Error('Görsel test için OpenRouter anahtarını veya yerel sunucu ayarlarını kaydet.')
     const chain = modelChain(s.visionModel, s.visionBackups)
     const models = chain.length ? chain : modelChain(s.model, s.modelBackups)
     const hidden = await hideSelf()

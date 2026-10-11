@@ -11,7 +11,7 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
   onSave: (partial: Partial<AppSettings>) => void
   graph: AgentGraph
   models: ModelInfo[]
-  onLoadModels: () => void
+  onLoadModels: () => void | Promise<void>
   disabled?: boolean
 }) {
   const s = recoverySettings(settings.recovery)
@@ -50,7 +50,16 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     if (['click', 'type', 'key', 'wait'].includes(node.kind)) nodes.push({ id: node.id, title: node.title,
       kind: NODE_SPECS[node.kind].label, path: [...packagePath.map(id => titles.get(id) ?? 'Paket'), ...loops.map(loop => loop.title)].join(' › ') })
   })
-  const info = models.find(m => m.id === s.model)
+  const cloudModels = models.filter(m => !m.id.startsWith('local:'))
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelError, setModelError] = useState('')
+  const loadModels = async () => {
+    if (loadingModels) return
+    setLoadingModels(true); setModelError('')
+    try { await onLoadModels() } catch (e) { setModelError(e instanceof Error ? e.message : String(e)) }
+    finally { setLoadingModels(false) }
+  }
+  const info = cloudModels.find(m => m.id === s.model)
   const vision = info?.vision
   return <div className="settings-grid recovery-settings">
     <fieldset className="recovery-edit" disabled={disabled}>
@@ -67,8 +76,10 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <ModelChain primary={settings.recovery?.model ?? s.model} backups={settings.recovery?.backups ?? []}
         inputId="recovery-model" listId="recovery-models" placeholder="Sağlayıcı/model kimliği"
         onChange={(model, backups) => update({ model, backups })} />
-      <datalist id="recovery-models">{models.map(m => <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />)}</datalist>
-      <button type="button" className="xp-btn" onClick={onLoadModels}>Model listesini getir</button>
+      <datalist id="recovery-models">{cloudModels.map(m => <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />)}</datalist>
+      <button type="button" className="xp-btn" disabled={loadingModels} onClick={() => void loadModels()}>{loadingModels ? 'Liste alınıyor…' : 'Model listesini getir'}</button>
+      {modelError && <p className="hint warn" role="status">{modelError}</p>}
+      {[s.model, ...s.backups].some(name => name.startsWith('local:')) && <p className="hint warn">Kurtarma ajanı OpenRouter kullanır. Buraya bir OpenRouter model kimliği yaz.</p>}
       <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
       {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
       {info && <p className="hint">{info.vision ? 'Görsel giriş: destekli.' : 'Görsel giriş: desteklenmiyor.'}{info.pricing ? ` Girdi ≈ $${info.pricing.promptPerM.toFixed(2)}/M · çıktı ≈ $${info.pricing.completionPerM.toFixed(2)}/M (OpenRouter listesi; sağlayıcıya göre değişir).` : ' Fiyat bilgisi listede yok.'} Destek işareti doğru kararı garanti etmez; gerçek ölçüm kendi hatalı akışında yapılır.</p>}

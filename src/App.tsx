@@ -162,6 +162,7 @@ export default function App() {
   const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
   const [windows, setWindows] = useState<{ title: string; handle: string }[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [localCatalogBase, setLocalCatalogBase] = useState('')
   const [stepStatus, setStepStatus] = useState<Record<string, StepStatus>>({})
   const [runProgress, setRunProgress] = useState<RunProgress>(() => finishProgress(beginProgress(''), false))
   const stopRequested = useRef(false)
@@ -859,7 +860,8 @@ export default function App() {
     if (api) {
       try {
         const next = await api.saveSettings(partial)
-        setSettings({ ...DEFAULT_SETTINGS, ...next })
+        // A partial save must not discard drafts in another settings section.
+        setSettings(prev => ({ ...prev, ...Object.fromEntries(Object.keys(partial).map(key => [key, next[key as keyof AppSettings]])) }))
       } catch (e) {
         pushLog('error', errText(e))
         return
@@ -1528,7 +1530,8 @@ export default function App() {
             onSaveSettings={saveSettings}
             windows={windows}
             onRefreshWindows={refreshWindows}
-            models={models}
+            models={models.filter(m => !m.id.startsWith('local:') || localCatalogBase === (settings.localBaseUrl ?? '').trim()).map(m =>
+              m.id.startsWith('local:') ? { ...m, vision: m.vision || settings.localVision === true } : m)}
             onLoadModels={async () => {
               try {
                 const list: ModelInfo[] = api
@@ -1541,21 +1544,27 @@ export default function App() {
                     )
                       .map((m) => ({ id: m.id, vision: !!m.architecture?.input_modalities?.includes('image') }))
                       .sort((a, b) => a.id.localeCompare(b.id))
-                setModels(list)
+                setModels(prev => [...list, ...prev.filter(m => m.id.startsWith('local:'))])
                 const vision = list.filter((m) => m.vision).length
                 pushLog('success', `${list.length} model yüklendi (${vision} tanesi ekran görüntüsü görebiliyor).`)
               } catch (e) {
                 pushLog('error', errText(e))
+                throw e
               }
             }}
             onLoadLocalModels={async () => {
               try {
                 const base = (settings.localBaseUrl ?? '').trim()
-                const list = (await api?.listLocalModels?.(base)) ?? []
-                setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision || settings.localVision === true }))])
+                if (!api?.listLocalModels) throw new Error('Yerel bağlantı testi masaüstü uygulamasında kullanılabilir.')
+                const list = await api.listLocalModels(base)
+                if (base !== (settingsRef.current.localBaseUrl ?? '').trim()) throw new Error('Sunucu adresi değişti. Yeni adres için listeyi tekrar getir.')
+                setLocalCatalogBase(base)
+                setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision }))])
                 pushLog('success', `Yerel model listesi: ${list.length} model${base ? ` · ${base}` : ''}.`)
+                return list
               } catch (e) {
                 pushLog('error', errText(e))
+                throw e
               }
             }}
             onTestApi={async () => {

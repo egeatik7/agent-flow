@@ -297,7 +297,7 @@ export function createAgent(ctx: AgentContext) {
     const why = exact ? null : conflict(mem, memo)
     if (why) {
       log('warn', `Bu tur farklı: ${why}. Tıklamadan önce bir kez daha bakılıyor.`)
-      if (s.apiKey && prompt && !byLlm) {
+      if ((s.apiKey || localConfigured()) && prompt && !byLlm) {
         try {
           const second = await chooseScreenTarget({
             apiKey: s.apiKey,
@@ -514,7 +514,7 @@ export function createAgent(ctx: AgentContext) {
           const pick = await pickFrom(node, scan, scan.window || win, true, true)
           if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
         }
-        if (stage === 'tars' && s.apiKey && (hasText || loc?.icon)) {
+        if (stage === 'tars' && (s.apiKey || localConfigured()) && (hasText || loc?.icon)) {
           ctx.setMethod?.('Görsel hedefleme')
           try {
             log('info', 'Görsel model ekran görüntüsüne bakıyor.')
