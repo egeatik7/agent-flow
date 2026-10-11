@@ -26,9 +26,11 @@ export default function LibraryTree(p: {
  useEffect(()=>()=>{cleanup.current?.();clearTimeout(expandTimer.current)},[])
  const bolum = p.mode === 'automation' ? 'automation' as const : 'canvas' as const
   // Bolumu olmayan (eski) klasorler iki bolumde de gorunur; boylece hicbir klasor kaybolmaz.
-  const items: LibraryItem[] = [ ...(p.library.folders ?? []).filter(f => !f.section || f.section === bolum).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => isArchived(p.library, item) === !!p.archived)
+  const items: LibraryItem[] = [ ...(p.library.folders ?? []).filter(f => f.section === bolum).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => p.mode === 'automation' ? true : isArchived(p.library, item) === !!p.archived)
  const parentOf = (item: LibraryItem) => {
   const parent = item.kind === 'folder' ? item.parentId : item.folderId
+  // Gorunmeyen ebeveyn: ogeyi koke bagla ki hicbir kayit ekrandan dusmesin.
+  if (parent && !items.some(i => i.id === parent)) return undefined
   if (p.archived && parent && !isArchived(p.library, p.library.folders?.find(f => f.id === parent) ?? {})) return undefined
   return parent
  }

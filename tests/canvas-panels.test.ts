@@ -18,7 +18,7 @@ describe('canvas library is a peer side-panel tab, not a separate fixed panel', 
     expect(html).toContain('tab active">Tuvaller</button>')
     for (const label of ['Node', 'LLM', 'Ayarlar', 'Ajan']) expect(html).toContain(`>${label}</button>`)
     expect(html).toContain('Tuval klasörleri')
-    expect(html).toContain('aria-label="Tuval yönetimi"')
+    expect(html).toContain('aria-label="Kütüphane bölümleri"')
     expect(html).toContain('>Otomasyonlar</button>')
   })
   it('retains the mounted library under other tabs so an unsaved draft is not discarded', () => {

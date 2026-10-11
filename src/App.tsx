@@ -1672,9 +1672,6 @@ const result=await api.manageLibrary(mode)
               onAskCanvasSave={name => askCanvasSave({ name })}
               onSaveAll={() => void saveAllWorkspace()}
               onSaveSequence={() => askName('sequence')}
-              recovery={recovery}
-              onRestoreDraft={id => void restoreDraft(id)}
-              onDiscardDraft={id => void removeDraft(id)}
               onCloseReview={registerAutomationCloseReview}
               onConfirm={askSure}
               onSaveCanvas={() => void saveCurrentCanvas()}

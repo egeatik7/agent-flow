@@ -1096,6 +1096,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const graph = book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] }
     store.set({ libraryPath: target.directory, libraryMigrated: true, canvases: librarySession(book), graph })
     libraryStorage = target; savedLibrary = library
+    // Eski klasordeki oturum kilidi birakilir, yeni klasor sahiplenilir (pid canli kalirsa kilit asili kalirdi).
+    if (target !== active) { try { active?.release() } catch { /* Yabanci kilit yerinde kalmali. */ } try { target.claim() } catch (e) { log('warn', `Kutuphane sahipligi alinamadi: ${(e as Error).message}`) } }
     viewerState.setBook(book)
     return { directory: target.directory, book }
   })

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CanvasBook, CanvasLibrary } from './graph-types'
-import { validateLibrary } from './library-tree'
+import { validateLibrary, ensureSections } from './library-tree'
 import { encodeLibrary, decodeLibrary } from './library-database'
 
 type File = { format: 'nubbo-library'; version: 1; revision: string; library: CanvasLibrary }
@@ -62,12 +62,14 @@ export class LibraryStorage {
     if(fs.existsSync(this.legacyFile)){fs.mkdirSync(path.join(this.directory,'Backups'),{recursive:true});fs.renameSync(this.legacyFile,path.join(this.directory,'Backups',`Legacy-${Date.now()}-${randomUUID()}.json`))}
    })
   }
-  const raw=fs.readFileSync(this.file),library=decodeLibrary(raw);this.raw=raw;this.catalogJSON=JSON.stringify(library);return library
+  const raw=fs.readFileSync(this.file),library=ensureSections(decodeLibrary(raw));this.raw=raw;this.catalogJSON=JSON.stringify(library);return library
  }
  save(library: CanvasLibrary): void {
+  library = ensureSections(library)
   validateLibrary(library)
   locked(this.directory,()=>{
-  const current = fs.readFileSync(this.file)
+  let current:Buffer
+  try { current = fs.readFileSync(this.file) } catch (e) { throw Error(`Kütüphane dosyası okunamadı (${(e as Error).message}); kayıt yapılmadı.`) }
   if (!current.equals(this.raw)) throw new LibraryConflictError('Kütüphane başka bir programda değişti. Yeniden açmadan üzerine yazılmaz.')
   const json=JSON.stringify(library);if(this.catalogJSON===json)return
   const next = encodeLibrary(library)
@@ -88,6 +90,7 @@ export class LibraryStorage {
  }
  /** Kütüphane bazında yazıcı sahipliği: oturum boyu tutulur, ölü sahipten devralınır. */
  claim(): void {
+  if (this.claimNonce) return
   fs.mkdirSync(this.directory, { recursive: true })
   const file = path.join(this.directory, '.nubbo-library.lock'), nonce = randomUUID()
   const write = () => { const fd = fs.openSync(file, 'wx'); try { fs.writeFileSync(fd, JSON.stringify({ format: 'nubbo-lock', pid: process.pid, nonce })) } finally { fs.closeSync(fd) } this.claimNonce = nonce; aktifTalepNonce = nonce }
@@ -114,7 +117,7 @@ export class LibraryStorage {
   const file = path.join(directory, `${Date.now()}-${randomUUID()}.library`); atomic(file, current); return file
  }
  restore(file: string): CanvasLibrary {
-  const raw=fs.readFileSync(file),library=raw.subarray(0,16).toString()==='SQLite format 3\0'?decodeLibrary(raw):decode(raw.toString('utf8')).library
+  const raw=fs.readFileSync(file),library=ensureSections(raw.subarray(0,16).toString()==='SQLite format 3\0'?decodeLibrary(raw):decode(raw.toString('utf8')).library)
   this.reload(); this.save(library); return library
  }
 }

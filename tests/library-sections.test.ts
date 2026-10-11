@@ -16,7 +16,9 @@ describe('kütüphane bölümleri (Tuval / Otomasyon)', () => {
   it('yeni klasör bölümünü taşır; aynı üstte aynı ad reddedilir, farklı üstte serbesttir', () => {
     let b = changeLibrary(kitap(), { action: 'newFolder', name: 'Üretim', section: 'automation' })
     expect(b.library!.folders?.[0].section).toBe('automation')
-    expect(() => changeLibrary(b, { action: 'newFolder', name: 'üretim', section: 'canvas' })).toThrow(/aynı adlı/)
+    // Ayni ad YALNIZ ayni bolumde yasak: iki bolum bagimsiz agactir.
+    expect(() => changeLibrary(b, { action: 'newFolder', name: 'üretim', section: 'canvas' })).not.toThrow()
+    expect(() => changeLibrary(b, { action: 'newFolder', name: 'üretim', section: 'automation' })).toThrow(/aynı adlı/)
     b = changeLibrary(b, { action: 'newFolder', name: 'Üretim', parentId: b.library!.folders![0].id, section: 'automation' })
     expect(b.library!.folders).toHaveLength(2)
   })

@@ -11,7 +11,7 @@ const dirs:string[]=[]
 beforeAll(initializeLibraryDatabase)
 const dir=()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'nubbo-library-test-'));dirs.push(d);return d}
 afterEach(()=>{for(const d of dirs.splice(0))fs.rmSync(d,{recursive:true,force:true})})
-const book=():CanvasBook=>({activeId:'tab',tabs:[{id:'tab',savedId:'c',name:'Canvas',graph:{nodes:[],edges:[]}}],library:{folders:[{id:'f',name:'Hunyuan'}],canvases:[{id:'c',name:'Canvas',folderId:'f',graph:{nodes:[],edges:[]},updatedAt:0}],automations:[{id:'a',name:'Run',folderId:'f',entries:[{id:'entry',canvasId:'c'}],updatedAt:0}]}})
+const book=():CanvasBook=>({activeId:'tab',tabs:[{id:'tab',savedId:'c',name:'Canvas',graph:{nodes:[],edges:[]}}],library:{folders:[{id:'f',name:'Hunyuan',section:'canvas'}],canvases:[{id:'c',name:'Canvas',folderId:'f',graph:{nodes:[],edges:[]},updatedAt:0}],automations:[{id:'a',name:'Run',folderId:'f',entries:[{id:'entry',canvasId:'c'}],updatedAt:0}]}})
 describe('portable library and recoverable storage',()=>{
  it('migrates without changing IDs; the library contains no open session or settings',()=>{
   const b=book(),store=new LibraryStorage(dir());expect(store.load(b.library)).toEqual(b.library)

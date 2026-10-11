@@ -130,9 +130,9 @@
 .library-tree.root-drop-target { box-shadow:inset 0 0 0 2px #316ac5; background:#f2f7ff; }
 .library-marquee { position:absolute; pointer-events:none; z-index:5; border:1px solid #316ac5; background:#316ac52b; }
 .library-tree-row.draft .library-tree-name { font-style:italic; }
-.canvas-tabs-row .canvas-tab { box-sizing:border-box; flex:0 0 auto; max-width:80px; gap:3px; padding-left:5px; background:linear-gradient(hsl(var(--tab-hue),65%,93%),hsl(var(--tab-hue),48%,79%)); border-color:hsl(var(--tab-hue),43%,56%); border-top:3px solid hsl(var(--tab-hue),65%,46%); }
+.canvas-tabs-row .canvas-tab { box-sizing:border-box; flex:0 0 auto; max-width:80px; gap:3px; padding-left:5px; background:linear-gradient(#f2f5fa,#dbe3ef); border-color:#93a9c6; border-top:3px solid #a9bcd6; }
 .canvas-tabs-row .canvas-tab-rename { flex:1; min-width:0; width:100%; }
-.canvas-tabs-row .canvas-tab.active { background:linear-gradient(hsl(var(--tab-hue),80%,96%),hsl(var(--tab-hue),60%,88%)); border-bottom-color:hsl(var(--tab-hue),60%,88%); box-shadow:inset 0 1px #fff; }
+.canvas-tabs-row .canvas-tab.active { background:linear-gradient(#ffffff,#eaf0f9); border-bottom-color:#eaf0f9; box-shadow:inset 0 1px #fff; }
 .canvas-tab.drop-before { box-shadow:inset 3px 0 #17498b !important; }
 .canvas-tab.drop-after { box-shadow:inset -3px 0 #17498b !important; }
 .canvas-tab[draggable=true] { cursor:grab; }

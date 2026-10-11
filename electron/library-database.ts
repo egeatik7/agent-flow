@@ -39,7 +39,7 @@ export function decodeLibrary(data:Uint8Array):CanvasLibrary{
   const folder=(r:Record<string,unknown>)=>r.folder_id===null?{}:{folderId:String(r.folder_id)}
   const entries=rows(db,'automation_entries'),library:CanvasLibrary={
    ...(shape.schemaVersion===undefined?{}:{schemaVersion:shape.schemaVersion}),
-   ...(shape.folders?{folders:rows(db,'folders').map(r=>({...common(r),...(r.parent_id===null?{}:{parentId:String(r.parent_id)}),...((r.section==='canvas'||r.section==='automation')?{section:r.section as 'canvas'|'automation'}:{})}))}:{}),
+   ...((shape.folders ?? true)?{folders:rows(db,'folders').map(r=>({...common(r),...(r.parent_id===null?{}:{parentId:String(r.parent_id)}),...((r.section==='canvas'||r.section==='automation')?{section:r.section as 'canvas'|'automation'}:{})}))}:{}),
    canvases:rows(db,'canvases').map(r=>({...common(r),...folder(r),updatedAt:Number(r.updated_at),graph:JSON.parse(String(r.graph))})),
    automations:rows(db,'automations').map(r=>({...common(r),...folder(r),updatedAt:Number(r.updated_at),entries:entries.filter(e=>e.automation_id===r.id).map(e=>({id:String(e.id),canvasId:String(e.canvas_id)}))}))
   };validateLibrary(library);return library

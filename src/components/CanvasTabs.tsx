@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type CanvasTabItem = { id: string; name: string; dirty?: boolean }
 
@@ -22,9 +22,8 @@ type Props = {
 export default function CanvasTabs(p: Props) {
   const [editId, setEditId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const dragging=useRef(''),colors=useRef(new Map<string,number>()),nextColor=useRef(0)
+  const dragging=useRef('')
   const [drop,setDrop]=useState<{id:string;after:boolean}|null>(null)
-  const palette=[210,110,32,290,175,345,55,250]
   const inputRef = useRef<HTMLInputElement>(null)
   const rename = useRef<{ id: string | null; name: string }>({ id: null, name: '' })
   rename.current = { id: editId, name: draft }
@@ -61,13 +60,10 @@ export default function CanvasTabs(p: Props) {
       {p.tabs.map((tab) => {
         const on = tab.id === p.activeId
         const editing = editId === tab.id
-        if(!colors.current.has(tab.id))colors.current.set(tab.id,palette[nextColor.current++%palette.length])
-        const hue=colors.current.get(tab.id)!
         return (
           <div
             key={tab.id}
             className={`canvas-tab${on ? ' active' : ''}${drop?.id===tab.id?(drop.after?' drop-after':' drop-before'):''}`}
-            style={{'--tab-hue':hue} as CSSProperties}
             draggable={!p.disabled&&!editing&&!!p.onReorder}
             onDragStart={e=>{if(p.disabled||editing){e.preventDefault();return}dragging.current=tab.id;e.dataTransfer.setData('application/x-nubbo-tab',tab.id);e.dataTransfer.effectAllowed='move'}}
             onDragOver={e=>{if(p.disabled||!dragging.current||dragging.current===tab.id)return;e.preventDefault();e.dataTransfer.dropEffect='move';const r=e.currentTarget.getBoundingClientRect();setDrop({id:tab.id,after:e.clientX>r.left+r.width/2});const strip=e.currentTarget.parentElement;if(strip){const s=strip.getBoundingClientRect();if(e.clientX<s.left+25)strip.scrollLeft-=18;else if(e.clientX>s.right-25)strip.scrollLeft+=18}}}
