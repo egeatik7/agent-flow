@@ -46,7 +46,8 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { toolLayerSave, windowSave } from './tool-branch'
+import { toolLayerSave } from './tool-branch'
+import { readWorkspace, writeWorkspace } from './workspace-store'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -972,20 +973,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   void syncEndpoint()
   /** An explicitly empty session must not fall back to the old graph and resurrect a tab. */
   function loadCanvases(): CanvasBook {
-    const saved = store.get('canvases') as CanvasBook | undefined
-    if (saved && Array.isArray(saved.tabs)) return normalizeCanvasBook(saved)
-    const legacy = normalizeGraph(store.get('graph'))
-    return legacy.nodes.length ? normalizeCanvasBook(undefined, legacy) : normalizeCanvasBook({ activeId: '', tabs: [] })
+    return readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')))
   }
 
   ipcMain.handle('canvases:get', () => loadCanvases())
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
-    const next = windowSave(normalizeCanvasBook(book), loadCanvases())
-    store.set('canvases', next)
-    const active = next.tabs.find((t) => t.id === next.activeId) ?? next.tabs[0]
-    if (active) store.set('graph', active.graph)
+    writeWorkspace(store, book, loadCanvases())
     return true
   })
 

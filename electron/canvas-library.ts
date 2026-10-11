@@ -1,4 +1,5 @@
 import { newId, normalizeGraph, type AgentGraph, type CanvasBook, type CanvasLibrary, type CanvasTab, type SavedCanvas, type CanvasAutomation, type AutomationEntry } from './graph-types'
+import { sameCanvasContent } from './canvas-content'
 
 export const libraryOf = (book: CanvasBook): CanvasLibrary => book.library ?? { schemaVersion: 2, canvases: [], automations: [] }
 const copy = <T>(value: T): T => structuredClone(value)
@@ -28,14 +29,20 @@ export function saveCanvas(book: CanvasBook, tabId: string): CanvasBook {
   const lib = libraryOf(book)
   const existing = lib.canvases.find(c => c.id === tab.savedId)
   if (existing && tab.baseline && (
-    existing.name !== tab.baseline.name || JSON.stringify(existing.graph) !== JSON.stringify(tab.baseline.graph)
+    existing.name !== tab.baseline.name || !sameCanvasContent(existing.graph, tab.baseline.graph)
   )) {
-    throw new Error('Bu tuval başka bir sekmeden kaydedildi; eski kopya yeni kaydı ezmemesi için kaydedilmedi. Değişikliklerin bu sekmede duruyor. Güncel tuvali Tuvaller’den yeniden aç.')
+    throw new Error('Bu tuval başka bir sekmeden kaydedildi; eski kopya yeni kaydı ezmemesi için kaydedilmedi. Değişikliklerin bu sekmede duruyor. Farklı Kaydet ile ayrı bir kayıt oluşturabilir veya güncel tuvali Tuvaller’den yeniden açabilirsin.')
   }
   const id = existing?.id ?? newId()
   const record: SavedCanvas = { id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
   return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id, baseline: { name: tab.name, graph: copy(tab.graph) } } : t), library: { ...lib,
     canvases: existing ? lib.canvases.map(c => c.id === id ? record : c) : [...lib.canvases, record] } }
+}
+/** Save As gives this working tab a new identity; shared automations keep the old one. */
+export function saveCanvasAs(book: CanvasBook, tabId: string, name: string): CanvasBook {
+  const clean = nameOf(name)
+  if (!clean) throw new Error('Tuval adı boş olamaz.')
+  return saveCanvas({ ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, name: clean, savedId: undefined, baseline: undefined } : t) }, tabId)
 }
 export function deleteSavedCanvas(book: CanvasBook, id: string): CanvasBook {
   const lib = libraryOf(book)

@@ -3,7 +3,8 @@ import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
-import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
+import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, libraryOf, saveCanvas, saveCanvasAs, deleteSavedCanvas, openSavedCanvas, moveCanvasTab, saveAutomation, renameSavedCanvas, deleteAutomation, type AutomationDraft, automationDraftDirty, openAutomation, exportAutomation, importAutomation } from '../electron/canvas-library'
+import { saveWorkspace, saveOpenSequence } from '../electron/workspace-save'
 import { CanvasSequence } from './lib/canvas-sequence'
 import { beginProgress, finishProgress, progressEdge, progressStep, runNodeView, visibleRunNodes, type RunProgress } from './lib/run-progress'
 import NodeCanvas from './components/NodeCanvas'
@@ -15,7 +16,8 @@ import LogPanel from './components/LogPanel'
 import ScreenScanner from './components/ScreenScanner'
 import ConfirmDialog from './components/ConfirmDialog'
 import SaveCanvasDialog from './components/SaveCanvasDialog'
-import { canvasDirty, emptyCanvasSession, settleCanvasChanges, startCanvasSession, type SaveDecision } from '../electron/canvas-session'
+import WorkspaceNameDialog from './components/WorkspaceNameDialog'
+import { canvasDirty, emptyCanvasSession, settleCanvasChanges, startCanvasSession, restoreCanvasDraft, discardCanvasDraft, type SaveDecision } from '../electron/canvas-session'
 import {
   DEFAULT_SETTINGS,
   NODE_SPECS,
@@ -31,6 +33,8 @@ import {
   type CanvasBook,
   type SavedCanvas,
   type CanvasAutomation,
+  type AutomationEditor,
+  type RecoveredCanvas,
   type Locator,
   type LogEntry,
   type LogLevel,
@@ -105,16 +109,12 @@ function fileNameFor(name: string): string {
 }
 
 function previewBook(): CanvasBook {
-  try {
-    const raw = localStorage.getItem(LOCAL_BOOK)
-    if (raw) return normalizeCanvasBook(JSON.parse(raw))
-    const g = localStorage.getItem(LOCAL_GRAPH)
-    if (g) {
-      const legacy = normalizeGraph(JSON.parse(g))
-      if (legacy.nodes.length) return normalizeCanvasBook(undefined, legacy)
-    }
-  } catch {
-    /* corrupt preview data */
+  const raw = localStorage.getItem(LOCAL_BOOK)
+  if (raw) return normalizeCanvasBook(JSON.parse(raw))
+  const g = localStorage.getItem(LOCAL_GRAPH)
+  if (g) {
+    const legacy = normalizeGraph(JSON.parse(g))
+    if (legacy.nodes.length) return normalizeCanvasBook(undefined, legacy)
   }
   return emptyBook()
 }
@@ -176,13 +176,19 @@ export default function App() {
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [library, setLibrary] = useState(() => libraryOf(book0))
+  const [automationDraft, setAutomationDraft] = useState<AutomationEditor | null>(null)
+  const [recovery, setRecovery] = useState<RecoveredCanvas[]>([])
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'error'>('saved')
+  const [loadError, setLoadError] = useState('')
+  const writeSerial = useRef(0)
   const [libraryBusy, setLibraryBusy] = useState(false)
   const libraryBusyRef = useRef(false)
   const sequenceRef = useRef(new CanvasSequence())
   const [sequenceLabel, setSequenceLabel] = useState('')
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
-  const [saveQuestion, setSaveQuestion] = useState<string | null>(null)
+  const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' | 'automation' } | null>(null)
+  const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas' | 'sequence'; tabId?: string; initial: string } | null>(null)
   const saveAnswer = useRef<((answer: SaveDecision) => void) | null>(null)
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
@@ -192,6 +198,8 @@ export default function App() {
   const registerAutomationCloseReview = useCallback((review: (() => Promise<boolean>) | null) => {
     automationCloseReview.current = review
   }, [])
+  const canvasRenameFlush = useRef<(() => void) | null>(null)
+  const registerCanvasRenameFlush = useCallback((flush: (() => void) | null) => { canvasRenameFlush.current = flush }, [])
 
   const graphRef = useRef(graph)
   graphRef.current = graph
@@ -266,17 +274,22 @@ export default function App() {
     setActiveId(book.activeId)
     setTabList(book.tabs.map(t => ({ id: t.id, name: t.name })))
     setLibrary(libraryOf(book))
+    setAutomationDraft(book.automationDraft ?? null)
+    setRecovery(book.recovery ?? [])
   }, [])
 
   const persistBook = useCallback((book: CanvasBook): Promise<boolean> => {
     const snapshot = structuredClone(book)
+    const serial = ++writeSerial.current
+    setSaveStatus('saving')
     // Draft autosaves, catalog writes and final closure always reach disk in order.
     const next = writeQueue.current.then(async () => {
       try {
         if (api) { if (await api.saveCanvases(snapshot) === false) throw new Error('Tuvaller diske kaydedilemedi.') }
         else localStorage.setItem(LOCAL_BOOK, JSON.stringify(snapshot))
+        if (serial === writeSerial.current) setSaveStatus('saved')
         return true
-      } catch (e) { pushLog('error', `Tuvaller kaydedilemedi: ${errText(e)}`); return false }
+      } catch (e) { if (serial === writeSerial.current) setSaveStatus('error'); pushLog('error', `Çalışma kaydedilemedi: ${errText(e)}`); return false }
     })
     writeQueue.current = next
     return next
@@ -298,6 +311,12 @@ export default function App() {
     }
   }, [])
 
+  const changeAutomationDraft = useCallback((draft: AutomationEditor | null) => {
+    const book = { ...commitActive(), automationDraft: draft ?? undefined }
+    // The draft enters the same recovery autosave stream as canvas edits.
+    adoptBook(book)
+  }, [commitActive, adoptBook])
+
   const showCanvas = useCallback((book: CanvasBook, id: string, persist = true) => {
     const tab = book.tabs.find((t) => t.id === id) ?? book.tabs[0]
     const next = { ...book, activeId: tab?.id ?? '' }
@@ -318,27 +337,29 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      if (api) {
-        setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
-        const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
-        showCanvas(book, '', false)
-        await persistBook(book)
-        pushLog('info', 'Nubbo Agent Studio hazır.')
-      } else {
-        try {
+      try {
+        if (api) {
+          setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
+          const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
+          showCanvas(book, '', false)
+          await persistBook(book)
+          pushLog('info', 'Nubbo Agent Studio hazır.')
+        } else {
           const book = startCanvasSession(previewBook())
           showCanvas(book, '', false)
           await persistBook(book)
           const s = localStorage.getItem(LOCAL_SETTINGS)
           if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
-        } catch {
-          /* corrupt local data, keep defaults */
+          pushLog('info', 'Tarayıcı önizlemesi: tıklamalar simüle edilir. Gerçek otomasyon Windows exe’de çalışır.')
         }
-        pushLog('info', 'Tarayıcı önizlemesi: tıklamalar simüle edilir. Gerçek otomasyon Windows exe’de çalışır.')
+        setLoaded(true)
+        void refreshWindows()
+        requestAnimationFrame(() => requestAnimationFrame(() => api?.bootReady?.()))
+      } catch (e) {
+        // A read failure is never permission to overwrite the profile with defaults.
+        setLoadError(errText(e)); pushLog('error', `Kayıtlar açılamadı: ${errText(e)}`)
+        api?.bootReady?.()
       }
-      setLoaded(true)
-      void refreshWindows()
-      requestAnimationFrame(() => requestAnimationFrame(() => api?.bootReady?.()))
     })()
   }, [pushLog, refreshWindows, showCanvas, persistBook])
 
@@ -346,7 +367,7 @@ export default function App() {
     if (!loaded || libraryBusy || closing || saveQuestion) return
     const t = setTimeout(() => { if (!libraryBusyRef.current && !closingRef.current && !saveAnswer.current) void rememberBook(commitActive()) }, 400)
     return () => clearTimeout(t)
-  }, [graph, stack, loaded, libraryBusy, closing, saveQuestion, rememberBook, commitActive])
+  }, [graph, stack, automationDraft, loaded, libraryBusy, closing, saveQuestion, rememberBook, commitActive])
 
   /** Adds a Click node after the selected node (or the end of the main path) and selects it. */
   const appendClick = useCallback((c: NewClick) => {
@@ -578,9 +599,9 @@ export default function App() {
     done?.(yes)
   }
 
-  const askCanvasSave = (tab: { name: string }): Promise<SaveDecision> => new Promise(resolve => {
+  const askCanvasSave = (tab: { name: string }, kind: 'canvas' | 'automation' = 'canvas'): Promise<SaveDecision> => new Promise(resolve => {
     saveAnswer.current = resolve
-    setSaveQuestion(tab.name)
+    setSaveQuestion({ name: tab.name, kind })
   })
   const answerCanvasSave = (answer: SaveDecision) => {
     const done = saveAnswer.current
@@ -655,7 +676,31 @@ export default function App() {
     } catch (e) { pushLog('error', errText(e)); return false }
     finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
-  const saveCurrentCanvas = () => saveLibraryChange(b => saveCanvas(b, b.activeId), `“${canvasName()}” Tuvaller'e kaydedildi.`)
+  const saveCurrentCanvas = () => {
+    canvasRenameFlush.current?.()
+    return saveLibraryChange(b => saveCanvas(b, b.activeId), `“${canvasName()}” Tuvaller'e kaydedildi.`)
+  }
+  const saveAllWorkspace = () => {
+    canvasRenameFlush.current?.()
+    return saveLibraryChange(saveWorkspace, 'Açık tuvaller ve otomasyon taslağı kaydedildi.')
+  }
+  const askName = (kind: 'canvas' | 'sequence') => {
+    if (!loaded || runningRef.current || libraryBusyRef.current || closingRef.current || saveAnswer.current || confirmAnswer.current) return
+    canvasRenameFlush.current?.()
+    setNameQuestion({ kind, ...(kind === 'canvas' ? { tabId: activeIdRef.current } : {}), initial: kind === 'canvas' ? `${canvasName().slice(0, 36)} (Kopya)` : 'Yeni Otomasyon' })
+  }
+  const answerName = async (name: string | null) => {
+    const question = nameQuestion
+    setNameQuestion(null)
+    if (!question || name === null) return
+    await saveLibraryChange(b => question.kind === 'canvas' ? saveCanvasAs(b, question.tabId!, name) : saveOpenSequence(b, name),
+      question.kind === 'canvas' ? `“${name}” ayrı tuval olarak kaydedildi.` : `“${name}” açık sıradan kaydedildi.`)
+  }
+  const restoreDraft = (id: string) => saveLibraryChange(b => restoreCanvasDraft(b, id), 'Kurtarma taslağı açıldı; kayıtlı tuval değiştirilmedi.', true)
+  const removeDraft = async (id: string) => {
+    if (!await askSure('Bu kurtarma taslağı silinsin mi? Kayıtlı tuval silinmez.')) return
+    await saveLibraryChange(b => discardCanvasDraft(b, id), 'Kurtarma taslağı silindi.')
+  }
   const openLibraryCanvas = (canvas: SavedCanvas) => saveLibraryChange(b => openSavedCanvas(b, canvas), `“${canvas.name}” yeni sekmede açıldı.`, true)
   const deleteLibraryCanvas = async (id: string) => {
     if (runningRef.current || libraryBusyRef.current) return
@@ -783,11 +828,18 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 's') {
+        e.preventDefault()
+        if (!loaded || workspacePicker || nameQuestion || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current || scanner) return
+        if (e.shiftKey) void saveAllWorkspace()
+        else if (activeIdRef.current) void saveCurrentCanvas()
+        return
+      }
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
       if (!activeIdRef.current || workspacePicker || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
-      const mod = e.ctrlKey || e.metaKey
-      const key = e.key.toLowerCase()
       if (scanner && mod) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
@@ -1281,15 +1333,22 @@ export default function App() {
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const counts = graph.nodes.filter((n) => n.kind !== 'start').length
   const hasCanvas = !!activeId
-  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion || !!workspacePicker
+  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion || !!workspacePicker || !!nameQuestion
 
   const closeProgram = async (requestId?: number) => {
     if (closingRef.current) return
-    if (!loaded || libraryBusyRef.current || confirmAnswer.current || saveAnswer.current || capturing || scanner) {
+    if (loadError) {
+      // Loading failed, so there is no editable session to save or discard.
+      // Permit a normal close without touching the unread profile.
+      if (requestId !== undefined) await api?.finishClose?.(requestId, true)
+      return
+    }
+    if (!loaded || libraryBusyRef.current || confirmAnswer.current || saveAnswer.current || nameQuestion || capturing || scanner) {
       pushLog('warn', 'Açık işlemi tamamladıktan sonra programı kapatabilirsiniz.')
       if (requestId !== undefined) await api?.finishClose?.(requestId, false)
       return
     }
+    canvasRenameFlush.current?.()
     closingRef.current = true; setClosing(true)
     let allow = false
     try {
@@ -1301,11 +1360,10 @@ export default function App() {
       // Drain writes before final saves/discards; a delayed autosave cannot undo them.
       await writeQueue.current
       if (automationCloseReview.current && !await automationCloseReview.current()) {
-        pushLog('error', 'Otomasyon düzenlemesi kaydedilemedi. Program açık bırakıldı; sağdaki listeden tekrar deneyin.')
         return
       }
       if (!await settleChanges()) return
-      const next = emptyCanvasSession(commitActive())
+      const next = { ...emptyCanvasSession(commitActive()), automationDraft: undefined }
       if (!await persistBook(next)) return
       showCanvas(next, '', false)
       allow = true
@@ -1325,14 +1383,17 @@ export default function App() {
   useEffect(() => {
     if (api) return
     const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!loaded) return
       const book = commitActive()
-      if (!book.tabs.some(tab => canvasDirty(book, tab))) return
+      // Synchronously flush the last keystroke before browser reload/crash recovery.
+      try { localStorage.setItem(LOCAL_BOOK, JSON.stringify(book)) } catch { /* native prompt still protects the page */ }
+      if (!book.tabs.some(tab => canvasDirty(book, tab)) && !(book.automationDraft && automationDraftDirty(book.automationDraft))) return
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [commitActive])
+  }, [commitActive, loaded])
 
   return (
     <div className="desktop">
@@ -1367,7 +1428,10 @@ export default function App() {
                 >
                   Dışa Aktar
                 </button>
-                <button type="button" role="menuitem" disabled={!hasCanvas || running || editorLocked || !loaded} onClick={() => { setFileOpen(false); void saveCurrentCanvas() }}>Tuvali Kaydet</button>
+                <button type="button" role="menuitem" disabled={!hasCanvas || running || editorLocked || !loaded} onClick={() => { setFileOpen(false); void saveCurrentCanvas() }}>Tuvali Kaydet · Ctrl+S</button>
+                <button type="button" role="menuitem" disabled={!hasCanvas || running || editorLocked || !loaded} onClick={() => { setFileOpen(false); askName('canvas') }}>Tuvali Farklı Kaydet</button>
+                <button type="button" role="menuitem" disabled={running || editorLocked || !loaded} onClick={() => { setFileOpen(false); void saveAllWorkspace() }}>Tümünü Kaydet · Ctrl+Shift+S</button>
+                <button type="button" role="menuitem" disabled={!hasCanvas || running || editorLocked || !loaded} onClick={() => { setFileOpen(false); askName('sequence') }}>Açık Sırayı Otomasyon Olarak Kaydet</button>
               </div>
             )}
           </div>
@@ -1386,6 +1450,7 @@ export default function App() {
             }}
           />
           <span className="menubar-status">
+            <span className={`workspace-save-status ${saveStatus}`} role="status">{saveStatus === 'saving' ? 'Taslak yazılıyor…' : saveStatus === 'error' ? 'Taslak kaydı başarısız' : 'Taslak güncel'} · </span>
             {hasCanvas ? `${tabList.find((t) => t.id === activeId)?.name ?? 'Tuval'} · ${counts} aşama · ${graph.edges.length} bağlantı` : 'Açık tuval yok'}
             {settings.targetWindow
               ? ` · hedef: ${settings.targetWindow}${
@@ -1394,6 +1459,7 @@ export default function App() {
               : ' · hedef: tüm ekran'}
             {settings.apiKey ? '' : ' · API anahtarı yok'}
           </span>
+          {saveStatus === 'error' && <button className="xp-btn" disabled={!loaded || editorLocked || running} onClick={() => void rememberBook(commitActive())}>Kaydı Tekrar Dene</button>}
         </div>
         <Toolbar
           running={running}
@@ -1415,6 +1481,7 @@ export default function App() {
 
         />
         <CanvasTabs
+          onRegisterRenameFlush={registerCanvasRenameFlush}
           tabs={tabList.map(tab => {
             const full = commitActive()
             const current = full.tabs.find(t => t.id === tab.id)
@@ -1505,19 +1572,28 @@ export default function App() {
               onRunFrom={(id) => run(id)}
               onEnterPackage={enterPackage}
               onUnpackPackage={unpack}
-            /> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
+            /> : loadError ? <div className="workspace-load-error" role="alert"><h2>Kayıtlar açılamadı</h2><p>{loadError}</p><p>Mevcut kayıtlar değiştirilmedi. Programı yeniden açıp tekrar deneyin.</p></div> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
           </div>
           <div className="right-sidebar">
             <fieldset className="canvas-editor-fields" disabled={editorLocked}>
           <SidePanel
             disabled={running || editorLocked}
             canvasPanel={<CanvasLibraryPanel library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
+              draft={automationDraft}
+              onDraftChange={changeAutomationDraft}
+              onAskSave={name => askCanvasSave({ name }, 'automation')}
+              onAskCanvasSave={name => askCanvasSave({ name })}
+              onSaveAll={() => void saveAllWorkspace()}
+              onSaveSequence={() => askName('sequence')}
+              recovery={recovery}
+              onRestoreDraft={id => void restoreDraft(id)}
+              onDiscardDraft={id => void removeDraft(id)}
               onCloseReview={registerAutomationCloseReview}
               onConfirm={askSure}
               onSaveCanvas={() => void saveCurrentCanvas()}
               onOpenCanvas={c => void openLibraryCanvas(c)}
               onCloseCanvas={closeLibraryCanvas}
-              onRenameCanvas={(id, name) => saveLibraryChange(b => renameSavedCanvas(b, id, name), 'Tuval adı depoda ve onu kullanan otomasyonlarda güncellendi.')}
+              onRenameCanvas={(id, name, reviewingClose) => saveLibraryChange(b => renameSavedCanvas(b, id, name), 'Tuval adı depoda ve onu kullanan otomasyonlarda güncellendi.', false, reviewingClose)}
               onDeleteCanvas={id => void deleteLibraryCanvas(id)}
               onOpenAutomation={id => void loadAutomation(id)}
               onSaveAutomation={saveAutomationEditor}
@@ -1648,7 +1724,8 @@ export default function App() {
       )}
       {workspacePicker && <WorkspacePicker kind={workspacePicker} library={library} onCancel={() => setWorkspacePicker(null)}
         onOpen={async id => workspacePicker === 'automation' ? loadAutomation(id) : await openLibraryCanvas(library.canvases.find(c => c.id === id)!)} />}
-      {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion} onAnswer={answerCanvasSave} />}
+      {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion.name} kind={saveQuestion.kind} onAnswer={answerCanvasSave} />}
+      {nameQuestion && <WorkspaceNameDialog title={nameQuestion.kind === 'canvas' ? 'Tuvali Farklı Kaydet' : 'Açık Sırayı Otomasyon Olarak Kaydet'} initial={nameQuestion.initial} onAnswer={name => void answerName(name)} />}
       {scanner && (
         <ScreenScanner
           targetLabel={

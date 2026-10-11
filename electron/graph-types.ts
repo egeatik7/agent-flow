@@ -146,11 +146,17 @@ export type SavedCanvas = { id: string; name: string; graph: AgentGraph; updated
 export type AutomationEntry = { id: string; canvasId: string }
 export type CanvasAutomation = { id: string; name: string; entries: AutomationEntry[]; updatedAt: number }
 export type CanvasLibrary = { schemaVersion?: 2; canvases: SavedCanvas[]; automations: CanvasAutomation[] }
+/** A working automation is a draft, never a second owner of canvas contents. */
+export type AutomationEditor = { key: string; id?: string; name: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
+export type RecoveredCanvas = CanvasTab & { recoveredAt: number }
 
 export type CanvasBook = {
   activeId: string
   tabs: CanvasTab[]
   library?: CanvasLibrary
+  /** Interrupted edits awaiting an explicit Open/Discard decision; not library records. */
+  recovery?: RecoveredCanvas[]
+  automationDraft?: AutomationEditor
   /**
    * Agent branches: recipes of edits over a canvas, kept as they are, never copies of a flow.
    * Their shape lives in electron/tool-branch.ts; this layer only carries them so a save does
@@ -852,7 +858,7 @@ function normalizeSavedCanvases(raw: unknown): SavedCanvas[] {
 }
 
 export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
-  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown; library?: unknown } | null
+  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown; library?: unknown; recovery?: unknown; automationDraft?: unknown } | null
   const seen = new Set<string>()
   const tabs: CanvasTab[] = rec && Array.isArray(rec.tabs) ? rec.tabs.map((item, i) => {
     const t = item as Partial<CanvasTab> | null
@@ -918,5 +924,25 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
     for (const t of tabs) t.savedId = t.id
   }
   const branches = Array.isArray(rec?.branches) ? rec!.branches.filter(b => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string') : undefined
-  return { activeId, tabs, library, ...(branches?.length ? { branches } : {}) }
+  // Normalize recovery separately: it must never enter legacy catalog migration.
+  const recoveryIds = new Set<string>()
+  const recovery: RecoveredCanvas[] = Array.isArray(rec?.recovery) ? rec.recovery.flatMap(value => {
+    const t = value as Partial<RecoveredCanvas> | null
+    if (!t || typeof t.id !== 'string' || !t.id || recoveryIds.has(t.id) || !Array.isArray(t.graph?.nodes) || !Array.isArray(t.graph?.edges)) return []
+    recoveryIds.add(t.id)
+    return [{ id: t.id, name: typeof t.name === 'string' ? t.name.slice(0, 48) : 'Kurtarılan Tuval', graph: normalizeGraph(t.graph),
+      ...(typeof t.savedId === 'string' ? { savedId: t.savedId } : {}),
+      ...(t.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
+        ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}),
+      recoveredAt: typeof t.recoveredAt === 'number' && Number.isFinite(t.recoveredAt) ? t.recoveredAt : 0 }]
+  }) : []
+  const draft = rec?.automationDraft as Partial<AutomationEditor> | undefined
+  const automationDraft = draft && typeof draft.key === 'string' && typeof draft.name === 'string' && Array.isArray(draft.entries)
+    ? { key: draft.key, name: draft.name.slice(0, 48), ...(typeof draft.id === 'string' ? { id: draft.id } : {}),
+      entries: draft.entries.filter(e => e && typeof e.id === 'string' && typeof e.canvasId === 'string').map(e => ({ id: e.id, canvasId: e.canvasId })),
+      // Preserve the expected revision, including references deleted since the draft was made.
+      // Replacing it with the current record would turn a stale draft into an overwrite.
+      ...(draft.expected && typeof draft.expected.id === 'string' && typeof draft.expected.name === 'string' && Array.isArray(draft.expected.entries)
+        ? { expected: structuredClone(draft.expected) } : {}) } : undefined
+  return { activeId, tabs, library, ...(branches?.length ? { branches } : {}), ...(recovery.length ? { recovery } : {}), ...(automationDraft ? { automationDraft } : {}) }
 }

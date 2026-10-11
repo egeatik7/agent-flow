@@ -37,33 +37,41 @@ function setup(failSave = false) {
     mutate(fn: (b: CanvasBook) => CanvasBook) { act(() => { book = fn(book); renderer.update(createElement(CanvasLibrary, props())) }) } }
 }
 
-describe('automation containers persist edits immediately', () => {
-  it('adds a saved canvas immediately without another Save button', async () => {
+describe('automation containers use explicit Save and recoverable drafts', () => {
+  it('holds a membership edit until explicit Save', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+    expect(h.saves).toBe(0); expect(h.book.library!.automations[0].entries).toHaveLength(1)
+    await h.click('Kaydet')
     expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['A', 'B'])
     expect(h.saves).toBe(1); expect(h.book.library!.canvases).toHaveLength(3)
-    expect(text(h.renderer.root)).toContain('Liste otomatik kaydedildi.')
-    expect(h.button('Kaydet')).toBeUndefined()
+    expect(text(h.renderer.root)).toContain('Kayıt güncel.')
+    expect(h.button('Kaydet').props.disabled).toBe(true)
   })
   it('retains the stored list when switching panels or collapsing it', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     await h.click('Tuval Deposu'); await h.click('Otomasyonlar'); await h.click('Daralt'); await h.click('Genişlet')
+    expect(h.saves).toBe(0)
+    await h.click('Kaydet')
     expect(text(h.renderer.root)).toContain('2. B')
     expect(h.book.library!.automations[0].entries).toHaveLength(2)
   })
-  it('creates a named persistent empty container immediately', async () => {
+  it('creates a draft and saves an empty container only when requested', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('+ Yeni')
+    expect(h.book.library!.automations).toHaveLength(1)
+    await h.click('Kaydet')
     expect(h.book.library!.automations.map(a => a.name)).toEqual(['Models', 'Otomasyon 1'])
-    await h.add('B'); expect(h.book.library!.automations[1].entries[0].canvasId).toBe('B')
+    await h.add('B'); await h.click('Kaydet'); expect(h.book.library!.automations[1].entries[0].canvasId).toBe('B')
   })
-  it('removes membership immediately while keeping the canvas in the depot', async () => {
+  it('saves membership removal without deleting the shared canvas', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
     await act(async () => { h.renderer.root.findByProps({ title: 'Tuvali otomasyon listesinden çıkar' }).props.onClick() })
+    expect(h.book.library!.automations[0].entries).toHaveLength(1)
+    await h.click('Kaydet')
     expect(h.book.library!.automations[0].entries).toEqual([])
     expect(h.book.library!.canvases.map(c => c.name)).toEqual(['A', 'B', 'C'])
   })
   it('a failed write retains the attempted list and provides a retry', async () => {
-    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B'); await h.click('Kaydet')
     expect(text(h.renderer.root)).toContain('Değişiklik kaydedilemedi.')
     expect(text(h.renderer.root)).toContain('2. B')
     expect(h.book.library!.automations[0].entries).toHaveLength(1)
@@ -71,7 +79,7 @@ describe('automation containers persist edits immediately', () => {
     await h.click('Tekrar Dene'); expect(h.saves).toBe(2)
   })
   it('blocks a stale failed edit from overwriting a newer container', async () => {
-    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
+    const h = setup(true); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B'); await h.click('Kaydet')
     h.mutate(b => deleteSavedCanvas(b, 'A'))
     expect(text(h.renderer.root)).toContain('Kayıt değişti veya silindi.')
     expect(h.button('Tekrar Dene').props.disabled).toBe(true)
@@ -84,23 +92,26 @@ describe('automation containers persist edits immediately', () => {
     expect(select.findAllByType('option').map(o => o.props.value)).toEqual(['', 'C'])
     expect(h.button('Ekle').props.disabled).toBe(true)
   })
-  it('locks changes until an asynchronous automatic write is acknowledged', async () => {
+  it('locks changes until an asynchronous explicit Save is acknowledged', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet')
     let release!: (value: null) => void
     h.saveOverride = () => new Promise(resolve => { release = resolve })
     await act(async () => { h.renderer.root.findByProps({ 'aria-label': 'Depodan tuval seç' }).props.onChange({ target: { value: 'B' } }) })
     await act(async () => { h.button('Ekle').props.onClick() })
+    await act(async () => { h.button('Kaydet').props.onClick() })
     expect(h.button('Daralt').props.disabled).toBe(true)
     expect(h.button('Ekle').props.disabled).toBe(true)
     await act(async () => release(null))
     expect(h.button('Tekrar Dene').props.disabled).toBe(false)
   })
-  it('automatically persists name edits on blur and order edits immediately', async () => {
+  it('keeps name and order edits in the same draft until Save', async () => {
     const h = setup(); await h.click('Otomasyonlar'); await h.click('Genişlet'); await h.add('B')
     await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onChange({ target: { value: 'Renamed' } }) })
-    await act(async () => { h.renderer.root.findByProps({ id: 'automation-name' }).props.onBlur() })
-    expect(h.book.library!.automations[0].name).toBe('Renamed')
+    expect(h.book.library!.automations[0].name).toBe('Models')
     await act(async () => { h.renderer.root.findAllByProps({ title: 'Yukarı taşı' })[1].props.onClick() })
+    expect(h.saves).toBe(0)
+    await h.click('Kaydet')
+    expect(h.book.library!.automations[0].name).toBe('Renamed')
     expect(automationCanvases(h.book, h.book.library!.automations[0].id).map(c => c.name)).toEqual(['B', 'A'])
   })
   it('flushes an unfinished name on close and blocks closure when the write fails', async () => {

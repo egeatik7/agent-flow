@@ -15,28 +15,41 @@ type Props = {
   onStop: () => void
   running: boolean
   sequenceLabel?: string
+  onRegisterRenameFlush?: (flush: (() => void) | null) => void
 }
 
 export default function CanvasTabs(p: Props) {
   const [editId, setEditId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const rename = useRef<{ id: string | null; name: string }>({ id: null, name: '' })
+  rename.current = { id: editId, name: draft }
+  useEffect(() => {
+    p.onRegisterRenameFlush?.(() => {
+      const current = rename.current
+      if (!current.id) return
+      rename.current = { id: null, name: '' }; setEditId(null)
+      p.onRename(current.id, current.name)
+    })
+    return () => p.onRegisterRenameFlush?.(null)
+  })
 
   useEffect(() => {
     if (editId) inputRef.current?.select()
   }, [editId])
 
   const commit = () => {
-    if (!editId) return
-    const id = editId
+    if (!rename.current.id) return
+    const { id, name } = rename.current
+    rename.current = { id: null, name: '' }
     setEditId(null)
-    p.onRename(id, draft)
+    p.onRename(id, name)
   }
 
   return (
     <div className="canvas-tabs-row">
       {p.tabs.length > 0 && <div className="canvas-sequence-controls">
-      <button type="button" className="xp-btn canvas-sequence-play" title="Açık tuvallerin tamamını soldan sağa oynat" aria-label="Tuvalleri sırayla oynat" disabled={p.disabled} onClick={p.onRunAll}>▶</button>
+      <button type="button" className="xp-btn canvas-sequence-play" title="Aktif tuvalden başlayıp sağındaki tuvallerle devam et" aria-label="Tuvalleri sırayla oynat" disabled={p.disabled} onClick={p.onRunAll}>▶</button>
       <button type="button" className="xp-btn canvas-sequence-stop" title="Çalışmayı ve tuval sırasını durdur" aria-label="Tuval sırasını durdur" disabled={!p.running} onClick={p.onStop}>■</button>
       {p.sequenceLabel && <span className="canvas-sequence-label" role="status">{p.sequenceLabel}</span>}
       </div>}
@@ -80,6 +93,7 @@ export default function CanvasTabs(p: Props) {
                     ;(e.target as HTMLInputElement).blur()
                   } else if (e.key === 'Escape') {
                     e.preventDefault()
+                    rename.current = { id: null, name: '' }
                     setEditId(null)
                   }
                 }}

@@ -1,5 +1,6 @@
 import { libraryOf, saveCanvas } from './canvas-library'
 import { newId, type CanvasBook, type CanvasTab } from './graph-types'
+import { sameCanvasContent } from './canvas-content'
 
 export type SaveDecision = 'save' | 'discard' | 'cancel'
 
@@ -8,24 +9,35 @@ export function canvasDirty(book: CanvasBook, tab: CanvasTab): boolean {
   // Deleting the saved record makes an open working copy unsaved again.
   if (tab.savedId && !saved) return true
   const baseline = tab.baseline ?? saved
-  return !baseline || baseline.name !== tab.name || JSON.stringify(baseline.graph) !== JSON.stringify(tab.graph)
+  return !baseline || baseline.name !== tab.name || !sameCanvasContent(baseline.graph, tab.graph)
 }
 
 export function emptyCanvasSession(book: CanvasBook): CanvasBook {
   return { ...book, activeId: '', tabs: [] }
 }
 
-/** Start with no open editor. Preserve interrupted/legacy unsaved work in the depot. */
+/** Start with no open editor. Recovery never silently publishes a working copy. */
 export function startCanvasSession(book: CanvasBook): CanvasBook {
-  let next = book
+  const recovery = [...(book.recovery ?? [])]
   for (const tab of book.tabs) {
     if (!canvasDirty(book, tab)) continue
-    const lib = libraryOf(next)
-    if (lib.canvases.some(c => c.name === tab.name && JSON.stringify(c.graph) === JSON.stringify(tab.graph))) continue
-    const record = { id: newId(), name: tab.savedId ? `${tab.name.slice(0, 35)} (Kurtarılan)` : tab.name, graph: structuredClone(tab.graph), updatedAt: Date.now() }
-    next = { ...next, library: { ...lib, canvases: [...lib.canvases, record] } }
+    const record = { ...structuredClone(tab), recoveredAt: Date.now() }
+    const found = recovery.findIndex(r => r.id === tab.id)
+    if (found < 0) recovery.push(record)
+    else recovery[found] = record
   }
-  return emptyCanvasSession(next)
+  return emptyCanvasSession({ ...book, recovery })
+}
+
+export function restoreCanvasDraft(book: CanvasBook, id: string): CanvasBook {
+  const recovered = book.recovery?.find(r => r.id === id)
+  if (!recovered) throw new Error('Kurtarılacak tuval artık yok.')
+  const { recoveredAt: _at, ...tab } = structuredClone(recovered)
+  tab.id = newId()
+  return { ...book, activeId: tab.id, tabs: [...book.tabs, tab], recovery: book.recovery!.filter(r => r.id !== id) }
+}
+export function discardCanvasDraft(book: CanvasBook, id: string): CanvasBook {
+  return { ...book, recovery: (book.recovery ?? []).filter(r => r.id !== id) }
 }
 
 /** Persist each accepted Save before asking about the next canvas. Cancel keeps tabs open. */

@@ -2147,6 +2147,12 @@ html.hud-root #root {
 .automation-add-row { margin-top: 8px; }
 .automation-add-row select { flex: 1; min-width: 0; width: 100%; }
 .automation-editor-status { font-size: 11px; margin: 5px 0; }
+.workspace-save-status { white-space: nowrap; }
+.workspace-save-status.error { color: #a51a1a; font-weight: bold; }
+.workspace-recovery { border: 1px solid #c5a04a; background: #fff7d8; padding: 7px; margin: 7px 0; }
+.workspace-recovery-row { display: flex; align-items: center; gap: 5px; margin: 4px 0; }
+.workspace-recovery-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-load-error { padding: 24px; max-width: 560px; }
 .library-warning { color: #9b2b20; }
 
 /* Values can be long; JSON and clipboard retain the raw {{…}} template. */
