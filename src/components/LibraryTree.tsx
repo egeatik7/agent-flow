@@ -24,7 +24,9 @@ export default function LibraryTree(p: {
  const tree=useRef<HTMLDivElement>(null),cleanup=useRef<(()=>void)|undefined>(undefined),expandTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),dragging=useRef<LibraryRef[]>([])
  const [box,setBox]=useState<{x:number;y:number;w:number;h:number}|null>(null)
  useEffect(()=>()=>{cleanup.current?.();clearTimeout(expandTimer.current)},[])
- const items: LibraryItem[] = [ ...(p.library.folders ?? []).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => isArchived(p.library, item) === !!p.archived)
+ const bolum = p.mode === 'automation' ? 'automation' as const : 'canvas' as const
+  // Bolumu olmayan (eski) klasorler iki bolumde de gorunur; boylece hicbir klasor kaybolmaz.
+  const items: LibraryItem[] = [ ...(p.library.folders ?? []).filter(f => !f.section || f.section === bolum).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => isArchived(p.library, item) === !!p.archived)
  const parentOf = (item: LibraryItem) => {
   const parent = item.kind === 'folder' ? item.parentId : item.folderId
   if (p.archived && parent && !isArchived(p.library, p.library.folders?.find(f => f.id === parent) ?? {})) return undefined

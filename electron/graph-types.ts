@@ -147,7 +147,9 @@ export type CanvasTab = {
   baseline?: { name: string; graph: AgentGraph }
 }
 
-export type LibraryFolder = { id: string; name: string; parentId?: string; archived?: boolean }
+/** Klasörün hangi bölüme ait olduğu. Eski kayıtlarda yoktur: o klasörler iki bölümde de görünür. */
+export type LibrarySection = 'canvas' | 'automation'
+export type LibraryFolder = { id: string; name: string; parentId?: string; archived?: boolean; section?: LibrarySection }
 export type SavedCanvas = { folderId?: string; archived?: boolean; id: string; name: string; graph: AgentGraph; updatedAt: number }
 export type AutomationEntry = { id: string; canvasId: string }
 export type CanvasAutomation = { folderId?: string; archived?: boolean; id: string; name: string; entries: AutomationEntry[]; updatedAt: number }

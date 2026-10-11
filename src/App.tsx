@@ -287,6 +287,9 @@ export default function App() {
     setRecovery(book.recovery ?? [])
   }, [])
 
+  
+  const libraryConflictRef = useRef(false)
+
   const persistBook = useCallback((book: CanvasBook): Promise<boolean> => {
     const snapshot = structuredClone(book)
     const serial = ++writeSerial.current
@@ -294,7 +297,17 @@ export default function App() {
     // Draft autosaves, catalog writes and final closure always reach disk in order.
     const next = writeQueue.current.then(async () => {
       try {
-        if (api) { if (await api.saveCanvases(snapshot) === false) throw new Error('Tuvaller diske kaydedilemedi.') }
+        if (api) {
+          const answer = await api.saveCanvases(snapshot)
+          if (answer === false) throw new Error('Tuvaller diske kaydedilemedi.')
+          // Kütüphane çakışması AYRI bir durumdur: oturum yazıldı, yalnız kütüphane atlandı.
+          const cakisti = typeof answer === 'object' && answer.conflict === true
+          if (cakisti && !libraryConflictRef.current) {
+            libraryConflictRef.current = true
+            
+            pushLog('warn', 'Kütüphane başka bir programda değişti: kütüphane kaydı durdu, çalışman taslakta duruyor. Sağ tık → Kütüphaneyi Yeniden Yükle ile güncel kaydı al.')
+          } else if (!cakisti && libraryConflictRef.current) { libraryConflictRef.current = false }
+        }
         else localStorage.setItem(LOCAL_BOOK, JSON.stringify(snapshot))
         if (serial === writeSerial.current) setSaveStatus('saved')
         return true
@@ -772,7 +785,7 @@ export default function App() {
     } catch (e) { pushLog('error', errText(e)) }
   }
 
-  const manageLibrary = async (mode: 'open'|'copy'|'backup'|'restore'|'reveal') => {
+  const manageLibrary = async (mode: 'open'|'copy'|'backup'|'restore'|'reveal'|'reload') => {
     if(!api?.manageLibrary || runningRef.current || libraryBusyRef.current)return
     try {
       if(loaded && ['open','copy','restore'].includes(mode)) {
@@ -781,7 +794,13 @@ export default function App() {
       }
       await writeQueue.current
       libraryBusyRef.current=true;setLibraryBusy(true)
-      const result=await api.manageLibrary(mode)
+      // Yeniden yükleme: kütüphane diskten tazelenir; AÇIK SEKMELER VE TASLAKLAR KORUNUR.
+if (mode === 'reload') {
+  const r = await api.manageLibrary('reload')
+  if (r?.book) { setLibrary(libraryOf(r.book)); libraryConflictRef.current = false; pushLog('info', 'Kütüphane diskten yeniden yüklendi; açık sekmeler ve taslaklar korundu.') }
+  return
+}
+const result=await api.manageLibrary(mode)
       if(result){setLibraryDirectory(result.directory);if(result.book){showCanvas(normalizeCanvasBook(result.book),result.book.activeId,false);setLoadError('');setLoaded(true)};pushLog('success',mode==='backup'?'Kütüphane yedeklendi.':'Kütüphane işlemi tamamlandı.')}
     } catch(e){pushLog('error',errText(e))}
     finally{libraryBusyRef.current=false;setLibraryBusy(false)}

@@ -52,7 +52,7 @@ import {
 } from './graph-types'
 import { toolLayerSave } from './tool-branch'
 import { readWorkspace, writeWorkspace } from './workspace-store'
-import { LibraryStorage, librarySession } from './library-storage'
+import { LibraryStorage, librarySession, isLibraryConflict } from './library-storage'
 import { initializeLibraryDatabase } from './library-database'
 import type { CanvasLibrary } from './graph-types'
 import { randomBytes, createHash } from 'node:crypto'
@@ -1042,23 +1042,32 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       libraryStorage = new LibraryStorage(store.get('libraryPath') || path.join(app.getPath('userData'), 'Library'))
       savedLibrary = libraryStorage.load(store.get('libraryMigrated') ? undefined : session.library)
       store.set('libraryMigrated', true)
+      // Kütüphane bazında yazıcı sahipliği: başka bir Nubbo tutuyorsa açıkça söyle, kaydı zorlamayız.
+      try { libraryStorage.claim() } catch (e) { log('warn', `Kütüphane sahipliği alınamadı: ${(e as Error).message}`) }
     }
     const book={ ...session, library: structuredClone(savedLibrary) }
     viewerState.setBook(book)
     return book
   }
-  function storeWorkspace(book: CanvasBook) {
+  /**
+   * Oturum kaydı ile kütüphane kaydı ayrıdır: kütüphane diskte başka bir programda değiştiyse
+   * YALNIZCA kütüphane yazımı atlanır, sekmeler/işaret her zaman yazılır ve çakışma çağırana bildirilir.
+   */
+  function storeWorkspace(book: CanvasBook): { conflict: boolean } {
     const current = loadCanvases()
+    let conflict = false
     writeWorkspace({ set: ({ canvases, graph }) => {
-      libraryStorage!.save(canvases.library!)
+      try { libraryStorage!.save(canvases.library!); savedLibrary = structuredClone(canvases.library!) }
+      catch (e) { if (!isLibraryConflict(e)) throw e; conflict = true }
       store.set({ canvases: librarySession(canvases), graph })
-      savedLibrary = structuredClone(canvases.library!)
       viewerState.setBook(canvases)
     } }, book, current)
+    return { conflict }
   }
   ipcMain.handle('library:info', () => {
-    loadCanvases(); return { directory: libraryStorage!.directory, file: libraryStorage!.file }
+    loadCanvases(); return { directory: libraryStorage!.directory, file: libraryStorage!.file, conflict: libraryStorage!.stale() }
   })
+  app.on('will-quit', () => { try { libraryStorage?.release() } catch { /* Kilit zaten yabancı olabilir. */ } })
   ipcMain.handle('library:manage', async (_e, mode: string) => {
     if (running || recoveryActive || !mainWindow) throw Error('Çalışma sürerken kütüphane değiştirilemez.')
     // Opening another catalog must also work when the previously chosen folder is missing.
@@ -1066,6 +1075,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     if (mode !== 'open' && !active) throw Error('Kütüphane açılamadı.')
     if (mode === 'reveal') { await shell.openPath(active!.directory); return { directory: active!.directory } }
     if (mode === 'backup') { active!.backup(); return { directory: active!.directory } }
+    if (mode === 'reload') { const library = active!.reload(); const book: CanvasBook = { ...current!, library }; savedLibrary = library; viewerState.setBook(book); return { directory: active!.directory, book } }
     if (!['open', 'copy', 'restore'].includes(mode)) throw Error('Geçersiz kütüphane işlemi.')
     if (mode === 'restore') {
       const answer = await dialog.showOpenDialog(mainWindow, { title: 'Kütüphane yedeğini seç', defaultPath: path.join(active!.directory, 'Backups'), properties: ['openFile'], filters: [{ name: 'Nubbo kütüphanesi', extensions: ['library','json'] }] })
@@ -1105,10 +1115,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
-    storeWorkspace(book)
-    return true
+    return storeWorkspace(book)
   })
-
   ipcMain.handle('windows:list', () => bridge.listWindows())
 
   ipcMain.handle('dialog:listDir', (_e, dir: string) => listDirEntries(typeof dir === 'string' ? dir : ''))

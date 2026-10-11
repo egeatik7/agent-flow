@@ -8,6 +8,17 @@ import { profileDirName } from './profile'
 // the flows of the one the person is working in.
 app.setPath('userData', path.join(app.getPath('appData'), profileDirName(process.env.NUBBO_PROFILE)))
 
+// Aynı profil için tek örnek: ikinci Nubbo, birincinin akışını ve kütüphanesini bozmasın.
+// Kilit userData yoluna bağlı olduğu için NUBBO_PROFILE ile ayrı test örnekleri etkilenmez.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const w = BrowserWindow.getAllWindows().find((x) => !x.isDestroyed())
+    if (w) { if (w.isMinimized()) w.restore(); w.focus() }
+  })
+}
+
 let splash: BrowserWindow | null = null
 let pageReady = false
 let pending = { pct: 28, line: 'Süreç açılıyor…' }

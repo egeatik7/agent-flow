@@ -9,7 +9,7 @@ import type { SaveDecision } from '../../electron/canvas-session'
 type Props = {
   directory?: string
   onLibraryChange?: (change: LibraryChange) => Promise<boolean>
-  onManageLibrary?: (mode: 'open' | 'copy' | 'backup' | 'restore' | 'reveal') => void
+  onManageLibrary?: (mode: 'open' | 'copy' | 'backup' | 'restore' | 'reveal' | 'reload') => void
   onNewCanvas?: (folderId?: string) => void
   onDuplicateCanvas?: (id: string) => void
   onExportCanvas?: (id: string) => void
@@ -172,7 +172,6 @@ export default function CanvasLibrary(p: Props) {
     <div className="library-views" role="tablist" aria-label="Tuval yönetimi"><button className={`xp-btn ${view==='canvases'?'primary':''}`} role="tab" aria-selected={view==='canvases'} onClick={()=>{setView('canvases');setSelection([])}}>Tuvaller</button><button className={`xp-btn ${view==='automations'?'primary':''}`} role="tab" aria-selected={view==='automations'} onClick={()=>{setView('automations');setSelection([])}}>Otomasyonlar</button></div>
     <div className="library-explorer-toolbar"><button className="xp-btn" onClick={()=>{setArchived(false);setSelection([])}} aria-pressed={!archived}>Kütüphane</button><button className="xp-btn" onClick={()=>{setArchived(true);setSelection([])}} aria-pressed={archived}>Arşiv</button><span title={p.directory||'Kütüphane'}>{p.directory?.split(/[\\/]/).slice(-1)[0]||'Nubbo'}</span></div>
     <div className="canvas-library-scroll" onContextMenu={e=>context(e)}>
-      {view==='canvases'&&!!p.recovery?.length&&<div className="workspace-recovery"><h3>Kurtarılan çalışmalar</h3>{p.recovery.map(d=><div className="workspace-recovery-row" key={d.id}><span>{d.name}</span><button className="xp-btn" disabled={locked} onClick={()=>p.onRestoreDraft?.(d.id)}>Taslağı Aç</button><button className="xp-btn" disabled={locked} onClick={()=>p.onDiscardDraft?.(d.id)}>Sil</button></div>)}</div>}
       <LibraryTree library={treeLibrary} draftId={draftId} reveal={editor?{kind:'automation',id:editor.id??editor.key}:undefined} mode={view==='canvases'?'canvas':'automation'} archived={archived} disabled={locked} selected={selection} onSelect={setSelection} onContext={(e,item)=>context(e,item?.id===draftId?undefined:item)} onMove={p.onLibraryChange?(refs,parentId)=>void p.onLibraryChange?.({action:'move',refs,parentId}):undefined} onOpen={item=>{if(item.kind==='canvas'){const c=p.library.canvases.find(c=>c.id===item.id);if(c)p.onOpenCanvas(c)}else if(item.kind==='automation'){if(item.id===(editor?.id??editor?.key))setCollapsed(!collapsed);else{const a=p.library.automations.find(a=>a.id===item.id);if(a)void choose(a)}}}} itemName={item=>item.kind==='automation'&&(editor?.id??editor?.key)===item.id?editor!.name+(dirty?' *':''):item.name} renderAfter={item=>view==='automations'&&(editor?.id??editor?.key)===item.id&&!collapsed?<div className="automation-editor-attached">{editView}</div>:null}/>
     </div>
     <div className="library-statusbar">{archived?'Arşiv':'Kütüphane'} · {selection.length?`${selection.length} öğe seçili`:'Sağ tık: işlemler'}</div>
@@ -194,13 +193,13 @@ export default function CanvasLibrary(p: Props) {
         </>}
         {menu.item?.kind==='folder'&&<><button role="menuitem" onClick={()=>askName('Klasörü Yeniden Adlandır',menu.item!.name,name=>void p.onLibraryChange?.({action:'renameFolder',id:menu.item!.id,name}))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'deleteFolder',id:menu.item!.id}))}>Boş Klasörü Sil</button><hr/></>}
         {refs.length>0&&<><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'archive',refs,archived:!archived}))}>{archived?'Arşivden Geri Al':'Arşivle'}</button><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'move',refs,parentId:undefined}))}>Ana Klasöre Taşı</button><hr/></>}
-        <button role="menuitem" onClick={()=>askName('Yeni Klasör','Yeni Klasör',name=>{if(!parent)setArchived(false);void p.onLibraryChange?.({action:'newFolder',name,parentId:parent})})}>Yeni Klasör…</button>
-        <button role="menuitem" onClick={()=>action(()=>{if(!parent)setArchived(false);p.onNewCanvas?.(parent)})}>Yeni Tuval</button>
-        <button role="menuitem" onClick={()=>action(()=>void choose(undefined,parent))}>Yeni Otomasyon</button>
+        <button role="menuitem" onClick={()=>askName('Yeni Klasör','Yeni Klasör',name=>{if(!parent)setArchived(false);void p.onLibraryChange?.({action:'newFolder',name,parentId:parent,section:view==='canvases'?'canvas':'automation'})})}>Yeni Klasör…</button>
+        {view==='canvases'&&<button role="menuitem" onClick={()=>action(()=>{if(!parent)setArchived(false);p.onNewCanvas?.(parent)})}>Yeni Tuval</button>}
+        {view==='automations'&&<button role="menuitem" onClick={()=>action(()=>void choose(undefined,parent))}>Yeni Otomasyon</button>}
         {p.hasCanvas&&<button role="menuitem" onClick={()=>action(p.onSaveCanvas)}>Açık Tuvali Kaydet</button>}
         {p.onSaveSequence&&<button role="menuitem" onClick={()=>action(p.onSaveSequence!)}>Açık Sırayı Otomasyon Kaydet…</button>}
         {p.onSaveAll&&<button role="menuitem" onClick={()=>action(p.onSaveAll!)}>Tümünü Kaydet</button>}
-        {p.onManageLibrary&&<><hr/>{([['reveal','Kütüphane Klasörünü Aç'],['open','Başka Kütüphane Aç…'],['copy','Farklı Klasöre Kaydet…'],['backup','Kütüphaneyi Yedekle'],['restore','Yedekten Geri Yükle…']]as const).map(([mode,label])=><button role="menuitem" key={mode} onClick={()=>action(()=>p.onManageLibrary?.(mode))}>{label}</button>)}</>}
+        {p.onManageLibrary&&<><hr/>{([['reload','Kütüphaneyi Yeniden Yükle'],['reveal','Kütüphane Klasörünü Aç'],['open','Başka Kütüphane Aç…'],['copy','Farklı Klasöre Kaydet…']]as const).map(([mode,label])=><button role="menuitem" key={mode} onClick={()=>action(()=>p.onManageLibrary?.(mode))}>{label}</button>)}</>}
       </>}
     </fieldset></div>,document.body)}
     {question&&<WorkspaceNameDialog title={question.title} initial={question.initial} onAnswer={name=>{const answer=question.answer;setQuestion(null);if(name!==null)answer(name)}}/>}

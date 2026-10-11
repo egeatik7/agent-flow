@@ -2,7 +2,7 @@ import { newId, type CanvasLibrary, type CanvasBook, type LibraryFolder } from '
 import { libraryOf } from './canvas-library'
 export type LibraryRef = { kind: 'folder' | 'canvas' | 'automation'; id: string }
 export type LibraryChange =
- | { action: 'newFolder'; name: string; parentId?: string }
+ | { action: 'newFolder'; name: string; parentId?: string; section?: import('./graph-types').LibrarySection }
  | { action: 'renameFolder'; id: string; name: string }
  | { action: 'move'; refs: LibraryRef[]; parentId?: string }
  | { action: 'archive'; refs: LibraryRef[]; archived: boolean }
@@ -40,8 +40,8 @@ export function changeLibrary(book: CanvasBook, change: LibraryChange): CanvasBo
  const name = ('name' in change ? change.name : '').trim().slice(0, 80)
  if (change.action === 'newFolder' || change.action === 'renameFolder') {
   if (!name) throw Error('Klasör adı boş olamaz.')
-  if (change.action === 'newFolder') lib.folders.push({ id: newId(), name, parentId: change.parentId })
-  else { const f = lib.folders.find(f => f.id === change.id); if (!f) throw Error('Klasör bulunamadı.'); f.name = name }
+  if (change.action === 'newFolder') { if (lib.folders.some(o => o.parentId === change.parentId && o.name.trim().toLocaleLowerCase('tr') === name.toLocaleLowerCase('tr'))) throw Error('Bu klasörde aynı adlı bir klasör var; farklı bir ad seç.'); lib.folders.push({ id: newId(), name, parentId: change.parentId, ...(change.section ? { section: change.section } : {}) }) }
+  else { const f = lib.folders.find(f => f.id === change.id); if (!f) throw Error('Klasör bulunamadı.'); if (lib.folders.some(o => o.id !== f.id && o.parentId === f.parentId && o.name.trim().toLocaleLowerCase('tr') === name.toLocaleLowerCase('tr'))) throw Error('Bu klasörde aynı adlı başka bir klasör var; farklı bir ad seç.'); f.name = name }
  } else if (change.action === 'deleteFolder') {
   if (lib.folders.some(f => f.parentId === change.id) || [...lib.canvases, ...lib.automations].some(c => c.folderId === change.id)) throw Error('Klasör dolu. İçeriğini taşı veya klasörü arşivle.')
   lib.folders = lib.folders.filter(f => f.id !== change.id)
@@ -63,10 +63,23 @@ export function changeLibrary(book: CanvasBook, change: LibraryChange): CanvasBo
    const rows = ref.kind === 'folder' ? lib.folders : ref.kind === 'canvas' ? lib.canvases : lib.automations
    const item = rows.find(v => v.id === ref.id); if (!item) throw Error('Taşınacak öğe artık yok.')
    if (change.action === 'archive') { item.archived = change.archived; if (!change.archived && isArchived(lib, item)) { if (ref.kind === 'folder') (item as LibraryFolder).parentId = undefined; else (item as {folderId?:string}).folderId = undefined } }
-   else if (ref.kind === 'folder') (item as LibraryFolder).parentId = change.parentId
-   else (item as { folderId?: string }).folderId = change.parentId
+   else if (ref.kind === 'folder') {
+     const folder = item as LibraryFolder
+     folder.parentId = change.parentId
+     // Bir klasör, başka bölümün klasörüne taşınırsa o bölüme geçer: ağaçta karışık dal kalmasın.
+     const target = change.parentId ? lib.folders.find(f => f.id === change.parentId) : undefined
+     if (target?.section) folder.section = target.section
+   }
+   else {
+     const row = item as { folderId?: string; section?: never }
+     row.folderId = change.parentId
+   }
   }
  }
  validateLibrary(lib)
- return { ...book, library: lib }
+ // Silinen/yok olan klasörde bekleyen otomasyon taslağı görünmez ve kaydedilemez kalmasın.
+ const automationDraft = book.automationDraft?.folderId && !lib.folders.some(f => f.id === book.automationDraft!.folderId)
+  ? { ...book.automationDraft, folderId: undefined }
+  : book.automationDraft
+ return { ...book, library: lib, automationDraft }
 }

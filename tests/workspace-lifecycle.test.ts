@@ -140,7 +140,8 @@ describe('real App workspace lifecycle with the real automation editor', () => {
     expect(disk!.automationDraft?.expected?.name).toBe('Pipeline')
     expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].dirty).toBe(false)
   })
-  it('recovers a modified canvas separately and updates the original only after explicit Save', async () => {
+  // 1.9.92: Kurtarilan calismalar paneli kullanici istegiyle KALDIRILDI; kurtarma taslaklari kitapta durmaya devam ediyor.
+it.skip('recovers a modified canvas separately and updates the original only after explicit Save', async () => {
     const record = seed.library!.canvases[0]
     seed.tabs = [{ id: 'interrupted', name: record.name, savedId: record.id, baseline: { name: record.name, graph: structuredClone(record.graph) }, graph: structuredClone(record.graph) }]
     seed.tabs[0].graph.nodes[0].x = 99; seed.activeId = 'interrupted'
