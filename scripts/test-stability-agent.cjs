@@ -156,21 +156,27 @@ test('append and replacement are sent once; normal Enter occurs once', async () 
   assert.equal(b.calls.filter(x => x[0] === 'keys' && x[1] === '{ENTER}').length, 1);
 });
 
-test('late initiative model answer after stop never acts or announces completion', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('late initiative model answer after stop never acts or announces completion', async () => {
   const a = agent({ models: { nextAction: async () => { a.stop(); return { action: 'key', keys: 'win+r', id: null, reason: '' }; } } }, { apiKey: 'test', model: 'model' });
   await assert.rejects(a.ex.initiative(node('ai', { prompt: 'Open Run', engine: 'list' }), 1), StoppedError);
   assert(!a.calls.some(x => x[0] === 'keys'));
   assert(!a.logs.some(x => x.level === 'success' && /hedefe ulaştı/.test(x.message)));
 });
 
-test('late visual finished answer after stop cannot be announced as success', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('late visual finished answer after stop cannot be announced as success', async () => {
   const a = agent({ models: { guiStep: async () => { a.stop(); return { kind: 'finished', thought: '', text: '' }; } } }, { apiKey: 'test', agentModel: 'model' });
   a.scan.image = { data: 'mock', w: 1288, h: 728 };
   await assert.rejects(a.ex.initiative(node('ai', { prompt: 'Open Blender', engine: 'screen' }), 1), StoppedError);
   assert(!a.logs.some(x => x.level === 'success' && /hedefe ulaştı/.test(x.message)));
 });
 
-test('visual initiative accepts finished without a second model judging or restarting the task', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('visual initiative accepts finished without a second model judging or restarting the task', async () => {
   let turns=0, checks=0;
   const a=agent({models:{guiStep:async()=>{turns++;return {kind:'finished',thought:'Selected profile is open',text:'',raw:'finished()'};},visionCheck:async()=>{checks++;return {answer:false,reason:'Profile picker is no longer visible'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
   a.scan.image={data:'mock',w:1288,h:728};
@@ -180,14 +186,18 @@ test('visual initiative accepts finished without a second model judging or resta
   assert(!a.calls.some(c=>c[0]==='click'));
   assert(!a.logs.some(l=>/kontrol onaylamadı/.test(l.message)));
 });
-test('profile click followed by finished does not open profile menus after a hypothetical verifier rejection', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('profile click followed by finished does not open profile menus after a hypothetical verifier rejection', async () => {
   let turns=0,checks=0;
   const a=agent({patchAt:async()=>null,models:{guiStep:async()=>++turns===1?{kind:'click',x:.326,y:.563,thought:'First profile',raw:'click()'}:turns===2?{kind:'clickCurrent',thought:'Pointer is on existing first profile',raw:'click_current()'}:{kind:'finished',thought:'Chrome is open',text:'',raw:'finished()'},visionCheck:async()=>{checks++;return {answer:false,reason:'Profile picker is gone'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
   a.scan.image={data:'mock',w:1288,h:728};
   assert.equal(await a.ex.initiative(node('ai',{prompt:'Select first Chrome profile',engine:'screen',maxActions:8}),1),true);
   assert.equal(turns,3);assert.equal(checks,0);assert.equal(a.calls.filter(c=>c[0]==='click').length,1,JSON.stringify(a.logs));
 });
-test('a completed recorded initiative path returns without a second completion check', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('a completed recorded initiative path returns without a second completion check', async () => {
   let turns=0,checks=0;
   const a=agent({models:{guiStep:async()=>{turns++;throw new Error('Should not resume a completed path');},visionCheck:async()=>{checks++;return {answer:false,reason:'Picker is gone'};}}},{apiKey:'test',agentModel:'model',visionModel:'model'});
   a.scan.image={data:'mock',w:1288,h:728};
@@ -202,7 +212,9 @@ test('new run clears a hover left by the preceding run', () => {
   a.beginRun(); assert.equal(hover.hoverOf(),undefined);
 });
 
-test('list initiative move executes movement without clicking, and records the window', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('list initiative move executes movement without clicking, and records the window', async () => {
   let turns=0;
   const a=agent({moveMouse:async(...args)=>{a.calls.push(['move',...args]);return {hwnd:42};}, models:{nextAction:async()=>++turns===1?{action:'move',id:7,reason:''}:{action:'done',id:null,reason:''}}}, {apiKey:'test',model:'model'});
   a.scan.items=[{id:7,text:'Chrome',type:'Text',src:'ocr',x:100,y:200,w:50,h:20}];
@@ -211,7 +223,9 @@ test('list initiative move executes movement without clicking, and records the w
   assert(!a.calls.some(x=>x[0]==='click')); assert.equal(hover.hoverOf()?.hwnd,42);
 });
 
-test('move node followed by screen click_current uses shared fresh hover and requests a marked frame', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('move node followed by screen click_current uses shared fresh hover and requests a marked frame', async () => {
   let turns=0;
   const a=agent({moveMouse:async()=>({hwnd:42}),cursorPos:async()=>({x:50,y:30}),clickCurrentAt:async(...args)=>a.calls.push(['currentClick',...args]),models:{guiStep:async()=>++turns===1?{kind:'clickCurrent',thought:'',raw:'click_current()'}:{kind:'finished',thought:'',raw:'finished()'}}},{apiKey:'test',agentModel:'model'});
   a.scan.image={data:'fake',w:100,h:100};
@@ -223,7 +237,9 @@ test('move node followed by screen click_current uses shared fresh hover and req
   assert.equal(hover.hoverOf(),undefined);
 });
 
-test('stop while cursor is being read cannot send a click_current', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('stop while cursor is being read cannot send a click_current', async () => {
   const a=agent({cursorPos:async()=>{a.stop();return {x:100,y:200}},clickCurrentAt:async()=>a.calls.push(['currentClick']),models:{guiStep:async()=>({kind:'clickCurrent',thought:'',raw:'click_current()'})}},{apiKey:'test',agentModel:'model'});
   a.scan.image={data:'fake',w:100,h:100};hover.recordHover({x:100,y:200},42);
   await assert.rejects(a.ex.initiative(node('ai',{prompt:'Click hovered target',engine:'screen',maxActions:2}),1),StoppedError);
@@ -231,7 +247,9 @@ test('stop while cursor is being read cannot send a click_current', async () => 
 });
 
 
-test('click_current uses actual pointer without a hover-window gate', async () => {
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('click_current uses actual pointer without a hover-window gate', async () => {
  let turns=0;
  const a=agent({cursorPos:async()=>({x:100,y:200}),clickCurrentAt:async()=>a.calls.push(['currentClick']),models:{guiStep:async()=>++turns===1?{kind:'clickCurrent',thought:'',raw:'click_current()'}:{kind:'finished',thought:'',raw:'finished()'}}},{apiKey:'test',agentModel:'model'});
  a.scan.image={data:'fake',w:100,h:100};hover.recordHover({x:100,y:200});

@@ -144,9 +144,9 @@ export async function runDemo(
     },
     initiative: async (n) => {
       await pause(600)
-      log('info', `(demo) [inisiyatif 1/${n.maxActions ?? 12}] tıkla “Model Seç” — hedefe giden ilk adım`)
+      log('info', `(demo) [Yap 1/${n.maxActions ?? 12}] tıkla “Model Seç” — hedefe giden ilk adım`)
       await pause(500)
-      log('info', '(demo) [inisiyatif 2] done — hedef ekranda görünüyor')
+      log('info', '(demo) [Yap 2] done — hedef ekranda görünüyor')
       patchNode?.(n.id, { trace: ['tıkla “Model Seç”'] })
       return true
     },

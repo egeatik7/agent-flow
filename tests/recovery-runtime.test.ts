@@ -32,6 +32,16 @@ describe('internal recovery desktop session', () => {
     expect(calls.every(c => c.kind === 'type')).toBe(true)
     expect(JSON.stringify(graph)).toBe(before)
   })
+  it('Yap uses desktop tools with recovery disabled but cannot execute another node', async () => {
+    calls.length = 0
+    const node = { ...createNode('ai',0,0), id: 'task' }
+    const req: RecoveryRequest = { graph: { nodes: [node], edges: [] }, node, live: node, error: new Error(''), stepNo: 1, ahead: {}, vars: {} }
+    const base = { getSettings: () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, recovery: { ...DEFAULT_RECOVERY, allowDesktop: false, allowNodes: false } }), log: () => {} } as unknown as ToolContext
+    const execute = recoveryExecutor(req, base, () => false, undefined, true)
+    await execute('act.key', { keys: 'enter' })
+    expect(calls[0].node.keys).toBe('enter')
+    await expect(execute('step.run', { nodeId: node.id })).rejects.toThrow('başka node')
+  })
   it.each(['ai', 'condition', 'package', 'loop'] as const)('does not use %s even if an internal caller bypasses the model tool catalogue', async kind => {
     calls.length = 0
     const node = { ...createNode(kind, 0, 0), id: 'bad' }

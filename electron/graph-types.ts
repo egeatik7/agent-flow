@@ -99,6 +99,7 @@ export type AgentNode = {
   path?: PathStep[]
   /** İnisiyatif: look at the screenshot and click coordinates, or pick from the list of screen texts. */
   engine?: 'screen' | 'list'
+  allowCode?: boolean
   maxActions?: number
   url?: string
   browser?: 'auto' | 'msedge' | 'chrome'
@@ -276,7 +277,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   visionModel: 'google/gemini-3.8-flash',
   visionBackups: [],
   hideWhileRunning: true,
-  agentModel: 'bytedance/ui-tars-1.5-7b',
+  agentModel: '',
   agentBackups: [],
   ocrEngine: 'combined',
   valueLo: 0.15,
@@ -366,15 +367,12 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     description: 'Bir kutu. İçine koyduğun node’lar listedeki her öğe için (veya N kez) sırayla çalışır.',
   },
   ai: {
-    label: 'İnisiyatif',
+    label: 'Yap',
     icon: '✦',
     color: '#b0306a',
     hasInput: true,
-    outputs: [
-      { key: 'next', label: 'tamam' },
-      { key: 'fail', label: 'olmadı' },
-    ],
-    description: 'Hedefi yaz, birkaç adımlık işi model ekrana bakarak kendisi yapar.',
+    outputs: [{ key: 'next', label: 'tamamlandı' }],
+    description: 'Görevi yaz; ajan ekran ve araçlarla gerçekleştirir, tamamlanınca devam eder.',
   },
   browser: {
     label: 'Tarayıcıyı Aç',
@@ -487,7 +485,7 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
     case 'loop':
       return { ...base, count: 3, members: [] }
     case 'ai':
-      return { ...base, prompt: '', maxActions: 25, engine: 'screen' }
+      return { ...base, prompt: '', maxActions: 25, timeoutMs: 300000 }
     case 'browser':
       return { ...base, url: 'https://', browser: 'auto' }
     case 'waitFile':
@@ -782,6 +780,7 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   const nodes: AgentNode[] = (g.nodes ?? [])
     .filter((n) => n && n.id)
     .map((n) => {
+      if (n.kind === 'ai' && n.title === 'İnisiyatif') n = { ...n, title: 'Yap' }
       if ((n.kind as string) === 'waitFor') {
         waitIds.add(n.id!)
         n = { ...n, kind: 'condition', timeoutMs: n.timeoutMs ?? 15000 }
@@ -825,7 +824,7 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   const seenPort = new Set<string>()
   edges = edges.filter((e) => {
     const from = byId.get(e.from)
-    if (!from || !NODE_SPECS[from.kind].outputs.some((o) => o.key === e.fromPort)) return false
+    if (!from || !(NODE_SPECS[from.kind].outputs.some((o) => o.key === e.fromPort) || from.kind === 'ai' && e.fromPort === 'fail')) return false
     const key = `${e.from}:${e.fromPort}`
     if (seenPort.has(key)) return false
     seenPort.add(key)

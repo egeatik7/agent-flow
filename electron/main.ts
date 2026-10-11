@@ -1,3 +1,5 @@
+import { contextOf } from './tool-context'
+import { runYap } from './yap'
 import { validateApiKey } from './openrouter'
 import { pruneScreenFiles } from './screen-files'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
@@ -658,6 +660,32 @@ async function runFlow(
     let recoveries = 0
     const pendingReports = new Map<string, RecoveryReport>()
     const executor = { ...agent.executor,
+      initiative: async (node: import('./graph-types').AgentNode, stepNo: number, ahead: import('./runner').StepAhead = {}, vars: Record<string, string> = {}) => {
+        if (opts?.fast || opts?.debug) throw new Error('Yap model gerektirir; hızlı/hata ayıklama koşusunda çalıştırılamaz.')
+        const settings = getSettings()
+        pushMethod('Yap')
+        try {
+          return await runYap(node, { nodeId: node.id, vars, packageContext: contextOf(graph, node.id), next: ahead.next, then: ahead.then }, {
+            shouldStop: () => stopRequested, log,
+            makeExecute: shouldStop => {
+              recoveryAbort = shouldStop
+              if (!recoveryToolContext) throw new Error('Yap araçları hazır değil.')
+              const request = { graph, node, live: node, stepNo, ahead, vars, error: new Error('') }
+              return recoveryExecutor(request, recoveryToolContext, shouldStop, agent.executor, true)
+            },
+            turn: args => {
+              return recoveryToolTurn({ ...args, allowLocal: true, apiKey: settings.apiKey, models: modelChain(settings.agentModel && !/ui-tars/i.test(settings.agentModel) ? settings.agentModel : settings.model, settings.agentBackups).filter(m => !/ui-tars/i.test(m)) })
+            },
+          })
+        } catch (error) {
+          if (stopRequested || error instanceof StoppedError) throw error
+          if (graph.edges.some(e => e.from === node.id && e.fromPort === 'fail')) {
+            log('warn', `Yap tamamlanamadı; eski başarısızlık bağlantısı kullanılıyor: ${(error as Error).message}`)
+            return false
+          }
+          throw error
+        } finally { recoveryAbort = () => false; pushMethod('') }
+      },
       recover: async (request: import('./runner').RecoveryRequest) => {
         const settings = recoverySettings(getSettings().recovery)
         if (!settings.enabled || opts?.fast || opts?.debug) {

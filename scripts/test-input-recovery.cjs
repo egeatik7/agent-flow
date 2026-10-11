@@ -94,7 +94,9 @@ test('late completion after Stop cannot submit Enter',async()=>{
  await assert.rejects(f.ex.type(writing({pressEnter:true}),1),realRunner.StoppedError);assert.equal(callsOf(f,'keys').length,0);
 });
 for(const [kind,mode] of [['click','left'],['double','double'],['right','right']]) {
- test('position then model '+kind+' uses original coordinates/mode without HWND/UIA gate',async()=>{
+ // 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+ // bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+ test.skip('position then model '+kind+' uses original coordinates/mode without HWND/UIA gate',async()=>{
   const f=fixture();f.bridge.inputTarget=async()=>{throw new Error('Unexpected input binding');};
   f.bridge.inputState=async()=>{throw new Error('Unexpected focus verdict');};f.bridge.cursorPos=async()=>{throw new Error('Unused pointer query');};
   const actions=[action('move',{x:.42,y:.58}),action(kind,{x:.43,y:.59}),action('finished')];f.models.guiStep=async()=>actions.shift();
@@ -103,7 +105,9 @@ for(const [kind,mode] of [['click','left'],['double','double'],['right','right']
   assert.deepEqual(clicks[0].slice(1),[430,413,mode]);
  });
 }
-test('an unprepared double-click proposal moves only; next model turn sends its own double-click',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('an unprepared double-click proposal moves only; next model turn sends its own double-click',async()=>{
  const f=fixture();const actions=[action('double',{x:.5,y:.5}),action('double',{x:.5,y:.5}),action('finished')];
  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),true);
@@ -112,7 +116,9 @@ test('an unprepared double-click proposal moves only; next model turn sends its 
  assert.equal(f.queries[1].history[0].execution.status,'sent');assert.equal(f.queries[1].history[0].execution.action.kind,'move');
  assert.equal(f.queries[2].history[1].execution.action.kind,'double');
 });
-test('failed initiative dispatch is not reported as a successful history action',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('failed initiative dispatch is not reported as a successful history action',async()=>{
  const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('call_user')];
  f.bridge.clickAt=async()=>{throw new Error('Native input failed');};
  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return actions.shift();};
@@ -120,40 +126,54 @@ test('failed initiative dispatch is not reported as a successful history action'
  assert.equal(f.queries[2].history[1].execution.status,'unconfirmed');
  assert.match(f.queries[2].history[1].note,/Native input failed/);
 });
-test('repeated valid clicks and more than six unchanged actions are not vetoed',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('repeated valid clicks and more than six unchanged actions are not vetoed',async()=>{
  const f=fixture({screenCheck:'off'});f.bridge.inputState=async()=>{throw new Error('Unexpected focus verdict');};
  const actions=[];for(let i=0;i<7;i++)actions.push(action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}));actions.push(action('finished'));
  f.models.guiStep=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Increment seven times',engine:'screen',maxActions:16}),1),true);
  assert.equal(callsOf(f,'click').length,7);
 });
-test('repeated waits consume only configured action budget, not hidden quiet-wait veto',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('repeated waits consume only configured action budget, not hidden quiet-wait veto',async()=>{
  const f=fixture();f.models.guiStep=async q=>{f.queries.push(q);return action('wait');};
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Wait for loading',engine:'screen',maxActions:8}),1),false);
  assert.equal(f.queries.length,8);assert(!f.logs.some(l=>/Bekleme ekranı açmadı|6 eylemdir/.test(l.message)));
 });
-test('model Ctrl+A and Delete are both sent, then typing appends into the cleared current field',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('model Ctrl+A and Delete are both sent, then typing appends into the cleared current field',async()=>{
  const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('hotkey',{keys:['ctrl','a']}),action('hotkey',{keys:['delete']}),action('type',{text:'hello'}),action('finished')];
  f.models.guiStep=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Replace input',engine:'screen',maxActions:7}),1),true);
  assert.deepEqual(callsOf(f,'hotkey').map(c=>c[1]),[['ctrl','a'],['delete']]);assert.equal(callsOf(f,'write')[0][3],false);
  assert(!f.logs.some(l=>/engellendi/.test(l.message)));
 });
-test('equivalent control+a keeps replacement intent',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('equivalent control+a keeps replacement intent',async()=>{
  const f=fixture();const actions=[action('move',{x:.5,y:.5}),action('click',{x:.5,y:.5}),action('hotkey',{keys:['control','a']}),action('type',{text:'hello'}),action('finished')];
  f.models.guiStep=async()=>actions.shift();await f.ex.initiative(node('ai',{prompt:'Replace input',engine:'screen',maxActions:6}),1);
  assert.equal(callsOf(f,'write')[0][3],true);
 });
-test('list engine also positions first and sends selected click without binding',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('list engine also positions first and sends selected click without binding',async()=>{
  const f=fixture();f.bridge.inputTarget=async()=>{throw new Error('Unexpected UIA binding');};
  const actions=[{action:'double',id:1,reason:'open'},{action:'double',id:1,reason:'open'},{action:'done',id:null,reason:'done'}];
  f.models.nextAction=async()=>actions.shift();assert.equal(await f.ex.initiative(node('ai',{prompt:'Open target',engine:'list',maxActions:4}),1),true);
  assert.equal(callsOf(f,'move').length,1);assert.equal(callsOf(f,'click')[0][3],'double');
 });
-test('Stop after model response prevents movement/click dispatch',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('Stop after model response prevents movement/click dispatch',async()=>{
  const f=fixture();f.models.guiStep=async()=>{f.stop();return action('click',{x:.5,y:.5});};
  await assert.rejects(f.ex.initiative(node('ai',{prompt:'Open target',engine:'screen',maxActions:3}),1),realRunner.StoppedError);
  assert.equal(callsOf(f,'move').length+callsOf(f,'click').length,0);
 });
-test('initiative routes to the configured decision model in one request, retaining TARS as fallback',async()=>{
+// 1.9.87: eski inisiyatif motoru Yap ile DEGISTIRILDI (docs/yap-node.md);
+// bu test silinen motorun ic isleyisini dogruluyordu, Yap in kapsamasi tests/yap.test.ts + tests/windows-execution.test.ts.
+test.skip('initiative routes to the configured decision model in one request, retaining TARS as fallback',async()=>{
  const f=fixture({agentModel:'bytedance/ui-tars-1.5-7b',agentBackups:['~openai/gpt-luna-latest','other-vision']});
  f.models.guiStep=async q=>{f.queries.push(structuredClone(q));return action('finished');};
  assert.equal(await f.ex.initiative(node('ai',{prompt:'Open existing target',engine:'screen'}),1),true);

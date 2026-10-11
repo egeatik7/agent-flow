@@ -19,7 +19,7 @@ export default function AgentTab({ settings, onSaveSettings }: {
           <option value="log">Yalnızca günlük — kaydeder, adımı hata saymaz, model çağırmaz</option>
           <option value="on">Açık — gerekirse yakından bakar ve plan sorar</option>
         </select>
-        <p className="hint">Varsayılan yalnızca günlük. Bu ayar, inisiyatifin ayrı bir modelle bitiş kontrolü yapmasını sağlamaz.</p>
+        <p className="hint">Varsayılan yalnızca günlük. Bu ayar, Yapin ayrı bir modelle bitiş kontrolü yapmasını sağlamaz.</p>
       </div>
     </div>
   )

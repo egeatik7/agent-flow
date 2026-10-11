@@ -18,7 +18,6 @@ import {
   type AgentGraph,
   type AgentNode,
   type AppSettings,
-  type PathStep,
   type ClickMode,
   type ModelInfo,
   type StepStatus,
@@ -302,102 +301,21 @@ function MemoryBox(p: Props & { n: AgentNode }) {
   )
 }
 
-function pathLabel(st: PathStep): string {
-  const pt = st.rx !== undefined && st.ry !== undefined ? ` (%${Math.round(st.rx * 100)}, %${Math.round(st.ry * 100)})` : ''
-  switch (st.action) {
-    case 'click':
-      return `tıkla${pt}`
-    case 'double':
-      return `çift tıkla${pt}`
-    case 'right':
-      return `sağ tıkla${pt}`
-    case 'move':
-      return `fareyi oynat${pt}`
-    case 'drag':
-      return `sürükle${pt}`
-    case 'hotkey':
-      return `tuş ${(st.keys ?? []).join('+')}`
-    case 'type':
-      return `yaz “${(st.text ?? '').replace(/\n/g, '⏎')}”`
-    case 'scroll':
-      return `kaydır ${st.direction ?? ''}`
-    default:
-      return 'bekle'
-  }
-}
-
 function AiEditor(p: Props & { n: AgentNode }) {
   const { n } = p
   const upd = p.onUpdateNode
-  const engine = n.engine ?? 'screen'
-  const model = (p.settings.agentModel || p.settings.visionModel || p.settings.model).trim()
-  return (
-    <>
-      <div className="field">
-        <label>Nasıl çalışsın?</label>
-        <div className="seg">
-          {(
-            [
-              ['screen', 'Ekrana bakarak (UI-TARS gibi)'],
-              ['list', 'Yazı listesiyle'],
-            ] as const
-          ).map(([k, label]) => (
-            <button type="button" key={k} className={`seg-btn${engine === k ? ' active' : ''}`} onClick={() => upd({ engine: k })}>
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="node-model-row">Model: <span className="mono">{model || '—'}</span>
-          <button type="button" className="link-btn" onClick={() => p.onTab('settings')}>değiştir</button>
-        </div>
-      </div>
-      <div className="field">
-        <label>Hedef (ne olmasını istiyorsun?)</label>
-        <TemplateField {...p} n={n} field="prompt" label="Hedef (ne olmasını istiyorsun?)" placeholder="Örn: Ayarlar’dan dili Türkçe yap ve kaydet" multiline />
-      </div>
-      <div className="field">
-        <label>En fazla eylem</label>
-        <input
-          className="xp-input"
-          type="number"
-          min={1}
-          max={60}
-          value={n.maxActions ?? 25}
-          onChange={(e) => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
-        />
-      </div>
-      {engine === 'screen' && n.path?.length ? (
-        <div className="memo-box">
-          <label>Kayıtlı yol ({n.path.length} adım)</label>
-          <ol className="hint-list">
-            {n.path.map((st, i) => (
-              <li key={i}>
-                <span className="mono">{pathLabel(st)}</span>
-                {st.thought ? <> — {st.thought}</> : null}
-              </li>
-            ))}
-          </ol>
-          <button type="button" className="xp-btn" onClick={() => upd({ path: undefined })}>
-            Unut
-          </button>
-        </div>
-      ) : null}
-      {!p.settings.apiKey && <p className="hint warn">API anahtarı kayıtlı değil; İnisiyatif çalışmaz.</p>}
-      {engine === 'list' && n.trace?.length ? (
-        <div className="memo-box">
-          <label>Geçen başarılı tur</label>
-          <ol className="hint-list">
-            {n.trace.map((t, i) => (
-              <li key={i} className="mono">{t}</li>
-            ))}
-          </ol>
-          <button type="button" className="xp-btn" onClick={() => upd({ trace: undefined })}>
-            Unut
-          </button>
-        </div>
-      ) : null}
-    </>
-  )
+  const model = (p.settings.agentModel && !/ui-tars/i.test(p.settings.agentModel) ? p.settings.agentModel : p.settings.model).trim()
+  return <>
+    <div className="node-model-row">Model: <span className="mono">{model || '—'}</span><button type="button" className="link-btn" onClick={() => p.onTab('settings')}>değiştir</button></div>
+    <div className="field"><label>Ne yapılsın?</label><TemplateField {...p} n={n} field="prompt" label="Ne yapılsın?" placeholder="Örn: Chrome penceresini büyüt ve Hunyuan sekmesini aç" multiline /></div>
+    <details><summary>Gelişmiş ayarlar</summary>
+      <label className="check"><input type="checkbox" checked={n.allowCode !== false} onChange={e => upd({ allowCode: e.target.checked })} />PowerShell çalıştırabilir</label>
+      <p className="hint">Hazır araçlar yetmezse kod çalıştırır. Kod günlükte görünür ve kullanıcı yetkileriyle çalışır.</p>
+      <div className="field"><label>En fazla eylem</label><input className="xp-input" type="number" min={1} max={60} value={n.maxActions ?? 25} onChange={e => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })} /></div>
+      <div className="field"><label>Süre sınırı (saniye)</label><input className="xp-input" type="number" min={10} max={900} value={(n.timeoutMs || 300000) / 1000} onChange={e => upd({ timeoutMs: Math.min(900, Math.max(10, Number(e.target.value) || 300)) * 1000 })} /></div>
+    </details>
+    <p className="hint">Görevi ekran ve araçlarla gerçekleştirir; tamamlanınca sonraki adıma geçer. Eski hareket kayıtları oynatılmaz.</p>
+  </>
 }
 
 function flowRank(graph: AgentGraph): Map<string, number> {
@@ -801,7 +719,7 @@ function GeneralSettings(p: Props) {
         </div>
       </fieldset>
       <fieldset className="xp-group">
-        <legend>İnisiyatif modeli</legend>
+        <legend>Yap modeli</legend>
         <div className="field">
           <label htmlFor="agentModel">Model adı</label>
           <ModelChain
@@ -810,7 +728,7 @@ function GeneralSettings(p: Props) {
             backups={s.agentBackups}
             listId="agent-model-list"
             inputId="agentModel"
-            placeholder="İnisiyatif model kimliği"
+            placeholder="Araç çağırabilen görsel model kimliği"
             onChange={(agentModel, agentBackups) => set({ agentModel, agentBackups })}
           />
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>
@@ -824,7 +742,7 @@ function GeneralSettings(p: Props) {
               ))}
           </datalist>
           <div className="chips">
-            {AGENT_PRESETS.map((m) => (
+            {AGENT_PRESETS.filter(m => !/ui-tars/i.test(m)).map((m) => (
               <button type="button" key={m} className="chip" onClick={() => set({ agentModel: m })}>
                 {m.split('/')[1]}
               </button>

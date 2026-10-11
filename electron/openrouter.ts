@@ -64,6 +64,7 @@ export type ToolMessage = {
 
 /** A bounded tool-calling turn. Model fallback happens before any action is executed. */
 export async function recoveryToolTurn(args: {
+  allowLocal?: boolean
   apiKey: string
   models: string[]
   messages: ToolMessage[]
@@ -78,9 +79,12 @@ export async function recoveryToolTurn(args: {
     if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
     try {
       chatLogger?.(`Kurtarma API → ${model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
-      const res = await guardedFetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST', headers: HEADERS(args.apiKey),
-        body: JSON.stringify({ model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
+      const target = args.allowLocal ? targetFor(model) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+      if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
+      if (target.local && args.messages.some(m => Array.isArray(m.content)) && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+      const res = await guardedFetch(target.url, {
+        method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
+        body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
       }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (!res.ok) {

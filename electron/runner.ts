@@ -48,7 +48,7 @@ export type Executor = {
   type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
   key: (node: AgentNode, ahead?: StepAhead) => Promise<void>
   exists: (text: string, node: AgentNode) => Promise<boolean>
-  /** İnisiyatif: reach the goal in a few actions. */
+  /** Yap: reach the goal in a few actions. */
   initiative?: (node: AgentNode, stepNo: number, ahead?: StepAhead, vars?: Record<string, string>) => Promise<boolean>
   /** Persist a change to a node (which item is on screen, memory) in the editor. */
   patchNode?: (id: string, patch: Partial<AgentNode>) => void
@@ -307,9 +307,9 @@ export async function runGraph(
         return wait > 0 ? 'timeout' : 'false'
       }
       case 'ai': {
-        if (!live.prompt?.trim()) throw new Error(`“${live.title}”: İnisiyatif için hedefi yaz.`)
-        if (!ex.initiative) throw new Error('İnisiyatif bu ortamda çalışmıyor.')
-        ex.log('info', `[${stepNo}] İnisiyatif: ${live.prompt.trim()}`)
+        if (!live.prompt?.trim()) throw new Error(`“${live.title}”: Yap için hedefi yaz.`)
+        if (!ex.initiative) throw new Error('Yap bu ortamda çalışmıyor.')
+        ex.log('info', `[${stepNo}] Yap: ${live.prompt.trim()}`)
         const ok = await ex.initiative(live, stepNo, ahead, vars)
         await settle()
         return ok ? 'next' : 'fail'

@@ -1,10 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { recoveryToolTurn, setStopCheck } from '../electron/openrouter'
+import { recoveryToolTurn, setStopCheck, setLocalEndpoint } from '../electron/openrouter'
 import { StoppedError } from '../electron/runner'
 
-afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false) })
+afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false); setLocalEndpoint(undefined) })
 const args = { apiKey: 'fixture', models: ['fixture/primary', 'fixture/backup'], messages: [{ role: 'user' as const, content: 'Repair' }], tools: [], shouldStop: () => false, timeoutMs: 1000 }
 describe('OpenRouter recovery native tool calls', () => {
+  it('routes Yap local tool calls without leaking the OpenRouter key', async () => {
+    setLocalEndpoint('http://localhost:1234/v1', 1000, true)
+    const fetch = vi.fn(async (url, init) => {
+      expect(url).toBe('http://localhost:1234/v1/chat/completions')
+      expect(init.headers.Authorization).toBeUndefined()
+      expect(JSON.parse(init.body).model).toBe('fixture')
+      return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: 'ready' }, finish_reason: 'stop' }] }) }
+    })
+    vi.stubGlobal('fetch', fetch)
+    expect((await recoveryToolTurn({ ...args, allowLocal: true, apiKey: '', models: ['local:fixture'] })).content).toBe('ready')
+  })
   it('passes tools to the provider and preserves tool identity and opaque reasoning', async () => {
     const fetch = vi.fn(async (_url, init) => {
       const req = JSON.parse(init.body)

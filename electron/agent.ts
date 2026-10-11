@@ -6,7 +6,7 @@ import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { NODE_SPECS, modelChain, renderTemplate, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type PathStep, type TargetMemo } from './graph-types'
+import { NODE_SPECS, modelChain, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type TargetMemo } from './graph-types'
 import { clickableBy, writableBy } from './target-match'
 import {
   containsText,
@@ -23,19 +23,15 @@ import {
   type ScreenItem,
   type Target,
 } from './matcher'
-import { activeFindOrder, promptOf, initiativeDecisionModels } from './llm-flow'
+import { activeFindOrder, promptOf } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
 import {
   chooseScreenTarget,
   chooseVisualTarget,
   type VisualTargetResult,
-  guiStep,
   isTarsModel,
   judgeReaction,
-  nextAction,
-  type GuiAction,
-  type GuiTurn,
   chooseTypeField,
   planStall,
   type ReactionVerdict,
@@ -107,16 +103,6 @@ function center(t: { x: number; y: number; w: number; h: number; clickPoint?: { 
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
 }
 
-/** Replace this lap's values with their placeholders so the trace fits the next lap too. */
-function generalize(line: string, vars: Record<string, string>): string {
-  let out = line
-  const pairs = Object.entries(vars)
-    .filter(([, v]) => v && v.length >= 3)
-    .sort((a, b) => b[1].length - a[1].length)
-  for (const [k, v] of pairs) out = out.split(v).join(`{{${k}}}`)
-  return out
-}
-
 function textModels(s: AppSettings): string[] {
   return modelChain(s.model, s.modelBackups)
 }
@@ -148,8 +134,6 @@ export function createAgent(ctx: AgentContext) {
   }
 
   const runMemo = new Map<string, TargetMemo[]>()
-  const runTrace = new Map<string, string[]>()
-  const runPath = new Map<string, PathStep[]>()
 
   function screenArea() {
     const d = electronScreen.getPrimaryDisplay()
@@ -183,8 +167,6 @@ export function createAgent(ctx: AgentContext) {
     failDir = logDir
     clearHover()
     runMemo.clear()
-    runTrace.clear()
-    runPath.clear()
     noted.clear()
     lastClickPoint = undefined
     guiReplace = false
@@ -1078,446 +1060,7 @@ export function createAgent(ctx: AgentContext) {
 
   let lastClickPoint: { x: number; y: number } | undefined
 
-  // ---------- İnisiyatif ----------
-
-  async function initiative(node: AgentNode, _stepNo: number, ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
-    const s = getSettings()
-    if (!s.apiKey && !localConfigured()) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
-    const model = visionModels(s)
-    const goal = node.prompt!.trim()
-    const max = Math.min(40, Math.max(1, Math.floor(node.maxActions ?? 12)))
-    const lastLap = (runTrace.get(node.id) ?? node.trace ?? []).map((l) => renderTemplate(l, vars) ?? l)
-    const history: string[] = []
-    const trace: string[] = []
-    let pointerPrepared = false
-    const next = ahead?.next
-      ? `${NODE_SPECS[ahead.next.kind].label}${ahead.next.prompt?.trim() ? `: ${ahead.next.prompt.trim()}` : ahead.next.text?.trim() ? `: ${ahead.next.text.trim()}` : ''}`
-      : undefined
-
-    for (let i = 1; i <= max; i++) {
-      if (stopped()) throw new StoppedError()
-      ctx.setMethod?.('İnisiyatif')
-      const res = await bridge.scan({ image: s.sendScreenshot ? 'marked' : 'none', fresh: true, maxImageW: 1400, tilt: true })
-      const items = res.items
-      const image = res.image
-      const a = await nextAction({
-        apiKey: s.apiKey,
-        model,
-        system: promptOf(s.llmPrompts, 'initiative'),
-        goal,
-        stepTitle: NODE_SPECS[node.kind].label,
-        history,
-        lastLap,
-        listText: describeItems(items, items.length),
-        image,
-        next,
-      })
-      checkStopped()
-      const item = a.id !== null ? items.find((x) => x.id === a.id) : undefined
-      log(
-        'info',
-        `[inisiyatif ${i}/${max}] ${a.action}${item ? ` “${item.text}”` : a.id !== null ? ` #${a.id}` : ''}${a.text ? ` → “${a.text}”` : ''}${
-          a.keys ? ` ${a.keys}` : ''
-        }${a.reason ? ` — ${a.reason}` : ''}`
-      )
-      if (a.action === 'done') {
-        const t = trace.map((l) => generalize(l, vars))
-        runTrace.set(node.id, t)
-        send('agent:patch', { id: node.id, patch: { trace: t } })
-        log('success', `İnisiyatif hedefe ulaştı (${history.length} eylem; liste motoru ekrandan doğrulamaz).`)
-        return true
-      }
-      if (a.action === 'fail') {
-        log('warn', `İnisiyatif hedefe ulaşamadı: ${a.reason || 'gerekçe yok'}`)
-        return false
-      }
-      try {
-        if (item && ['click', 'double', 'right', 'type'].includes(a.action) && !pointerPrepared) {
-          const p = center(item)
-          const moved = await bridge.moveMouse(p.x, p.y)
-          checkStopped()
-          recordHover(p, moved?.hwnd)
-          pointerPrepared = true
-          history.push(`Yalnız fare “${item.text}” üzerine getirildi; tıklama/yazma gönderilmedi. Güncel ekrandan hedefi değerlendir ve şimdi kendi eylemini seç.`)
-          await pause(700)
-          continue
-        }
-        if (a.action === 'wait') {
-          await pause(a.seconds * 1000)
-          history.push(`${a.seconds} sn beklendi`)
-        } else if (a.action === 'key') {
-          if (!a.keys) throw new Error('tuş boş')
-          checkStopped()
-          lastClickPoint = undefined
-          clearHover()
-          await bridge.sendKeys(a.keys)
-          pointerPrepared = false
-          history.push(`tuş ${a.keys}`)
-          trace.push(`tuş ${a.keys}`)
-        } else if (a.action === 'move') {
-          if (!item) { history.push(`#${a.id} numaralı öğe yok (geçersiz seçim)`); continue }
-          checkStopped()
-          clearHover()
-          const p = center(item)
-          const moved = await bridge.moveMouse(p.x, p.y)
-          checkStopped()
-          recordHover(p, moved?.hwnd)
-          pointerPrepared = true
-          const line = `fareyi oynat “${item.text}” (tıklama yok)`
-          history.push(line)
-          trace.push(line)
-        } else if (a.action === 'type') {
-          if (item) {
-            checkStopped()
-            await clickInput(center(item), node)
-            await sleep(FOCUS_MS)
-            await typeDirect(a.text, a.enter, true, lastClickPoint)
-          } else {
-            await typeDirect(a.text, a.enter, false, lastClickPoint)
-          }
-          pointerPrepared = false
-          const line = `yaz “${a.text}”${item ? ` → “${item.text}”` : ''}${a.enter ? ' + Enter' : ''}`
-          history.push(line)
-          trace.push(line)
-        } else {
-          if (!item) {
-            history.push(`#${a.id} numaralı öğe yok (geçersiz seçim)`)
-            continue
-          }
-          const mode = a.action === 'double' ? 'double' : a.action === 'right' ? 'right' : 'left'
-          checkStopped()
-          await clickInput(center(item), node, mode)
-          pointerPrepared = false
-          const line = `${mode === 'double' ? 'çift tıkla' : mode === 'right' ? 'sağ tıkla' : 'tıkla'} “${item.text}”`
-          history.push(line)
-          trace.push(line)
-        }
-      } catch (e) {
-        if (e instanceof StoppedError) throw e
-        history.push(`hata: ${(e as Error).message.split('\n')[0]}`)
-      }
-      await pause(700)
-    }
-    log('warn', `İnisiyatif ${max} eylemde hedefe ulaşamadı.`)
-    return false
-  }
-
-  // ---------- İnisiyatif: screenshots in, coordinates out (UI-TARS style) ----------
-
-  type Shot = { img: { data: string; w: number; h: number; mime?: string }; area: { x: number; y: number; w: number; h: number }; sig: string }
-
-  async function agentShot(tars: boolean, label: string): Promise<Shot> {
-    const res = await bridge.scan({
-      image: 'plain',
-      uia: false,
-      ocr: false,
-      fresh: true,
-      primary: true,
-      // Under 1 megapixel, so a provider that downsizes images does not shift UI-TARS pixel coordinates.
-      maxImageW: tars ? 1288 : 1400,
-      snap: tars ? 28 : 0,
-      fit: true,
-      sig: true,
-      cursorMarker: true,
-    })
-    if (!res.image) throw new Error('Ekran görüntüsü alınamadı.')
-    rememberShot(res.image.data, label)
-    return { img: res.image, area: res.area, sig: res.sig ?? '' }
-  }
-
-  type Doable = Pick<GuiAction, 'kind' | 'x' | 'y' | 'x2' | 'y2' | 'keys' | 'text' | 'direction'>
-
-  function describeGui(a: Doable): string {
-    const pt = (x?: number, y?: number) => (x === undefined || y === undefined ? '' : ` (%${Math.round(x * 100)}, %${Math.round(y * 100)})`)
-    switch (a.kind) {
-      case 'click':
-        return `tıkla${pt(a.x, a.y)}`
-      case 'double':
-        return `çift tıkla${pt(a.x, a.y)}`
-      case 'right':
-        return `sağ tıkla${pt(a.x, a.y)}`
-      case 'drag':
-        return `sürükle${pt(a.x, a.y)} →${pt(a.x2, a.y2)}`
-      case 'hotkey':
-        return `tuş ${(a.keys ?? []).join('+')}`
-      case 'type':
-        return `yaz “${(a.text ?? '').replace(/\n/g, '⏎')}”`
-      case 'scroll':
-        return `kaydır ${a.direction ?? 'down'}${pt(a.x, a.y)}`
-      case 'wait':
-        return 'bekle'
-      default:
-        return a.kind
-    }
-  }
-
-  async function doGui(a: Doable, area: Shot['area'], node?: AgentNode) {
-    checkStopped()
-    const at = (x?: number, y?: number) => ({ x: area.x + (x ?? 0.5) * area.w, y: area.y + (y ?? 0.5) * area.h })
-    switch (a.kind) {
-      case 'move': {
-        await waitUnlocked()
-        checkStopped()
-        clearHover()
-        // Koordinat yoksa UYDURMA: merkeze taşımak "hedefe gittim" demek olurdu.
-        if (a.x === undefined || a.y === undefined || !Number.isFinite(a.x) || !Number.isFinite(a.y)) {
-          throw new Error('Fare oynatma için koordinat yok; imleç oynatılmadı.')
-        }
-        const p = at(a.x, a.y)
-        const tasima = await bridge.moveMouse(p.x, p.y)
-        checkStopped()
-        if (tasima?.warning) log('warn', tasima.warning)
-        // İNCELEME DÜZELTMESİ: kayıt tek modülde tutulur ve TAŞIMA anındaki pencereyi de
-        // saklar; böylece "Fareyi Oynat node'u → click_current" zinciri de aynı kaydı görür.
-        recordHover({ x: p.x, y: p.y }, tasima?.hwnd)
-        lastClickPoint = { x: p.x, y: p.y }
-        log('info', `Fare oynatıldı @${Math.round(p.x)},${Math.round(p.y)} (tıklama yok)`)
-        return true
-      }
-      case 'clickCurrent': {
-        await waitUnlocked()
-        checkStopped()
-        const point = await bridge.cursorPos()
-        checkStopped()
-        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('Fare konumu okunamadı; koordinat uydurulmadı.')
-        await sendClick(point.x, point.y, 'left')
-        checkStopped()
-        lastClickPoint = point
-        clearHover()
-        log('info', `Fare konumundan tıklama gönderildi @${Math.round(point.x)},${Math.round(point.y)}`)
-        return true
-      }
-      case 'click':
-      case 'double':
-      case 'right': {
-        guiReplace = false
-        if (a.x === undefined || a.y === undefined || !Number.isFinite(a.x) || !Number.isFinite(a.y)) throw new Error('Tıklama koordinatları eksik; nokta uydurulmadı.')
-        const p = at(a.x, a.y)
-        await clickInput(p, node, a.kind === 'double' ? 'double' : a.kind === 'right' ? 'right' : 'left')
-        return
-      }
-      case 'drag': {
-        guiReplace = false
-        lastClickPoint = undefined
-        clearHover()
-        const p = at(a.x, a.y)
-        const q = at(a.x2, a.y2)
-        await bridge.drag(p.x, p.y, q.x, q.y)
-        return
-      }
-      case 'hotkey':
-        if (a.keys?.length) {
-          clearHover()
-          const keys = a.keys.map(k => k.toLowerCase() === 'control' || k.toLowerCase() === 'ctl' ? 'ctrl' : k.toLowerCase())
-          guiReplace = keys.length === 2 && keys.includes('ctrl') && keys.includes('a')
-          await bridge.hotkey(a.keys)
-        }
-        return
-      case 'type': {
-        const raw = a.text ?? ''
-        const enter = /\n$/.test(raw)
-        const body = raw.replace(/\n+$/, '')
-        try { await typeDirect(body, enter, guiReplace, lastClickPoint) }
-        finally { guiReplace = false }
-        return
-      }
-      case 'scroll': {
-        guiReplace = false
-        lastClickPoint = undefined
-        clearHover()
-        const p = at(a.x, a.y)
-        await bridge.scroll(p.x, p.y, a.direction ?? 'down', 5)
-        return
-      }
-      case 'wait':
-        await pause(5000)
-        return
-    }
-  }
-
-  /** Replays the last good lap without the model while the screen still looks like it did then. */
-  async function replayPath(steps: PathStep[], vars: Record<string, string>, tars: boolean): Promise<{ ok: boolean; done: PathStep[] }> {
-    log('info', `Kayıtlı yol deneniyor (${steps.length} adım, model çağrılmadan).`)
-    const done: PathStep[] = []
-    for (const [i, st] of steps.entries()) {
-      if (stopped()) throw new StoppedError()
-      await waitUnlocked()
-      const shot = await agentShot(tars, `kayıtlı yol ${i + 1}`)
-      const diff = sigDiff(st.sig, shot.sig)
-      if (st.sig && diff > REPLAY_DIFF) {
-        log('info', `Kayıtlı yol ${i + 1}. adımda ayrıldı (ekran kayıttakinden farklı). Model buradan devam edecek.`)
-        return { ok: false, done }
-      }
-      const a: Doable = {
-        kind: st.action,
-        x: st.rx,
-        y: st.ry,
-        x2: st.rx2,
-        y2: st.ry2,
-        keys: st.keys,
-        text: renderTemplate(st.text, vars),
-        direction: st.direction,
-      }
-      if (st.patch && a.x !== undefined && a.y !== undefined && process.platform === 'win32') {
-        const px = shot.area.x + a.x * shot.area.w
-        const py = shot.area.y + a.y * shot.area.h
-        const hit = await bridge
-          .findImage(st.patch, undefined, { x: px - PATCH_RADIUS, y: py - PATCH_RADIUS, w: PATCH_RADIUS * 2, h: PATCH_RADIUS * 2 })
-          .catch(() => null)
-        if (!hit || hit.score < PATCH_MIN) {
-          log('info', `Kayıtlı yol ${i + 1}. adımda ayrıldı: tıklanacak yerdeki görüntü kayıttakiyle aynı değil (%${Math.round((hit?.score ?? 0) * 100)}). Model buradan devam edecek.`)
-          return { ok: false, done }
-        }
-        const dx = (hit.x - px) / shot.area.w
-        const dy = (hit.y - py) / shot.area.h
-        a.x += dx
-        a.y += dy
-        if (a.x2 !== undefined && a.y2 !== undefined) {
-          a.x2 += dx
-          a.y2 += dy
-        }
-      }
-      log('info', `[kayıtlı yol ${i + 1}/${steps.length}] ${describeGui(a)}`)
-      await doGui(a, shot.area)
-      done.push(st)
-      await pause(a.kind === 'wait' ? 0 : a.kind === 'type' || a.kind === 'hotkey' ? 700 : 1000)
-    }
-    return { ok: true, done }
-  }
-
-  function savePath(node: AgentNode, steps: PathStep[], vars: Record<string, string>) {
-    const out = steps.map((st) => (st.text ? { ...st, text: generalize(st.text, vars) } : st))
-    runPath.set(node.id, out)
-    send('agent:patch', { id: node.id, patch: { path: out } })
-  }
-
-  async function initiativeScreen(node: AgentNode, _stepNo: number, _ahead?: StepAhead, vars: Record<string, string> = {}): Promise<boolean> {
-    const s = getSettings()
-    if (!s.apiKey && !localConfigured()) throw new Error('İnisiyatif için OpenRouter API anahtarı gerekli (Ayarlar > API Key).')
-    const configured = agentModels(s)
-    const model = initiativeDecisionModels(configured)
-    if (model[0] !== configured[0]) log('info', `İnisiyatif görev kararı için yapılandırılmış görsel model öne alındı: ${model[0]}. UI-TARS yedekte; normal hedef bulma sırası değiştirilmedi.`)
-    const tars = model.some((name) => isTarsModel(name))
-    const goal = node.prompt!.trim()
-    const max = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
-    const history: GuiTurn[] = []
-
-    // A lap can run dozens of actions, and the model only ever receives the newest few
-    // frames, so older screenshots are released instead of being held for the whole lap.
-    const GUI_IMAGES_KEPT = 4
-    const keepRecentImages = () => {
-      for (let i = 0; i < history.length - GUI_IMAGES_KEPT; i++) {
-        if (history[i].image) delete history[i].image
-      }
-    }
-    let path: PathStep[] = []
-    ctx.setMethod?.(isTarsModel(model[0] || '') ? 'UI-TARS' : 'İnisiyatif')
-    log('info', `İnisiyatif (${model.join(' → ')}${tars && !isTarsModel(model[0] || '') ? ', UI-TARS yedek' : ''}): ${goal}`)
-    if (!s.hideWhileRunning) log('warn', 'Ayarlarda “Çalışırken bu pencereyi küçült” kapalı; bu pencere ekran görüntüsünde görünür ve model ona tıklayabilir.')
-
-    const saved = runPath.get(node.id) ?? node.path
-    if (saved?.length && node.templated) {
-      log('info', 'Hedefte her tur değişen bir değer ({{öğe}} gibi) var; geçen turun kayıtlı yolu bu tura uymayabileceği için oynatılmıyor, model ekrana bakarak yapacak.')
-    } else if (saved?.some(st => ['click', 'double', 'right', 'move', 'clickCurrent'].includes(st.action))) {
-      log('info', 'Kayıtlı görsel tıklamalar yeni karede fare konumu değerlendirilmeden oynatılmıyor; model mevcut hedefi yeniden görecek.')
-    } else if (saved?.length) {
-      const r = await replayPath(saved, vars, tars)
-      path = [...r.done]
-      if (r.ok) {
-        log('success', `Kayıtlı İnisiyatif yolu tamamlandı (${saved.length} adım).`)
-        return true
-      }
-      if (r.done.length) {
-        history.push({
-          thought: `Önceki turun kaydından ${r.done.length} adım oynatıldı: ${r.done.map((st) => describeGui({ ...st, kind: st.action })).join(', ')}`,
-          raw: 'wait()',
-          note: 'Kayıt buraya kadar oynatıldı. Ekrana bak ve görevin kalanını tamamla.',
-        })
-      }
-    }
-
-    let pointerPrepared = false
-    for (let i = 1; i <= max; i++) {
-      if (stopped()) throw new StoppedError()
-      ctx.setMethod?.(isTarsModel(model[0] || '') ? 'UI-TARS' : 'İnisiyatif')
-      keepRecentImages()
-      await waitUnlocked()
-      const shot = await agentShot(tars, `inisiyatif ${i}`)
-      let a = await guiStep({
-        apiKey: s.apiKey,
-        model,
-        goal,
-        history,
-        screen: shot.img,
-        tarsPrompt: promptOf(s.llmPrompts, 'tars'),
-        jsonPrompt: promptOf(s.llmPrompts, 'screen'),
-        initiative: true,
-      })
-      checkStopped()
-      let moveNote: string | undefined
-      // One deliberate preparation step, then a fresh frame and the model's own click.
-      // No distance/foreground/UIA/screen-difference verdict is applied to that click.
-      if (['click', 'double', 'right'].includes(a.kind) && !pointerPrepared) {
-        moveNote = 'Your proposed click was NOT sent. Only the pointer was positioned. Inspect the NEXT screenshot; if the target is correct choose your own click/double/right with coordinates, otherwise move again. Do not claim the task finished merely because the pointer moved.'
-        a = { ...a, kind: 'move' }
-      }
-      log('info', `[inisiyatif ${i}/${max}] ${a.thought || '—'} → ${describeGui(a)}`)
-
-      if (a.kind === 'finished') {
-        // §17: model "bitti" dediğinde mekanizma ikinci bir yargı koymaz; eski "önerilen tıklama
-        // gönderilmedi" reddi kaldırıldı (kullanıcı kararı).
-        savePath(node, path, vars)
-        log('success', `İnisiyatif tamamlandı (model “bitti” dedi; ${path.length} eylem)${a.text ? `: ${a.text}` : ''}.`)
-        return true
-      }
-      if (a.kind === 'call_user') {
-        log('warn', `Model yardım istedi, İnisiyatif duruyor: ${a.thought || 'gerekçe yok'}`)
-        return false
-      }
-
-      const turn: GuiTurn = { thought: a.thought, raw: a.raw, image: shot.img, ...(moveNote ? { note: moveNote } : {}) }
-      const { thought: _thought, raw: _raw, ...dispatchedAction } = a
-      try {
-        let patch: string | undefined
-        if (['click', 'double', 'right', 'drag'].includes(a.kind) && a.x !== undefined && a.y !== undefined) {
-          const px = shot.area.x + a.x * shot.area.w
-          const py = shot.area.y + a.y * shot.area.h
-          patch = (await bridge.patchAt(px, py, 64))?.data
-        }
-        const sent = await doGui(a, shot.area, node)
-        if (a.kind === 'clickCurrent') {
-          if (sent !== true) throw new Error('INPUT_CLICK_NOT_SENT: Fare konumundan tıklama gönderilmedi; adım kaydedilmedi.')
-        }
-        if (['click', 'double', 'right'].includes(a.kind)) {
-          log('info', 'Modelin seçtiği tıklama yürütüldü: ' + describeGui(a))
-        }
-        turn.execution = { status: 'sent', action: dispatchedAction }
-        pointerPrepared = a.kind === 'move' && sent === true
-        path.push({
-          patch,
-          action: a.kind as PathStep['action'],
-          rx: a.x,
-          ry: a.y,
-          rx2: a.x2,
-          ry2: a.y2,
-          keys: a.keys,
-          text: a.text,
-          direction: a.direction,
-          thought: a.thought.slice(0, 160),
-          sig: shot.sig,
-        })
-      } catch (e) {
-        if (e instanceof StoppedError) throw e
-        turn.execution = { status: 'unconfirmed', action: dispatchedAction }
-        turn.note = `Eylem tamamlanamadı: ${(e as Error).message.split('\n')[0]}`
-        log('warn', turn.note)
-      }
-      history.push(turn)
-      await pause(a.kind === 'wait' ? 0 : a.kind === 'type' || a.kind === 'hotkey' ? 700 : 1000)
-    }
-    log('warn', `İnisiyatif ${max} eylemde hedefe ulaşamadı.`)
-    return false
-  }
+  // ---------- Yap ----------
 
   // ---------- executor ----------
 
@@ -1569,7 +1112,7 @@ export function createAgent(ctx: AgentContext) {
             const tasima = await bridge.moveMouse(t.x, t.y)
             checkStopped()
             // İNCELEME DÜZELTMESİ: node'un "Fareyi Oynat" modu kaydı GERÇEKTEN güncellemeli;
-            // yoksa "Fareyi Oynat node'u → İnisiyatif'te click_current" zinciri konumu bulamaz.
+            // yoksa "Fareyi Oynat node'u → Yap'te click_current" zinciri konumu bulamaz.
             recordHover({ x: t.x, y: t.y }, tasima?.hwnd)
             lastClickPoint = { x: t.x, y: t.y }
             trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
@@ -1677,8 +1220,7 @@ export function createAgent(ctx: AgentContext) {
       log('info', `Hata anının ekran görüntüsü kaydedildi: ${file}`)
       ctx.noteFailureShot?.(file)
     },
-    initiative: (node, stepNo, ahead, vars) =>
-      node.engine === 'list' ? initiative(node, stepNo, ahead, vars) : initiativeScreen(node, stepNo, ahead, vars),
+
   }
 
   /** Same resolver, one read-only pass. No click, typing, recovery actions or memory write. */

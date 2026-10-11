@@ -1,3 +1,4 @@
+import { runPowerShell, windowScript } from './windows-tools'
 import { createAgent } from './agent'
 import { callTool, type ToolContext } from './tools'
 import { runGraph, StoppedError, type RecoveryRequest, type Executor } from './runner'
@@ -7,7 +8,7 @@ import { RECOVERY_ACTION_KINDS, type RecoveryToolResult } from './recovery'
 import { recoverySettings } from './recovery-settings'
 
 /** An internal session owns the paused run; public tools still see `running:true`. */
-export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, shouldStop: () => boolean, sharedExecutor?: Executor) {
+export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, shouldStop: () => boolean, sharedExecutor?: Executor, taskMode = false) {
   const graph = structuredClone(request.graph)
   const allowed = new Set([request.node.id, ...recoverySettings(base.getSettings().recovery).allowedNodeIds])
   const check = () => { if (shouldStop()) throw new StoppedError() }
@@ -24,6 +25,13 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
   }
   return async (name: string, args: Record<string, unknown>): Promise<RecoveryToolResult> => {
     check()
+    if (name === 'window_action' || name === 'powershell_run') {
+      const settings = recoverySettings(base.getSettings().recovery)
+      if (taskMode && name === 'powershell_run' && request.node.allowCode === false) throw new Error('Yap kod çalıştırma kapalı.')
+      if (!taskMode && (!settings.allowDesktop || name === 'powershell_run' && !settings.allowCode)) throw new Error('Bu Windows aracı kapalı.')
+      return runPowerShell(name === 'window_action' ? windowScript(args, process.pid) : String(args.code || ''), typeof args.cwd === 'string' ? args.cwd : undefined, shouldStop)
+    }
+    if (taskMode && ['step.run', 'target.preview'].includes(name)) throw new Error('Yap başka node çalıştıramaz.')
     if (['screen.read', 'flow.read', 'flow.context', 'target.preview'].includes(name)) {
       if (name === 'target.preview') {
         const node = findPlace(graph, String(args.nodeId ?? ''))?.node
@@ -43,7 +51,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       return result
     }
     if (['act.move', 'act.clickPoint', 'act.clickCurrent'].includes(name)) {
-      if (!recoverySettings(base.getSettings().recovery).allowDesktop) throw new Error('Ekran eylemleri kapalı.')
+      if (!taskMode && !recoverySettings(base.getSettings().recovery).allowDesktop) throw new Error('Ekran eylemleri kapalı.')
       const source = sharedExecutor ?? isolated.executor
       if (!source.pointerAction) throw new Error('Fare eylem altyapısı hazır değil.')
       const mode = name === 'act.move' ? 'move' : args.mode ?? 'left'
@@ -72,7 +80,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       for (const field of ['prompt', 'text', 'keys', 'folder', 'pattern', 'source', 'url'] as const) node[field] = renderTemplate(node[field], request.vars)
     } else {
       const settings = recoverySettings(base.getSettings().recovery)
-      if (!settings.allowDesktop) throw new Error('Ekran eylemleri kapalı.')
+      if (!taskMode && !settings.allowDesktop) throw new Error('Ekran eylemleri kapalı.')
       const kinds: Record<string, 'click' | 'type' | 'key' | 'wait'> = { 'act.click': 'click', 'act.type': 'type', 'act.key': 'key', 'act.wait': 'wait' }
       const kind = kinds[name]
       if (!kind) throw new Error(`Kurtarma aracı yok: ${name}`)

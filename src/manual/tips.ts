@@ -40,8 +40,8 @@ const KIND: Record<string, Tip> = {
     text: 'Bir kutu. İçindeki adımlar listedeki her dosya için bir kez çalışır. Ajanı Çalıştır listenin başından başlar. Listedeki işaret, Seçiliden Çalıştır’ın hangi dosyadan devam edeceğini tutar. Kutu “bitti” deyince işaret 1. öğeye döner; sıradaki klasör baştan işlenir. Durdurulursa veya kutu hata diye kesilirse işaret o dosyada kalır. Sıradaki dosyanın yolu {{öğe}}, uzantısız adı {{öğe.isim}} olur. İş bitince akış “bitti” çıkışından çıkar.',
   },
   ai: {
-    title: 'İnisiyatif',
-    text: 'Birkaç adımlık işi tek cümleyle tarif edersin. Model ekrana bakıp tıklar, yazar, tuşa basar. Hedefe ulaşırsa “tamam”, ulaşamazsa “olmadı” çıkışından devam eder. Başarılı turun yolu kaydedilir; Hafızayı Sil bunu unutturur.',
+    title: 'Yap',
+    text: 'Birkaç adımlık işi tek cümleyle tarif edersin. Model ekrana bakıp tıklar, yazar, tuşa basar. Görev tamamlanınca sonraki adıma geçer. Çözülemezse hata verir. Önceki turun hareketleri oynatılmaz.',
   },
   browser: {
     title: 'Tarayıcıyı Aç',
@@ -74,7 +74,7 @@ const BY_LABEL: Record<string, string> = {
   Zamanlayıcı: 'wait',
   Koşul: 'condition',
   'Her Öğe İçin': 'loop',
-  İnisiyatif: 'ai',
+  Yap: 'ai',
   'Tarayıcıyı Aç': 'browser',
   'Dosyayı Bekle': 'waitFile',
   'Dosyayı Taşı': 'moveFile',
@@ -113,11 +113,11 @@ const PORT: Record<string, Tip> = {
   },
   tamam: {
     title: 'Tamam',
-    text: 'İnisiyatif hedefe ulaştı. Akış bu çıkıştan gider.',
+    text: 'Yap hedefe ulaştı. Akış bu çıkıştan gider.',
   },
   olmadı: {
     title: 'Olmadı',
-    text: 'İnisiyatif hedefe ulaşamadı. Akış bu çıkıştan gider. Çıkış boşsa adım hata verir.',
+    text: 'Yap hedefe ulaşamadı. Akış bu çıkıştan gider. Çıkış boşsa adım hata verir.',
   },
 }
 
@@ -314,14 +314,6 @@ function segTip(t: string): Tip | null {
     'Tek tık': { title: 'Tek tık', text: 'Sol tuşla bir kez tıklar.' },
     'Çift tık': { title: 'Çift tık', text: 'Çift tıklar. Masaüstü simgeleri ve dosyalar genelde bunu ister.' },
     'Sağ tık': { title: 'Sağ tık', text: 'Sağ tıklar. Menü açmak için.' },
-    'Ekrana bakarak (UI-TARS gibi)': {
-      title: 'Ekrana bakarak',
-      text: 'İnisiyatif her adımda ekran görüntüsü alır ve tıklanacak noktayı modelden ister. Yazısız ikon ve menülerde bu yol kullanılır.',
-    },
-    'Yazı listesiyle': {
-      title: 'Yazı listesiyle',
-      text: 'Ekrandaki yazılar numaralanır, model numarayı seçer. Formlar ve web sayfalarında hızlıdır. İkonu göremez.',
-    },
   }
   return map[t] ?? null
 }
@@ -334,9 +326,8 @@ function fieldTip(el: Element): Tip | null {
   const tips: [string, Tip][] = [
     ['Liste (her satır bir öğe)', { title: 'Liste', text: 'Her satır bir turdur. Soldaki işaret, Seçiliden Çalıştır’ın başlayacağı satırdır; tek satır işaretli olur. Ajanı Çalıştır her zaman birinci satırdan başlar. Çalışırken işaret turdaki dosyaya kayar. Kutu bitince işaret 1. satıra döner. Yarıda kesilirse o satırda kalır. Yükleme adımına {{öğe}} yaz; o, satırdaki tam yoldur.' }],
     ['Tekrar sayısı', { title: 'Tekrar sayısı', text: 'Liste boşken kutu bu kadar kez döner. {{öğe}} o turda 1, 2, 3 diye gider.' }],
-    ['Nasıl çalışsın?', { title: 'Nasıl çalışsın?', text: 'Ekrana bakarak: model görüntüden tıklar. Yazı listesiyle: ekrandaki yazılardan numara seçer.' }],
-    ['Hedef (ne olmasını istiyorsun?)', { title: 'Hedef', text: 'İnisiyatif’in yapacağı iş. Birkaç adımı tek cümlede yaz. {{öğe}} yazarsan her tur o dosyaya göre değişir; kayıtlı yol o zaman oynatılmaz, model yeniden bakar.' }],
-    ['En fazla eylem', { title: 'En fazla eylem', text: 'İnisiyatif bu kadar tıklama, yazma ve tuştan sonra durur. Hedefe varmadan sınır dolarsa “olmadı” sayılır.' }],
+    ['Ne yapılsın?', { title: 'Görev', text: 'Yap’ın gerçekleştireceği görev. {{öğe}} gibi değişkenler her tur güncellenir. Ajan güncel ekran ve araçlarla çalışır.' }],
+    ['En fazla eylem', { title: 'En fazla eylem', text: 'Yap bu kadar tıklama, yazma ve tuştan sonra durur. Görev bitmeden sınır dolarsa hata verir.' }],
     ['Neye tıklanacak?', { title: 'Neye tıklanacak?', text: 'Ekranda gördüğün yazıyı yaz. Tırnak içine alırsan birebir aranır. {{öğe.ad}} o turdaki dosya adıdır.' }],
     ['Tıklama türü', { title: 'Tıklama türü', text: 'Tek tık, çift tık veya sağ tık. Simgeler çoğunlukla çift tık ister.' }],
     ['Yazılacak metin', { title: 'Yazılacak metin', text: 'Alana yazılacak şey. Sıradaki dosya için yalnızca {{öğe}} yaz. Sabit bir dosya adı yazarsan her tur aynı dosya gider.' }],
@@ -348,14 +339,14 @@ function fieldTip(el: Element): Tip | null {
     ['Ekranda ne görünmeli?', { title: 'Ekranda ne görünmeli?', text: 'Görsel modele sorulacak tarif. Önce yazı ve seçilen öğe aranır; bulunamazsa bu tarif modele gider.' }],
     ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca tekrar tekrar bakar. Süre dolunca “yok” çıkışı kullanılır.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
-    ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve İnisiyatif için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
-    ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsünden hedef bulma bu modeli kullanır. İnisiyatif’in ekran modu için ayrı model seçilebilir.' }],
+    ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve Yap için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
+    ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsünden hedef bulma bu modeli kullanır. Yap için ayrı bir araç çağırabilen görsel model seçilebilir.' }],
     ['Hedef pencere', { title: 'Hedef pencere', text: 'Doluysa yalnızca o pencere okunur ve öne alınır. “Tüm ekran” masaüstü dahil her yere bakar. ↻ listeyi yeniler.' }],
     ['Adımlar arası bekleme', { title: 'Adımlar arası bekleme', text: 'Her adımdan sonra bu kadar milisaniye durur. Sayfanın yerleşmesi için. 800 makul bir başlangıçtır.' }],
     ['Maks. adım', { title: 'Maks. adım', text: 'Bir turda bu kadar adımdan fazla çalışılırsa tur durur. Hiç bitmeyen bir bekleme döngüsüne karşı. Kutunun her turu ayrı sayılır.' }],
   ]
-  if (label === 'Model adı' && group.includes('İnisiyatif')) {
-    return { title: 'İnisiyatif modeli', text: 'Ekrana bakarak çalışan İnisiyatif bu modeli kullanır. Varsayılan UI-TARS’tır. Aynı OpenRouter anahtarı geçerli. Kaydet’e bas.' }
+  if (label === 'Model adı' && group.includes('Yap')) {
+    return { title: 'Yap modeli', text: 'Ekrana bakarak çalışan Yap bu modeli kullanır. Araç çağırabilen ve görüntü anlayabilen bir model seç. Aynı OpenRouter anahtarı geçerli. Kaydet’e bas.' }
   }
   if (label === 'Model adı') {
     return { title: 'Model adı', text: 'Yazı listesinden seçim yapan modeller. 1 önce denenir, olmazsa alttakiler. Listenin altındaki Kaydet’e basınca kalır.' }

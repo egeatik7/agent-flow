@@ -1,3 +1,4 @@
+import { windowsTools } from './windows-tools'
 import { modelChain, type AgentGraph, type LogLevel } from './graph-types'
 import { contextOf, findPlace } from './tool-context'
 import { StoppedError, type RecoveryDecision, type RecoveryRequest } from './runner'
@@ -57,7 +58,7 @@ export function recoveryTools(settings: RecoverySettings): ModelTool[] {
     tool('recovery_complete', 'Güncel ekranı gördükten sonra mevcut node’un hedefinin başka yoldan gerçekleştiğini bildir. Motor mevcut node’u tekrarlamadan devam eder. Bu karar model gözlemine dayanır.', { probableCause: str, evidence: str, summary: str }, ['probableCause', 'evidence', 'summary']),
     tool('recovery_stop', 'Bu hatayı toparlayamadığını açık bir nedenle raporla.', { probableCause: str, evidence: str, summary: str }, ['probableCause', 'evidence', 'summary']),
   ]
-  if (settings.allowDesktop) tools.push(
+  if (settings.allowDesktop) tools.push(...windowsTools(settings.allowCode === true),
     tool('act_click', 'Ekrandaki hedefe tıkla.', { target: str, mode: { type: 'string', enum: ['left', 'double', 'right', 'move'] } }, ['target']),
     tool('act_move', 'Fareyi son screen_read görüntüsünde gördüğün noktaya hizala; tıklamaz. x/y görüntüye göre 0–1: sol üst 0/0, sağ alt 1/1. Sonra screen_read ile hizalamayı incele.', { x: { type: 'number' }, y: { type: 'number' } }, ['x', 'y']),
     tool('act_click_current', 'Gerçek fare konumundan tıkla. Önce act_move ve screen_read ile hedefe hizalan; çift tık için mode double kullan.', { mode: { type: 'string', enum: ['left', 'double', 'right'] } }),
@@ -102,7 +103,7 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   let costUsd = 0
   let costKnown = true
   const messages: ToolMessage[] = [{ role: 'system', content: `Nubbo kurtarma ajanısın. Yalnız hata sınırında devreye girdin; normal akış sen çalışırken bekliyor.
-Akışı/JSON'u değiştirme veya baştan başlatma. Döngü öğesi ve yürütme yığını korunuyor. Yeni kod veya komut betiği üretme.
+Akışı/JSON'u değiştirme veya baştan başlatma. Döngü öğesi ve yürütme yığını korunuyor. ${settings.allowCode ? 'Hazır araçlar yetmediğinde görev kapsamında powershell_run kullanabilirsin.' : 'Kod veya komut betiği çalıştırma.'}
 Yalnız Tıkla, Tuş Gönder, Yazı Yaz ve Zamanlayıcı eylemlerini kullan. İnisiyatif, Koşul, Paket ve Döngü çalıştıramazsın.
 step_run yalnız izinli eylem node'larını mevcut öğeyle çalıştırır. Bitmiş işi tekrar etme. İşlem gönderildi ile sonuç gözlendi ayrımını koru.
 Hata fırlaması, eylemin hiç gönderilmediğini kanıtlamaz. Kısmen veya tamamen yapılmış bir işlemi yeniden göndermeden güncel durumu ve günlüğü dikkate al.
@@ -180,9 +181,9 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
           const keys = Object.keys(schema.properties as Record<string, unknown>)
           args = Object.fromEntries(Object.entries(args).filter(([key]) => keys.includes(key)))
           if (name === 'act_wait') args.ms = Math.max(0, Math.min(10_000, typeof args.ms === 'number' ? args.ms : 1000))
-          deps.log('info', `Kurtarma aracı: ${names[name]} ${JSON.stringify(args).slice(0, 500)}`)
-          if (name.startsWith('act_') || name === 'step_run') freshScreen = false
-          result = await execute(names[name], args)
+          deps.log('info', `Kurtarma aracı: ${names[name] || name} ${name === 'powershell_run' ? JSON.stringify(args) : JSON.stringify(args).slice(0, 500)}`)
+          if (name.startsWith('act_') || name === 'step_run' || name === 'window_action' || name === 'powershell_run') freshScreen = false
+          result = await execute(names[name] || name, args)
           check()
           if (name === 'screen_read') freshScreen = result.ok && result.outcome === 'tamam'
           if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam' && result.data?.sent !== false) failedNodeSent = true

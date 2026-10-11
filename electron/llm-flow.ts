@@ -18,7 +18,6 @@ export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt
 
 export const EXTRA_PROMPTS: { id: PromptId; title: string; note: string }[] = [
   { id: 'screen', title: 'Ekran görüntüsü JSON', note: 'UI-TARS olmayan model ekran görüntüsüne bu prompt ile bakar.' },
-  { id: 'initiative', title: 'İnisiyatif', note: 'Hedefe giderken her turda numaralı liste ve görüntü bu prompt ile gider.' },
   { id: 'reaction', title: 'Tepki', note: 'Tıklamadan sonraki iki kare bu prompt ile yorumlanır.' },
   { id: 'stall', title: 'Takılma', note: 'Hedef bulunamazsa akış bu prompt ile bekler, sürer ya da durur.' },
 ]

@@ -6,6 +6,7 @@ export type RecoverySettings = {
   backups: string[]
   task: string
   instructions: string
+  allowCode?: boolean
   allowDesktop: boolean
   allowNodes: boolean
   /** The failed action is always allowed; these are additional action nodes. */
@@ -50,6 +51,7 @@ export function recoverySettings(value?: Partial<RecoverySettings>): RecoverySet
     backups: strings(value?.backups, 4),
     task: typeof value?.task === 'string' ? value.task.slice(0, 30_000) : '',
     instructions: typeof value?.instructions === 'string' ? value.instructions.slice(0, 30_000) : DEFAULT_RECOVERY_INSTRUCTIONS,
+    allowCode: value?.allowCode === true,
     allowDesktop: value?.allowDesktop !== false,
     allowNodes: value?.allowNodes !== false,
     allowedNodeIds: strings(value?.allowedNodeIds, 2000),

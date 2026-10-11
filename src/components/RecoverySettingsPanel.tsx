@@ -93,9 +93,10 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <button type="button" className="xp-btn" onClick={() => update({ instructions: DEFAULT_RECOVERY_INSTRUCTIONS })}>Varsayılan talimatı getir</button>
     </div>
     <fieldset><legend>Araç yetkileri</legend>
-      <label className="check"><input type="checkbox" checked={s.allowDesktop} onChange={e => update({ allowDesktop: e.target.checked })} /> Tıkla, yaz, tuş gönder ve bekle</label>
+      <label className="check"><input type="checkbox" checked={s.allowDesktop} onChange={e => update({ allowDesktop: e.target.checked })} /> Tıkla, yaz, tuş gönder, bekle ve pencereyi yönet</label>
       <label className="check"><input type="checkbox" checked={s.allowNodes} onChange={e => update({ allowNodes: e.target.checked })} /> Hata veren eylem node'unu tek adım olarak çağır</label>
-      <p className="hint">İnisiyatif, Koşul, Paket ve Döngü çalıştırılamaz. JSON ve ekran okunabilir. Ajan node'ları düzenleyemez ve akışı baştan başlatamaz. Seçtiğin ek node'lar mevcut öğenin değişkenleriyle çalışır.</p>
+      <label className="check"><input type="checkbox" checked={s.allowCode === true} onChange={e => update({ allowCode: e.target.checked })} />PowerShell çalıştırabilir</label>
+      <p className="hint">Yap, Koşul, Paket ve Döngü çalıştırılamaz. JSON ve ekran okunabilir. Ajan node'ları düzenleyemez ve akışı baştan başlatamaz. Seçtiğin ek node'lar mevcut öğenin değişkenleriyle çalışır.</p>
       <details><summary>Çağırabileceği ek eylem node'ları ({s.allowedNodeIds.length})</summary>
         <div className="recovery-node-list">{nodes.length ? nodes.map(node => <label className="check" key={node.id} title={node.path}>
           <input type="checkbox" disabled={!s.allowNodes} checked={s.allowedNodeIds.includes(node.id)} onChange={e => update({ allowedNodeIds: e.target.checked ? [...s.allowedNodeIds, node.id] : s.allowedNodeIds.filter(id => id !== node.id) })} />
