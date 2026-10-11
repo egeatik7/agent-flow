@@ -1,6 +1,8 @@
 import { useState, type Dispatch, type SetStateAction } from 'react'
 import type { AppSettings, ModelInfo } from '../types'
 
+import NumberDraft from './NumberDraft'
+
 const PRESETS = [
   { title: 'llama.cpp', url: 'http://127.0.0.1:8080/v1' },
   { title: 'Ollama', url: 'http://127.0.0.1:11434/v1' },
@@ -67,7 +69,7 @@ export default function LocalModelSettings({ settings: s, setSettings, onSave, o
         </div>
         <p className="hint">Düşünme açıkken model cevabı yazmadan önce uzun bir düşünme metni üretir: Ollama'da ölçüm kapalıyken <b>0,1 sn</b>, açıkken <b>1,4 sn</b> ve kısa yanıt bütçesi düşünmeye gidip cevap boş kalabiliyor. Seviyeler (düşük/orta/yüksek) yalnız seviyeli modellerde (örn. gpt-oss) anlam taşır; diğerlerinde "açık" gibi davranır.</p>
         <div className="field"><label htmlFor="local-timeout">Yanıt için bekleme süresi (saniye)</label>
-          <input id="local-timeout" className="xp-input" type="number" min={10} max={900} value={Math.round((s.localTimeoutMs ?? 180_000) / 1000)} onChange={e => set({ localTimeoutMs: Math.max(10, Math.min(900, Number(e.target.value) || 180)) * 1000 })} />
+          <NumberDraft id="local-timeout" min={10} max={900} value={Math.round((s.localTimeoutMs ?? 180_000) / 1000)} onCommit={value => set({ localTimeoutMs: value * 1000 })} />
         </div>
       </fieldset>
       <button type="button" className="xp-btn save block" onClick={() => onSave({ localBaseUrl: (s.localBaseUrl ?? '').trim(), localTimeoutMs: s.localTimeoutMs ?? 180_000, localVision: s.localVision === true, localOff: s.localOff === true, localThink: s.localThink ?? '' })}>Yerel ayarları kaydet</button>

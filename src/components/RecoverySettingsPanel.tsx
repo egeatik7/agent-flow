@@ -3,6 +3,7 @@ import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '.
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
 import ModelChain from './ModelChain'
+import NumberDraft from './NumberDraft'
 import type { RecoveryReport } from '../../electron/recovery'
 
 export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled }: {
@@ -104,7 +105,7 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     </fieldset>
     <div className="field-row recovery-limits">
       <label>Araç çağrısı sınırı<input className="xp-input" type="number" min={1} max={60} value={s.maxCalls} onChange={e => update({ maxCalls: Number(e.target.value) })} /></label>
-      <label>Kurtarma süresi (sn)<input className="xp-input" type="number" min={10} max={900} value={s.timeoutMs / 1000} onChange={e => update({ timeoutMs: Number(e.target.value) * 1000 })} /></label>
+      <label>Kurtarma süresi (sn)<NumberDraft min={10} max={900} value={s.timeoutMs / 1000} onCommit={value => update({ timeoutMs: value * 1000 })} /></label>
       <label>Koşu başına kurtarma<input className="xp-input" type="number" min={1} max={100} value={s.maxRecoveries} onChange={e => update({ maxRecoveries: Number(e.target.value) })} /></label>
     </div>
     <button type="button" className="xp-btn save block" onClick={() => onSave({ recovery: s })}>Kurtarma Ayarlarını Kaydet</button>

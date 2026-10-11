@@ -23,17 +23,18 @@ function idleMs() {
   const ps = [
     'Add-Type -Namespace N -Name U -MemberDefinition \'[DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p); [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }\';',
     '$i = New-Object N.U+LASTINPUTINFO; $i.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($i);',
-    '$null = [N.U]::GetLastInputInfo([ref]$i);',
+    'if (-not [N.U]::GetLastInputInfo([ref]$i)) { throw "GetLastInputInfo başarısız" };',
     '$tick = [Environment]::TickCount;',
-    '[int]($tick - $i.dwTime)',
+    '(([long]$tick - [long]$i.dwTime + 4294967296) % 4294967296)',
   ].join(' ')
   const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
   const n = Number(String(out).trim().split(/\r?\n/).pop())
-  return Number.isFinite(n) ? n : -1
+  return String(out).trim() && Number.isFinite(n) && n >= 0 ? n : -1
 }
 
-const idle = idleMs()
-const busy = idle >= 0 && idle < need
+let idle = -1
+try { idle = idleMs() } catch { /* Unknown input time must block the run. */ }
+const busy = !Number.isFinite(need) || need < 0 || idle < 0 || idle < need
 const result = {
   idleMs: idle,
   needed: need,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type SetStateAction } from 'react'
 import { DEFAULT_FIND_OFF, normalizeFind } from '../../electron/llm-flow'
 import {
   DEFAULT_PROMPTS,
@@ -13,6 +13,7 @@ import {
 type Props = {
   settings: AppSettings
   onSave: (partial: Partial<AppSettings>) => void
+  onDraft?: (partial: Partial<AppSettings>) => void
 }
 
 function move(list: FindStageId[], index: number, dir: -1 | 1): FindStageId[] {
@@ -25,16 +26,29 @@ function move(list: FindStageId[], index: number, dir: -1 | 1): FindStageId[] {
 }
 
 export default function LlmPanel(p: Props) {
-  const [order, setOrder] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).order)
-  const [off, setOff] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).off)
-  const [prompts, setPrompts] = useState<LlmPrompts>({ ...p.settings.llmPrompts })
+  const [order, setOrderState] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).order)
+  const [off, setOffState] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).off)
+  const [prompts, setPromptsState] = useState<LlmPrompts>({ ...p.settings.llmPrompts })
 
   useEffect(() => {
     const find = normalizeFind(p.settings.findOrder, p.settings.findOff)
-    setOrder(find.order)
-    setOff(find.off)
-    setPrompts({ ...p.settings.llmPrompts })
-  }, [p.settings])
+    setOrderState(find.order)
+    setOffState(find.off)
+    setPromptsState({ ...p.settings.llmPrompts })
+  }, [p.settings.findOrder, p.settings.findOff, p.settings.llmPrompts])
+
+  const setOrder = (action: SetStateAction<FindStageId[]>) => {
+    const value = typeof action === 'function' ? action(order) : action
+    setOrderState(value); p.onDraft?.({ findOrder: value })
+  }
+  const setOff = (action: SetStateAction<FindStageId[]>) => {
+    const value = typeof action === 'function' ? action(off) : action
+    setOffState(value); p.onDraft?.({ findOff: value })
+  }
+  const setPrompts = (action: SetStateAction<LlmPrompts>) => {
+    const value = typeof action === 'function' ? action(prompts) : action
+    setPromptsState(value); p.onDraft?.({ llmPrompts: value })
+  }
 
   const text = (id: PromptId) => prompts[id] ?? DEFAULT_PROMPTS[id]
   const setText = (id: PromptId, value: string) => setPrompts((prev) => ({ ...prev, [id]: value }))

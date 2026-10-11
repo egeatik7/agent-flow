@@ -154,7 +154,7 @@ export default function ScreenScanner(p: Props) {
       if (!g) return
       g.drawImage(image, 0, 0)
       baseRef.current = g.getImageData(0, 0, c.width, c.height)
-      paintRamp()
+      paintRampRef.current()
     }
     image.src = src
     return () => {
@@ -164,6 +164,7 @@ export default function ScreenScanner(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
 
+  const paintRampRef = useRef<() => void>(() => {})
   const paintRamp = () => {
     const base = baseRef.current
     const canvas = canvasRef.current
@@ -190,6 +191,8 @@ export default function ScreenScanner(p: Props) {
     g.putImageData(out, 0, 0)
     setPainted(true)
   }
+
+  paintRampRef.current = paintRamp
 
   useEffect(() => {
     paintRamp()

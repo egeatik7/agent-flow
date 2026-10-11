@@ -185,7 +185,7 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
           result = await execute(names[name], args)
           check()
           if (name === 'screen_read') freshScreen = result.ok && result.outcome === 'tamam'
-          if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam') failedNodeSent = true
+          if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam' && result.data?.sent !== false) failedNodeSent = true
         } catch (error) {
           if (error instanceof StoppedError) throw error
           result = { ok: false, outcome: 'hata', message: (error as Error).message }

@@ -97,6 +97,6 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       maxSteps: 1, stepDelayMs: Math.max(0, s.stepDelayMs), vars: { ...request.vars },
     })
     check()
-    return { ok: true, outcome: 'tamam', message: `“${node.title}” tek adım olarak çalıştı. Bağlı adımlar çalıştırılmadı; dış uygulamadaki sonuç ayrıca gözlemlenebilir.`, data: { nodeId: node.id, kind: node.kind, sent: node.kind !== 'wait' } }
+    return { ok: true, outcome: 'tamam', message: `“${node.title}” tek adım olarak çalıştı. Bağlı adımlar çalıştırılmadı; dış uygulamadaki sonuç ayrıca gözlemlenebilir.`, data: { nodeId: node.id, kind: node.kind, sent: node.kind === 'type' || node.kind === 'key' || node.kind === 'click' && node.clickMode !== 'move', inputKind: node.kind === 'click' && node.clickMode === 'move' ? 'move' : node.kind } }
   }
 }

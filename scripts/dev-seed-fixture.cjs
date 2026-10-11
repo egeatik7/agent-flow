@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { profileDirName } = require('./profile-name.cjs')
 /**
  * Puts a small, fixed fixture on the test profile's canvas: one package whose inside creates a
  * file. The loop needs something to repair that looks like the real thing - a node inside a
@@ -21,7 +22,7 @@ if (!profile) {
   console.error('Profil adı gerekli; gerçek profil bu betikle tohumlanmaz.')
   process.exit(2)
 }
-const appDir = path.join(process.env.APPDATA || '', `xp-agent-studio-${profile}`)
+const appDir = path.join(process.env.APPDATA || '', profileDirName(profile))
 const storeFile = path.join(appDir, 'config.json')
 const tokenFile = path.join(appDir, 'tool-endpoint.json')
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { profileDirName } = require('./profile-name.cjs')
 /**
  * nubbo — the command line side of the tool layer (electron/tools.ts).
  *
@@ -128,10 +129,8 @@ function toolContext(graph) {
  * different folders and each carries its own version and profile stamp.
  */
 function profileName() {
-  return String(process.env.NUBBO_PROFILE || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '')
+  const dir = profileDirName(process.env.NUBBO_PROFILE)
+  return dir === 'xp-agent-studio' ? '' : dir.slice('xp-agent-studio-'.length)
 }
 
 /** Where the running app leaves its address and token. */

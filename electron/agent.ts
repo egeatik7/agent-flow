@@ -614,7 +614,7 @@ export function createAgent(ctx: AgentContext) {
         guiReplace = false
         // Flag before dispatch: a thrown native call can have partially sent input.
         didDismiss = true
-        try { await bridge.clickAt(x, y, 'left') }
+        try { await sendClick(x, y, 'left') }
         catch (e) { throw new VisualTargetRecoveryError(`Popup kapatma girdisi başarısız; tekrar gönderilmeyecek: ${(e as Error).message}`) }
         checkStopped()
         trace(node, { kind: 'input', point: { x: Math.round(x), y: Math.round(y) }, mode: 'popup-dismiss', phase: 'sent' })
@@ -1022,11 +1022,17 @@ export function createAgent(ctx: AgentContext) {
     checkStopped()
   }
 
+  async function sendClick(...args: Parameters<typeof bridge.clickAt>) {
+    const result = await bridge.clickAt(...args)
+    if (result?.warning) log('warn', `Tıklama uyarısı: ${result.warning}`)
+    return result
+  }
+
   async function clickInput(point: Point, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
     clearHover()
     checkStopped()
     // Explicit desktop action: the chosen point is not reclassified as an input field.
-    await bridge.clickAt(point.x, point.y, mode)
+    await sendClick(point.x, point.y, mode)
     if (node) trace(node, { kind: 'input', point: { x: Math.round(point.x), y: Math.round(point.y) }, mode, phase: 'sent' })
     lastClickPoint = mode === 'right' ? undefined : { x: point.x, y: point.y }
   }
@@ -1274,7 +1280,7 @@ export function createAgent(ctx: AgentContext) {
         const point = await bridge.cursorPos()
         checkStopped()
         if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('Fare konumu okunamadı; koordinat uydurulmadı.')
-        await bridge.clickAt(point.x, point.y, 'left')
+        await sendClick(point.x, point.y, 'left')
         checkStopped()
         lastClickPoint = point
         clearHover()
@@ -1532,7 +1538,7 @@ export function createAgent(ctx: AgentContext) {
         recordHover(point, moved.hwnd)
         log('info', `Fare hizalandı @${Math.round(point.x)},${Math.round(point.y)} (tıklama yok). Güncel ekranla hedefe bak.`)
       } else {
-        await bridge.clickAt(point.x, point.y, action.mode)
+        await sendClick(point.x, point.y, action.mode)
         checkStopped()
         log('info', `${action.mode === 'double' ? 'Çift tıklama' : action.mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi @${Math.round(point.x)},${Math.round(point.y)}. Sonuç henüz gözlenmedi.`)
       }
@@ -1571,7 +1577,7 @@ export function createAgent(ctx: AgentContext) {
             return
           }
           clearHover()
-          await bridge.clickAt(t.x, t.y, mode)
+          await sendClick(t.x, t.y, mode)
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
         }

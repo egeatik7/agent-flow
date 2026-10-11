@@ -21,11 +21,11 @@ beforeEach(() => {
 function harness(allowDesktop = true) {
   let stop = false
   const settings = { ...DEFAULT_SETTINGS, stepDelayMs: 0, recovery: { ...DEFAULT_RECOVERY, enabled: true, allowDesktop } }
-  const send = vi.fn(), agent = createAgent({ settings: () => settings, log: vi.fn(), send, shouldStop: () => stop })
+  const send = vi.fn(), log = vi.fn(), agent = createAgent({ settings: () => settings, log, send, shouldStop: () => stop })
   const node = createNode('click', 0, 0), graph = { nodes: [node], edges: [] }
   const request = { node, live: node, graph, error: new Error('wrong click'), stepNo: 1, vars: {}, ahead: {} }
   const execute = recoveryExecutor(request, { getSettings: () => settings, log: vi.fn() } as unknown as ToolContext, () => stop, agent.executor)
-  return { execute, graph, send, stop: () => { stop = true } }
+  return { execute, graph, send, log, stop: () => { stop = true } }
 }
 describe('recovery pointer through the real normal agent input path', () => {
   it('aligns without clicking, reports the cursor and double-clicks its actual position without editing nodes', async () => {
@@ -68,4 +68,13 @@ describe('recovery pointer through the real normal agent input path', () => {
     await expect(h.execute('act.clickCurrent', { mode: 'double' })).rejects.toBeInstanceOf(StoppedError)
     expect(fixture.click).not.toHaveBeenCalled()
   })
+})
+
+it('B1: worker warning is visible while the real normal-agent pointer path still sends the click',async()=>{
+  const h=harness();await h.execute('screen.read',{})
+  fixture.click.mockResolvedValueOnce({warning:'INPUT_CLICK_OCCLUDED: yine de tıklandı'})
+  const result=await h.execute('act.clickPoint',{x:.5,y:.5,mode:'left'})
+  expect(result.data?.sent).toBe(true)
+  expect(h.log).toHaveBeenCalledWith('warn',expect.stringContaining('INPUT_CLICK_OCCLUDED'))
+  expect(fixture.click).toHaveBeenCalledTimes(1)
 })

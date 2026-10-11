@@ -1,3 +1,5 @@
+import { validateApiKey } from './openrouter'
+import { pruneScreenFiles } from './screen-files'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -80,11 +82,12 @@ let recoveryToolContext: ToolContext | undefined
 let recoveryAbort: () => boolean = () => false
 let recoveryActive = false
 
+try { pruneScreenFiles() } catch { /* Temp directory may be unavailable. */ }
+
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
   // Yerel (OpenAI uyumlu) adres tek yerden uygulanır: boşsa her istek OpenRouter'da kalır.
   setLocalEndpoint(s.localBaseUrl, s.localTimeoutMs, s.localVision, s.localOff, s.localThink)
-  if (s.maxSteps === 500) s.maxSteps = DEFAULT_SETTINGS.maxSteps
   s.ocrEngine = 'combined'
   const ramp = clampRamp(s.valueLo, s.valueHi)
   s.valueLo = ramp.lo
@@ -735,7 +738,7 @@ async function runFlow(
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
     })
     // A run that went through every step but had loop items end on an error is not a success.
-    outcome = { ok: summary.failed === 0, failed: summary.failed, steps: summary.steps, ...(opts?.requireEnd ? { reachedEnd: summary.reachedEnd === true } : {}) }
+    outcome = { ok: summary.failed === 0 && !summary.incomplete, failed: summary.failed, steps: summary.steps, ...(opts?.requireEnd ? { reachedEnd: summary.reachedEnd === true } : {}) }
     return { ...outcome, runId }
   } catch (e) {
     if (e instanceof StoppedError) {
@@ -808,6 +811,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
     const next = { ...getSettings(), ...partial }
+    next.apiKey = validateApiKey(next.apiKey)
+    if (next.recovery?.apiKey) next.recovery = { ...next.recovery, apiKey: validateApiKey(next.recovery.apiKey) }
     next.ocrEngine = 'combined'
     const ramp = clampRamp(next.valueLo, next.valueHi)
     next.valueLo = ramp.lo
@@ -829,7 +834,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
 
   ipcMain.handle('graph:get', () => normalizeGraph(store.get('graph')))
   ipcMain.handle('graph:save', (_e, graph: AgentGraph) => {
-    store.set('graph', graph)
+    store.set('graph', normalizeGraph(graph))
     return true
   })
 

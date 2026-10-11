@@ -392,9 +392,9 @@ export async function crop(rect: { x: number; y: number; w: number; h: number },
   return got as { area: { x: number; y: number; w: number; h: number }; image: { data: string; w: number; h: number; mime?: string } }
 }
 
-export async function clickAt(x: number, y: number, button: ClickMode = 'left', target?: InputWindow): Promise<void> {
+export async function clickAt(x: number, y: number, button: ClickMode = 'left', target?: InputWindow): Promise<{ warning?: string } | undefined> {
   if (!IS_WIN) return
-  await worker.call('clickAt', { x: Math.round(x), y: Math.round(y), button, target, ownPid: process.pid })
+  return await worker.call<{ warning?: string }>('clickAt', { x: Math.round(x), y: Math.round(y), button, target, ownPid: process.pid })
 }
 /**
  * Fareyi bir noktaya taşır — TIKLAMAZ. İnisiyatif ajanı önce konumlanıp emin olabilsin,

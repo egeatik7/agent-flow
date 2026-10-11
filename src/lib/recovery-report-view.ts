@@ -4,7 +4,7 @@ import type { NodeContext } from '../../electron/tool-context'
 
 /** Read-only projection: reports never become nodes or graph metadata. */
 export function recoveryReportIndex(graph: AgentGraph, reports: RecoveryReport[], canvasId?: string): Map<string, RecoveryReport[]> {
-  const eligible = [...new Map(reports.filter(r => !r.canvasId || r.canvasId === canvasId).map(r => [r.id, r])).values()]
+  const eligible = [...new Map(reports.filter(r => canvasId ? r.canvasId === canvasId : !r.canvasId).map(r => [r.id, r])).values()]
     .sort((a,b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id))
   const descendants = (g: AgentGraph, id: string, seen = new Set<string>()): Set<string> => {
     if (seen.has(id)) return seen

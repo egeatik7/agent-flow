@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { profileDirName } = require('./profile-name.cjs')
 /**
  * Scenario runner: set it up, run it, check it, keep the evidence.
  *
@@ -37,9 +38,15 @@ if (!profile && scenario.allowReal !== true) {
   process.exit(2)
 }
 
+const { assertScenarioFile } = require('./scenario-files.cjs')
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-const outDir = path.join(root, 'test-artifacts', `${name}-${stamp}`)
+const outDir = path.join(root, 'test-artifacts', `${name.replace(/[^a-z0-9_-]/gi, '_')}-${stamp}`)
 fs.mkdirSync(outDir, { recursive: true })
+const scenarioTemp = path.join(os.tmpdir(), 'nubbo-scenarios', `${name.replace(/[^a-z0-9_-]/gi, '_')}-${stamp}`)
+fs.mkdirSync(scenarioTemp, { recursive: true })
+const expectedFile = text => assertScenarioFile(expand(text), [scenarioTemp, path.join(root, 'test-artifacts')])
+// Validate before connecting to the desktop or deleting previous test evidence.
+for (const f of [...(scenario.expect?.files || []), ...(scenario.expect?.absentFiles || [])]) expectedFile(f.path)
 
 const evidence = { name, profile, startedAt: new Date().toISOString(), classes: { 'tool-answered': [], 'input-sent': [], observed: [], completed: [] }, notes: [] }
 const checks = []
@@ -78,7 +85,7 @@ async function copyRetry(from, to, tries = 12) {
 }
 
 function profileDir() {
-  return path.join(process.env.APPDATA || '', profile ? `xp-agent-studio-${profile}` : 'xp-agent-studio')
+  return path.join(process.env.APPDATA || '', profileDirName(profile))
 }
 function pidAlive(pid) {
   try {
@@ -121,7 +128,7 @@ function call(info, tool, args, timeoutMs) {
 
 function expand(text) {
   return String(text)
-    .replace(/\{\{temp\}\}/gi, os.tmpdir())
+    .replace(/\{\{temp\}\}/gi, scenarioTemp)
     .replace(/\{\{host\}\}/gi, path.join(root, 'test-artifacts', 'fixture'))
 }
 function logsDir() {
@@ -236,7 +243,7 @@ async function main() {
     check('edits-accepted', 'tool-answered', true, 'düzenleme yok: bulunan akış olduğu gibi koşacak')
   }
 
-  const before = [...(scenario.expect?.files || []), ...(scenario.expect?.absentFiles || [])].map((f) => expand(f.path))
+  const before = [...(scenario.expect?.files || []), ...(scenario.expect?.absentFiles || [])].map((f) => expectedFile(f.path))
   for (const p of before) if (fs.existsSync(p)) fs.rmSync(p, { force: true })
 
   if (scenario.expect?.screenshot === true) await call(info, 'screen.read', { image: true }, 60_000)
@@ -300,7 +307,7 @@ async function main() {
   evidence.report = report.result.message
 
   for (const f of scenario.expect?.files || []) {
-    const p = expand(f.path)
+    const p = expectedFile(f.path)
     const exists = fs.existsSync(p)
     const content = exists ? fs.readFileSync(p, 'utf8').trim() : ''
     const ok = exists && (f.content === undefined || content === String(f.content).trim())
@@ -310,10 +317,10 @@ async function main() {
   // A bounded region test is only proven by what did NOT happen: the step past the boundary must
   // leave no trace at all.
   for (const f of scenario.expect?.absentFiles || []) {
-    const p = expand(f.path)
+    const p = expectedFile(f.path)
     const exists = fs.existsSync(p)
     check(`absent:${path.basename(p)}`, 'completed', !exists, exists ? 'BEKLENMEDİK: dosya oluşmuş' : 'dosya yok (beklendiği gibi)')
-    if (exists) fs.rmSync(p, { force: true })
+    if (exists) fs.copyFileSync(p, path.join(outDir, `unexpected-${path.basename(p)}`)) // Retain the original as failure evidence.
   }
   const stop = waited.result.data?.stoppedBy ?? null
   if (scenario.expect?.stoppedBy !== undefined) {

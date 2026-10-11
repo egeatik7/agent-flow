@@ -15,7 +15,7 @@ export function setStopCheck(fn: () => boolean) {
   stopCheck = fn
 }
 
-class TransientError extends Error {}
+class TransientError extends Error { readonly serviceFailure = true }
 
 /** fetch + body read, with a time limit and the stop hotkey. */
 async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS, localStop: () => boolean = () => false): Promise<{ ok: boolean; status: number; text: string }> {
@@ -36,7 +36,7 @@ async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_
   } catch (e) {
     if (byUser) throw new StoppedError()
     if (ctrl.signal.aborted) throw new TransientError(`Model ${Math.round(timeoutMs / 1000)} sn içinde cevap vermedi.`)
-    throw new TransientError(`Bağlantı hatası: ${(e as Error).message}`)
+    throw new TransientError(`Bağlantı hatası: ${redact((e as Error).message)}`)
   } finally {
     clearTimeout(timer)
     clearInterval(poll)
@@ -88,7 +88,7 @@ export async function recoveryToolTurn(args: {
         throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
       }
       const data = JSON.parse(res.text)
-      if (data.error) throw new Error(`OpenRouter: ${String(data.error.message ?? 'Yanıt hatası').slice(0, 300)}`)
+      if (data.error) throw new ModelRejected(`OpenRouter: ${providerError(data.error).slice(0, 300)}`)
       const choice = data.choices?.[0]
       if (!choice?.message || choice.finish_reason === 'length') throw new Error('Kurtarma modelinin yanıtı boş veya kesilmiş.')
       const m = choice.message
@@ -100,7 +100,7 @@ export async function recoveryToolTurn(args: {
       const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
       const answered = typeof data.model === 'string' && data.model ? data.model : model
       chatLogger?.(`Kurtarma API ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
-      return { role: 'assistant', content: typeof m.content === 'string' ? m.content : null,
+      return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
         ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
         ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
         model: answered,
@@ -122,8 +122,20 @@ async function stoppableWait(ms: number) {
   }
 }
 
+const secrets = new Set<string>()
+export function validateApiKey(value: string): string {
+  const key = String(value ?? '').trim()
+  if (/[\r\n\x00-\x1f\x7f]/.test(key)) throw new ModelRejected('API anahtarı geçersiz kontrol karakteri içeriyor. Anahtarı yeniden yapıştır.')
+  if (key) { secrets.add(key); if (secrets.size > 20) secrets.delete(secrets.values().next().value!) }
+  return key
+}
+function redact(value: string): string {
+  let out = value
+  for (const key of secrets) out = out.split(key).join('[API ANAHTARI GİZLENDİ]')
+  return out.replace(/sk-or-v1-[a-z0-9_-]+/gi, '[API ANAHTARI GİZLENDİ]')
+}
 const HEADERS = (apiKey: string) => ({
-  Authorization: `Bearer ${apiKey}`,
+  Authorization: `Bearer ${validateApiKey(apiKey)}`,
   'Content-Type': 'application/json',
   'HTTP-Referer': 'https://nubbo.local',
   'X-Title': 'Nubbo Agent Studio',
@@ -221,12 +233,12 @@ let voiceLogger: ((line: string) => void) | null = null
 
 /** The agent log receives every completion request and response. Images are noted, not pasted. */
 export function setChatLogger(fn: ((line: string) => void) | null) {
-  chatLogger = fn
+  chatLogger = fn ? line => fn(redact(line)) : null
 }
 
 /** A short line in the corner report: the model that answered, then what it said. */
 export function setVoiceLogger(fn: ((line: string) => void) | null) {
-  voiceLogger = fn
+  voiceLogger = fn ? line => fn(redact(line)) : null
 }
 
 function shortModel(model: string): string {
@@ -277,10 +289,10 @@ function reportIn(text: string) {
 class ImageUnsupportedError extends Error {}
 
 /** Key or balance. Another model name cannot fix these. */
-export class FatalApiError extends Error {}
+export class FatalApiError extends Error { readonly serviceFailure = true }
 
 /** This model could not answer. The next name in the list should be tried. */
-export class ModelFailed extends Error {}
+export class ModelFailed extends Error { readonly serviceFailure = true }
 
 /** This model will not answer however often it is asked: wrong name or request (400/404/422), empty or unreadable answer. Outages and rate limits are not this. */
 export class ModelRejected extends ModelFailed {}
@@ -302,23 +314,27 @@ export function asModelChain(model: string | string[] | undefined): string[] {
 }
 
 function brief(err: unknown): string {
-  return ((err as Error).message || String(err)).replace(/\s+/g, ' ').slice(0, 160)
+  return redact((err as Error).message || String(err)).replace(/\s+/g, ' ').slice(0, 160)
 }
 
 /**
  * Tries each model once. After the last one fails, waits and starts again at the first.
  * Stops when the user stops, the key / balance is rejected, or every model was rejected for good
- * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits keep waiting and retrying.
+ * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits retry within the total cycle/time bound.
  */
-export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS): Promise<T> {
+export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number } = {}): Promise<T> {
   const chain = asModelChain(models)
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
   let rejectedCycles = 0
+  const maxCycles = Math.max(1, limits.maxCycles ?? 256)
+  const deadline = Date.now() + Math.max(1, limits.maxWaitMs ?? 15 * 60_000)
+  let cycles = 0
   for (;;) {
     let allRejected = true
     let lastError = ''
     for (let i = 0; i < chain.length; i++) {
       if (stopCheck()) throw new StoppedError()
+      if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
       const model = chain[i]
       try {
         return await run(model)
@@ -335,9 +351,28 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
     if (rejectedCycles >= MAX_REJECTED_CYCLES) {
       throw new Error(`Hiçbir model cevap vermedi: ${rejectedCycles} tur üst üste reddedildi (model adını ve ayarları kontrol et). Son hata: ${lastError}`)
     }
+    if (++cycles >= maxCycles || Date.now() >= deadline) throw new ModelFailed(`Model deneme sınırı doldu (${cycles} tur). Son hata: ${lastError}`)
     chatLogger?.(`Modellerin hepsi susuyor. ${Math.round(pauseMs / 1000)} sn sonra ${chain[0]} yeniden denenecek.`)
-    await stoppableWait(pauseMs)
+    await stoppableWait(Math.min(pauseMs, Math.max(0, deadline - Date.now())))
   }
+}
+
+export function responseText(content: unknown): string {
+  if (content == null) return ''
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map(part => {
+    if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') return part.text
+    throw new ModelRejected('Model yanıtında desteklenmeyen içerik parçası var.')
+  }).join('\n')
+  throw new ModelRejected('Model yanıtının içerik biçimi geçersiz.')
+}
+function providerError(error: unknown): string {
+  if (typeof error === 'string') return redact(error)
+  if (error && typeof error === 'object') return redact(String((error as { message?: unknown }).message ?? 'Yanıt hatası'))
+  return ''
+}
+function permanentFailure(status: number, text: string): boolean {
+  return [400, 403, 404, 405, 413, 415, 422, 431].includes(status) || /invalid[_ ]request|invalid parameter|out of memory|not enough (?:gpu |vram |system )?memory|failed to allocate|context (?:length|window).*(?:exceed|limit)|invalid base64/i.test(text)
 }
 
 /** One request to one model. No second try here; the chain does that. */
@@ -350,8 +385,10 @@ async function chatOnce(
 ): Promise<string> {
   const once = async (json: boolean) => {
     const target = targetFor(model)
+    if (!target.local) validateApiKey(apiKey)
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
     if (!target.local && !String(apiKey ?? '').trim()) throw new ModelRejected('OpenRouter anahtarı yok; satır atlandı.')
+    if (target.local && hasImage && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
     const effort = target.local ? localReasoningEffort() : null
@@ -376,24 +413,24 @@ async function chatOnce(
       if (!target.local && res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
       if (!target.local && res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
       if (target.local && [401, 403].includes(res.status)) throw new ModelRejected('Yerel sunucu erişimi reddetti. Sunucunun kimlik doğrulama ayarını kontrol et; OpenRouter anahtarı yerel sunucuya gönderilmez.')
-      if (hasImage && /image|vision|multimodal|modalit/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
+      if (hasImage && /(?:not support|unsupported|does not accept|only text|no vision).*(?:image|vision|multimodal)|(?:image|vision|multimodal).*(?:not support|unsupported|not available)/i.test(res.text)) throw new ImageUnsupportedError(res.text.slice(0, 200))
       const message = `${where} ${res.status}: ${res.text.slice(0, 200)}`
-      throw [400, 404, 422].includes(res.status) ? new ModelRejected(message) : new ModelFailed(message)
+      throw permanentFailure(res.status, res.text) ? new ModelRejected(redact(message)) : new ModelFailed(redact(message))
     }
-    let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; error?: { message?: string } }
+    let data: { choices?: { message?: { content?: unknown }; finish_reason?: string }[]; error?: unknown }
     try {
       data = JSON.parse(res.text)
     } catch {
       throw new ModelRejected(`${where} yanıtı okunamadı.`)
     }
-    if (data.error?.message) {
-      const msg = data.error.message
+    if (data.error) {
+      const msg = providerError(data.error)
       reportIn(`hata: ${msg}`)
       if (!target.local && /invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
       if (!target.local && /insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
-      throw new ModelFailed(`${where}: ${msg.slice(0, 200)}`)
+      throw permanentFailure(0, msg) ? new ModelRejected(`${where}: ${msg.slice(0, 200)}`) : new ModelFailed(`${where}: ${msg.slice(0, 200)}`)
     }
-    const content = data.choices?.[0]?.message?.content ?? ''
+    const content = responseText(data.choices?.[0]?.message?.content)
     reportIn(content)
     if (data.choices?.[0]?.finish_reason === 'length') throw new ModelRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
     const said = modelSaid(model, content)
@@ -895,7 +932,12 @@ export function parseJsonAction(content: string): GuiAction {
     if (v === undefined || v === null) return undefined
     const x = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN
     if (!Number.isFinite(x) || x < 0 || x > 1000) throw new ModelRejected('Geçersiz GUI koordinatı')
-    return x > 1 ? x / 1000 : x
+    // The JSON prompt's contract is 0–1000. Normalized custom prompts must explicitly declare their unit.
+    if (p.coordinate_unit === 'normalized') {
+      if (x > 1) throw new ModelRejected('Normalize GUI koordinatı 0–1 arasında olmalı')
+      return x
+    }
+    return x / 1000
   }
   const a = String(p.action ?? '').toLowerCase()
   // İNCELEME DÜZELTMESİ: Luna'nın JSON yolu move/click_current'ı tanımıyordu ve 'wait' oluyordu.

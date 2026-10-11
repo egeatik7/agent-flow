@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { profileDirName } = require('./profile-name.cjs')
 /**
  * One clean test instance, or nothing.
  *
@@ -13,6 +14,7 @@
  * Usage: node scripts/dev-start-test.cjs [profile]   (default: test)
  */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const http = require('http')
 const { spawnSync, execFileSync } = require('child_process')
@@ -23,7 +25,7 @@ if (!profile) {
   console.error('Profil adı gerekli (gerçek profil bu betikle açılmaz).')
   process.exit(2)
 }
-const appDir = path.join(process.env.APPDATA || '', `xp-agent-studio-${profile}`)
+const appDir = path.join(process.env.APPDATA || '', profileDirName(profile))
 const tokenFile = path.join(appDir, 'tool-endpoint.json')
 const exe = path.join(process.env.USERPROFILE || '', 'Desktop', 'Nubbo-test.exe')
 

@@ -1,3 +1,4 @@
+import { writeScreenFile } from './screen-files'
 /**
  * The tool layer: everything an outside agent is allowed to do, in one place.
  *
@@ -720,7 +721,7 @@ const branchMerge: ToolDef = {
     const guncel = ctx.getCanvases()
     guncel.branches = branchesOf(guncel).filter((b) => b.id !== branch.id)
     ctx.saveCanvases(guncel)
-    const message = `Merge edildi: “${branch.name}” → “${base?.name ?? branch.baseTabId}” (${view.diff?.summary ?? '—'}). Tarif silindi, çünkü aynı düzenlemeler artık tuvalin kendisinde.${tail}`
+    const message = `Merge edildi: “${branch.name}” → “${base?.name ?? branch.baseTabId}” (${view.diff?.summary ?? '—'}). Tarif silindi, çünkü aynı düzenlemeler artık tuvalin kendisinde.${notes.length ? ' ' + notes.join(' ') : ''}`
     ctx.log('info', `Ajan · merge · ${message}`)
     return {
       ok: true,
@@ -728,7 +729,7 @@ const branchMerge: ToolDef = {
       outcome: 'tamam',
       message,
       observed: { note: 'Tuval pencereye devredildi; pencere kendi kaydını yapar.' },
-      data: { applied: true, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, failed: view.failed, baseChanged: view.baseChanged },
+      data: { applied: true, branchId: branch.id, tabId: branch.baseTabId, diff: view.diff, failed: view.failed, baseChanged: view.baseChanged, removed: pruned.removed, keptBack: pruned.keptBack, ambiguous: pruned.ambiguous },
     }
   },
 }
@@ -1317,6 +1318,7 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
   // too, and an action slipping into the middle of one would fight it for the same cursor.
   if (ctx.isRunning()) return failed(name, 'Bir koşu sürüyor; tek eylem için önce bitmesini bekle ya da durdur.')
   if (probing()) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
+  if (args.timeoutMs !== undefined && (num(args.timeoutMs) === undefined || (num(args.timeoutMs) ?? 0) <= 0)) return failed(name, 'timeoutMs pozitif bir süre olmalı; 0 sınırsız anlamına gelmez.')
   const { node } = actionGraph(spec)
   if (!beginProbe(node.id)) return failed(name, 'Tek adım sürüyor; bitmesini bekle.')
   // The desktop is ours now: a stop left over from an earlier run or a debug failure must not cut
@@ -1534,13 +1536,9 @@ const screenRead: ToolDef = {
       if (s.image?.data) {
         imageData = { data: s.image.data, mime: s.image.mime || 'image/png', w: s.image.w ?? 0, h: s.image.h ?? 0 }
         try {
-          const fs = await import('node:fs')
-          const os = await import('node:os')
-          const pathMod = await import('node:path')
-          const ext = /jpe?g/i.test(s.image.mime || '') ? 'jpg' : 'png'
-          imagePath = pathMod.join(os.tmpdir(), `nubbo-screen-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`)
-          fs.writeFileSync(imagePath, Buffer.from(s.image.data, 'base64'))
-        } catch {
+          imagePath = writeScreenFile(s.image.data, s.image.mime || 'image/png')
+        } catch (error) {
+          ctx.log('warn', `Ekran görüntüsü dosyası kaydedilemedi: ${(error as Error).message}`)
           imagePath = ''
         }
       }

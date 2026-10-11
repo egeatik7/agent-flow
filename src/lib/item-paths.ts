@@ -5,11 +5,15 @@ import { walkGraph } from '../../electron/tool-context'
 /** Döngü öğesi mutlak yol değilse klasör alanıyla birleştirir; şablonlu/boş klasörde yol çözülemez. */
 export function fullItemPath(item: string, folder?: string): string {
   const value = item.trim()
-  if (!value) return ''
+  if (!value || /\{\{/.test(value)) return ''
   if (isAbsolutePath(value)) return value
-  const base = (folder ?? '').trim().replace(/[\\/]+$/, '')
+  const base = cleanFolder((folder ?? '').trim())
   if (!base || /\{\{/.test(base) || !isAbsolutePath(base)) return ''
-  return `${base}\\${value}`
+  return `${base}${/[\\/]$/.test(base) ? '' : '\\'}${value}`
+}
+
+export function cleanFolder(value: string): string {
+  return /^[a-z]:[\\/]$/i.test(value) ? value : value.replace(/[\\/]+$/, '')
 }
 
 /** Sürücü harfli ya da UNC yol. Düz metin bir liste öğesi (ör. "kedi") yol sayılmaz. */
@@ -49,9 +53,10 @@ export function collectLoopPaths(canvases: { name: string; graph: AgentGraph }[]
       if (node.kind !== 'loop') return
       const label = [...loops.filter((l) => l.id !== node.id).map((l) => l.title), node.title].join(' › ')
       const folder = (node.folder ?? '').trim()
+      if (/\{\{/.test(folder)) return // Runtime regenerates this loop's items from the resolved directory.
       // Klasörün kendisi mutlak ve şablonsuzsa: "klasör yok" en sık arıza, onu da denetle.
       if (folder && !/\{\{/.test(folder) && isAbsolutePath(folder)) {
-        push({ canvas: canvas.name, node: label, item: folder, path: folder.replace(/[\\/]+$/, ''), kind: 'klasör' })
+        push({ canvas: canvas.name, node: label, item: folder, path: cleanFolder(folder), kind: 'klasör' })
       }
       for (const item of listItems(node)) {
         const path = fullItemPath(item, node.folder)

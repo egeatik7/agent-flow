@@ -205,7 +205,8 @@ test('normal item-error policy and successful per-lap step budgets stay unchange
   loop.items = ['A', 'B', 'C']; loop.members = [click.id]; click.prompt = '{{öğe}}';
   const actions = [];
   const ex = { log: () => {}, step: () => {}, shouldStop: () => false, click: async x => { actions.push(x.prompt); if (x.prompt === 'B') throw Error('item-specific error'); }, type: async () => {}, key: async () => {}, exists: async () => false };
-  const summary = await runGraph({ nodes: [start, loop, click], edges: [e(start, loop)] }, ex, { maxSteps: 1, stepDelayMs: 0 });
+  // 1.9.86: kutu çağrısı artık zincirin bütçesinden 1 adım yer (A5 düzeltmesi): start + kutu = 2 adım.
+  const summary = await runGraph({ nodes: [start, loop, click], edges: [e(start, loop)] }, ex, { maxSteps: 2, stepDelayMs: 0 });
   assert.deepEqual(actions, ['A', 'B', 'C']);
   assert.equal(summary.failed, 1);
 });

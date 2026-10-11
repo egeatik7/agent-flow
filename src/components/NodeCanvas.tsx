@@ -167,6 +167,12 @@ export default function NodeCanvas(p: Props) {
   const [linking, setLinking] = useState<Linking | null>(null)
   const linkRef = useRef<Linking | null>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
+  useEffect(() => {
+    setMenu(null); setLinking(null); linkRef.current = null
+    setDrag(null); dragRef.current = null; setMarquee(null)
+    pasteClick.current = null; pointerRef.current = null
+  }, [p.canvasKey, p.running])
+  useEffect(() => { if (menu?.mode === 'node' && !p.graph.nodes.some(n => n.id === menu.nodeId)) setMenu(null) }, [p.graph, menu])
   const [hoverTarget, setHoverTarget] = useState<string | null>(null)
   const [view, setView] = useState<View>({ x: 24, y: 24, z: 1 })
   const viewRef = useRef(view)

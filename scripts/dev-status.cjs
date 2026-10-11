@@ -1,3 +1,4 @@
+const { profileDirName } = require('./profile-name.cjs')
 /**
  * Tek ekranda döngünün durumu: "hangi örneğe bağlıyım, hangi build, dal temiz mi, son senaryolar
  * ne dedi, ekran boş mu". Bu oturumda aynı bilgileri her seferinde yeniden türetmek zaman kaybı ve
@@ -31,7 +32,7 @@ const ahead = sh('git', ['rev-list', '--count', 'main..HEAD']) || '?'
 line(`  dal           : ${branch} · ${sha}${dirty ? ' · KİRLİ (commit edilmemiş değişiklik var)' : ' · temiz'}`)
 line(`  main'e göre   : ${ahead} commit ileride · main'e merge edilmedi`)
 
-const runDir = profile === 'test' ? path.join(process.env.APPDATA, 'xp-agent-studio-test') : path.join(process.env.APPDATA, 'xp-agent-studio')
+const runDir = path.join(process.env.APPDATA || '', profileDirName(profile))
 const epFile = path.join(runDir, 'tool-endpoint.json')
 if (!fs.existsSync(epFile)) line('  uç nokta     : yok (örnek kapalı)')
 else {
@@ -44,7 +45,7 @@ else {
     alive = false
   }
   line(`  uç nokta     : port ${ep.port} · pid ${ep.pid} ${alive ? '(yaşıyor)' : '(ÖLÜ — jeton eski oturumdan)'} · sürüm ${ep.version || '?'} · build ${ep.build || 'damgasız'} · profil ${ep.profile || '?'}`)
-  if ((ep.build || '') !== sha) line(`  UYARI        : jetonun damgası “${ep.build || ''}”, dalınki “${sha}” — eski build olabilir.`)
+  if ((ep.build || '').replace(/-dirty$/, '') !== sha) line(`  UYARI        : jetonun damgası “${ep.build || ''}”, dalınki “${sha}” — eski build olabilir.`)
 }
 
 const idle = (() => {

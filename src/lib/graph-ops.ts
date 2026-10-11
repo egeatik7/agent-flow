@@ -281,6 +281,7 @@ export function packageSelection(graph: AgentGraph, ids: string[]): { graph: Age
   // A one-exit package cannot preserve multiple external branches/entries.
   // Reject the selection rather than silently changing its meaning.
   if (leaving.length > 1 || new Set(incoming.map((e) => e.to)).size > 1) return null
+  if (leaving.some(edge => { const owner = ownerOf(graph, edge.from); return owner && sel.has(owner.id) })) return null
 
   if (!innerNodes.some((n) => n.kind === 'start')) {
     const fromOutside = [...new Set(incoming.map((e) => e.to))]

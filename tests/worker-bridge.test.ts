@@ -87,8 +87,8 @@ describe.skipIf(process.platform !== 'win32')('worker köprüsü', () => {
     expect(h.spawned.length).toBe(2) // eskiden kalıcı bozuluyordu: yeni süreç hiç açılmıyordu
     h.spawned[1].say('READY')
     await flush()
-    h.spawned[1].answer(h.spawned[1].requests()[0].id, true)
-    await expect(second).resolves.toBeUndefined()
+    h.spawned[1].answer(h.spawned[1].requests()[0].id, { warning: 'INPUT_CLICK_OCCLUDED: test' })
+    await expect(second).resolves.toEqual({ warning: 'INPUT_CLICK_OCCLUDED: test' })
   })
 
   it('PowerShell hiç başlatılamazsa (spawn error) sonraki çağrı yeniden dener', async () => {
@@ -103,8 +103,8 @@ describe.skipIf(process.platform !== 'win32')('worker köprüsü', () => {
     expect(h.spawned.length).toBe(2)
     h.spawned[1].say('READY')
     await flush()
-    h.spawned[1].answer(h.spawned[1].requests()[0].id, true)
-    await expect(second).resolves.toBeUndefined()
+    h.spawned[1].answer(h.spawned[1].requests()[0].id, { warning: 'INPUT_CLICK_OCCLUDED: test' })
+    await expect(second).resolves.toEqual({ warning: 'INPUT_CLICK_OCCLUDED: test' })
   })
 
   it('uzun bir işin arkasında bekleyen kısa istek, sağlıklı worker\'ı zaman aşımıyla öldürmez', async () => {
@@ -141,8 +141,8 @@ describe.skipIf(process.platform !== 'win32')('worker köprüsü', () => {
     expect(h.spawned.length).toBe(2)
     h.spawned[1].say('READY')
     await flush()
-    h.spawned[1].answer(h.spawned[1].requests()[0].id, true)
-    await expect(next).resolves.toBeUndefined()
+    h.spawned[1].answer(h.spawned[1].requests()[0].id, { warning: 'INPUT_CLICK_OCCLUDED: test' })
+    await expect(next).resolves.toEqual({ warning: 'INPUT_CLICK_OCCLUDED: test' })
   })
 
   it('worker kapanmışken yazmak (stdin hatası) uygulamayı çökertmez', async () => {

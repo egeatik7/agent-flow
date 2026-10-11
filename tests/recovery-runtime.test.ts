@@ -41,3 +41,11 @@ describe('internal recovery desktop session', () => {
     expect(calls).toEqual([])
   })
 })
+
+it('B2: actual move-only step reports sent:false and preserves the click retry distinction',async()=>{
+  const node={...createNode('click',0,0),clickMode:'move' as const,prompt:'target'}
+  const request={graph:{nodes:[node],edges:[]},node,live:node,error:new Error('missing'),stepNo:1,ahead:{},vars:{}}
+  const execute=recoveryExecutor(request,{getSettings:()=>({...DEFAULT_SETTINGS,recovery:{...DEFAULT_RECOVERY,enabled:true,allowNodes:true}}),log:()=>{}} as unknown as ToolContext,()=>false)
+  const result=await execute('step.run',{nodeId:node.id})
+  expect(result.data).toMatchObject({sent:false,inputKind:'move'})
+})

@@ -190,6 +190,7 @@ export default function App() {
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   /** Koşu öncesi eksik döngü yolu raporu; açıkken koşu beklemede kalır. */
   const [missingReport, setMissingReport] = useState<{ items: LoopPathReport[]; answer: (run: boolean) => void } | null>(null)
+  const missingAnswer = useRef<((run: boolean) => void) | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' | 'automation' } | null>(null)
   const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas' | 'sequence'; tabId?: string; initial: string } | null>(null)
@@ -576,7 +577,7 @@ export default function App() {
     const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedRef.current ? [selectedRef.current] : []
     const r = packageSelection(graphRef.current, ids)
     if (!r) {
-      if (ids.length) pushLog('warn', 'Bu seçim tek girişli ve tek çıkışlı bir pakete kayıpsız alınamıyor. Dallanmanın devamını da seç veya adımları ayrı bırak; akış değiştirilmedi.')
+      if (ids.length) pushLog('warn', 'Bu seçim tek girişli ve tek çıkışlı bir pakete kayıpsız alınamıyor. Döngü üyesinden dışarı çıkan oku kutunun “bitti” çıkışına bağla; birden fazla dış kol varsa devamını da seç. Akış değiştirilmedi.')
       return
     }
     setGraph(r.graph)
@@ -836,14 +837,14 @@ export default function App() {
       const key = e.key.toLowerCase()
       if (mod && key === 's') {
         e.preventDefault()
-        if (!loaded || workspacePicker || nameQuestion || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current || scanner) return
+        if (!loaded || workspacePicker || nameQuestion || confirmQuestion || missingReport || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current || scanner) return
         if (e.shiftKey) void saveAllWorkspace()
         else if (activeIdRef.current) void saveCurrentCanvas()
         return
       }
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
-      if (!activeIdRef.current || workspacePicker || confirmQuestion || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
+      if (!activeIdRef.current || workspacePicker || nameQuestion || confirmQuestion || missingReport || scanner || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
       if (scanner && mod) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
@@ -1159,39 +1160,39 @@ export default function App() {
     if (!candidates.length) return true
     let missing: string[] = []
     try { missing = await api.missingPaths(candidates.map((c) => c.path)) } catch { return true }
+    if (stopRequested.current || closingRef.current) return false
     const items = missingLoopPaths(candidates, new Set(missing))
     if (!items.length) return true
     return await new Promise<boolean>((resolve) => {
-      setMissingReport({ items, answer: (run) => { setMissingReport(null); resolve(run) } })
+      const answer = (run: boolean) => { missingAnswer.current = null; setMissingReport(null); resolve(run) }
+      missingAnswer.current = answer
+      setMissingReport({ items, answer })
     })
   }
 
   const run = async (startId?: string) => {
     if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || missingReport || !activeIdRef.current || graphRef.current.nodes.length === 0) return
-    {
-      const path0 = stackRef.current.map((c) => c.id)
-      const full0 = path0.length ? rooted(graphRef.current, stackRef.current) : graphRef.current
-      if (!(await guardMissingPaths([{ name: canvasName(), graph: full0 }]))) return
-    }
-    runningRef.current = true
-    if (!startId) writeCanvas(resetLoopTicks(rooted(graphRef.current, stackRef.current)))
-    const path = stackRef.current.map((c) => c.id)
-    const full = path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current
+    const path = stackRef.current.map(c => c.id)
+    const full = structuredClone(path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current)
     const name = canvasName()
+    const canvasId = bookRef.current.tabs.find(t => t.id === activeIdRef.current)?.savedId ?? `tab:${activeIdRef.current}`
+    runningRef.current = true
     setRunning(true)
-    setStepStatus({})
     stopRequested.current = false
-    setRunProgress(beginProgress(activeIdRef.current))
     let halted = true
     let failed = false
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
+      if (!(await guardMissingPaths([{ name, graph: full }])) || stopRequested.current || closingRef.current) return
+      if (!startId) { const reset = resetLoopTicks(full); full.nodes = reset.nodes; full.edges = reset.edges; writeCanvas(full) }
+      setStepStatus({})
+      setRunProgress(beginProgress(activeIdRef.current))
       if (api) {
-        const result = await api.runAgent(full, startId, path, { canvasId: bookRef.current.tabs.find(t => t.id === activeIdRef.current)?.savedId })
+        const result = await api.runAgent(full, startId, path, { canvasId })
         halted = !!result.stopped || !result.ok
         failed = !result.ok && !result.stopped
         // The agent log already explains each error; this one line says the run did not end clean.
-        if (!result.ok && !result.stopped) pushLog('error', `“${name}” ${result.failed ?? 0} öğe/tur hatayla bitti, başarılı sayılmaz. Hatalar yukarıdaki kayıtlarda.`)
+        if (!result.ok && !result.stopped) pushLog('error', (result.failed ?? 0) > 0 ? `“${name}” ${result.failed} öğe/tur hatayla bitti. Ayrıntılar yukarıdaki kayıtlarda.` : `“${name}” tamamlanmadan sonlandı. Ayrıntılar yukarıdaki kayıtlarda.`)
       } else {
         const result = await runDemo(full, settingsRef.current, pushLog, recordStep, startId, patchNode, path, false, recordEdge)
         halted = !!result.stopped || !result.ok
@@ -1210,6 +1211,7 @@ export default function App() {
 
   const stop = () => {
     stopRequested.current = true
+    missingAnswer.current?.(false)
     sequenceRef.current.stop()
     if (api) void api.stopAgent().catch(e => pushLog('error', errText(e)))
     else stopDemo()
@@ -1226,15 +1228,15 @@ export default function App() {
     const startPath = startNodeId ? stackRef.current.map(c => c.id) : []
     const book = commitActive()
     const from = book.tabs.findIndex(t => t.id === activeId)
-    const ordered = from <= 0 ? book.tabs : book.tabs.slice(from)
+    const ordered = structuredClone(from <= 0 ? book.tabs : book.tabs.slice(from))
     if (!ordered.length) { pushLog('warn', 'Oynatılacak tuval yok.'); return }
-    if (!(await guardMissingPaths(ordered.map((t) => ({ name: t.name, graph: t.graph }))))) return
     runningRef.current = true
     setRunning(true)
     stopRequested.current = false
     let halted = true
     let failed = false
     try {
+      if (!(await guardMissingPaths(ordered.map(t => ({ name: t.name, graph: t.graph })))) || stopRequested.current || closingRef.current) return
       pushLog('info', startNodeId
         ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
         : `Aktif tuvalden sağa doğru oynatılıyor (${ordered.length} tuval).`)
@@ -1252,7 +1254,7 @@ export default function App() {
         pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId })
+        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId ?? `tab:${tab.id}` })
           : await runDemo(prepared.graph, settingsRef.current, pushLog, recordStep, ilk, patchNode, path, true, recordEdge)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
@@ -1539,7 +1541,7 @@ export default function App() {
               onExitPackage={exitPackage}
               canExitPackage={stack.length > 0}
               recoveryReports={recoveryReports}
-              reportCanvasId={bookRef.current.tabs.find(t => t.id === activeId)?.savedId ?? activeId}
+              reportCanvasId={bookRef.current.tabs.find(t => t.id === activeId)?.savedId ?? `tab:${activeId}`}
               canvasKey={JSON.stringify([activeId, ...stack.map(crumb => crumb.id)])}
               pasteRevision={pasteRevision}
               onPasteTarget={registerPasteTarget}

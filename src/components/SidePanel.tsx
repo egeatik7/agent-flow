@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import AgentTab from './AgentTab'
 import RecoverySettingsPanel from './RecoverySettingsPanel'
 import ModelChain from './ModelChain'
@@ -154,8 +154,23 @@ function TemplateField(p: Props & { n: AgentNode; field: 'prompt' | 'text' | 'ke
 
 function LoopEditor(p: Props & { n: AgentNode }) {
   const [pathMenu, setPathMenu] = useState<{ x: number; y: number; item: string; full: string } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pathError, setPathError] = useState('')
+  const openItem = async (full: string) => {
+    setPathError('')
+    try { if (!await window.xpAgent?.openPath?.(full)) setPathError('Öğe açılamadı. Yolun mevcut olduğunu ve ilişkilendirilmiş uygulamayı kontrol et.') }
+    catch (error) { setPathError(`Öğe açılamadı: ${error instanceof Error ? error.message : String(error)}`) }
+  }
+  useEffect(() => { setPathMenu(null); setPathError('') }, [p.n.id, p.disabled])
+  useEffect(() => {
+    if (!pathMenu) return
+    const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setPathMenu(null) }
+    const outside = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setPathMenu(null) }
+    window.addEventListener('keydown', close); window.addEventListener('mousedown', outside)
+    return () => { window.removeEventListener('keydown', close); window.removeEventListener('mousedown', outside) }
+  }, [pathMenu])
   const { n } = p
-  const items = listItems(n)
+  const items = n.items ?? []
   const members = (n.members ?? []).length
   const mark = loopStartIndex(n, items.length, true)
   const folder = n.folder ?? ''
@@ -193,7 +208,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
                 }}
                 onDoubleClick={() => {
                   const full = fullItemPath(item, n.folder)
-                  if (full && window.xpAgent?.openPath) void window.xpAgent.openPath(full)
+                  if (full) void openItem(full)
                 }}
                 title="Sağ tık: bulunduğu klasörü aç · Çift tık: öğeyi aç">
                 <label className="xp-tick">
@@ -210,7 +225,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
                   size={Math.max(item.length, 16)}
                   spellCheck={false}
                   onChange={(e) => {
-                    if (e.target.value.trim()) setItem(i, e.target.value)
+                    setItem(i, e.target.value)
                   }}
                 />
               </div>
@@ -224,8 +239,9 @@ function LoopEditor(p: Props & { n: AgentNode }) {
             onChange={(e) => p.onUpdateNode({ items: e.target.value.split('\n'), startIndex: 0 })}
           />
         )}
-        {pathMenu && (
-          <div className="ctx-menu" style={{ position: 'fixed', left: pathMenu.x, top: pathMenu.y, zIndex: 60 }}
+        {pathError && <p className="hint warn" role="status">{pathError}</p>}
+        {pathMenu && !p.disabled && (
+          <div ref={menuRef} className="ctx-menu" style={{ position: 'fixed', left: pathMenu.x, top: pathMenu.y, zIndex: 60 }}
             onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
             <div className="ctx-title">{pathMenu.item}</div>
             <button
@@ -240,7 +256,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
               Yolu aç
             </button>
             <button type="button" disabled={!pathMenu.full} onClick={() => {
-              if (pathMenu.full) void window.xpAgent?.openPath?.(pathMenu.full)
+              if (pathMenu.full) void openItem(pathMenu.full)
               setPathMenu(null)
             }}>
               Öğeyi aç
@@ -904,7 +920,7 @@ export default function SidePanel(p: Props) {
             stepStatus={p.stepStatus} highlightedNodeIds={p.highlightedNodeIds} runPhase={p.runPhase} />
           {p.tab === 'node' && (p.selected || p.selectedEdge) && <fieldset className="node-inspector" disabled={p.disabled}><NodeInspector {...p} /></fieldset>}
         </div>
-        {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} onSave={p.onSaveSettings} /></fieldset>}
+        {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} onSave={p.onSaveSettings} onDraft={patch => p.setSettings(prev => ({ ...prev, ...patch }))} /></fieldset>}
         {p.tab === 'settings' && <Settings {...p} />}
         {p.tab === 'agent' && <fieldset className="panel-fields" disabled={p.disabled}><AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} /></fieldset>}
         {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}<div className="library-brand"><NubboMascot /></div></div>}

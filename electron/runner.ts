@@ -81,7 +81,7 @@ type Budget = { used: number }
 type Tally = { n: number; failed: number }
 
 /** What a run reports when it ends without being stopped: steps taken, and loop items or laps that ended on an error. */
-export type RunSummary = { steps: number; failed: number; reachedEnd?: boolean; packageExitReached?: boolean }
+export type RunSummary = { steps: number; failed: number; incomplete?: boolean; reachedEnd?: boolean; packageExitReached?: boolean }
 
 /** At most this many item names are listed in the end-of-loop summary. */
 const FAILED_NAMES_SHOWN = 5
@@ -93,7 +93,7 @@ const FAILED_NAMES_SHOWN = 5
  * a file name like "video(429).glb" and would stop the whole list.
  */
 export function isApiDown(message: string): boolean {
-  return /(?:api|openrouter|anahtar|bakiye|kota|model|sunucu)[^()]{0,24}\((?:401|402|429)\)|resourceexhausted|rate limit|too many requests|quota|bakiye|upstream error|openrouter \d{3}/i.test(message)
+  return /^(?:OpenRouter\b.*(?:\b(?:401|402|429|5\d\d)\b|anahtar.*geçersiz|bakiy.*yetersiz|insufficient credits|rate limit)|(?:API|Model|Yerel sunucu|Sunucu|Bağlantı hatası)\b.*(?:\((?:401|402|429)\)|rate limit|too many requests|quota exceeded|resourceexhausted|upstream error|cevap vermedi|bağlantı))|^resourceexhausted\b|^rate limit\b|^too many requests\b|^upstream error\b/i.test(message)
 }
 
 export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
@@ -175,6 +175,7 @@ export async function runGraph(
       stepDelayMs: opts.stepDelayMs,
       root: opts.root ?? graph,
       resume: opts.resume,
+      debug: opts.debug,
       reportEnd: opts.reportEnd,
       resumeLoopId: opts.resumeLoopId,
       resumeItem: opts.resumeItem,
@@ -196,6 +197,7 @@ export async function runGraph(
   const entry = opts.afterNodeId ? undefined : findEntry(graph, opts.startId)
   if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
   let packageExitReached = false
+  let incomplete = false
   const observeExit = (node: AgentNode, port: string, scope: AgentNode | null) => {
     // An edge from a loop member to outside its scope does not leave the loop.
     if (!scope && opts.packageExit?.from === node.id) packageExitReached = opts.packageExit.fromPort === port
@@ -329,7 +331,7 @@ export async function runGraph(
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        const result = await runGraph(inner, ex, { packageExit: node.packageExit, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
+        const result = await runGraph(inner, ex, { packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
         if (node.packageExit && !result.packageExitReached) {
           ex.log('info', `“${node.title}” kayıtlı çıkışına ulaşmadı; dışarıdaki sonraki adım çalıştırılmıyor.`)
           return 'blocked'
@@ -356,6 +358,11 @@ export async function runGraph(
       if (stopAt?.has(node.id)) return
       if (ex.shouldStop()) throw new StoppedError()
 
+      if (budget.used >= opts.maxSteps) {
+        if (budget === topBudget) throw new StepLimitError(`Kutuların dışında ${opts.maxSteps} adım/kutu çağrısı çalıştırıldı ve durduruldu. Sonsuz döngü olabilir.`)
+        throw new LapLimitError(`Bu tur ${opts.maxSteps} adımı geçti (sonsuz döngü olabilir).`)
+      }
+      budget.used++
       let port: string
       if (node.kind === 'loop') {
         const route = resumeRoute?.[0]?.id === node.id ? resumeRoute : undefined
@@ -363,15 +370,6 @@ export async function runGraph(
         if (route) resumeRoute = undefined
         port = await runLoop(node, scope, route?.[1], false, undefined, route?.slice(1))
       } else {
-        if (budget.used >= opts.maxSteps) {
-          if (budget === topBudget) {
-            throw new StepLimitError(
-              `Kutuların dışında ${opts.maxSteps} adım çalıştırıldı ve durduruldu. Sonsuz döngü olabilir; Ayarlar’dan “Maks. adım” değerini artırabilirsin.`
-            )
-          }
-          throw new LapLimitError(`Bu tur ${opts.maxSteps} adımı geçti (sonsuz döngü olabilir: örn. Koşul → Zamanlayıcı döngüsü hiç bitmedi).`)
-        }
-        budget.used++
         tally.n++
         ex.step(node.id, 'running')
         let recovering = false
@@ -427,6 +425,7 @@ export async function runGraph(
         if (FAIL_PORTS.has(port)) {
           throw new StepFailedError(`“${node.title}”: ${portLabel(node.kind, port)}. Bu çıkış bir yere bağlı değil.`)
         }
+        if (!scope && !stopAt && node.kind === 'condition' && port === 'false') { incomplete = true; ex.log('warn', `“${node.title}”: koşul sağlanmadı, “yok” çıkışı bağlı değil; akış tamamlanmadan sonlandı.`) }
         if (!scope && !stopAt) ex.log('info', `“${node.title}” node’unun “${portLabel(node.kind, port)}” çıkışı bağlı değil, akış burada bitti.`)
         return
       }
@@ -553,10 +552,13 @@ export async function runGraph(
           ex.step(loop.id, 'error')
           tally.failed++
           ex.log('error', `${label}: ${msg}`)
-          await ex.captureFailure?.(label).catch(() => {})
-          const again = msg === lastFail
-          lastFail = msg
-          if (isApiDown(msg) || again) {
+          await ex.captureFailure?.(label).catch(error => ex.log('warn', `Hata ekran görüntüsü kaydedilemedi: ${(error as Error).message}`))
+          const serviceFailure = (e as { serviceFailure?: boolean }).serviceFailure === true || isApiDown(msg)
+          // Only infrastructure failures may be normalized across item-specific text.
+          const signature = serviceFailure ? msg.replace(/[“"'][^“"']*[”"']/g, '<öğe>').replace(/\b\d+\b/g, '#') : msg
+          const again = signature === lastFail
+          lastFail = signature
+          if (serviceFailure || again) {
             ex.log('error', isApiDown(msg) ? 'API cevap vermiyor. Döngü durdu, işaret bu öğede kaldı.' : 'Aynı hata üst üste geldi. Döngü durdu, işaret bu öğede kaldı.')
             throw new LoopHalted(msg)
           }
@@ -677,6 +679,9 @@ export async function runGraph(
     if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed, ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
     throw e
   }
-  if (!opts.nested) ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
-  return { steps: tally.n, failed: tally.failed, ...exitEvidence(), ...(opts.reportEnd ? { reachedEnd: false } : {}) }
+  if (!opts.nested) {
+    if (incomplete) ex.log('warn', `Akış tamamlanmadan sonlandı (${tally.n} adım): koşul sağlanmadı.`)
+    else ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
+  }
+  return { steps: tally.n, failed: tally.failed, ...(incomplete ? { incomplete: true } : {}), ...exitEvidence(), ...(opts.reportEnd ? { reachedEnd: false } : {}) }
 }
