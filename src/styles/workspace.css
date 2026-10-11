@@ -130,7 +130,8 @@
 .library-tree.root-drop-target { box-shadow:inset 0 0 0 2px #316ac5; background:#f2f7ff; }
 .library-marquee { position:absolute; pointer-events:none; z-index:5; border:1px solid #316ac5; background:#316ac52b; }
 .library-tree-row.draft .library-tree-name { font-style:italic; }
-.canvas-tabs-row .canvas-tab { max-width:152px; background:linear-gradient(hsl(var(--tab-hue),65%,93%),hsl(var(--tab-hue),48%,79%)); border-color:hsl(var(--tab-hue),43%,56%); border-top:3px solid hsl(var(--tab-hue),65%,46%); }
+.canvas-tabs-row .canvas-tab { box-sizing:border-box; flex:0 0 auto; max-width:80px; gap:3px; padding-left:5px; background:linear-gradient(hsl(var(--tab-hue),65%,93%),hsl(var(--tab-hue),48%,79%)); border-color:hsl(var(--tab-hue),43%,56%); border-top:3px solid hsl(var(--tab-hue),65%,46%); }
+.canvas-tabs-row .canvas-tab-rename { flex:1; min-width:0; width:100%; }
 .canvas-tabs-row .canvas-tab.active { background:linear-gradient(hsl(var(--tab-hue),80%,96%),hsl(var(--tab-hue),60%,88%)); border-bottom-color:hsl(var(--tab-hue),60%,88%); box-shadow:inset 0 1px #fff; }
 .canvas-tab.drop-before { box-shadow:inset 3px 0 #17498b !important; }
 .canvas-tab.drop-after { box-shadow:inset -3px 0 #17498b !important; }
@@ -168,4 +169,12 @@
 .library-picker-body { padding:12px; }
 .library-picker-body .library-tree { border:1px solid #7f9db9; background:#fff; height:300px; overflow:auto; }
 .library-canvas-picker .xp-dialog-title { color:white; font:bold 13px Tahoma,sans-serif; background:linear-gradient(#0969ed,#0052c8); padding:8px; }
+.tablet-dialog { width:560px; max-width:calc(100vw - 30px); max-height:calc(100dvh - 30px); }
+.tablet-dialog-title { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; color:white; font:bold 13px Tahoma,sans-serif; background:linear-gradient(#0969ed,#0052c8); padding:5px 6px; }
+.tablet-dialog-title .xp-btn { width:23px; min-width:23px; height:23px; padding:0; color:white; background:linear-gradient(#ee9b86,#c73d25); border-color:white; font:bold 17px Tahoma,sans-serif; }
+.tablet-dialog-body { min-height:0; overflow:auto; padding:15px; }
+.tablet-dialog-body p { overflow-wrap:anywhere; }
+.tablet-dialog-qr { display:block; margin:12px auto; max-width:100%; height:auto; }
+.tablet-dialog-url { width:100%; box-sizing:border-box; }
+.tablet-dialog .workspace-picker-actions { flex-wrap:wrap; }
 @media(max-height:700px) { .library-brand { min-height:110px; max-height:130px; padding:5px 4px 0; } .library-brand .nubbo-mascot { width:66px; height:66px; } .library-brand .nubbo-logo { max-width:112px; } }
