@@ -22,6 +22,7 @@ import RecoveryNote from './RecoveryNote'
 import { recoveryReportIndex } from '../lib/recovery-report-view'
 import type { RecoveryReport } from '../../electron/recovery'
 import { packageAppearances } from '../lib/package-appearance'
+import { ViewerGesture } from '../viewer/gesture'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
 
@@ -42,6 +43,8 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 }
 
 type Props = {
+  readOnly?: boolean
+  onInspect?: (id:string) => void
   graph: AgentGraph
   recoveryReports?: RecoveryReport[]
   reportCanvasId?: string
@@ -138,8 +141,8 @@ function overlaps(a: Rect, b: Rect) {
 
 export default function NodeCanvas(p: Props) {
   // Consult a live ref: a drag/link begun before Run must not write after Run.
-  const lockedRef = useRef(p.running)
-  lockedRef.current = p.running
+  const lockedRef = useRef(p.running || p.readOnly)
+  lockedRef.current = p.running || p.readOnly
   const guard = <A extends unknown[]>(callback: (...args: A) => void) => (...args: A) => {
     if (!lockedRef.current) callback(...args)
   }
@@ -176,6 +179,8 @@ export default function NodeCanvas(p: Props) {
   const [hoverTarget, setHoverTarget] = useState<string | null>(null)
   const [view, setView] = useState<View>({ x: 24, y: 24, z: 1 })
   const viewRef = useRef(view)
+  const touch=useRef(new ViewerGesture())
+  useEffect(()=>{touch.current.clear();setPanning(false)},[p.canvasKey,p.readOnly])
   viewRef.current = view
   const [panning, setPanning] = useState(false)
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -332,7 +337,7 @@ export default function NodeCanvas(p: Props) {
 
   const runningId = p.runPhase === 'running' ? [...(p.highlightedNodeIds ?? [])].reverse().find(id => byId.get(id)?.kind !== 'loop') : undefined
   useEffect(() => {
-    if (runningId) reveal(runningId)
+    if (runningId && !p.readOnly) reveal(runningId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId])
 
@@ -552,14 +557,17 @@ export default function NodeCanvas(p: Props) {
       ref={scrollRef}
       className={`canvas-scroll${panning ? ' panning' : ''}${marquee ? ' selecting' : ''}`}
       style={{
+        touchAction:p.readOnly?'none':undefined,
         backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
       onMouseDownCapture={(e) => {
         if ((e.target as Element | undefined)?.closest?.('.recovery-note, .recovery-report-badge')) return
+        if(p.readOnly){e.preventDefault();e.stopPropagation();return}
         if (e.button === 0 || e.button === 2) pasteClick.current = { canvasKey: p.canvasKey, point: toCanvas(e.clientX, e.clientY) }
       }}
       onMouseDown={(e) => {
+        if(p.readOnly)return
         if (e.button === 1) {
           e.preventDefault()
           setPanning(true)
@@ -632,12 +640,22 @@ export default function NodeCanvas(p: Props) {
       }}
       onContextMenu={(e) => {
         e.preventDefault()
+        if(p.readOnly)return
         // Sağ tık artık "Node ekle" penceresini AÇMAZ (istek: 1.9.76); o pencere Shift+A ile açılır.
         // Paket içindeyken sağ tık doğrudan bir üst pakete çıkar. Gezinti koşu sürerken de serbesttir.
         if (p.canExitPackage && p.onExitPackage) { p.onExitPackage(); return }
       }}
       onMouseMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY } }}
       onMouseLeave={() => { pointerRef.current = null }}
+      onPointerDownCapture={e=>{
+        if(!p.readOnly||(e.target as Element).closest('.recovery-note,.recovery-report-badge,.canvas-zoom'))return
+        e.preventDefault();e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect()
+        touch.current.down(e.pointerId,{x:e.clientX-rect.left,y:e.clientY-rect.top},viewRef.current,(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')??null)
+        e.currentTarget.setPointerCapture?.(e.pointerId);setPanning(true)
+      }}
+      onPointerMoveCapture={e=>{if(!p.readOnly)return;const r=e.currentTarget.getBoundingClientRect(),next=touch.current.move(e.pointerId,{x:e.clientX-r.left,y:e.clientY-r.top});if(next){e.preventDefault();e.stopPropagation();setViewNow(next)}}}
+      onPointerUpCapture={e=>{if(!p.readOnly)return;const id=touch.current.up(e.pointerId,viewRef.current);if(id)p.onInspect?.(id);setPanning(false)}}
+      onPointerCancel={e=>{if(p.readOnly){touch.current.up(e.pointerId,viewRef.current,true);setPanning(false)}}}
     >
       <div
         ref={innerRef}
@@ -935,7 +953,7 @@ export default function NodeCanvas(p: Props) {
           />
         )}
 
-        {menu && !p.running && (
+        {menu && !p.running && !p.readOnly && (
           <div
             className="ctx-menu"
             style={{ left: menu.x, top: menu.y }}
@@ -1012,7 +1030,7 @@ export default function NodeCanvas(p: Props) {
           </div>
         )}
       </div>
-      {reportNodeId && <RecoveryNote title={byId.get(reportNodeId)?.title ?? 'Node'} reports={reportIndex.get(reportNodeId) ?? []} onClose={() => setReportNodeId(null)} />}
+      {reportNodeId && <RecoveryNote readOnly={p.readOnly} title={byId.get(reportNodeId)?.title ?? 'Node'} reports={reportIndex.get(reportNodeId) ?? []} onClose={() => setReportNodeId(null)} />}
       <button type="button" className="canvas-zoom" title="Tekerlek: yakınlaştır · Orta tuş: kaydır · Tıkla: 100%" onMouseDown={(e) => e.stopPropagation()} onClick={resetZoom}>
         {Math.round(view.z * 100)}%
       </button>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
+import TabletDialog from './components/TabletDialog'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import CanvasLibraryPanel from './components/CanvasLibrary'
@@ -178,6 +179,7 @@ export default function App() {
   const [sideTab, setSideTab] = useState<SideTab>('canvases')
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [tabletDialog,setTabletDialog]=useState(false)
   const [libraryDirectory, setLibraryDirectory] = useState('')
   const [library, setLibrary] = useState(() => libraryOf(book0))
   const [automationDraft, setAutomationDraft] = useState<AutomationEditor | null>(null)
@@ -1496,6 +1498,8 @@ export default function App() {
           <button type="button" onClick={() => setSideTab('settings')}>
             Ayarlar
           </button>
+          {api?.viewerInfo&&<button type="button" onClick={()=>setTabletDialog(true)}>Tablet İzleme</button>}
+          {tabletDialog&&<TabletDialog onClose={()=>setTabletDialog(false)}/>}
           <input
             ref={fileRef}
             type="file"

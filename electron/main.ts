@@ -54,6 +54,12 @@ import { toolLayerSave } from './tool-branch'
 import { readWorkspace, writeWorkspace } from './workspace-store'
 import { LibraryStorage, librarySession } from './library-storage'
 import type { CanvasLibrary } from './graph-types'
+import { randomBytes, createHash } from 'node:crypto'
+import QRCode from 'qrcode'
+import { ViewerState } from './viewer-state'
+import { startViewerServer } from './viewer-server'
+import { configureViewerTailscale } from './viewer-tailscale'
+import type { ViewerInfo } from './viewer-types'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
 
@@ -63,7 +69,7 @@ const APPROVAL_TIMEOUT_MS = 120_000
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook; libraryPath?: string; libraryMigrated?: boolean }>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook; libraryPath?: string; libraryMigrated?: boolean; viewerEnabled?:boolean; viewerSecret?:string; viewerOrigin?:string }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
   // The real profile keeps the file exactly where it has always lived. A test profile
@@ -73,6 +79,20 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
 
 let libraryStorage: LibraryStorage | undefined
 let savedLibrary: CanvasLibrary | undefined
+const viewerState=new ViewerState(app.getVersion())
+let viewerServer:Awaited<ReturnType<typeof startViewerServer>>|undefined
+let viewerPending:Promise<void>|undefined
+const viewerPort=31389+(process.env.NUBBO_PROFILE?parseInt(createHash('sha256').update(process.env.NUBBO_PROFILE).digest('hex').slice(0,4),16)%500:0)
+async function ensureViewer(){
+ if(viewerServer)return
+ if(viewerPending)return viewerPending
+ viewerPending=(async()=>{if(!store.get('viewerSecret'))store.set('viewerSecret',randomBytes(32).toString('hex'));viewerServer=await startViewerServer(viewerState,path.join(app.getAppPath(),'dist'),store.get('viewerSecret')!,viewerPort)})()
+ try{await viewerPending}finally{viewerPending=undefined}
+}
+async function viewerInfo():Promise<ViewerInfo>{
+ const origin=store.get('viewerOrigin'),url=viewerServer&&origin?`${origin}/viewer#token=${store.get('viewerSecret')}`:undefined
+ return {enabled:!!viewerServer,port:viewerServer?.port,url,qr:url?await QRCode.toDataURL(url,{width:240,margin:2}):undefined}
+}
 let mainWindow: BrowserWindow | null = null
 const closeGuard = new WindowCloseGuard()
 let hudWindow: BrowserWindow | null = null
@@ -117,6 +137,7 @@ let derivedRun = false
 let fastRun = false
 
 function send(channel: string, payload: unknown) {
+  viewerState.event(channel,payload)
   if (channel === 'agent:step') {
     // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
     noteStep(payload)
@@ -507,11 +528,13 @@ function deliverHud(channel: string, payload: unknown, show: boolean) {
 }
 
 function pushLoop(text: string) {
+  viewerState.event('hud:loop',{text})
   if (!running || !hudWindow || hudWindow.isDestroyed()) return
   deliverHud('hud:loop', { text }, false)
 }
 
 function pushMethod(text: string) {
+  viewerState.event('hud:method',{text})
   if (!running || !hudWindow || hudWindow.isDestroyed()) return
   deliverHud('hud:method', { text: recoveryActive ? `Kurtarma ajanı${text ? ` · ${text}` : ''}` : text }, false)
 }
@@ -636,6 +659,7 @@ async function runFlow(
     if (!opts?.derived) store.set('graph', graph)
     // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
     runId = beginRun(graph, startId)
+    viewerState.begin(runId,opts?.canvasId??'',graph)
     const s = getSettings()
     let shotDir = ''
     try {
@@ -789,6 +813,7 @@ async function runFlow(
     // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
     // still ask how the run ended after it is over.
     endRun(outcome)
+    if(runId)viewerState.finish(outcome)
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
     recoveryActive = false
     running = false
@@ -1016,7 +1041,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       savedLibrary = libraryStorage.load(store.get('libraryMigrated') ? undefined : session.library)
       store.set('libraryMigrated', true)
     }
-    return { ...session, library: structuredClone(savedLibrary) }
+    const book={ ...session, library: structuredClone(savedLibrary) }
+    viewerState.setBook(book)
+    return book
   }
   function storeWorkspace(book: CanvasBook) {
     const current = loadCanvases()
@@ -1024,6 +1051,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       libraryStorage!.save(canvases.library!)
       store.set({ canvases: librarySession(canvases), graph })
       savedLibrary = structuredClone(canvases.library!)
+      viewerState.setBook(canvases)
     } }, book, current)
   }
   ipcMain.handle('library:info', () => {
@@ -1043,6 +1071,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       const library = active!.restore(answer.filePaths[0])
       const book: CanvasBook = { tabs: [], activeId: '', library }
       store.set({ canvases: librarySession(book), graph: { nodes: [], edges: [] } }); savedLibrary = library
+      viewerState.setBook(book)
       return { directory: active!.directory, book }
     }
     const answer = await dialog.showOpenDialog(mainWindow, { title: mode === 'copy' ? 'Kütüphaneyi kaydedeceğin klasörü seç' : 'Nubbo kütüphanesi bulunan klasörü seç', properties: ['openDirectory', 'createDirectory'] })
@@ -1055,10 +1084,22 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const graph = book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] }
     store.set({ libraryPath: target.directory, libraryMigrated: true, canvases: librarySession(book), graph })
     libraryStorage = target; savedLibrary = library
+    viewerState.setBook(book)
     return { directory: target.directory, book }
   })
 
   ipcMain.handle('canvases:get', () => loadCanvases())
+  ipcMain.handle('viewer:info',()=>viewerInfo())
+  ipcMain.handle('viewer:manage',async(_e,action:string)=>{
+    if(action==='disable'){store.set('viewerEnabled',false);await viewerServer?.close();viewerServer=undefined;return viewerInfo()}
+    if(!['enable','rotate'].includes(action))throw Error('Geçersiz izleme işlemi.')
+    loadCanvases();viewerState.setReports(readRecoveryReports())
+    if(action==='rotate'){await viewerServer?.close();viewerServer=undefined;store.set('viewerSecret',randomBytes(32).toString('hex'))}
+    await ensureViewer();store.set('viewerEnabled',true)
+    try{store.set('viewerOrigin',await configureViewerTailscale(viewerServer!.port));return await viewerInfo()}
+    catch(e){return {...await viewerInfo(),error:(e as Error).message}}
+  })
+  if(store.get('viewerEnabled'))void ensureViewer().then(()=>{try{loadCanvases();viewerState.setReports(readRecoveryReports())}catch(e){log('warn',`Tablet kayıtları açılamadı: ${(e as Error).message}`)}}).catch(e=>log('warn',`Tablet izleme açılamadı: ${(e as Error).message}`))
   ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
@@ -1193,6 +1234,7 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  void viewerServer?.close()
   globalShortcut.unregisterAll()
   bridge.shutdown()
 })

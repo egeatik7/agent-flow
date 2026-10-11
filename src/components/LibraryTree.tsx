@@ -7,7 +7,7 @@ export function FileIcon({ kind }: { kind: LibraryRef['kind'] }) {
  return <svg className="library-file-icon" viewBox="0 0 20 20" aria-hidden="true">{kind === 'folder' ? <><path d="M1 5V3h7l2 2h8v12H1z" fill="#dc9b29" stroke="#a26e18"/><path d="M1 7h18l-2 10H1z" fill="#ffda72" stroke="#c08a27"/><path d="M3 9h13" stroke="#fff4b0"/></> : <><path d="M4 1h8l4 4v13H4z" fill="#fff" stroke="#6984a5"/><path d="M12 1v5h4" fill="#bdd8f5" stroke="#6984a5"/><path d="M7 9h6M7 12h6M7 15h4" stroke={kind === 'automation' ? '#398a39' : '#4676ae'} strokeWidth="2"/>{kind === 'automation' && <path d="M1 11h4v4h3" fill="none" stroke="#4a9b43" strokeWidth="2"/>}</>}</svg>
 }
 export default function LibraryTree(p: {
- library: CanvasLibrary; mode?: 'canvas' | 'automation'; archived?: boolean; disabled?: boolean
+ library: CanvasLibrary; mode?: 'canvas' | 'automation'; archived?: boolean; disabled?: boolean; touch?:boolean
  selected?: LibraryRef[]; onSelect?: (refs: LibraryRef[]) => void
  onOpen?: (item: LibraryItem) => void; onContext?: (e: MouseEvent, item?: LibraryItem) => void
  itemName?: (item: LibraryItem) => string
@@ -46,12 +46,12 @@ export default function LibraryTree(p: {
  }
  return <div className="library-tree" role="tree" aria-label={p.mode === 'automation' ? 'Otomasyon klasörleri' : 'Tuval klasörleri'} onContextMenu={e => { e.preventDefault(); p.onContext?.(e) }}
   onDragOver={e => { if (p.onMove && !p.disabled) {e.preventDefault(); e.dataTransfer.dropEffect='move'} }} onDrop={e => drop(e)}>
-  {!visible.length && <div className="library-empty">{p.archived ? 'Arşiv boş.' : 'Sağ tıkla bir klasör veya tuval oluştur.'}</div>}
+  {!visible.length && <div className="library-empty">{p.archived ? 'Arşiv boş.' : p.touch ? 'Kütüphane boş.' : 'Sağ tıkla bir klasör veya tuval oluştur.'}</div>}
   {visible.map(({item,depth}) => {
    const key=refKey(item), active=selected.some(r=>refKey(r)===key), folder=item.kind==='folder'
    return <Fragment key={key}><div role="treeitem" aria-selected={active} aria-expanded={folder ? expanded.has(item.id) : undefined} aria-level={depth+1} tabIndex={active || (!selected.length && visible[0]?.item === item) ? 0 : -1}
     className={`library-tree-row${active ? ' selected' : ''}${over === key ? ' drop-target' : ''}`} style={{paddingLeft:depth*15+4}} draggable={!!p.onMove && !p.disabled}
-    onClick={e=>pick(item,e)} onDoubleClick={()=>{if(!p.disabled)folder ? toggle(item.id) : p.onOpen?.(item)}}
+    onClick={e=>{pick(item,e);if(p.touch&&!p.disabled)folder?toggle(item.id):p.onOpen?.(item)}} onDoubleClick={()=>{if(!p.disabled&&!p.touch)folder ? toggle(item.id) : p.onOpen?.(item)}}
     onKeyDown={e=>{const i=visible.findIndex(v=>refKey(v.item)===key); if(e.key==='Enter'){if(!p.disabled)folder ? toggle(item.id) : p.onOpen?.(item)} else if(e.key==='ArrowRight'&&folder){setExpanded(s=>new Set([...s,item.id]))} else if(e.key==='ArrowLeft'&&folder){setExpanded(s=>{const n=new Set(s);n.delete(item.id);return n})} else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const next=visible[Math.max(0,Math.min(visible.length-1,i+(e.key==='ArrowDown'?1:-1)))];select([{kind:next.item.kind,id:next.item.id}]);(e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role=treeitem]')[visible.indexOf(next)])?.focus()} }}
     onContextMenu={e=>{e.preventDefault();e.stopPropagation();if(!active)select([{kind:item.kind,id:item.id}]);p.onContext?.(e,item)}}
     onDragStart={e=>{const refs=active?selected:[{kind:item.kind,id:item.id}];select(refs);e.dataTransfer.setData('application/x-nubbo-library',JSON.stringify(refs));e.dataTransfer.effectAllowed='move'}}

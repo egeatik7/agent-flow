@@ -48,6 +48,9 @@ function harness(overrides = {}) {
     setDebugRun: (on) => events.push(on ? 'debug-on' : 'debug-off'),
     setErrorStopHook: () => events.push('error-hook'),
     noteError: () => {},
+    // 1.9.89: tablet izleme durumu. runFlow kosunun basinda/sonunda haber verir;
+    // harness in kendi kurali: runFlow un kullandigi yuzeyin aynisi burada da olmali.
+    viewerState: { begin: () => {}, finish: () => {}, event: () => {}, setBook: () => {}, setReports: () => {} },
     noteLogLine: () => {},
     // The debug record's surface, as runFlow uses it: opened at a failure, completed by the message
     // and the screenshot that arrive later.

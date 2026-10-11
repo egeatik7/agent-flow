@@ -9,7 +9,7 @@ function NavigationIcon(p: { direction: 'back' | 'forward' | 'out' }) {
   </svg>
 }
 export default function NodeNavigator(p: {
-  graph: AgentGraph; name?: string; locationKey?: string; disabled?: boolean; inspecting?: boolean; active?: boolean
+  graph: AgentGraph; name?: string; locationKey?: string; disabled?: boolean; inspecting?: boolean; active?: boolean; touch?:boolean
   onNavigate?: (id: string, inspect: boolean) => void
   onBack?: () => void; onForward?: () => void; onOut?: () => void
   canBack?: boolean; canForward?: boolean; canOut?: boolean
@@ -36,6 +36,7 @@ export default function NodeNavigator(p: {
           title={`${node.title} — ${spec.label} · Tek tık: ${node.kind === 'package' ? 'içine gir' : 'merkeze git'} · Çift tık: ayarlar`}
           onClick={e => {
             cancel()
+            if(p.touch){p.onNavigate?.(node.id,node.kind!=='package');return}
             if (e.detail > 1) return
             // Keep the row stable until a possible double click, so package
             // settings can open instead of the second click hitting a new row.

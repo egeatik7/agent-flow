@@ -3,7 +3,7 @@ import type { RecoveryReport } from '../../electron/recovery'
 import type { NodeContext } from '../../electron/tool-context'
 import { recoveryOutcome, recoveryReportText } from '../lib/recovery-report-view'
 
-export default function RecoveryNote({ reports, title, onClose }: { reports: RecoveryReport[]; title: string; onClose: () => void }) {
+export default function RecoveryNote({ reports, title, onClose, readOnly }: { reports: RecoveryReport[]; title: string; onClose: () => void; readOnly?:boolean }) {
   const [selected, setSelected] = useState(reports[0]?.id)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | 'all' | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -66,7 +66,7 @@ export default function RecoveryNote({ reports, title, onClose }: { reports: Rec
       <b>Yapılanlar</b>
       {report.actions.length ? <ol>{report.actions.map((a,i) => <li key={i}><b>{a.tool}</b> · {a.message}</li>)}</ol> : <p>Eylem kaydı yok.</p>}
     </div>
-    {(window.xpAgent?.removeRecoveryReport || window.xpAgent?.clearRecoveryReports) && <footer className="recovery-note-actions">
+    {!readOnly && (window.xpAgent?.removeRecoveryReport || window.xpAgent?.clearRecoveryReports) && <footer className="recovery-note-actions">
       {deleteTarget ? <>
         <p>{deleteTarget === 'all' ? 'Bütün tuvallerin kurtarma raporları kalıcı olarak temizlensin mi? Node ve akışlar korunur.' : 'Bu rapor kalıcı olarak temizlensin mi?'}</p>
         <button type="button" className="xp-btn" disabled={deleting} onClick={() => void remove()}>Evet, temizle</button>
@@ -77,7 +77,7 @@ export default function RecoveryNote({ reports, title, onClose }: { reports: Rec
       </>}
       {deleteError && <p role="alert">{deleteError}</p>}
     </footer>}
-    {(window.xpAgent?.openRecoveryReports || window.xpAgent?.copyRecoveryReportText) && <footer className="recovery-note-actions">
+    {!readOnly && (window.xpAgent?.openRecoveryReports || window.xpAgent?.copyRecoveryReportText) && <footer className="recovery-note-actions">
       <button type="button" className="xp-btn" disabled={!window.xpAgent?.openRecoveryReports} onClick={() => void openFolder()}>Rapor klasörünü aç</button>
       <button type="button" className="xp-btn recovery-copy" disabled={!window.xpAgent?.copyRecoveryReportText}
         title="Rapor metnini kopyala" aria-label="Rapor metnini kopyala" onClick={() => void copy()}>
