@@ -56,7 +56,39 @@ OCR aynı karenin döndürülmüşü `:833-837` + kutu geri taşıma `:446-455` 
 JPEG `:851` · görüntü + liste tek `scan` nesnesinden (`electron/openrouter.ts:664-681`) · koşulda resim yok
 (`electron/agent.ts` koşul okuyucuları `image:'none'`).
 
-## Kalan riskler (dürüst)
+## "Aynı ana koysak, tek işlem farkla?" — neden mümkün değil, ama pratikte ne oluyor?
+
+UIA okuması zaten karenin **hemen ardındaki tek işlemdir** (araya başka bir iş girmiyor): `Capture-Raw`
+→ UIA. Yine de "aynı an" olmaz, çünkü:
+
+1. **UIA okuması bir an değil, bir süredir:** ağaç yürüyüşü ölçülen **180–315 ms** sürüyor; öğeler bu
+   aralık boyunca tek tek okunur. Kare ise **tek bir BitBlt** (15–60 ms). İki farklı işletim sistemi
+   mekanizması (GDI ekran kopyası ↔ UIA/COM ağaç yürüyüşü) atomik yapılamaz; "1 işlem fark" zaten budur.
+2. **Paralel okumak da çözmez:** UIA yürüyüşü ayrı bir iş parçacığına alınsa *ortalama* kayma yarıya iner,
+   ama aralık sıfırlanmaz; üstüne COM/cache tutarlılığı ve worker karmaşıklığı eklenir. Bilinçli olarak
+   yapılmadı.
+3. **Ölçülen gerçek etki — bu makinede:** `scripts/measure-uia-drift.ps1` (UIA → kare → UIA, salt okuma):
+
+   | Tur | UIA1 | kare | UIA2 | Aralık | Karşılaştırılan | >2 px kayan | En büyük fark |
+   | --- | --- | --- | --- | --- | --- | --- | --- |
+   | 1 | 315 ms | 47 ms | 180 ms | **542 ms** | 146 öğe | **0** | **0 px** |
+   | 2 | 195 ms | 19 ms | 184 ms | **398 ms** | 145 öğe | **0** | **0 px** |
+
+   Yani **durağan bir arayüzde yarım saniyelik aralıkta bile hiçbir öğe kaymadı**. Risk, o pencerede
+   değişen arayüzlerle sınırlıdır: animasyon, kaydırma, ilerleme göstergesi, yeni açılan diyalog.
+
+**Farkı küçültmenin gerçek kaldıraçları (ölçülü):**
+- **Hedef pencere seçmek:** UIA yürüyüşü tüm masaüstünde 202–397 ms, **tek pencerede 73 ms** → ~5 kat
+  küçük aralık. Bu zaten bir kullanıcı ayarıdır (Ayarlar > Hedef pencere).
+- **Kapsamı daraltmak / daha çok özelliği önbelleğe almak:** `Get-UiaItems` Name, ControlType,
+  BoundingRectangle ve AutomationId'yi zaten `CacheRequest` ile toplu okuyor (`screen.ps1:527-531`);
+  kalan süre ağaç yürüyüşünün kendisidir.
+- **Aralığı yok sayıp sonucu doğrulamak (asıl çözüm, seçenek C):** UIA kutusunu aynı karenin OCR kanıtıyla
+  karşılaştırıp örtüşmeyeni numaralamadan listelemek. Bu, zamanlamaya değil **veriye** dayalı bir garanti
+  verir. Bedeli var: OCR'ın görmediği (yalnız simge olan) düğmeler düşebilir; bu yüzden ölçülen 0 px
+  kayma göz önüne alınarak **şimdilik yapılmadı**.
+
+
 
 1. **UIA artık kareden yeni:** çok hızlı değişen bir arayüzde, görüntüye çizilen UIA numarası öğenin
    *şimdiki* yerini gösterirken kare *eski* hâli gösterir. Ölçülen fark küçüktür (≈0,07–0,4 sn) ve prompt
