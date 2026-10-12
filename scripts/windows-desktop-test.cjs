@@ -22,7 +22,7 @@ function state() {
   for (let attempt = 0; ; attempt++) {
     try { return JSON.parse(fs.readFileSync(path.join(fixtureDir, 'state.json'), 'utf8')); }
     catch (e) {
-      if (e.code === 'EBUSY' && attempt < 5) {
+      if ((e.code === 'EBUSY' || e.code === 'ENOENT' || e instanceof SyntaxError) && attempt < 5) {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         continue;
       }
@@ -287,3 +287,4 @@ app.whenReady().then(async () => {
     app.exit(exitCode);
   }
 });
+
