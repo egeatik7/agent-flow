@@ -1,9 +1,9 @@
-import { describeItems, type ScanResult, type ScreenItem, type Target } from './matcher'
+import { commandNeedle, describeItems, norm, type ScanResult, type ScreenItem, type Target } from './matcher'
 import { taskbarItem } from './spatial-context'
 
 export const WORD_TARGET_RULES = `OCR is supplied as individual observed words with real bounding boxes, not reconstructed sentence boxes. Use the whole word cloud: proximity, alignment, spacing, UIA control bounds, and overall screen position to infer which words belong to the requested label or button. A shared OCR parent is NOT proof of one button; adjacent words can be different buttons. Related words can have different parents. Do not infer a clickable button from proximity alone.
 For an OCR target, choose exactly ONE word: the word you are most confident lies on the intended clickable target. Return that word's listed id. The engine will click INSIDE that word's real box, never at an average between words or at a combined group center. Do not return several IDs, a group ID, an OCR parent ID, or coordinates. The text field cannot change the click box. Context-only unsplit OCR boxes are NOT selectable. For a genuine UIA/DOM control, its listed id remains valid. If no observed candidate fits, return id:null.
-These IDs belong only to this current list. Screenshot numbers, if present, refer to original control/phrase IDs; OCR word IDs in this list have their own coordinates. Resolve word IDs from the list, not screenshot numbering.
+These IDs belong only to this current list. Screenshot numbers, if present, refer to original control/phrase IDs; OCR word IDs in this list have their own numbering. Resolve word IDs from the list, not screenshot numbering. Return the word whose text matches the instruction's own wording; never return another word from the same line, and never return a number that appears only in parent-line="..." or overlapping-OCR=...
 Preserve a specifically named application's identity. A generic "browser"/"tarayıcı" label does not identify Google Chrome or any other named application. If the requested application is not identified by observed evidence, return id:null; do not substitute another application with a similar purpose.`
 
 export const OCR_READER_RULES = `OCR-reader identifies the reader of each observation from the SAME captured frame. Windows and ONNX observations are supplied separately even when their text and coordinates overlap. Identical or differing readings at overlapping coordinates can refer to the SAME target; they are not automatically different buttons, additional completed jobs or additional actions. Infer the best reading from nearby words and the instruction. Select only ONE listed candidate for the requested target or condition evidence. Do not concatenate conflicting alternatives or mix observations from unrelated locations. overlapping-OCR lists cross-reader candidate IDs whose boxes geometrically overlap; its percentage is intersection area divided by the smaller box area, NOT a probability or proof of one button. Use it to recognize repeated observations of the same screen location, while still checking text and surrounding context. Each candidate keeps its own measured box; never average boxes or borrow word geometry from another observation. ONNX-confidence is that reader's recognition score, not proof of clickability. Keep counters, totals and negations meaningful: 6/60 is not 60/60, and running is not finished.`
@@ -116,6 +116,58 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
     const clipped = !options?.fullText && item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
     return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent-line="${parentText.get(parentId) ?? ''}"` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
+}
+
+/** Ignore model-supplied text/coordinates: only the selected observed word defines this box. */
+function instructionTokens(instruction: string): string[] {
+  const needle = commandNeedle(instruction) || instruction
+  // Komut sözcükleri ayıklanmış hâl + HAM cümle birlikte taranır: "5.2" ya da dosya adı gibi hedefler
+  // komut ayıklamasında düşse bile kaybolmaz. `norm` noktalama yerine boşluk koyduğu için noktalı
+  // hedefler ham metinden de toplanır ("5.2", "anvil.glb" tek sözcük kalır).
+  const kaynak = `${needle} ${instruction}`
+  const ham = norm(kaynak).split(' ')
+  const noktali = kaynak.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9.]+/)
+  return [...new Set([...ham, ...noktali])].map((token) => token.replace(/^\.+|\.+$/g, '')).filter((token) => token.length >= 2)
+}
+
+/**
+ * Aday kelime ↔ talimat sözcüğü puanı. MESAFE/UZAKLIK HESABI YOKTUR (kullanıcı isteği): yalnız birebir,
+ * önek/sonek ilişkisi, tam sözcük geçişi ve harf kapsaması bakılır. Talimat bir cümle olabilir; karar
+ * cümlenin TÜM sözcükleri içinde en iyi uyanla verilir.
+ */
+export function wordScore(kelime: string, token: string): number {
+  const k = norm(kelime), t = norm(token)
+  if (!k || !t || k.length < 2) return 0
+  if (k === t) return 1
+  if (k.length < 3 || t.length < 3) return 0
+  if (k.startsWith(t) || t.startsWith(k)) return 0.9
+  if (t.includes(k) || k.includes(t)) return 0.85
+  // Yazım hatası toleransı: ilk iki harf aynı ve uzunluklar yakınsa ("blkonr" → "blender").
+  if (k.length >= 3 && k.slice(0, 2) === t.slice(0, 2) && Math.abs(k.length - t.length) <= 2) return 0.65
+  const havuz = t.split('')
+  let bulunan = 0
+  for (const harf of k) {
+    const i = havuz.indexOf(harf)
+    if (i >= 0) { havuz.splice(i, 1); bulunan++ }
+  }
+  const kapsama = bulunan / k.length
+  return kapsama >= 0.75 ? 0.5 : 0
+}
+
+/**
+ * Model doğru OCR SATIRINI seçtiyse, o satırın kelimeleri arasından talimata en uygun olanı program seçer.
+ * Belirsizse (en iyi puan zayıf ya da ikinciyle neredeyse eşit) `null` döner ve modelin seçimi korunur.
+ */
+export function bestWordMatch(kelimeler: string[], instruction: string): { index: number; word: string; score: number } | null {
+  const tokens = instructionTokens(instruction)
+  if (!tokens.length || kelimeler.length < 2) return null
+  const puanli = kelimeler.map((word, index) => ({ index, word, score: Math.max(...tokens.map((token) => wordScore(word, token))) }))
+  // Beraberlikte daha UZUN kelime (daha belirgin hedef) kazanır: "Blender" > "5.2".
+  const sirali = [...puanli].sort((a, b) => b.score - a.score || b.word.length - a.word.length || a.index - b.index)
+  const en = sirali[0], ikinci = sirali[1]
+  if (!en || en.score < 0.6) return null
+  if (en.score < 1 && ikinci && en.score < ikinci.score * 1.3) return null
+  return en
 }
 
 /** Ignore model-supplied text/coordinates: only the selected observed word defines this box. */

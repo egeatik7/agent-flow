@@ -1,5 +1,5 @@
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
-import { refineWordTarget } from './word-targets'
+import { bestWordMatch, refineWordTarget } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
 import fs from 'fs'
@@ -265,6 +265,16 @@ export function createAgent(ctx: AgentContext) {
       const item = choice.id !== null ? items.find((i) => i.id === choice.id) : undefined
       if (item) {
         log('info', `Seçilen hedef #${item.id}: ${item.src}/${item.type} “${item.text.slice(0, 120)}” @${item.x},${item.y} ${item.w}x${item.h}${scan.window ? ` / ${scan.window}` : ''}`)
+        // Model doğru SATIRI seçtiyse ve kelime indeksi GEÇERLİYSE, kelimeyi TALİMATA göre program seçer
+        // (mesafe hesabı yok; 1.9.111). Geçersiz indeks eski gibi REDDEDİLİR: birleşik metin ortasına
+        // düşmek yasak (scripts/test-targeting.cjs "invalid word index cannot fall back").
+        if (choice.wordIndex !== undefined && item.words?.length && item.words[choice.wordIndex]) {
+          const duzeltme = bestWordMatch(item.words.map((w) => w.t), explicit?.text || prompt || recordedText)
+          if (duzeltme && duzeltme.index !== choice.wordIndex) {
+            log('info', `Kelime talimata göre düzeltildi: “${item.words[choice.wordIndex]?.t ?? '?'}” → “${duzeltme.word}” (puan ${duzeltme.score.toFixed(2)}).`)
+            choice.wordIndex = duzeltme.index
+          }
+        }
         hit = choice.wordIndex !== undefined ? refineWordTarget(item, choice.wordIndex) : refineTarget(item, choice.text)
         if (!hit) return null
         if (choice.wordIndex !== undefined) log('info', `Seçilen OCR kelimesi #${choice.candidateId ?? '?'}: “${hit.text}” @${hit.x},${hit.y} ${hit.w}x${hit.h}; yalnız bu kelimeye tıklanacak.`)
