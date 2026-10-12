@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Qwen</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f8cff'/><path d='M22 32h56v34H46L32 78V66h-10z' fill='white'/></svg>">
+<style>
+:root{
+  --bg:#0e1014; --panel:#151922; --panel2:#1b2130; --line:#252c3a;
+  --fg:#e8ecf3; --mut:#8b95a7; --acc:#4f8cff; --acc2:#2f6fe0;
+  --user:#1c2533; --ok:#39d98a; --warn:#ffb454; --err:#ff6b6b;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);color:var(--fg);
+  font:15px/1.55 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+/* ---------- ust bar ---------- */
+header{
+  display:flex;align-items:center;gap:8px;padding:7px 10px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
+  flex-wrap:wrap;
+}
+.logo{font-weight:700;letter-spacing:.3px;margin-right:4px;white-space:nowrap}
+.logo b{color:var(--acc)}
+select,input[type=text]{
+  background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  border-radius:7px;padding:5px 8px;font:inherit;font-size:13px;outline:none;
+}
+select:focus,input:focus{border-color:var(--acc)}
+button{
+  background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  border-radius:7px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer;
+  transition:background .12s,border-color .12s;white-space:nowrap;
+}
+button:hover{background:#232b3c;border-color:#33405a}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.primary:hover{background:var(--acc2)}
+button:disabled{opacity:.45;cursor:default}
+label.chk{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--mut);cursor:pointer;user-select:none}
+.spacer{flex:1}
+#stat{font-size:12px;color:var(--mut);white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--err);margin-right:5px;vertical-align:middle}
+.dot.on{background:var(--ok)}
+/* ---------- mesajlar ---------- */
+main{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth}
+#wrap{max-width:900px;margin:0 auto;padding:18px 16px 26px}
+.msg{margin:0 0 16px;display:flex;gap:10px;animation:in .12s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.msg .av{
+  flex:0 0 26px;height:26px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;font-size:13px;font-weight:700;margin-top:2px;
+}
+.msg.u .av{background:var(--user);color:var(--mut)}
+.msg.a .av{background:linear-gradient(135deg,var(--acc),#8b5cf6);color:#fff}
+.body{min-width:0;flex:1}
+.who{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--mut);margin-bottom:3px}
+.bubble{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 13px;overflow-wrap:anywhere}
+.msg.u .bubble{background:var(--user);border-color:#26303f}
+.bubble>*:first-child{margin-top:0}
+.bubble>*:last-child{margin-bottom:0}
+.bubble p{margin:.45em 0}
+.bubble h1,.bubble h2,.bubble h3,.bubble h4{margin:.7em 0 .35em;line-height:1.3}
+.bubble h1{font-size:1.35em}.bubble h2{font-size:1.2em}.bubble h3{font-size:1.08em}.bubble h4{font-size:1em}
+.bubble ul{margin:.4em 0;padding-left:1.3em}
+.bubble li{margin:.15em 0}
+.bubble a{color:var(--acc)}
+.bubble code{background:#0b0e13;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:.9em;
+  font-family:"Cascadia Mono",Consolas,"Courier New",monospace}
+.cb{margin:.6em 0;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0b0e13}
+.cbh{display:flex;align-items:center;justify-content:space-between;padding:4px 9px;background:#131924;
+  border-bottom:1px solid var(--line);font-size:11px;color:var(--mut)}
+.cbh button{padding:2px 7px;font-size:11px;border-radius:5px}
+.cb pre{margin:0;padding:10px 12px;overflow-x:auto}
+.cb code{background:none;border:0;padding:0;font-size:12.5px;line-height:1.5;white-space:pre}
+.think{border-left:2px solid #3a4560;background:#121722;border-radius:0 8px 8px 0;padding:6px 10px;
+  margin:.5em 0;font-size:13px;color:#9aa6bd;white-space:pre-wrap}
+.think summary{cursor:pointer;color:var(--mut);font-size:12px;user-select:none}
+.imgs{display:flex;flex-wrap:wrap;gap:6px;margin:.5em 0}
+.imgs img{max-width:190px;max-height:190px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block}
+.meta{font-size:11px;color:var(--mut);margin-top:5px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.meta button{padding:1px 7px;font-size:11px;border-radius:5px}
+.cursor{display:inline-block;width:7px;height:15px;background:var(--acc);vertical-align:-2px;animation:bl .9s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+.err{color:var(--err);font-size:13px;white-space:pre-wrap}
+/* ---------- bos ekran ---------- */
+#empty{max-width:900px;margin:0 auto;padding:8vh 16px;text-align:center;color:var(--mut)}
+#empty h1{font-size:26px;color:var(--fg);margin:0 0 6px}
+#empty .tip{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#empty .tip button{font-size:12.5px}
+kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;font-size:11.5px}
+/* ---------- composer ---------- */
+footer{flex:0 0 auto;background:var(--panel);border-top:1px solid var(--line);padding:9px 10px 11px}
+#cwrap{max-width:900px;margin:0 auto}
+#thumbs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:7px}
+.th{position:relative}
+.th img{width:62px;height:62px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+.th b{position:absolute;top:-6px;right:-6px;background:var(--err);color:#fff;border-radius:50%;
+  width:19px;height:19px;line-height:17px;text-align:center;font-size:13px;cursor:pointer;border:2px solid var(--panel)}
+.th .sz{position:absolute;bottom:2px;left:3px;font-size:9px;color:#cbd5e1;text-shadow:0 1px 3px #000}
+#row{display:flex;gap:8px;align-items:flex-end}
+#txt{
+  flex:1;resize:none;background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font:inherit;font-size:14.5px;outline:none;
+  max-height:190px;min-height:42px;line-height:1.45;
+}
+#txt:focus{border-color:var(--acc)}
+.ico{width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:17px;padding:0}
+#send{width:auto;padding:0 16px;height:40px;font-size:14px}
+.hint{font-size:11px;color:var(--mut);margin-top:6px;text-align:center}
+#drop{position:fixed;inset:0;background:rgba(79,140,255,.13);border:3px dashed var(--acc);
+  display:none;align-items:center;justify-content:center;font-size:22px;font-weight:600;z-index:99}
+#drop.on{display:flex}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;z-index:100;cursor:zoom-out}
+#lb.on{display:flex}
+#lb img{max-width:94vw;max-height:94vh;border-radius:8px}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:#2b3446;border-radius:6px;border:3px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Qwen<b>Chat</b></span>
+  <span id="health"><span class="dot" id="hdot"></span><span id="htxt">bağlanıyor…</span></span>
+  <select id="model" title="Model"></select>
+  <label class="chk" id="thinkWrap" title="Modelin düşünme adımı (yavaşlatır)"><input type="checkbox" id="think"> düşün</label>
+  <select id="ctx" title="Bağlam penceresi">
+    <option value="8192">8K bağlam</option>
+    <option value="16384">16K</option>
+    <option value="32768">32K</option>
+    <option value="65536">64K</option>
+  </select>
+  <select id="keep" title="Model bellekte ne kadar kalsın (hız için: sürekli)">
+    <option value="-1">sürekli yüklü (en hızlı)</option>
+    <option value="30m">30 dk</option>
+    <option value="5m">5 dk</option>
+    <option value="0">hemen boşalt</option>
+  </select>
+  <span class="spacer"></span>
+  <button id="retry" title="Son mesajı yeniden gönder">↻ yenile</button>
+  <button id="clear" title="Sohbeti temizle">🗑 temizle</button>
+  <button class="primary" id="new" title="Yeni sohbet">+ yeni</button>
+</header>
+
+<main id="main">
+  <div id="empty">
+    <h1>Yerel Qwen hazır</h1>
+    <div>Mesaj yaz, <b>görsel yapıştır</b> (<kbd>Ctrl</kbd>+<kbd>V</kbd>), sürükle-bırak veya 📎 ile dosya seç.</div>
+    <div class="tip">
+      <button data-p="Bu görselde ne var? Kısaca anlat.">🖼 Görseli anlat</button>
+      <button data-p="Ekrandaki metni birebir yaz.">🔤 Metni çıkar</button>
+      <button data-p="Şu kodu açıkla ve hatasını bul:">🐞 Kod incele</button>
+      <button data-p="Türkçe kısa ve net yanıt ver. Merhaba, neler yapabilirsin?">💬 Tanış</button>
+    </div>
+  </div>
+  <div id="wrap"></div>
+</main>
+
+<footer>
+  <div id="cwrap">
+    <div id="thumbs"></div>
+    <div id="row">
+      <button class="ico" id="attach" title="Görsel ekle">📎</button>
+      <textarea id="txt" rows="1" placeholder="Bir şey yaz…  (Enter = gönder, Shift+Enter = alt satır)"></textarea>
+      <button id="stop" style="display:none">■ durdur</button>
+      <button class="primary" id="send">gönder ▸</button>
+    </div>
+    <div class="hint" id="hint">görseller otomatik olarak 1280 piksele küçültülür · model bellekte tutulur</div>
+  </div>
+  <input type="file" id="file" accept="image/*" multiple style="display:none">
+</footer>
+
+<div id="drop">Görseli buraya bırak</div>
+<div id="lb"><img id="lbimg" alt=""></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = { main:$("#main"), wrap:$("#wrap"), empty:$("#empty"), txt:$("#txt"), thumbs:$("#thumbs"),
+  model:$("#model"), ctx:$("#ctx"), keep:$("#keep"), think:$("#think"), thinkWrap:$("#thinkWrap"),
+  send:$("#send"), stop:$("#stop"), attach:$("#attach"), file:$("#file"), stat:$("#stat"),
+  hdot:$("#hdot"), htxt:$("#htxt"), drop:$("#drop"), lb:$("#lb"), lbimg:$("#lbimg"), hint:$("#hint") };
+
+const MAXPX = 1280, JPEGQ = 0.86, LS = "qwenchat.v1";
+let msgs = [];            // {role, content, images:[dataURL], thinking, stats}
+let pending = [];         // ekli görseller (dataURL)
+let controller = null, busy = false, modelCaps = [], cfg = {};
+
+/* ---------------- kalıcılık ---------------- */
+function save(){
+  try{
+    localStorage.setItem(LS, JSON.stringify({msgs, cfg, model:el.model.value, ctx:el.ctx.value, keep:el.keep.value, think:el.think.checked}));
+  }catch(e){ // kota dolarsa görselleri atıp tekrar dene
+    try{ localStorage.setItem(LS, JSON.stringify({msgs:msgs.map(m=>({...m,images:[]})), cfg, model:el.model.value, ctx:el.ctx.value, keep:el.keep.value, think:el.think.checked})); }catch(_){}
+  }
+}
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS)||"null");
+    if(!s) return;
+    msgs = s.msgs||[]; cfg = s.cfg||{};
+    if(s.think!==undefined) el.think.checked = !!s.think;
+    if(s.ctx) el.ctx.value = s.ctx;
+    if(s.keep) el.keep.value = s.keep;
+    renderAll();
+    if(s.model) setTimeout(()=>{ if([...el.model.options].some(o=>o.value===s.model)) el.model.value = s.model; }, 60);
+  }catch(e){}
+}
+
+/* ---------------- yardımcılar ---------------- */
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function inline(s){
+  let t = esc(s);
+  t = t.replace(/`([^`]+)`/g, (m,c)=>`<code>${c}</code>`);
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  return t;
+}
+function md(src){
+  const out=[]; let inCode=false, code=[], lang="", list=[], para=[];
+  const fp = ()=>{ if(para.length){ out.push("<p>"+inline(para.join("\n")).replace(/\n/g,"<br>")+"</p>"); para=[]; } };
+  const fl = ()=>{ if(list.length){ out.push("<ul>"+list.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"); list=[]; } };
+  for(const line of String(src||"").split("\n")){
+    const f = line.match(/^\s*```(\w*)\s*$/);
+    if(f){
+      if(inCode){ out.push(cb(lang, code.join("\n"))); code=[]; inCode=false; }
+      else { fp(); fl(); inCode=true; lang=f[1]; }
+      continue;
+    }
+    if(inCode){ code.push(line); continue; }
+    if(/^\s*[-*+]\s+/.test(line)){ fp(); list.push(line.replace(/^\s*[-*+]\s+/,"")); continue; }
+    if(/^\s*$/.test(line)){ fp(); fl(); continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if(h){ fp(); fl(); const n=h[1].length; out.push(`<h${n}>${inline(h[2])}</h${n}>`); continue; }
+    fl(); para.push(line);
+  }
+  if(inCode) out.push(cb(lang, code.join("\n")));
+  fp(); fl();
+  return out.join("");
+}
+let cbId = 0;
+function cb(lang, code){
+  const id = "c"+(cbId++);
+  return `<div class="cb"><div class="cbh"><span>${esc(lang||"kod")}</span>`+
+         `<button class="cp" data-c="${id}">kopyala</button></div>`+
+         `<pre><code id="${id}">${esc(code)}</code></pre></div>`;
+}
+
+/* ---------------- çizim ---------------- */
+function avatar(role){ return role==="user" ? '<div class="av">S</div>' : '<div class="av">Q</div>'; }
+function imgsHtml(images){
+  if(!images||!images.length) return "";
+  return '<div class="imgs">'+images.map(u=>`<img src="${u}" alt="">`).join("")+"</div>";
+}
+function statsLine(m){
+  const s = m.stats; if(!s) return "";
+  const bits = [];
+  if(s.tps) bits.push(s.tps.toFixed(1)+" tok/s");
+  if(s.eval) bits.push(s.eval+" token");
+  if(s.total) bits.push("toplam "+s.total.toFixed(1)+"s");
+  if(s.load) bits.push("yükleme "+s.load.toFixed(1)+"s");
+  return bits.join(" · ");
+}
+function msgEl(m, i){
+  const d = document.createElement("div");
+  d.className = "msg " + (m.role==="user" ? "u" : "a");
+  d.dataset.i = i;
+  const think = m.thinking ? `<details class="think"><summary>düşünme</summary>${esc(m.thinking)}</details>` : "";
+  const body = m.role==="user" ? `<p>${m.content?inline(m.content).replace(/\n/g,"<br>"):"<i>(görsel)</i>"}</p>` : md(m.content);
+  d.innerHTML = avatar(m.role) +
+    `<div class="body"><div class="who">${m.role==="user"?"sen":"qwen"}</div>`+
+    `<div class="bubble">${imgsHtml(m.images)}${think}${body}${m.error?`<div class="err">${esc(m.error)}</div>`:""}</div>`+
+    (m.role==="user"
+      ? `<div class="meta"><button class="again" data-i="${i}">↻ tekrar gönder</button></div>`
+      : `<div class="meta"><span class="st">${statsLine(m)}</span>${m.content?'<button class="copy" data-i="'+i+'">kopyala</button>':""}</div>`)+
+    `</div>`;
+  return d;
+}
+function renderAll(){
+  el.wrap.innerHTML = "";
+  msgs.forEach((m,i)=> el.wrap.appendChild(msgEl(m,i)));
+  el.empty.style.display = msgs.length ? "none" : "block";
+  scrollDown(true);
+}
+function scrollDown(force){
+  const nearBottom = el.main.scrollHeight - el.main.scrollTop - el.main.clientHeight < 160;
+  if(force || nearBottom) el.main.scrollTop = el.main.scrollHeight;
+}
+function updateLast(){
+  const i = msgs.length-1, m = msgs[i];
+  const old = el.wrap.querySelector(`.msg[data-i="${i}"]`);
+  if(!old){ renderAll(); return; }
+  const fresh = msgEl(m, i);
+  el.wrap.replaceChild(fresh, old);
+  scrollDown();
+}
+
+/* ---------------- görseller ---------------- */
+function downscale(file){
+  return new Promise((res, rej)=>{
+    const fr = new FileReader();
+    fr.onerror = rej;
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = rej;
+      img.onload = () => {
+        let {width:w, height:h} = img;
+        const scale = Math.min(1, MAXPX/Math.max(w,h));
+        w = Math.max(1,Math.round(w*scale)); h = Math.max(1,Math.round(h*scale));
+        const c = document.createElement("canvas"); c.width=w; c.height=h;
+        const g = c.getContext("2d");
+        g.fillStyle="#fff"; g.fillRect(0,0,w,h);
+        g.drawImage(img,0,0,w,h);
+        const isPng = /png/i.test(file.type);
+        res(c.toDataURL(isPng && scale===1 ? "image/png" : "image/jpeg", JPEGQ));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function addFiles(files){
+  const list = [...files].filter(f=>f.type.startsWith("image/"));
+  if(!list.length) return;
+  setHint(`işleniyor… (${list.length})`);
+  for(const f of list){
+    try{
+      const u = await downscale(f);
+      pending.push({u, name:f.name||"görsel", kb:Math.round(u.length*0.75/1024)});
+    }catch(e){ console.warn(e); }
+  }
+  drawThumbs(); syncSend(); setHint("");
+}
+function drawThumbs(){
+  el.thumbs.innerHTML = pending.map((p,i)=>
+    `<div class="th"><img src="${p.u}" data-big="${i}" alt=""><span class="sz">${p.kb}KB</span><b data-del="${i}" title="kaldır">×</b></div>`
+  ).join("");
+}
+function setHint(t){ el.hint.textContent = t || "görseller otomatik olarak 1280 piksele küçültülür · model bellekte tutulur"; }
+function syncSend(){ el.send.disabled = busy || (!el.txt.value.trim() && !pending.length); }
+
+/* ---------------- API ---------------- */
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  if(!r.ok){
+    let t = ""; try{ t = await r.text(); }catch(_){}
+    throw new Error(t || ("HTTP "+r.status));
+  }
+  return r;
+}
+async function loadModels(){
+  try{
+    const r = await api("/api/tags");
+    const d = await r.json();
+    const names = (d.models||[]).map(m=>m.name).sort((a,b)=>a.localeCompare(b,"tr"));
+    const qwen = names.filter(n=>/qwen/i.test(n)), other = names.filter(n=>!/qwen/i.test(n));
+    el.model.innerHTML = [...qwen,...other].map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("") || '<option value="qwen3.5:9b">qwen3.5:9b</option>';
+    if(cfg.model && [...el.model.options].some(o=>o.value===cfg.model)) el.model.value = cfg.model;
+    else if([...el.model.options].some(o=>o.value==="qwen3.5:9b")) el.model.value = "qwen3.5:9b";
+    health(true);
+    await loadCaps();
+  }catch(e){
+    health(false, e.message);
+  }
+}
+async function loadCaps(){
+  try{
+    const r = await api("/api/show", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model: el.model.value})});
+    const d = await r.json();
+    modelCaps = d.capabilities || [];
+    el.thinkWrap.style.display = modelCaps.includes("thinking") ? "flex" : "none";
+    el.attach.disabled = !modelCaps.includes("vision");
+    el.attach.title = modelCaps.includes("vision") ? "Görsel ekle" : "Bu model görsel desteklemiyor";
+  }catch(e){ modelCaps = []; }
+}
+function health(ok, err){
+  el.hdot.className = "dot" + (ok ? " on" : "");
+  el.htxt.textContent = ok ? "ollama hazır" : ("ollama yok" + (err?" · "+err.slice(0,60):""));
+}
+function opts(){
+  return { num_ctx: parseInt(el.ctx.value,10) };
+}
+// "-1" metin olarak gonderilirse Ollama 400 verir; sayi olmali.
+function keepAlive(){ return el.keep.value === "-1" ? -1 : el.keep.value; }
+function apiMessages(){
+  return msgs.filter(m=>!m.error).map(m=>({
+    role: m.role,
+    content: m.content || "",
+    ...(m.images && m.images.length ? {images: m.images.map(u=>u.split(",")[1] || u)} : {})
+  }));
+}
+
+/* ---------------- gönderim ---------------- */
+async function send(text){
+  if(busy) return;
+  text = (text!==undefined ? text : el.txt.value).trim();
+  if(!text && !pending.length) return;
+
+  const images = pending.map(p=>p.u);
+  pending = []; drawThumbs();
+  el.txt.value = ""; autosize();
+  msgs.push({role:"user", content:text, images});
+  msgs.push({role:"assistant", content:"", thinking:"", stats:null, error:null});
+  renderAll(); save();
+  await run();
+}
+async function run(){
+  busy = true; el.send.style.display="none"; el.stop.style.display="block"; syncSend();
+  controller = new AbortController();
+  const ai = msgs.length-1, m = msgs[ai];
+  const t0 = performance.now();
+  try{
+    const body = {
+      model: el.model.value,
+      messages: apiMessages(),
+      stream: true,
+      keep_alive: keepAlive(),
+      options: opts()
+    };
+    if(modelCaps.includes("thinking")) body.think = !!el.think.checked;
+    const r = await api("/api/chat", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body), signal: controller.signal
+    });
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let buf = "", raf = 0;
+    const paint = () => { if(raf) return; raf = requestAnimationFrame(()=>{ raf = 0; updateLast(); }); };
+    while(true){
+      const {done, value} = await rd.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for(const line of lines){
+        const s = line.trim(); if(!s) continue;
+        let j; try{ j = JSON.parse(s); }catch(_){ continue; }
+        if(j.error){ m.error = j.error; }
+        const mm = j.message || {};
+        if(mm.content) m.content += mm.content;
+        if(mm.thinking) m.thinking += mm.thinking;
+        if(j.done){
+          const ns = x => (x||0)/1e9;
+          const ev = j.eval_count||0, ed = ns(j.eval_duration);
+          m.stats = {
+            eval: ev, tps: ed>0 ? ev/ed : 0,
+            total: ns(j.total_duration), load: ns(j.load_duration),
+            prompt: j.prompt_eval_count||0
+          };
+        }
+      }
+      paint();
+    }
+    if(!m.content && !m.error && m.thinking) m.content = m.thinking;
+  }catch(e){
+    if(e.name !== "AbortError") m.error = String(e.message||e);
+    else if(!m.content) m.content = "_(durduruldu)_";
+  }finally{
+    busy = false; controller = null;
+    el.stop.style.display="none"; el.send.style.display="block";
+    updateLast(); save(); syncSend(); el.txt.focus();
+    const secs = (performance.now()-t0)/1000;
+    if(m.stats && !m.stats.total) m.stats.total = secs;
+  }
+}
+function stop(){ if(controller){ try{ controller.abort(); }catch(_){} } }
+
+/* ---------------- olaylar ---------------- */
+function autosize(){
+  el.txt.style.height = "auto";
+  el.txt.style.height = Math.min(190, el.txt.scrollHeight) + "px";
+}
+el.txt.addEventListener("input", ()=>{ autosize(); syncSend(); save(); });
+el.txt.addEventListener("keydown", e=>{
+  if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }
+  else if(e.key==="Escape"){ stop(); }
+});
+el.send.addEventListener("click", ()=>send());
+el.stop.addEventListener("click", stop);
+el.attach.addEventListener("click", ()=>el.file.click());
+el.file.addEventListener("change", ()=>{ addFiles(el.file.files); el.file.value=""; });
+el.model.addEventListener("change", ()=>{ cfg.model = el.model.value; loadCaps(); save(); warmSoon(); });
+el.ctx.addEventListener("change", ()=>{ save(); warmSoon(); });
+el.keep.addEventListener("change", save);
+el.think.addEventListener("change", save);
+$("#new").addEventListener("click", ()=>{ if(busy) stop(); msgs=[]; renderAll(); save(); el.txt.focus(); });
+$("#clear").addEventListener("click", ()=>{ if(!msgs.length || confirm("Sohbet silinsin mi?")){ msgs=[]; renderAll(); save(); } });
+$("#retry").addEventListener("click", ()=>{
+  if(busy) return;
+  let i = msgs.length-1;
+  while(i>=0 && msgs[i].role!=="user") i--;
+  if(i<0){ if(msgs.length) run(); return; }
+  const u = msgs[i];
+  msgs = msgs.slice(0, i+1);
+  msgs.push({role:"assistant", content:"", thinking:"", stats:null, error:null});
+  renderAll(); save(); run();
+});
+el.empty.addEventListener("click", e=>{
+  const b = e.target.closest("button[data-p]"); if(b) send(b.dataset.p);
+});
+el.wrap.addEventListener("click", e=>{
+  const cp = e.target.closest(".cp");
+  if(cp){ const c = document.getElementById(cp.dataset.c);
+    navigator.clipboard.writeText(c.innerText).then(()=>{ cp.textContent="kopyalandı ✓"; setTimeout(()=>cp.textContent="kopyala",1200); });
+    return; }
+  const c2 = e.target.closest(".copy");
+  if(c2){ navigator.clipboard.writeText(msgs[+c2.dataset.i].content).then(()=>{ c2.textContent="kopyalandı ✓"; setTimeout(()=>c2.textContent="kopyala",1200); }); return; }
+  const ag = e.target.closest(".again");
+  if(ag){ if(busy) return; msgs = msgs.slice(0, +ag.dataset.i); renderAll(); save(); run(); return; }
+  const big = e.target.closest("img[data-big]");
+  if(big){ el.lbimg.src = pending[+big.dataset.big].u; el.lb.classList.add("on"); return; }
+  const im = e.target.closest(".imgs img");
+  if(im){ el.lbimg.src = im.src; el.lb.classList.add("on"); }
+});
+el.thumbs.addEventListener("click", e=>{
+  const d = e.target.closest("[data-del]");
+  if(d){ pending.splice(+d.dataset.del,1); drawThumbs(); syncSend(); return; }
+  const b = e.target.closest("[data-big]");
+  if(b){ el.lbimg.src = pending[+b.dataset.big].u; el.lb.classList.add("on"); }
+});
+el.lb.addEventListener("click", ()=>el.lb.classList.remove("on"));
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ el.lb.classList.remove("on"); } });
+document.addEventListener("paste", e=>{
+  const items = [...(e.clipboardData?.items||[])].filter(i=>i.kind==="file" && i.type.startsWith("image/"));
+  if(items.length){ e.preventDefault(); addFiles(items.map(i=>i.getAsFile()).filter(Boolean)); }
+});
+let dragN = 0;
+addEventListener("dragenter", e=>{ e.preventDefault(); dragN++; el.drop.classList.add("on"); });
+addEventListener("dragover", e=>e.preventDefault());
+addEventListener("dragleave", e=>{ if(--dragN<=0){ dragN=0; el.drop.classList.remove("on"); } });
+addEventListener("drop", e=>{
+  e.preventDefault(); dragN=0; el.drop.classList.remove("on");
+  if(e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+});
+addEventListener("beforeunload", save);
+
+let warmT = 0;
+function warmSoon(){ clearTimeout(warmT); warmT = setTimeout(warm, 900); }
+async function warm(){
+  try{
+    await fetch("/api/generate", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model: el.model.value, prompt:"", stream:false, keep_alive: keepAlive(), options: opts()})});
+  }catch(_){}
+}
+
+/* ---------------- başlat ---------------- */
+(async function init(){
+  load();
+  autosize();
+  syncSend();
+  await loadModels();
+  setInterval(async ()=>{ try{ const r = await fetch("/health"); health(r.ok); }catch(_){ health(false); } }, 15000);
+  el.txt.focus();
+})();
+</script>
+</body>
+</html>

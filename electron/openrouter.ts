@@ -4,7 +4,7 @@ import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
 import type { NodeKind } from './graph-types'
-import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
+import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, WORD_CHOICE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
 
@@ -472,7 +472,7 @@ async function chatOnce(
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; signal?: AbortSignal } = {}
+  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean } = {}
 ): Promise<string> {
   const once = async (json: boolean) => {
     checkObservation(opts.signal)
@@ -483,7 +483,7 @@ async function chatOnce(
     if (target.local && hasImage && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
-    const effort = target.local ? localReasoningEffort() : null
+    const effort = target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
     reportOut(target.model, target.local, messages)
     const res = await guardedFetch(target.url, {
       method: 'POST',
@@ -494,6 +494,7 @@ async function chatOnce(
         // Ollama'da düşünme varsayılan açık; kapatılmazsa model cevabı beklerken tokenı
         // düşünmeye harcıyor (ölçüldü: 1,4-10 sn ve boş cevap; kapalıyken 0,1 sn).
         ...(effort ? { reasoning_effort: effort } : {}),
+        ...(!target.local && opts.reasoningOff ? { reasoning: { enabled: false } } : {}),
         // Leave output/reasoning token limits to the provider's model defaults.
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
@@ -544,7 +545,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number } = {},
+  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -734,6 +735,45 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     reason: String(parsed.reason ?? ''),
     usedImage,
   }
+}
+
+/** A small independent decision: only this OCR line, no screenshot/history or first-answer bias. */
+export async function chooseOcrWord(opts: {
+  apiKey: string
+  model: string | string[]
+  scan: ScanResult
+  parentId: number
+  prompt: string
+  nodeId?: string
+  system?: string
+}): Promise<{ wordIndex: number; candidateId: number; text: string } | null> {
+  const candidates = wordCandidates(opts.scan).filter(c => c.parentId === opts.parentId && c.wordIndex !== undefined)
+  if (candidates.length < 2) throw new Error('Kelime seçimi için en az iki gerçek kelime kutusu gerekli.')
+  const list = candidates.map(c => `#${c.item.id} ${JSON.stringify(c.item.text)}`).join('\n')
+  const user = `Instruction: ${opts.prompt}\nWords:\n${list}`
+  const system = opts.system?.trim() || WORD_CHOICE_PROMPT
+  const id = nextRequestId()
+  const validate = (content: string) => {
+    const parsed = parseJson(content)
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'id') || !(parsed.id === null || typeof parsed.id === 'number' && Number.isInteger(parsed.id) && candidates.some(c => c.item.id === parsed.id))) {
+      throw new ModelRejected('WORD_CHOICE_INVALID: Bu kısa istekteki bir kelime ID’si veya null gerekli.')
+    }
+  }
+  const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'ocr-word-choice',
+    model: asModelChain(opts.model).join(' → '), target: isLocalName(asModelChain(opts.model)[0]) ? 'local' : 'api',
+    image: { sent: false, reason: 'kısa kelime seçimi: yalnız talimat ve kelimeler' },
+    candidates: { built: candidates.length, sent: candidates.length }, promptChars: user.length })
+  chatLogger?.(summary)
+  saveRequestEvidence(id, { summary, system, instruction: opts.prompt, candidates: list })
+  const content = await chat(opts.apiKey, opts.model, [{ role: 'system', content: system }, { role: 'user', content: user }], false,
+    { validate, maxCycles: 1, reasoningOff: true })
+  const parsed = parseJson(content)
+  const picked = candidates.find(c => c.item.id === parsed.id)
+  chatLogger?.(responseSummaryText({ id, raw: content, returnedId: parsed.id as number | null,
+    inSentList: !!picked, selectable: !!picked, rejected: picked ? undefined : 'model belirsiz: null',
+    resolvedWord: picked ? `#${picked.item.id} w${picked.wordIndex}` : undefined, targetText: picked?.item.text }))
+  saveRequestEvidence(id, { response: content })
+  return picked ? { wordIndex: picked.wordIndex!, candidateId: picked.item.id, text: picked.item.text } : null
 }
 
 type Img = { data: string; w: number; h: number; mime?: string }

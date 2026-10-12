@@ -126,7 +126,7 @@ test('no recorded picture either: the recorded position is still not clicked',as
 test('word-level model choice clicks the selected real word, not the phrase midpoint or returned text', async()=>{
   const row=item(7,'Run Remesh',100,80,280,20);
   row.words=[{t:'Run',x:100,y:80,w:40,h:20},{t:'Remesh',x:300,y:80,w:80,h:20}];
-  const b=bundle(['list'],[row],{model:true,node:{prompt:'Click remesh'},events:[{kind:'model',source:'list',value:{id:7,wordIndex:1,candidateId:8,text:'Run Remesh',reason:'Remesh is the intended word'}}]});
+  const b=bundle(['list'],[row],{model:true,node:{prompt:'Click remesh'},events:[{kind:'model',source:'list',value:{id:7,wordIndex:0,candidateId:8,text:'Run',reason:'first selection'}},{kind:'model',source:'list',value:{stage:'wordChoice',wordIndex:1,candidateId:9,text:'Remesh'}}]});
   const r=await replayTrace(b);
   assert.equal(r.result.x,340); assert.equal(r.result.y,90);
   assert.notEqual(r.result.x,240); assert.equal(r.inputCalls,0);

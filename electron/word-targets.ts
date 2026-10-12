@@ -1,4 +1,4 @@
-import { commandNeedle, describeItems, norm, type ScanResult, type ScreenItem, type Target } from './matcher'
+import { describeItems, type ScanResult, type ScreenItem, type Target } from './matcher'
 import { taskbarItem } from './spatial-context'
 
 export const WORD_TARGET_RULES = `OCR is supplied as individual observed words with real bounding boxes, not reconstructed sentence boxes. Use the whole word cloud: proximity, alignment, spacing, UIA control bounds, and overall screen position to infer which words belong to the requested label or button. A shared OCR parent is NOT proof of one button; adjacent words can be different buttons. Related words can have different parents. Do not infer a clickable button from proximity alone.
@@ -116,58 +116,6 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
     const clipped = !options?.fullText && item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
     return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent-line="${parentText.get(parentId) ?? ''}"` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
-}
-
-/** Ignore model-supplied text/coordinates: only the selected observed word defines this box. */
-function instructionTokens(instruction: string): string[] {
-  const needle = commandNeedle(instruction) || instruction
-  // Komut sözcükleri ayıklanmış hâl + HAM cümle birlikte taranır: "5.2" ya da dosya adı gibi hedefler
-  // komut ayıklamasında düşse bile kaybolmaz. `norm` noktalama yerine boşluk koyduğu için noktalı
-  // hedefler ham metinden de toplanır ("5.2", "anvil.glb" tek sözcük kalır).
-  const kaynak = `${needle} ${instruction}`
-  const ham = norm(kaynak).split(' ')
-  const noktali = kaynak.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9.]+/)
-  return [...new Set([...ham, ...noktali])].map((token) => token.replace(/^\.+|\.+$/g, '')).filter((token) => token.length >= 2)
-}
-
-/**
- * Aday kelime ↔ talimat sözcüğü puanı. MESAFE/UZAKLIK HESABI YOKTUR (kullanıcı isteği): yalnız birebir,
- * önek/sonek ilişkisi, tam sözcük geçişi ve harf kapsaması bakılır. Talimat bir cümle olabilir; karar
- * cümlenin TÜM sözcükleri içinde en iyi uyanla verilir.
- */
-export function wordScore(kelime: string, token: string): number {
-  const k = norm(kelime), t = norm(token)
-  if (!k || !t || k.length < 2) return 0
-  if (k === t) return 1
-  if (k.length < 3 || t.length < 3) return 0
-  if (k.startsWith(t) || t.startsWith(k)) return 0.9
-  if (t.includes(k) || k.includes(t)) return 0.85
-  // Yazım hatası toleransı: ilk iki harf aynı ve uzunluklar yakınsa ("blkonr" → "blender").
-  if (k.length >= 3 && k.slice(0, 2) === t.slice(0, 2) && Math.abs(k.length - t.length) <= 2) return 0.65
-  const havuz = t.split('')
-  let bulunan = 0
-  for (const harf of k) {
-    const i = havuz.indexOf(harf)
-    if (i >= 0) { havuz.splice(i, 1); bulunan++ }
-  }
-  const kapsama = bulunan / k.length
-  return kapsama >= 0.75 ? 0.5 : 0
-}
-
-/**
- * Model doğru OCR SATIRINI seçtiyse, o satırın kelimeleri arasından talimata en uygun olanı program seçer.
- * Belirsizse (en iyi puan zayıf ya da ikinciyle neredeyse eşit) `null` döner ve modelin seçimi korunur.
- */
-export function bestWordMatch(kelimeler: string[], instruction: string): { index: number; word: string; score: number } | null {
-  const tokens = instructionTokens(instruction)
-  if (!tokens.length || kelimeler.length < 2) return null
-  const puanli = kelimeler.map((word, index) => ({ index, word, score: Math.max(...tokens.map((token) => wordScore(word, token))) }))
-  // Beraberlikte daha UZUN kelime (daha belirgin hedef) kazanır: "Blender" > "5.2".
-  const sirali = [...puanli].sort((a, b) => b.score - a.score || b.word.length - a.word.length || a.index - b.index)
-  const en = sirali[0], ikinci = sirali[1]
-  if (!en || en.score < 0.6) return null
-  if (en.score < 1 && ikinci && en.score < ikinci.score * 1.3) return null
-  return en
 }
 
 /** Ignore model-supplied text/coordinates: only the selected observed word defines this box. */

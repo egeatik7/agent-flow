@@ -51,7 +51,8 @@ async function replayTrace(bundle, observer) {
     clickAt: noInput, typeText: noInput, sendKeys: noInput, inputTarget: noInput,
   };
   const nextModel = source => {
-    const i = models.findIndex(e => e.source === source || (source === 'list' && e.source === 'chrome'));
+    const i = models.findIndex(e => source === 'wordChoice' ? e.value?.stage === 'wordChoice'
+      : e.value?.stage !== 'wordChoice' && (e.source === source || (source === 'list' && e.source === 'chrome')));
     if (i < 0) throw new Error('No recorded model answer; replay is incomplete');
     return structuredClone(models.splice(i, 1)[0].value);
   };
@@ -60,7 +61,9 @@ async function replayTrace(bundle, observer) {
     'a11y-bridge': bridge,
     browser: { userChromeItems: async () => chrome ? { items: chrome.items, area: chrome.area, host: chrome.window } : null },
     shots: { rememberShot: () => {} },
-    openrouter: { isTarsModel: () => false, localConfigured: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
+    openrouter: { FatalApiError: class FatalApiError extends Error {},
+      chooseOcrWord: async () => { const value = nextModel('wordChoice'); return value.result === null ? null : value; },
+      isTarsModel: () => false, localConfigured: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
       const value = nextModel('tars');
       if (value.intent) return value;
       // Legacy diagnostic traces used GuiAction. Replay their recorded target interpretation

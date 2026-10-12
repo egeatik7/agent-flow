@@ -136,6 +136,8 @@ function getSettings(): AppSettings {
   s.findOrder = find.order
   s.findOff = find.off
   s.llmPrompts = normalizePrompts(s.llmPrompts)
+  s.wordChoiceModel = String(s.wordChoiceModel ?? '').trim()
+  s.wordChoiceBackups = cleanBackups(s.wordChoiceBackups)
   s.modelBackups = cleanBackups(s.modelBackups)
   s.visionBackups = cleanBackups(s.visionBackups)
   s.agentBackups = cleanBackups(s.agentBackups)
@@ -1068,6 +1070,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.findOrder = find.order
     next.findOff = find.off
     next.llmPrompts = normalizePrompts(next.llmPrompts)
+    next.wordChoiceModel = String(next.wordChoiceModel ?? '').trim()
+    next.wordChoiceBackups = cleanBackups(next.wordChoiceBackups).filter(name => name !== next.wordChoiceModel)
     next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
     next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())

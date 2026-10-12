@@ -1,5 +1,5 @@
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
-import { bestWordMatch, refineWordTarget } from './word-targets'
+import { wordCandidates, refineWordTarget } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
 import fs from 'fs'
@@ -29,6 +29,9 @@ import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
 import {
   chooseScreenTarget,
+  chooseOcrWord,
+  FatalApiError,
+  type ScreenChoice,
   chooseVisualTarget,
   type VisualTargetResult,
   isTarsModel,
@@ -211,6 +214,38 @@ export function createAgent(ctx: AgentContext) {
 
   type TargetPick = { item: ScreenItem; target: Target; memo: TargetMemo; how: string }
 
+  async function refineClickWord(node: AgentNode, scan: ScanResult, item: ScreenItem, choice: ScreenChoice): Promise<boolean> {
+    if (node.kind !== 'click' || item.src !== 'ocr' || choice.wordIndex === undefined) return true
+    // An invalid first word index must never become a click at a reconstructed phrase center.
+    if (!refineWordTarget(item, choice.wordIndex)) return false
+    const words = wordCandidates(scan).filter(c => c.parentId === item.id && c.wordIndex !== undefined)
+    if (words.length < 2) return true
+    const s = getSettings()
+    const dedicated = modelChain(s.wordChoiceModel, s.wordChoiceBackups)
+    log('info', `OCR kelime seçimi: ${words.length} kelime kısa ikinci isteğe gidiyor; görüntü ve geçmiş yok.`)
+    try {
+      const selected = await chooseOcrWord({ apiKey: s.apiKey, model: dedicated.length ? dedicated : textModels(s),
+        scan, parentId: item.id, prompt: node.prompt?.trim() || item.text, nodeId: node.id,
+        system: promptOf(s.llmPrompts, 'wordChoice') })
+      trace(node, { kind: 'model', source: 'list', value: selected ? { stage: 'wordChoice', ...selected } : { stage: 'wordChoice', result: null } })
+      if (!selected) {
+        log('warn', 'İkinci kelime seçimi belirsiz (null); bu OCR satırına tıklanmadı, sonraki hedefleme aşamasına geçiliyor.')
+        return false
+      }
+      const before = item.words?.[choice.wordIndex]?.t ?? '?'
+      choice.wordIndex = selected.wordIndex
+      choice.candidateId = selected.candidateId
+      choice.text = selected.text
+      choice.reason = `kısa ikinci model seçimi: “${selected.text}”`
+      log('info', `Kelimeyi ikinci model seçti: “${before}” → “${selected.text}” (#${selected.candidateId}).`)
+      return true
+    } catch (e) {
+      if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+      log('warn', `İkinci kelime seçimi alınamadı; bu OCR satırına tıklanmadı: ${(e as Error).message}`)
+      return false
+    }
+  }
+
   /**
    * Fresh search on this lap's screen. Memory only breaks ties between near-equal matches,
    * and a pick that clearly disagrees with the recent laps is looked at twice.
@@ -265,16 +300,7 @@ export function createAgent(ctx: AgentContext) {
       const item = choice.id !== null ? items.find((i) => i.id === choice.id) : undefined
       if (item) {
         log('info', `Seçilen hedef #${item.id}: ${item.src}/${item.type} “${item.text.slice(0, 120)}” @${item.x},${item.y} ${item.w}x${item.h}${scan.window ? ` / ${scan.window}` : ''}`)
-        // Model doğru SATIRI seçtiyse ve kelime indeksi GEÇERLİYSE, kelimeyi TALİMATA göre program seçer
-        // (mesafe hesabı yok; 1.9.111). Geçersiz indeks eski gibi REDDEDİLİR: birleşik metin ortasına
-        // düşmek yasak (scripts/test-targeting.cjs "invalid word index cannot fall back").
-        if (choice.wordIndex !== undefined && item.words?.length && item.words[choice.wordIndex]) {
-          const duzeltme = bestWordMatch(item.words.map((w) => w.t), explicit?.text || prompt || recordedText)
-          if (duzeltme && duzeltme.index !== choice.wordIndex) {
-            log('info', `Kelime talimata göre düzeltildi: “${item.words[choice.wordIndex]?.t ?? '?'}” → “${duzeltme.word}” (puan ${duzeltme.score.toFixed(2)}).`)
-            choice.wordIndex = duzeltme.index
-          }
-        }
+        if (!await refineClickWord(node, scopedScan, item, choice)) return null
         hit = choice.wordIndex !== undefined ? refineWordTarget(item, choice.wordIndex) : refineTarget(item, choice.text)
         if (!hit) return null
         if (choice.wordIndex !== undefined) log('info', `Seçilen OCR kelimesi #${choice.candidateId ?? '?'}: “${hit.text}” @${hit.x},${hit.y} ${hit.w}x${hit.h}; yalnız bu kelimeye tıklanacak.`)
@@ -333,6 +359,7 @@ export function createAgent(ctx: AgentContext) {
           const item = second.id !== null ? items.find((i) => i.id === second.id) : undefined
           if (item && (item.id !== hit.item.id || second.wordIndex !== undefined)) {
             log('info', `İkinci bakış başka öğe seçti: #${item.id} “${item.text}”${second.reason ? ` — ${second.reason}` : ''}`)
+            if (!await refineClickWord(node, scopedScan, item, second)) return null
             const refined = second.wordIndex !== undefined ? refineWordTarget(item, second.wordIndex) : refineTarget(item, second.text)
             if (!refined) return null
             hit = refined
@@ -342,6 +369,7 @@ export function createAgent(ctx: AgentContext) {
             log('info', `İkinci bakış aynı öğeyi onayladı${second.reason ? `: ${second.reason}` : ''}.`)
           }
         } catch (e) {
+          if (e instanceof StoppedError || e instanceof FatalApiError) throw e
           log('warn', `İkinci bakış atlandı: ${(e as Error).message}`)
         }
       } else {

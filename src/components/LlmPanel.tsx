@@ -156,6 +156,10 @@ export default function LlmPanel(p: Props) {
       </ol>
       <div className="llm-stage"><b>Girdi gönderme — LLM yok</b><p className="llm-note">{nodeTab === 'click' ? 'Bulunan hedefe seçilen tıklama veya fareyi oynatma eylemi gönderilir.' : 'Hedef varsa alan seçilir; Ctrl+A / Delete, yazı ve istenirse Enter gönderilir. Alan seçimi için ayrı LLM çağrısı yapılmaz.'}</p></div>
       <div className="llm-stage"><b>Hedef bulunamazsa</b><p className="llm-note">3 saniye bekleyip tüm ekranda bir kez daha arar. Yine bulunamazsa Takılma modelinden plan istenebilir.</p></div>
+      {nodeTab === 'click' && <>
+        <p className="llm-note">Çok kelimeli OCR satırında ikinci seçim: {p.settings.wordChoiceModel?.trim() || p.settings.model || 'model seçilmedi'}. Model Ayarlar → Genel → OCR kelime seçimi bölümünden seçilir.</p>
+        {promptBox('wordChoice', 'OCR kelime seçimi — kısa ikinci istek', 'Liste modelinin seçtiği çok kelimeli OCR satırındaki kelimeler ve tam node talimatı gönderilir. Screenshot ve sohbet geçmişi yoktur. Cevap yalnız id veya null; seçimi program değiştirmez. Düşünme kapalı istenir. Tek kelime ve UIA/DOM hedeflerinde çağrılmaz.')}
+      </>}
       {nodeTab === 'click' && promptBox('reaction', 'Tıklama sonrası tepki', 'Ekran kontrolü Açık olduğunda ve yerel değerlendirme belirsizse önce/sonra kareleri görsel modeline gönderilir. Kapalı ve Yalnız günlük modunda bu model çağrılmaz.')}
       {promptBox('stall', 'Takılma planı', 'Hedef bulma veya tıklama değerlendirmesi toparlanamazsa bekleme/devam/durma kararı. Ortak Tıkla/Yazı Yaz promptu; görsel model zinciri kullanılır.')}
       </>}

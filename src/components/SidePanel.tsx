@@ -651,6 +651,17 @@ function GeneralSettings(p: Props) {
       </fieldset>
 
       <fieldset className="xp-group">
+        <legend>OCR kelime seçimi — kısa ikinci istek</legend>
+        <div className="field">
+          <label htmlFor="wordChoiceModel">Model adı</label>
+          <ModelChain localModels={localModels} primary={s.wordChoiceModel ?? ''} backups={s.wordChoiceBackups ?? []}
+            listId="model-list" inputId="wordChoiceModel" placeholder="Boş = Metin Modeli; API veya local:model"
+            onChange={(wordChoiceModel, wordChoiceBackups) => set({ wordChoiceModel, wordChoiceBackups })} />
+          <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ wordChoiceModel: s.wordChoiceModel?.trim() ?? '', wordChoiceBackups: s.wordChoiceBackups ?? [] })}>Kaydet</button>
+          <p className="hint">Tıkla’nın liste aşamasında seçilen çok kelimeli OCR satırı için kullanılır. Tam talimat ve yalnız o satırın kelimeleri gönderilir; görüntü ve geçmiş yoktur. Düşünme kapalı istenir. Prompt: LLM → Tıkla → OCR kelime seçimi.</p>
+        </div>
+      </fieldset>
+      <fieldset className="xp-group">
         <legend>Görsel LLM (ekran görüntüsü modu)</legend>
         <div className="field">
           <label htmlFor="visionModel">Görsel model adı</label>

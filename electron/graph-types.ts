@@ -172,6 +172,9 @@ export type AppSettings = {
   model: string
   /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */
   modelBackups: string[]
+  /** Short, text-only second choice within a multi-word OCR line. Empty = Metin Modeli. */
+  wordChoiceModel?: string
+  wordChoiceBackups?: string[]
   /** Model that answers Koşul (condition) checks. Empty = the Metin Modeli chain answers them. */
   conditionModel: string
   /** Tried, in order, when `conditionModel` cannot be reached. */
@@ -269,6 +272,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   model: 'openai/gpt-4o-mini',
   modelBackups: [],
+  wordChoiceModel: '',
+  wordChoiceBackups: [],
   conditionModel: '',
   conditionBackups: [],
   localBaseUrl: '',
