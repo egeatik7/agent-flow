@@ -75,16 +75,6 @@ type Props = {
   capturing: number
 }
 
-const VISION_PRESETS = [
-  'google/gemini-3.8-flash',
-  'google/gemini-3.5-flash-lite',
-  'google/gemini-2.5-flash',
-  'anthropic/claude-sonnet-5',
-  'qwen/qwen2.5-vl-72b-instruct',
-]
-
-const AGENT_PRESETS = ['bytedance/ui-tars-1.5-7b', 'google/gemini-3.8-flash', 'anthropic/claude-sonnet-5']
-
 const CLICK_MODES: { key: ClickMode; label: string }[] = [
   { key: 'left', label: 'Tek tık' },
   { key: 'double', label: 'Çift tık' },
@@ -605,8 +595,6 @@ function Settings(p: Props) {
 function GeneralSettings(p: Props) {
   const s = p.settings
   const set = (patch: Partial<AppSettings>) => p.setSettings((prev) => ({ ...prev, ...patch }))
-  const model = p.models.find((m) => m.id === s.model.trim())
-  const visionInfo = p.models.find((m) => m.id === s.visionModel.trim())
   const [loading, setLoading] = useState(false)
   const [modelNote, setModelNote] = useState('')
   const loadModels = async () => {
@@ -634,7 +622,6 @@ function GeneralSettings(p: Props) {
       </div>
       {modelNote && <p className="hint" role="status">{modelNote}</p>}
       </fieldset>
-      <p className="hint">Yerel sunucu bağlantısını Yerel Model sekmesinden kur. Bulut ve yerel modelleri aşağıdaki listelerde birlikte sıralayabilirsin.</p>
       <fieldset className="xp-group">
         <legend>Metin Modeli</legend>
       <div className="field">
@@ -651,17 +638,11 @@ function GeneralSettings(p: Props) {
         <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
           Kaydet
         </button>
-        <p className="hint">İlk model önce denenir; yanıt vermezse sıradaki yedek kullanılır. ↑ ↓ ile önceliği değiştir.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
             <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
           ))}
         </datalist>
-        {model && !model.id.startsWith('local:') && (
-          <p className={`hint ${model.vision ? 'ok' : 'warn'}`}>
-            {model.vision ? 'Bu model ekran görüntüsünü görebilir.' : 'Bu model ekran görüntüsü göremez; sadece yazı listesiyle seçer.'}
-          </p>
-        )}
         <label className="check">
           <input type="checkbox" checked={s.sendScreenshot} onChange={e => p.onSaveSettings({ sendScreenshot: e.target.checked })} />
           Metin modeline numaralı ekran görüntüsü gönder
@@ -692,17 +673,6 @@ function GeneralSettings(p: Props) {
                 <option key={m.id} value={m.id} />
               ))}
           </datalist>
-          {visionInfo && !visionInfo.vision && (
-            <p className="hint warn">Bu model ekran görüntüsü göremiyor; görsel destekli bir model seç.</p>
-          )}
-          {visionInfo?.vision && <p className="hint ok">Görsel destekli model.</p>}
-          <div className="chips">
-            {VISION_PRESETS.map((m) => (
-              <button type="button" key={m} className="chip" onClick={() => set({ visionModel: m })}>
-                {m.split('/')[1]}
-              </button>
-            ))}
-          </div>
           <div className="field-row">
             <button type="button" className="xp-btn primary" onClick={p.onTestVision}>
               Görsel Test (ekranı anlat)
@@ -733,13 +703,6 @@ function GeneralSettings(p: Props) {
                 <option key={m.id} value={m.id} />
               ))}
           </datalist>
-          <div className="chips">
-            {AGENT_PRESETS.filter(m => !/ui-tars/i.test(m)).map((m) => (
-              <button type="button" key={m} className="chip" onClick={() => set({ agentModel: m })}>
-                {m.split('/')[1]}
-              </button>
-            ))}
-          </div>
         </div>
       </fieldset>
 
@@ -770,15 +733,10 @@ function GeneralSettings(p: Props) {
             ↻
           </button>
         </SaveRow>
-        {s.targetWindow && p.windows.length > 0 && !p.windows.some((w) => w.title === s.targetWindow) ? (
-          <p className="hint warn">
-            “{s.targetWindow}” şu an açık değil; çalışırken tüm ekran okunur.{' '}
-            <button type="button" className="link-btn" onClick={() => p.onSaveSettings({ targetWindow: '' })}>
-              Tüm ekran yap
-            </button>
-          </p>
-        ) : (
-          <p className="hint">Seçilirse sadece o pencere okunur ve öne getirilir. “Tüm ekran” masaüstü ve görev çubuğu dahil her şeyi okur.</p>
+        {s.targetWindow && p.windows.length > 0 && !p.windows.some((w) => w.title === s.targetWindow) && (
+          <button type="button" className="xp-btn" onClick={() => p.onSaveSettings({ targetWindow: '' })}>
+            Tüm ekran yap
+          </button>
         )}
       </div>
 
