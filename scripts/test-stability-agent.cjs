@@ -16,7 +16,7 @@ function agent(overrides = {}, settings = {}) {
   const scan = { area: { x: 0, y: 0, w: 1920, h: 1080 }, items: [], image: null, window: 'Blender', ocr: true, uiaCount: 0, ocrCount: 0 };
   const bridge = {
     isLocked: async () => false,
-    locate: async () => { calls.push(['locate']); return { x: 10, y: 20, w: 80, h: 20, name: 'OLD', enabled: true }; },
+    locate: async (...args) => { calls.push(['locate', ...args]); return { x: 10, y: 20, w: 80, h: 20, name: 'OLD', enabled: true }; },
     scan: async (opts) => { calls.push(['scan', opts]); return scan; },
     applyOnnx: async res => res,
     findImage: async () => null,
@@ -36,6 +36,10 @@ function agent(overrides = {}, settings = {}) {
     ...overrides,
   };
   const models = { isTarsModel: () => false, ...overrides.models };
+  // Koşul artık her zaman metin modeline sorar. Gerçek ağ çağrısı yapmadan aynı sözleşmeyi
+  // ölçmek için model kararı burada taklit edilir; varsayılan "kanıt yok".
+  const model = { answer: { id: null, reason: '' }, calls: [] };
+  models.chooseScreenTarget = async opts => { model.calls.push(opts); return model.answer };
   for (const [name, exports] of Object.entries({
     'a11y-bridge': bridge, browser: { userChromeItems: async () => null },
     shots: { rememberShot: () => {} }, openrouter: { ...models, localConfigured: () => false },
@@ -58,35 +62,42 @@ function agent(overrides = {}, settings = {}) {
       settings: () => ({ apiKey: '', model: '', findOrder: ['uia'], findOff: [], ...settings }),
     });
   } finally { Module._load = oldLoad; }
-  return { calls, logs, bridge, scan, ex: instance.executor, beginRun: instance.beginRun, stop: () => stop = true };
+  return { calls, logs, bridge, scan, model, ex: instance.executor, beginRun: instance.beginRun, stop: () => stop = true };
 }
 function node(kind, extra = {}) { return { ...createNode(kind, 0, 0), ...extra }; }
 const loc = { name: 'OLD', controlType: 'Button', windowTitle: 'Blender', automationId: 'button' };
 const nextCondition = { next: node('condition') };
 
 test('edited condition cannot succeed from its old locator', async () => {
-  const a = agent();
+  // Kutuda yazı varken karar artık yerel eşleşmeden değil, metin modelinden gelir.
+  const a = agent({}, { apiKey: 'test', model: 'test/model' });
+  // Kanıt olmayan bir satır: karar modelden gelir ve model "yok" der.
+  a.scan.items = [{ id: 1, text: 'İlgisiz yazı', type: 'Text', src: 'uia', x: 20, y: 20, w: 50, h: 20 }];
   assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: '“BİTTİ”' })), false);
+  assert.equal(a.model.calls.length, 1, 'koşul kararı modelden sorulmalı');
   assert(!a.calls.some(x => x[0] === 'locate'));
   assert(a.calls.some(x => x[0] === 'scan'));
 });
 
 test('edited condition still succeeds when the new text is actually visible', async () => {
-  const a = agent();
+  const a = agent({}, { apiKey: 'test', model: 'test/model' });
   a.scan.items = [{ id: 1, text: 'BİTTİ', type: 'Text', src: 'ocr', x: 20, y: 20, w: 50, h: 20 }];
+  a.model.answer = { id: 1, reason: 'durum yazısı görünüyor' };
   assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: '“BİTTİ”' })), true);
+  assert.equal(a.model.calls.length, 1);
+  assert(!a.calls.some(x => x[0] === 'locate'));
 });
 
-test('picked condition text requires current UIA or combined OCR evidence, not a stale saved target', async () => {
+test('a textless saved condition target is verified live, without the model or desktop input', async () => {
   const a = agent();
-  assert.equal(await a.ex.exists('', node('condition', { locator: loc })), false);
-  a.scan.items = [{ id: 1, text: 'OLD', type: 'Text', src: 'ocr', x: 20, y: 20, w: 50, h: 20 }];
+  // Kutuda yazı yoksa eski kayıtlı öğe yolu yaşar: canlı UIA kimliği SALT OKUNUR doğrulanır,
+  // model hiç çağrılmaz ve koşul yeni bir arama turu açmaz (kutu doluyken bu yol kapanır).
   assert.equal(await a.ex.exists('', node('condition', { locator: loc })), true);
-  assert(!a.calls.some(x => x[0] === 'locate'));
-  const options = a.calls.filter(x => x[0] === 'scan').map(x => x[1]);
-  assert(options.every(o => o.readOnly && o.image === 'none' && o.ocrEngine === 'combined'));
-  assert(options.some(o => o.uia === true && o.ocr === false));
-  assert(options.some(o => o.uia === false && o.ocr === true));
+  assert.equal(a.model.calls.length, 0, 'kayıtlı öğe yolu model çağırmaz');
+  const locate = a.calls.find(x => x[0] === 'locate');
+  assert(locate, 'canlı UIA kimliği doğrulanır');
+  assert.equal(locate[3], true, 'kayıtlı öğe kontrolü salt okunur olmalı');
+  assert.equal(a.calls.filter(x => x[0] === 'scan').length, 0, 'kayıtlı öğe yolu ekran taraması açmaz');
 });
 
 test('icon-only conditions can observe a saved image without sending input', async () => {

@@ -108,7 +108,9 @@ Güvenceler:
 - **Adım sınırı tur başınadır.** “Maks. adım” kutunun her turu için ayrı sayılır; aşan tur (örn. hiç bitmeyen Koşul → Zamanlayıcı
   döngüsü) orada kalır ve sıradaki öğeye geçilir.
 - **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar ve bekler. Hafızaya yalnızca
-  tepkisi doğrulanan hedefler yazılır. Koşul node’u tırnak beklemez: kutusundaki yazıyı doğrudan Windows OCR, sonra ONNX ile arar.
+  tepkisi doğrulanan hedefler yazılır. **Koşul node’u kutusundaki cümleyi metin modeline sorar:** her turda önce uygulama
+  öğeleri (UIA), açık kanıt yoksa birleşik Windows + ONNX OCR okunur ve kararı model verir. Tırnak, birebir eşleşme veya
+  yerel arama yoktur; “Önce aranacak pencere” yazarsan önce o pencereye bakılır, bulunamazsa tüm ekran taranır ve bağlamı yine model değerlendirir.
 - **Yazı Yaz güvenlidir.** Ctrl+A / Delete yalnızca odak bir yazı alanındayken gönderilir. Klavyeyle yazılamayan karakterler
   (Çince vb.) pano üzerinden yapıştırılır. Alan biçimlendirme yaptıysa (1.5 → 1,5) sadece uyarılır.
 - **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.

@@ -301,7 +301,7 @@ export async function runGraph(
       }
       case 'condition': {
         const text = (live.text ?? '').trim()
-        if (!text && !live.locator) throw new Error(`“${live.title}”: koşul için yazı gir ya da Ekrandan Seç ile bir öğe seç.`)
+        if (!text && !live.locator) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
         const label = text ? `“${text}”` : 'seçilen öğe'
         const wait = Math.max(0, live.timeoutMs ?? 0)
         const until = Date.now() + wait

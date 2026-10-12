@@ -160,11 +160,10 @@ export default function LlmPanel(p: Props) {
       {promptBox('stall', 'Takılma planı', 'Hedef bulma veya tıklama değerlendirmesi toparlanamazsa bekleme/devam/durma kararı. Ortak Tıkla/Yazı Yaz promptu; görsel model zinciri kullanılır.')}
       </>}
       {nodeTab === 'condition' && <>
-        <p className="llm-note">Tarifleri yorumlayan metin modeli: {p.settings.model || 'model seçilmedi'}. Tamamı tırnaklı kesin metin, gözlenen metnin tamamıyla yerelde eşleşir. Pencere dışına geçilirse bağlamı model değerlendirir.</p>
-        {promptBox('conditionUia', '1. UIA — koşul değerlendirmesi', 'Güncel uygulama öğeleri okunur. Metin, düğme ve diğer kontrol türleri kanıt olabilir. Normal tarif bu promptla metin modeline gider; boş listede çağrı yapılmaz.')}
-        {promptBox('conditionOcr', '2. Windows + ONNX OCR — koşul değerlendirmesi', 'UIA’da açık kanıt yoksa düz ve 90° OCR okuması kullanılır. Bu aşamanın ayrı promptu vardır.')}
+        <p className="llm-note">Koşul kutusuna ne aradığını normal cümleyle yaz. Her turda önce UIA öğeleri, olmazsa Windows + ONNX OCR okuması yapılır ve kararı bu sekmelerdeki metin modeli promptları verir. Tırnak, birebir eşleşme veya yerel arama yoktur. “Önce aranacak pencere” yazarsan okuma önce o pencerede yapılır; pencere bağlamına uyup uymadığına da model karar verir. Tarifleri yorumlayan metin modeli: {p.settings.model || 'model seçilmedi'}.</p>
+        {promptBox('conditionUia', '1. UIA — koşul değerlendirmesi', 'Güncel uygulama öğeleri okunur. Metin, düğme ve diğer kontrol türleri kanıt olabilir. Normal tarif bu promptla metin modeline gider; boş listede çağrı yapılmaz. Node’da süre verirsen her turda okuma yeniden yapılır ve karar bu promptla yeniden verilir.')}
+        {promptBox('conditionOcr', '2. Windows + ONNX OCR — koşul değerlendirmesi', 'UIA’da açık kanıt yoksa düz ve 90° OCR okuması kullanılır. Bu aşamanın ayrı promptu vardır. Süre verildiyse her turda yeniden okunur ve yeniden değerlendirilir.')}
         {fixedRules('Her koşul listesine eklenen sabit kanıt/OCR kuralları', CONDITION_TARGET_RULES + '\n\n' + OCR_READER_RULES)}
-        <div className="llm-stage"><b>Seçilmiş yazısız öğe — LLM yok</b><p className="llm-note">Tarif boşsa canlı UIA kimliği veya kayıtlı simge resmi aranır. Eski koordinat tek başına kanıt değildir.</p></div>
         <div className="llm-stage"><b>Ekran görüntüsünden karar — kapalı</b><p className="llm-note">Koşul şu an görsel modele görüntü göndermez.</p></div>
       </>}
       {nodeTab === 'ai' && <>

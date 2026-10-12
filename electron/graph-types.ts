@@ -363,7 +363,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
       { key: 'true', label: 'var' },
       { key: 'false', label: 'yok' },
     ],
-    description: 'Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler.',
+    description: 'Ekranda ne aradığını normal cümleyle yaz; değerlendirmeyi metin modeli yapar. İstersen görünene kadar bekler.',
   },
   loop: {
     label: 'Her Öğe İçin',
@@ -533,7 +533,7 @@ export function summarize(n: AgentNode): string {
     case 'wait':
       return `${((n.ms ?? 0) / 1000).toLocaleString('tr-TR')} sn bekle`
     case 'condition': {
-      const what = n.text?.trim() ? `“${n.text.trim()}”` : n.locator ? 'seçilen öğe' : '“—”'
+      const what = n.text?.trim() || (n.locator ? 'seçili öğe' : '—')
       const wait = Math.round((n.timeoutMs ?? 0) / 1000)
       return wait > 0 ? `${what} görünene kadar bekle (en çok ${wait} sn)` : `Ekranda ${what} var mı?`
     }

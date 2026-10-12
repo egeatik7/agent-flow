@@ -33,7 +33,7 @@ const KIND: Record<string, Tip> = {
   },
   condition: {
     title: 'Koşul',
-    text: 'Ekranda bir yazı ya da seçtiğin öğe var mı diye bakar. Varsa “var”, yoksa “yok” çıkışından devam eder. Süre verirsen o süre boyunca tekrar tekrar bakar.',
+    text: 'Ekranda ne aradığını normal cümleyle yazarsın; kararı metin modeli verir. Bir turda önce uygulama öğeleri, olmazsa Windows + ONNX OCR okunur. Pencere yazarsan önce orada aranır. Varsa “var”, yoksa “yok” çıkışından devam eder. Süre verirsen o süre boyunca her turda yeniden bakar ve yeniden değerlendirir.',
   },
   loop: {
     title: 'Her Öğe İçin',
@@ -335,9 +335,10 @@ function fieldTip(el: Element): Tip | null {
     ['Tuş / Kısayol', { title: 'Tuş', text: 'ctrl+s kaydet, win+r çalıştır, alt+f4 kapat. Eski SendKeys biçimi (^s, %{F4}, #r) de desteklenir. Win düğmesi Windows kısayolunu başlatır; tamamlanmış kısayolu win+ ile değiştirir. {{öğe}} bu alanda da değişir.' }],
     ['Önce tıklanacak yer', { title: 'Önce tıklanacak yer', text: 'Tuş gitmeden önce modelin ekranda tıklayacağı yer. Odak yanlış penceredeyse tuş oraya gitmesin diye.' }],
     ['Süre (saniye)', { title: 'Süre', text: 'Zamanlayıcının bekleyeceği saniye. Ekrana bakılmaz.' }],
-    ['Ekranda aranacak yazı', { title: 'Aranacak yazı', text: 'Yalnız tırnak içindeki metin yerel aranır. Diğer tarifleri LLM birleşik Windows + ONNX OCR sonuçlarından yorumlar. Koşul tıklamaz, fareyi oynatmaz ve görsel modele dönmez.' }],
+    ['Ekranda ne aradığını yaz', { title: 'Aranacak şey', text: 'Ne aradığını normal cümleyle yaz; kararı metin modeli verir. Tırnak, birebir eşleşme veya yerel arama yoktur. Her turda önce uygulama öğeleri, olmazsa Windows + ONNX OCR okunur ve tarif bu sekmelerdeki promptlarla değerlendirilir. Koşul tıklamaz, fareyi oynatmaz ve görsel modele dönmez.' }],
     ['Ekranda ne görünmeli?', { title: 'Ekranda ne görünmeli?', text: 'Görsel modele sorulacak tarif. Önce yazı ve seçilen öğe aranır; bulunamazsa bu tarif modele gider.' }],
-    ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca tekrar tekrar bakar. Süre dolunca “yok” çıkışı kullanılır.' }],
+    ['Önce aranacak pencere', { title: 'Önce aranacak pencere', text: 'Pencere başlığı yazarsan koşul önce o pencerede arar; bulunamazsa tüm ekranda devam eder. Pencere öne alınmaz, tıklanmaz. Bulunan kanıtın o pencereye ait olup olmadığını da metin modeli değerlendirir.' }],
+    ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca her turda yeniden okur ve her turda metin modeline yeniden sorar. Süre dolunca “yok” çıkışı kullanılır.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
     ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve Yap için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
     ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsünden hedef bulma bu modeli kullanır. Yap için ayrı bir araç çağırabilen görsel model seçilebilir.' }],

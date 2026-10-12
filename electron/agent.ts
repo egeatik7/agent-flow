@@ -1186,8 +1186,6 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      const literal = instruction.match(/^(?:"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“)$/)
-      const savedText = !instruction ? (node.locator?.text || node.locator?.name || '').trim() : ''
       // Same readers and target-list model as Click, but one UIA pass then one
       // combined OCR pass. No Click retries, popup recovery, input or memory writes.
       const preferredWindow = node.conditionWindow?.trim() || ''
@@ -1214,42 +1212,39 @@ export function createAgent(ctx: AgentContext) {
         checkObservation(signal)
         return res
       }
-      // An explicitly picked, textless element can be observed by its live UIA
-      // identity or saved icon, rather than being silently discarded.
-      if (!instruction && !savedText && node.locator) {
+      // An explicitly picked element (from an older saved flow) is still observed by its live
+      // UIA identity or saved icon. The condition box itself no longer offers "pick from screen".
+      if (!instruction && node.locator) {
         const visible = await savedTargetVisible(node, options)
         checkStopped()
         return visible ? found(visible) : false
       }
-      const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
-      const semantic = !literal && !savedText
-      if (semantic && !getSettings().apiKey && !localConfigured()) {
-        throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
+      if (!instruction) throw new Error(`“${node.title}”: koşul için ne aradığını yaz.`)
+      // Every condition text is a plain sentence handed to the text model; there is no
+      // quoted "exact text" shortcut and no local full-text equality any more.
+      if (!getSettings().apiKey && !localConfigured()) {
+        throw new Error('Koşul artık her zaman metin modeline sorar; API anahtarı ya da yerel model gerekli.')
       }
       for (const source of ['uia', 'ocr'] as const) {
         ctx.setMethod?.(source === 'uia' ? 'Koşul: uygulama öğeleri (UIA)' : 'Koşul: Windows + ONNX OCR')
         const res = await scanCondition(source)
         if (source === 'ocr') noteCjk(res, node.id)
         const items = res.items.filter(item => item.src === source)
-        const needsContextJudge = !!preferredWindow && !scoped
-        if (!semantic && !needsContextJudge) {
-          const hit = items.find(item => norm(item.text) === norm(wanted))
-          if (hit) return found(`${source}: “${hit.text}”`)
-        } else if (items.length) {
-          const s = getSettings()
-          if (!s.apiKey && !localConfigured()) throw new Error('Pencere dışındaki koşul kanıtının bağlamını değerlendirmek için metin modeli gerekli.')
-          const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
-          const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: textModels(s), signal,
-            context: preferredWindow ? `Preferred application/window: ${preferredWindow}. ${scoped ? 'Evidence is from the selected window.' : 'That window was missing or ambiguous; this is a broader screen search. Accept only evidence belonging to the intended application/task; a status from an unrelated application or historical log is not proof. If the application context cannot be established, return id:null. A changed title alone does not disqualify the same application.'}` : undefined,
-            kind: 'condition', prompt: instruction || wanted, scan: { ...res, items, image: null },
-            stepTitle: 'Koşul', sendImage: false,
-            system: promptOf(s.llmPrompts, promptId) || DEFAULT_PROMPTS[promptId] }), signal)
-          checkStopped()
-          checkObservation(signal)
-          const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
-          if (hit) return found(`${source}: “${hit.text}”${choice.reason ? ` — ${choice.reason}` : ''}`)
-          log('info', `Koşul ${source}: açık kanıt yok${choice.reason ? ` — ${choice.reason}` : ''}.`)
-        }
+        // A preferred window that could not be used goes to the model as context: it decides
+        // whether broader evidence still belongs to the intended application (needsContextJudge).
+        if (!items.length) continue
+        const s = getSettings()
+        const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
+        const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: textModels(s), signal,
+          context: preferredWindow ? `Preferred application/window: ${preferredWindow}. ${scoped ? 'Evidence is from the selected window.' : 'That window was missing or ambiguous; this is a broader screen search. Accept only evidence belonging to the intended application/task; a status from an unrelated application or historical log is not proof. If the application context cannot be established, return id:null. A changed title alone does not disqualify the same application.'}` : undefined,
+          kind: 'condition', prompt: instruction, scan: { ...res, items, image: null },
+          stepTitle: 'Koşul', sendImage: false,
+          system: promptOf(s.llmPrompts, promptId) || DEFAULT_PROMPTS[promptId] }), signal)
+        checkStopped()
+        checkObservation(signal)
+        const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
+        if (hit) return found(`${source}: “${hit.text}”${choice.reason ? ` — ${choice.reason}` : ''}`)
+        log('info', `Koşul ${source}: açık kanıt yok${choice.reason ? ` — ${choice.reason}` : ''}.`)
       }
       return false
     },

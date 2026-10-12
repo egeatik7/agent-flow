@@ -17,6 +17,12 @@ Ters kontrol başarısız (henüz uygulanmamış) → düz kontrol başarılı �
 - Tanıma eşikleri, model dosyaları, Windows OCR ölçeklemesi ve ton işlemesi **değiştirilmedi** ✓.
 
 ## 2) Koşul (salt okunur)
+
+> **⚠️ Bu bölüm 1.9.98’de geçersizdir.** Kullanıcının açık isteğiyle koşulda **tırnaklı kesin metin ve yerel
+> eşleştirme tamamen kaldırıldı**: koşul kutusu artık her zaman düz cümle tariftir ve **her aşamada metin modeli**
+> karar verir (UIA → birleşik Windows + ONNX OCR). “Ekrandan Seç” koşuldan kaldırıldı. Aşağıdaki tablo, 1.9.52
+> davranışının tarihsel kaydıdır; güncel sözleşme için [sürüm notu 1.9.98](surum-notu-1.9.98.md) ve README’ye bak.
+
 | Koşul metni | Yol |
 | --- | --- |
 | `"Bitti"` (tamamı tırnaklı) | **Yerel** birleşik OCR — API gerekmez |

@@ -54,3 +54,28 @@ Yeni regresyonlar: yanlış log eşleşmesi, fallback bağlamı, yazısız UIA/s
 Eski Node test paketindeki iki OCR-only/icon-reject beklentisi, kullanıcının daha önce onayladığı UIA+OCR/simge davranışına güncellendi; sahte bridge'in findImage eksikliği giderildi.
 Son sonuç: 792 Vitest geçti, 6 mevcut test atlandı; 98 Node testi geçti, 21 mevcut test atlandı. Typecheck, build:electron ve git diff --check başarılı.
 Son ZIP, bu dört düzeltmeyi Koşul ve yöntem/prompt paneliyle birlikte içerir. Önceki panel paketi uygulanmışsa yalnız son bug düzeltmeleri için ek patch de bulunur.
+
+## Tur 4 — Koşul artık her zaman modele sorar (1.9.98, kullanıcının açık isteği)
+
+Kullanıcının sözü: *"tırnaklı tam eşleşme llm'siz hiçbir şey istemiyorum, ekrandan seç de kalksın. her şeye llm baksın
+istiyorum. o koşul kutusunda ne aradığımı da bam diye kutuya yazcam. tırnak falan yok. hangi pencerede aradığımı da
+yazcam ama hepsinin seçimini llm yapacak."*
+
+Bu istekle **önceki karar geçersiz oldu**: 1.9.52/1.9.97'de koşulda "tırnaklı = yerel kesin metin" diye bir yol vardı ve
+yerel mi tarif mi olacağını kullanıcı tırnakla seçiyordu. Artık:
+
+1. **Tırnak, birebir eşleşme ve yerel arama koşuldan tamamen kaldırıldı.** Koşul kutusu (`text`) her zaman düz cümle
+   tariftir ve **her aşamada metin modeli** karar verir.
+2. **Aşama sırası korunur:** bir turda önce UIA okuması (`conditionUia` promptu), açık kanıt yoksa birleşik
+   Windows + ONNX OCR okuması (`conditionOcr` promptu). İki aşama da kanıt bulamazsa "yok".
+3. **Pencere alanı korunur ve kullanıcı yazar:** `conditionWindow` + `conditionWindowMatch`. Önce o pencereye bakılır;
+   pencere yok/başlığı belirsizse bir kez tüm ekrana geçilir ve **bağlamı da model değerlendirir** (başka uygulamanın
+   durumu kanıt sayılmaz).
+4. **"Ekrandan Seç" / "İmleçle Yakala" koşuldan kaldırıldı** (Tıkla/Yazı Yaz/Yap seçimleri aynen kalır). Kayıtlı eski
+   akışlar bozulmasın diye koşulda kayıtlı bir öğe (`locator`) varsa ve kutu boşsa motor yolu korunur; panel bu durumda
+   yalnız "Eski seçimi temizle" sunar.
+5. **Kutu boşsa:** "…: koşul için ne aradığını yaz." **Model yoksa:** "Koşul artık her zaman metin modeline sorar;
+   API anahtarı ya da yerel model gerekli." (yerel yedek yol yok).
+6. Koşul değişmeyen kuralı: masaüstüne dokunmaz (tıklama/yazma/tuş/odak/pencere öne getirme yok); görsel modele ekran
+   görüntüsü göndermez; süre 0 = tek tur, süre verilirse en çok 700 ms aralıkla tekrar bakılır ve süre dolunca "yok"
+   çıkışı kullanılır (bağlı değilse süreli durumda açık hata, süresiz durumda uyarı + tamamlanmamış koşu).

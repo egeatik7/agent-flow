@@ -469,16 +469,23 @@ function NodeFields(p: Props & { n: AgentNode }) {
       {n.kind === 'condition' && (
         <>
           <div className="field">
-            <label>Ekranda aranacak yazı / durum (seçilen öğe varsa boş bırakılabilir)</label>
-            <TemplateField {...p} n={n} field="text" label="Ekranda aranacak yazı / durum" placeholder="Örn: job finished 60/60 yazıyorsa evet ver" />
+            <label>Ekranda ne aradığını yaz (değerlendirmeyi model yapar)</label>
+            <TemplateField {...p} n={n} field="text" label="Ekranda ne aradığını yaz (değerlendirmeyi model yapar)" placeholder="Örn: kaydet düğmesi ekranda göründü mü" />
           </div>
-          <TargetBox {...p} n={n} />
+          {n.locator && !n.text?.trim() && (
+            <div className="field">
+              <p className="field-hint">Bu koşulda eski bir ekran seçimi duruyor. Koşul artık seçim kullanmaz; kutuya ne aradığını normal cümleyle yaz, kararı model verir.</p>
+              <button type="button" className="xp-btn" onClick={() => upd({ locator: undefined, anchor: undefined })}>
+                Eski seçimi temizle
+              </button>
+            </div>
+          )}
           <div className="field"><label>Önce aranacak pencere (boş = tüm ekran)</label><input className="xp-input" value={n.conditionWindow || ''} onChange={e => upd({ conditionWindow: e.target.value })} /></div>
           {n.conditionWindow?.trim() && <>
             <div className="field"><label>Pencere başlığı</label><select className="xp-input" value={n.conditionWindowMatch || 'exact'} onChange={e => upd({ conditionWindowMatch: e.target.value as 'exact' | 'contains' })}><option value="exact">Tam eşleşme</option><option value="contains">Başlığı içerir (tek pencere)</option></select></div>
 
           </>}
-          <p className="field-hint">Bir turda önce UIA, sonra Windows + ONNX OCR aranır. Pencere bulunamazsa tüm ekranda devam eder. Görsel model kullanılmaz; tıklama veya pencereyi öne getirme yapılmaz.</p>
+          <p className="field-hint">Bir turda önce UIA, sonra Windows + ONNX OCR okunur. Pencere bulunamazsa tüm ekranda devam eder. Kararı bu sekmelerdeki metin modeli promptları verir; tırnak, birebir eşleşme veya yerel arama yoktur. Koşul tıklama veya pencereyi öne getirme yapmaz.</p>
           <div className="field">
             <label>Görünene kadar bekle (saniye, 0 = bir kez bak)</label>
             <input
