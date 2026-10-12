@@ -48,4 +48,12 @@ describe('kütüphane klasörü seçimi (korumalı klasör oluşturmadan)', () =
     const r = sec('   ', () => false)
     expect(r.fallback).toBe(true)
   })
+
+  it('kullanıcı seçimi kuralı: korumalı + yok = tehlikeli (klasör açma denenmez), diğerleri güvenli', () => {
+    // main.ts `unsafeLibraryPath` tam olarak bu bileşimi kullanır.
+    const tehlikeli = (aday: string, varMi: boolean) => isProtectedPath(aday, KORUMALI) && !varMi
+    expect(tehlikeli(`${BELGELER}\\Nubbo\\Kütüphane`, false)).toBe(true)   // seçilirse uygulama kilitlenebilirdi
+    expect(tehlikeli(`${BELGELER}\\Nubbo\\Kütüphane`, true)).toBe(false)   // zaten var: okumak güvenli
+    expect(tehlikeli(`${EV}\\NubboKutuphane`, false)).toBe(false)         // korumasız: klasör açılabilir
+  })
 })

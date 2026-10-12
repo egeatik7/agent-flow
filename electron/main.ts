@@ -53,7 +53,7 @@ import {
 } from './graph-types'
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
-import { chooseLibraryDirectory } from './library-path'
+import { chooseLibraryDirectory, isProtectedPath } from './library-path'
 import { zipDocumentFor } from './zip-workspace'
 import { copyZipCanvas } from './zip-canvas-document'
 import { sameCanvasContent } from './canvas-content'
@@ -1219,6 +1219,16 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return info ? info.file : null
   })
   void syncEndpoint()
+  /** Windows Denetimli klasör erişimi kapsamındaki kökler (yazma engellenebilir). */
+  function protectedRoots(): string[] {
+    return (['documents', 'desktop', 'pictures', 'videos', 'music'] as const)
+      .map((key) => app.getPath(key))
+      .concat(path.join(app.getPath('home'), 'Favorites'))
+  }
+  /** Korumalı VE henüz yok olan bir klasörde `mkdirSync` süresiz bekleyebilir: oraya hiç gidilmez. */
+  function unsafeLibraryPath(candidate: string): boolean {
+    try { return isProtectedPath(candidate, protectedRoots()) && !fs.existsSync(candidate) } catch { return false }
+  }
   /**
    * Kütüphane klasörü: korumalı bir klasörü ASLA oluşturmaya çalışmaz (ölçüldü: Denetimli klasör
    * erişimi açıkken `mkdirSync` Belgeler altında süresiz bekliyor ve arayüz "yükleniyor"da donuyordu).
@@ -1230,9 +1240,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       documents: app.getPath('documents'),
       home: app.getPath('home'),
       exists: (candidate) => { try { return fs.existsSync(candidate) } catch { return false } },
-      protectedRoots: (['documents', 'desktop', 'pictures', 'videos', 'music'] as const)
-        .map((key) => app.getPath(key))
-        .concat(path.join(app.getPath('home'), 'Favorites')),
+      protectedRoots: protectedRoots(),
     })
     if (choice.fallback) {
       log('warn', `Varsayılan kütüphane klasörü “${preferred}” Windows Denetimli klasör erişimi kapsamında ve henüz yok; orada klasör açmak uygulamayı kilitleyebilir. Kütüphane “${choice.directory}” altına alındı. Kalıcı çözüm: Ayarlar > Kütüphane’den bir klasör seç ya da Windows Güvenliği > Fidye yazılımı koruması > Denetimli klasör erişimi altında bu uygulamaya izin ver.`)
@@ -1273,6 +1281,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     if (mode !== 'open') throw Error('Bu eski katalog işlemi kaldırıldı.')
     const answer = await dialog.showOpenDialog(mainWindow, { title: 'ZIP kütüphanesi klasörünü seç', properties: ['openDirectory','createDirectory'] })
     if (answer.canceled) return null
+    // Seçilen klasör korumalı ve henüz yoksa klasör açma denemesi uygulamayı kilitleyebilir (ölçüldü).
+    if (unsafeLibraryPath(answer.filePaths[0])) {
+      throw Error(`“${answer.filePaths[0]}” Windows Denetimli klasör erişimi kapsamında ve henüz yok; orada klasör açmak uygulamayı kilitleyebilir. Korumasız bir klasör seç (ör. ${path.join(app.getPath('home'), 'NubboKutuphane')}) ya da Windows Güvenliği > Fidye yazılımı koruması > Denetimli klasör erişimi altında bu uygulamaya izin ver.`)
+    }
     const target = new ZipLibraryStorage(answer.filePaths[0]), library = target.load()
     const book: CanvasBook = { workspaceVersion: 3, activeId: '', tabs: [], zipLibrary: library }
     zipStorage = target; zipSnapshot = library; store.set('zipLibraryPath', target.directory); storeWorkspace(book)
