@@ -90,3 +90,41 @@ it('tek kelimeli kontrol (UIA düğmesi) rozetten kendi kutusuna çözülür', a
   expect(secim.wordIndex).toBeUndefined()
   expect(secim.rejected).toBeUndefined()
 })
+
+it('rozet satiri kisa ikinci kelime secimine GERCEKTEN girer (eski hata: sessizce cikiyordu)', async () => {
+  const { shouldRefineWord } = await import('../electron/word-targets')
+  expect(shouldRefineWord('click', 'ocr', { badgeResolved: true })).toBe(true)   // rozet satiri
+  expect(shouldRefineWord('click', 'ocr', { wordIndex: 1 })).toBe(true)          // normal kelime adayi
+  expect(shouldRefineWord('click', 'ocr', {})).toBe(false)                       // ESKI HATA: burada cikiyordu
+  expect(shouldRefineWord('click', 'ocr', { badgeResolved: false })).toBe(false)
+  expect(shouldRefineWord('type', 'ocr', { badgeResolved: true })).toBe(false)   // tikla disi tur
+  expect(shouldRefineWord('click', 'uia', { badgeResolved: true })).toBe(false)  // UIA ogesi zaten kendi kutusu
+})
+
+it('rozetten cozulen secim badgeResolved tasir ve kelime indeksi VERILMEZ', async () => {
+  setDiagnosticsRoot('')
+  const satirlar: string[] = []
+  setChatLogger((s) => satirlar.push(s))
+  yanit(36)
+  const secim = await sor(tarama(true))
+  expect(secim.badgeResolved).toBe(true)
+  expect(secim.wordIndex).toBeUndefined()
+  expect(satirlar.some((s) => s.startsWith('GORUNTU-ROZETI'))).toBe(true)
+  setChatLogger(null)
+})
+
+it('gonderim ozeti GERCEK marked bilgisini tasir (plain/marked artik durust)', async () => {
+  setDiagnosticsRoot('')
+  const satirlar: string[] = []
+  setChatLogger((s) => satirlar.push(s))
+  yanit(101, 'Import GLB Files')
+  await sor(tarama(true))
+  const markedOzet = satirlar.find((s) => s.startsWith('GONDERIM id='))!
+  expect(markedOzet).toContain('marked')
+  expect(markedOzet).not.toContain('plain')
+  satirlar.length = 0
+  await sor(tarama(false))
+  const plainOzet = satirlar.find((s) => s.startsWith('GONDERIM id='))!
+  expect(plainOzet).toContain('plain')
+  setChatLogger(null)
+})

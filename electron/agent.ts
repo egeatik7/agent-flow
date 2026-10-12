@@ -1,5 +1,5 @@
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
-import { wordCandidates, refineWordTarget } from './word-targets'
+import { shouldRefineWord, wordCandidates, refineWordTarget  } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
 import fs from 'fs'
@@ -215,14 +215,14 @@ export function createAgent(ctx: AgentContext) {
   type TargetPick = { item: ScreenItem; target: Target; memo: TargetMemo; how: string }
 
   async function refineClickWord(node: AgentNode, scan: ScanResult, item: ScreenItem, choice: ScreenChoice): Promise<boolean> {
-    if (node.kind !== 'click' || item.src !== 'ocr' || choice.wordIndex === undefined) return true
+    if (!shouldRefineWord(String(node.kind), item.src, choice)) return true
     // An invalid first word index must never become a click at a reconstructed phrase center.
-    if (!refineWordTarget(item, choice.wordIndex)) return false
+    if (choice.wordIndex !== undefined && !refineWordTarget(item, choice.wordIndex)) return false
     const words = wordCandidates(scan).filter(c => c.parentId === item.id && c.wordIndex !== undefined)
     if (words.length < 2) return true
     const s = getSettings()
     const dedicated = modelChain(s.wordChoiceModel, s.wordChoiceBackups)
-    log('info', `OCR kelime seçimi: ${words.length} kelime kısa ikinci isteğe gidiyor; görüntü ve geçmiş yok.`)
+    log('info', `OCR kelime seçimi: ${words.length} kelime kısa ikinci isteğe gidiyor; görüntü ve geçmiş yok.${choice.badgeResolved ? ' (görüntü rozetinden çözülen satır)' : ''}`)
     try {
       const selected = await chooseOcrWord({ apiKey: s.apiKey, model: dedicated.length ? dedicated : textModels(s),
         scan, parentId: item.id, prompt: node.prompt?.trim() || item.text, nodeId: node.id,
@@ -232,7 +232,7 @@ export function createAgent(ctx: AgentContext) {
         log('warn', 'İkinci kelime seçimi belirsiz (null); bu OCR satırına tıklanmadı, sonraki hedefleme aşamasına geçiliyor.')
         return false
       }
-      const before = item.words?.[choice.wordIndex]?.t ?? '?'
+      const before = choice.wordIndex !== undefined ? item.words?.[choice.wordIndex]?.t ?? '?' : item.text.slice(0, 40)
       choice.wordIndex = selected.wordIndex
       choice.candidateId = selected.candidateId
       choice.text = selected.text

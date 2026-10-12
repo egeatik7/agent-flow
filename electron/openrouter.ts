@@ -626,7 +626,7 @@ export function validateConditionReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' }
+export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -676,7 +676,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
       id: istekId, node: opts.stepTitle, stage: String(opts.kind), model: Array.isArray(opts.model) ? opts.model.join(',') : opts.model,
       target: isLocalName(ilk) ? 'local' : 'api',
       image: resim
-        ? { sent: true, w: scan.image?.w, h: scan.image?.h, bytes: resim.buffer.length, mime: resim.mime }
+        ? { sent: true, w: scan.image?.w, h: scan.image?.h, bytes: resim.buffer.length, mime: resim.mime, marked: (scan.image as { marked?: boolean } | null | undefined)?.marked === true }
         : { sent: false, reason: !opts.sendImage ? 'ayar kapalı: numaralı ekran görüntüsü gönder' : scan.image ? 'görüntü nesnesi var ama istek gövdesine image_url eklenmedi' : 'tarama görüntüsü boş (kare alınamadı)' },
       fallbackNoImage: goruntusuzDonus,
       candidates: { built: candidates.length, sent: countSentCandidates(listText) },
@@ -731,7 +731,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   const rejected = id === null || selected || rozet ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
   // YANIT KANITI (1.9.113): ham cevap, dönen id, listede var mı, seçilebilir mi, red sebebi ve çözülen öğe.
   const gonderilenMi = id !== null && Number.isInteger(id) ? new RegExp(`^#${id}\\s`, 'm').test(listText) : false
-  if (rozet) chatLogger?.(`GORUNTU-ROZETI id=${istekId} | donen-id=${id} listede YOK ama marked goruntude #${rozet.id} “${rozet.text.slice(0, 60)}” | cok-kelimeli=${(rozet.words?.length ?? 0) > 1 ? 'evet (kisa ikinci kelime secimine gidiyor)' : 'hayir (kendi kutusuna)'}`)
+  if (rozet) chatLogger?.(`GORUNTU-ROZETI id=${istekId} | donen-id=${id} listede YOK ama marked goruntude #${rozet.id} “${rozet.text.slice(0, 60)}” | cok-kelimeli=${(rozet.words?.length ?? 0) > 1 ? (opts.kind === 'click' ? 'evet (kisa ikinci kelime secimine gidiyor)' : 'evet (tikla disi tur: kelime secimi yok)') : 'hayir (kendi kutusuna)'}`)
   chatLogger?.(responseSummaryText({
     id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!(selected || rozet), rejected,
     resolvedItem: selected ? `${selected.item.src}/${selected.item.type} "${selected.item.text.slice(0, 60)}"` : rozet ? `${rozet.src}/${rozet.type} "${rozet.text.slice(0, 60)}" (görüntü rozeti #${rozet.id})` : undefined,
@@ -743,6 +743,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
     id: selected?.parentId ?? rozet?.id ?? null,
     ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
+    ...(rozet ? { badgeResolved: true } : {}),
     ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
     text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
     reason: String(parsed.reason ?? ''),

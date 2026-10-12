@@ -129,3 +129,14 @@ export function refineWordTarget(item: ScreenItem, wordIndex: number): Target | 
   const clickPoint = { x: Math.min(maxX, Math.max(minX, Math.floor(word.x + word.w / 2))), y: Math.min(maxY, Math.max(minY, Math.floor(word.y + word.h / 2))) }
   return { x: word.x, y: word.y, w: word.w, h: word.h, text: word.t, item, clickPoint }
 }
+
+/**
+ * Kisa ikinci kelime secimine girilmeli mi (1.9.117). Olculen kusur: goruntu rozetinden cozulen cok
+ * kelimeli OCR satirinda wordIndex bos oldugu icin yol erken cikiyor, gunluk "ikinci secime gidiyor"
+ * derken satir MERKEZINE tikliyordu. Rozet satiri da bu yola girer; tikla gercek kelime kutusuna gider.
+ */
+export function shouldRefineWord(kind: string, itemSrc: string, choice: { wordIndex?: number; badgeResolved?: boolean }): boolean {
+  if (kind !== 'click' || itemSrc !== 'ocr') return false
+  if (choice.wordIndex === undefined && choice.badgeResolved !== true) return false
+  return true
+}
