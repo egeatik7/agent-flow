@@ -1,13 +1,16 @@
+import { METHOD_TABS } from '../../electron/node-methods'
+import { listPromptFor, TARS_TEMPLATE, SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT } from '../../electron/llm-flow'
+import { WORD_TARGET_RULES, CONDITION_TARGET_RULES, OCR_READER_RULES } from '../../electron/word-targets'
 import { useEffect, useState, type SetStateAction } from 'react'
 import { DEFAULT_FIND_OFF, normalizeFind } from '../../electron/llm-flow'
 import {
   DEFAULT_PROMPTS,
-  EXTRA_PROMPTS,
   FIND_STAGES,
   type AppSettings,
   type FindStageId,
   type LlmPrompts,
   type PromptId,
+  type NodeKind,
 } from '../types'
 
 type Props = {
@@ -26,6 +29,7 @@ function move(list: FindStageId[], index: number, dir: -1 | 1): FindStageId[] {
 }
 
 export default function LlmPanel(p: Props) {
+  const [nodeTab, setNodeTab] = useState<NodeKind>('click')
   const [order, setOrderState] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).order)
   const [off, setOffState] = useState<FindStageId[]>(() => normalizeFind(p.settings.findOrder, p.settings.findOff).off)
   const [prompts, setPromptsState] = useState<LlmPrompts>({ ...p.settings.llmPrompts })
@@ -90,62 +94,88 @@ export default function LlmPanel(p: Props) {
     p.onSave({ findOrder: order, findOff: off, llmPrompts: clean })
   }
 
+  const sharedFind = nodeTab === 'click' || nodeTab === 'type'
+  const selectedTab = METHOD_TABS.find(tab => tab.id === nodeTab)!
+  const resetPrompt = (id: PromptId) => setPrompts(prev => { const next = { ...prev }; delete next[id]; return next })
+  const fixedRules = (title: string, value: string) => <details className="llm-fixed"><summary>{title}</summary><pre>{value}</pre></details>
+  const promptBox = (id: PromptId, title: string, note: string, value = text(id)) => (
+    <div className="llm-stage" key={id}>
+      <div className="llm-stage-head"><b>{title}</b><button type="button" className="xp-btn" onClick={() => resetPrompt(id)}>Sıfırla</button></div>
+      <p className="llm-note">{note}</p>
+      <textarea aria-label={title} className="xp-input llm-prompt" rows={7} value={value} onChange={e => setText(id, e.target.value)} spellCheck={false} />
+    </div>
+  )
+
   return (
     <div className="llm-panel">
+      <div className="llm-node-tabs" role="tablist" aria-label="Node yöntemleri" onKeyDown={e => {
+        const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+        const index = buttons.indexOf(e.target as HTMLButtonElement)
+        if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+        e.preventDefault()
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length
+        buttons[next].click(); buttons[next].focus()
+      }}>
+        {METHOD_TABS.map(tab => <button key={tab.id} id={`method-tab-${tab.id}`} type="button" role="tab" aria-selected={nodeTab === tab.id} aria-controls="method-panel" tabIndex={nodeTab === tab.id ? 0 : -1} className={`xp-btn${nodeTab === tab.id ? ' active' : ''}`} onClick={() => setNodeTab(tab.id)}>{tab.title}</button>)}
+      </div>
+      <section id="method-panel" role="tabpanel" aria-labelledby={`method-tab-${nodeTab}`}>
+      <p className="llm-note">{selectedTab.note}</p>
+      {sharedFind && <>
+      <p className="llm-note">Metin seçimi: {p.settings.model || 'model seçilmedi'}. Görsel hedef: {p.settings.agentModel || p.settings.visionModel || p.settings.model || 'model seçilmedi'}. Model yedekleri Ayarlar bölümünden gelir.</p>
       <ol className="llm-stages">
         {order.map((id, index) => {
           const spec = FIND_STAGES.find((s) => s.id === id)
           if (!spec) return null
+          const visual = id === 'tars'
+          const prompt = spec.prompt
+          const stageText = prompt ? (visual ? (prompts.tars === TARS_TEMPLATE ? '' : prompts.tars ?? '') : nodeTab === 'type' && prompt === 'list' ? listPromptFor('type', prompts.list) : text(prompt)) : ''
           return (
             <li key={id} className={`llm-stage${enabled(id) ? '' : ' off'}`}>
               <div className="llm-stage-head">
-                <label className="llm-check">
-                  <input type="checkbox" checked={enabled(id)} onChange={() => toggle(id)} />
-                  <b>
-                    {index + 1}. {spec.title}
-                  </b>
-                </label>
+                <label className="llm-check"><input type="checkbox" checked={enabled(id)} onChange={() => toggle(id)} /><b>{index + 1}. {id === 'uia' ? 'Uygulama öğesi (UIA)' : id === 'tars' ? 'Görsel hedefleme' : spec.title}</b></label>
                 <span className="llm-move">
-                  <button type="button" className="xp-btn" disabled={index === 0} onClick={() => setOrder((list) => move(list, index, -1))}>
-                    ↑
-                  </button>
-                  <button type="button" className="xp-btn" disabled={index === order.length - 1} onClick={() => setOrder((list) => move(list, index, 1))}>
-                    ↓
-                  </button>
-                  <button type="button" className="xp-btn" title="Bu aşamayı varsayılana çevir" onClick={() => resetStage(id)}>
-                    Sıfırla
-                  </button>
+                  <button type="button" className="xp-btn" aria-label={`${spec.title} yukarı`} disabled={index === 0} onClick={() => setOrder(list => move(list, index, -1))}>↑</button>
+                  <button type="button" className="xp-btn" aria-label={`${spec.title} aşağı`} disabled={index === order.length - 1} onClick={() => setOrder(list => move(list, index, 1))}>↓</button>
+                  <button type="button" className="xp-btn" onClick={() => resetStage(id)}>Sıfırla</button>
                 </span>
               </div>
-              <p className="llm-note">{spec.note}</p>
-              {spec.prompt && (
-                <textarea className="xp-input llm-prompt" rows={7} value={text(spec.prompt)} onChange={(e) => setText(spec.prompt!, e.target.value)} spellCheck={false} />
-              )}
+              <p className="llm-note">{id === 'uia' ? 'Kayıtlı öğe veya yazılı hedefe uyan düğme/yazılabilir alan yerelde aranır. LLM yok.' : id === 'offset' ? 'Eski konum yalnız tanılama için okunur; tek başına hedef kanıtı veya tıklama yöntemi değildir. LLM yok.' : visual ? 'Ekran görüntüsünden tek hedef aranır. UI-TARS ile diğer görsel modellerin talimatları aşağıda ayrı gösterilir.' : spec.note}</p>
+              {prompt && <textarea aria-label={visual ? 'UI-TARS ek talimatı' : spec.title + ' promptu'} className="xp-input llm-prompt" rows={7} value={stageText} onChange={e => setText(prompt, e.target.value)} spellCheck={false} />}
+              {id === 'chrome' && <p className="llm-note">Model gerektiğinde aşağıdaki ortak Kelime listesi promptu kullanılır.</p>}
+              {id === 'list' && fixedRules('Model isteğine eklenen sabit liste/OCR kuralları', WORD_TARGET_RULES + '\n\n' + OCR_READER_RULES)}
+              {visual && <>
+                <p className="llm-note">Yukarıdaki kutu UI-TARS’a ek talimattır. Boşsa aşağıdaki yerleşik hedef promptu kullanılır.</p>
+                {fixedRules('UI-TARS yerleşik hedef promptu', VISUAL_TARGET_TARS_PROMPT)}
+                {promptBox('screen', 'Diğer görsel modeller — ek talimat', 'Bu kutu ortak görsel hedefleme ek talimatıdır; boşsa yerleşik JSON hedef promptu kullanılır.', prompts.screen === SCREEN_PROMPT ? '' : prompts.screen ?? '')}
+                {fixedRules('JSON yerleşik hedef promptu', VISUAL_TARGET_JSON_PROMPT)}
+                {fixedRules('Her görsel isteğe eklenen hedef kuralları', VISUAL_TARGET_RULES)}
+              </>}
             </li>
           )
         })}
       </ol>
-      <h3 className="llm-extra-title">Diğer LLM çağrıları</h3>
-      {EXTRA_PROMPTS.map((spec) => (
-        <div key={spec.id} className="llm-stage">
-          <div className="llm-stage-head">
-            <b>{spec.title}</b>
-            <button type="button" className="xp-btn" title="Bu promptu varsayılana çevir" onClick={() => setText(spec.id, DEFAULT_PROMPTS[spec.id])}>
-              Sıfırla
-            </button>
-          </div>
-          <p className="llm-note">{spec.note}</p>
-          <textarea className="xp-input llm-prompt" rows={6} value={text(spec.id)} onChange={(e) => setText(spec.id, e.target.value)} spellCheck={false} />
-        </div>
-      ))}
-      <div className="llm-save-row">
-        <button type="button" className="xp-btn" onClick={resetAll}>
-          Tümünü sıfırla
-        </button>
-        <button type="button" className="xp-btn save" onClick={save}>
-          Kaydet
-        </button>
-      </div>
+      <div className="llm-stage"><b>Girdi gönderme — LLM yok</b><p className="llm-note">{nodeTab === 'click' ? 'Bulunan hedefe seçilen tıklama veya fareyi oynatma eylemi gönderilir.' : 'Hedef varsa alan seçilir; Ctrl+A / Delete, yazı ve istenirse Enter gönderilir. Alan seçimi için ayrı LLM çağrısı yapılmaz.'}</p></div>
+      <div className="llm-stage"><b>Hedef bulunamazsa</b><p className="llm-note">3 saniye bekleyip tüm ekranda bir kez daha arar. Yine bulunamazsa Takılma modelinden plan istenebilir.</p></div>
+      {nodeTab === 'click' && promptBox('reaction', 'Tıklama sonrası tepki', 'Ekran kontrolü Açık olduğunda ve yerel değerlendirme belirsizse önce/sonra kareleri görsel modeline gönderilir. Kapalı ve Yalnız günlük modunda bu model çağrılmaz.')}
+      {promptBox('stall', 'Takılma planı', 'Hedef bulma veya tıklama değerlendirmesi toparlanamazsa bekleme/devam/durma kararı. Ortak Tıkla/Yazı Yaz promptu; görsel model zinciri kullanılır.')}
+      </>}
+      {nodeTab === 'condition' && <>
+        <p className="llm-note">Tarifleri yorumlayan metin modeli: {p.settings.model || 'model seçilmedi'}. Tamamı tırnaklı kesin metin, gözlenen metnin tamamıyla yerelde eşleşir. Pencere dışına geçilirse bağlamı model değerlendirir.</p>
+        {promptBox('conditionUia', '1. UIA — koşul değerlendirmesi', 'Güncel uygulama öğeleri okunur. Metin, düğme ve diğer kontrol türleri kanıt olabilir. Normal tarif bu promptla metin modeline gider; boş listede çağrı yapılmaz.')}
+        {promptBox('conditionOcr', '2. Windows + ONNX OCR — koşul değerlendirmesi', 'UIA’da açık kanıt yoksa düz ve 90° OCR okuması kullanılır. Bu aşamanın ayrı promptu vardır.')}
+        {fixedRules('Her koşul listesine eklenen sabit kanıt/OCR kuralları', CONDITION_TARGET_RULES + '\n\n' + OCR_READER_RULES)}
+        <div className="llm-stage"><b>Seçilmiş yazısız öğe — LLM yok</b><p className="llm-note">Tarif boşsa canlı UIA kimliği veya kayıtlı simge resmi aranır. Eski koordinat tek başına kanıt değildir.</p></div>
+        <div className="llm-stage"><b>Ekran görüntüsünden karar — kapalı</b><p className="llm-note">Koşul şu an görsel modele görüntü göndermez.</p></div>
+      </>}
+      {nodeTab === 'ai' && <>
+        <p className="llm-note">Araç modeli: {p.settings.agentModel && !/ui-tars/i.test(p.settings.agentModel) ? p.settings.agentModel : p.settings.model || 'model seçilmedi'}. UI-TARS modelleri bu araç döngüsünde kullanılmaz.</p>
+        {promptBox('yap', 'Yap — araç kullanan ajan', 'Node’daki görev, döngü öğesi, tuval bağlamı ve sonraki adımlar ayrı görev mesajında gönderilir. Ekran okuma ve Windows araçları modelin seçtiği sırayla çalışır.')}
+        <div className="llm-stage"><b>Araç yürütme — LLM yok</b><p className="llm-note">Seçilen araç sırayla çalıştırılır; sonucu modele döner. Güncel ekranlar varsa son iki görüntü tutulur. Araç/adım ve süre sınırları node ayarlarından gelir.</p></div>
+        <div className="llm-stage"><b>Tamamlanma — araç kararı</b><p className="llm-note">Model task_complete çağırınca motor mevcut gözlem ve araç sınırlarını değerlendirir. Eski kayıtlı İnisiyatif yolları oynatılmaz.</p></div>
+      </>}
+      {!sharedFind && nodeTab !== 'condition' && nodeTab !== 'ai' && <div className="llm-stage"><b>Yerel yürütme — LLM yok</b><p className="llm-note">{selectedTab.note}</p></div>}
+      </section>
+      <div className="llm-save-row"><button type="button" className="xp-btn" onClick={resetAll}>Tüm yöntemleri sıfırla</button><button type="button" className="xp-btn save" onClick={save}>Kaydet</button></div>
     </div>
   )
 }

@@ -2188,3 +2188,10 @@ html.hud-root #root {
 }
 .template-token-remove:hover, .template-token-remove:focus { background: #ffddd5; outline: 1px solid #b64c3c; }
 .node-model-row { display: flex; align-items: baseline; gap: 5px; font-size: 11px; overflow-wrap: anywhere; }
+
+.llm-node-tabs { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; border-bottom: 1px solid #919b9c; padding-bottom: 6px; }
+.llm-node-tabs .xp-btn { font-size: 11px; min-width: 0; padding: 3px 7px; }
+.llm-node-tabs .xp-btn.active { background: #fff; border-color: #003c74; color: #003c74; font-weight: bold; }
+.llm-fixed { margin: 6px 0; font-size: 11px; }
+.llm-fixed summary { cursor: pointer; color: #003c74; }
+.llm-fixed pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #bbb; background: #f3f3f0; padding: 6px; font: 11px/1.4 var(--font-mono); max-height: 220px; overflow-y: auto; }

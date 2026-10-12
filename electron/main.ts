@@ -61,7 +61,7 @@ import { startViewerServer } from './viewer-server'
 import { configureViewerTailscale } from './viewer-tailscale'
 import type { ViewerInfo } from './viewer-types'
 import { listDirEntries } from './list-dir'
-import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts } from './llm-flow'
+import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts, promptOf } from './llm-flow'
 
 const STOP_HOTKEY = 'CommandOrControl+Shift+Q'
 /** How long an approval question waits before the caller is told "no". */
@@ -759,6 +759,7 @@ async function runFlow(
         pushMethod('Yap')
         try {
           return await runYap(node, { nodeId: node.id, vars, packageContext: contextOf(graph, node.id), next: ahead.next, then: ahead.then }, {
+            system: promptOf(settings.llmPrompts, 'yap'),
             shouldStop: () => stopRequested, log,
             makeExecute: shouldStop => {
               recoveryAbort = shouldStop

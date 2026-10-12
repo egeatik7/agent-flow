@@ -28,6 +28,6 @@ describe('one combined OCR target matching stage', () => {
     const html = renderToStaticMarkup(createElement(LlmPanel, { settings: { ...DEFAULT_SETTINGS, findOrder: ['windows', 'onnx', 'list'], findOff: ['onnx'] }, onSave: vi.fn() }))
     expect(html).toContain('Windows + ONNX OCR')
     expect(html).not.toMatch(/\d+\. ONNX OCR/)
-    expect((html.match(/Windows \+ ONNX OCR/g) ?? []).length).toBe(1)
+    expect((html.match(/<b>\d+\. Windows \+ ONNX OCR<\/b>/g) ?? []).length).toBe(1)
   })
 })

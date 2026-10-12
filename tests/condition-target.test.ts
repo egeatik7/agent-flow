@@ -1,3 +1,4 @@
+import { ObservationTimeoutError } from '../electron/observation-budget'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScanResult } from '../electron/matcher'
 const state = vi.hoisted(() => ({ stopped: false, missingWindow: '', scans: [] as unknown[], actions: [] as string[], items: [] as unknown[], scanError: null as Error | null, requests: [] as string[] }))
@@ -17,8 +18,8 @@ import { createAgent } from '../electron/agent'
 import { createNode, DEFAULT_SETTINGS } from '../electron/graph-types'
 import { setStopCheck } from '../electron/openrouter'
 import { StoppedError, runGraph } from '../electron/runner'
-function make(order = ['windows', 'onnx', 'list'], apiKey = 'test-key') {
-  return createAgent({ log: () => {}, send: () => {}, shouldStop: () => state.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey, model: 'test/model', agentModel: 'test/model', agentBackups: [], visionModel: 'test/model', visionBackups: [], findOrder: order as never, findOff: [] }) }).executor
+function make(order = ['windows', 'onnx', 'list'], apiKey = 'test-key', llmPrompts = {}) {
+  return createAgent({ log: () => {}, send: () => {}, shouldStop: () => state.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey, llmPrompts, model: 'test/model', agentModel: 'test/model', agentBackups: [], visionModel: 'test/model', visionBackups: [], findOrder: order as never, findOff: [] }) }).executor
 }
 const condition = (text: string) => ({ ...createNode('condition', 0, 0), text })
 const row = (text: string) => ({ id: 1, text, type: 'Text', src: 'ocr', x: 20, y: 30, w: 170, h: 20, ocrSources: ['onnx'] })
@@ -27,56 +28,104 @@ function respond(value: unknown) {
 }
 beforeEach(() => { state.stopped = false; state.missingWindow = ''; state.scans = []; state.actions = []; state.items = []; state.scanError = null; state.requests = []; setStopCheck(() => false) })
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false); expect(state.actions).toEqual([]) })
-describe('Condition uses the shared resolver without desktop input', () => {
-  it('quoted-only conditions use local combined OCR without a model/key', async () => {
+describe('Condition observes UIA then OCR without desktop input', () => {
+  it('finds quoted Button UIA text locally before doing OCR', async () => {
+    state.items = [{ ...row('Bitti'), src: 'uia', type: 'Button' }]
+    expect(await make(undefined, '').exists('', condition('"Bitti"'))).toBe(true)
+    expect(state.scans).toHaveLength(1)
+    expect(state.scans[0]).toMatchObject({ uia: true, ocr: false, readOnly: true })
+    expect(state.requests).toHaveLength(0)
+  })
+  it('falls through absent UIA to combined OCR without a model', async () => {
     state.items = [row('Job finished 60/60')]
-    expect(await make(undefined, '').exists('finished 60/60', condition('"finished 60/60"'))).toBe(true)
-    expect(await make(undefined, '').exists('finished 6/60', condition('“finished 6/60”'))).toBe(false)
-    expect(state.requests).toEqual([])
-    expect(state.scans[0]).toMatchObject({ readOnly: true, fresh: true, ocrEngine: 'combined' })
+    expect(await make(undefined, '').exists('', condition('"Job finished 60/60"'))).toBe(true)
+    expect(state.scans).toHaveLength(2)
+    expect(state.scans[1]).toMatchObject({ uia: false, ocr: true, fresh: true, tilt: true, ocrEngine: 'combined', readOnly: true })
+    expect(state.requests).toHaveLength(0)
   })
-  it('plain text is interpreted by the LLM even when it matches a visible row', async () => {
-    state.items = [row('Bitti')]; respond({ id: 1, reason: 'finished' })
-    expect(await make().exists('Bitti', condition('Bitti'))).toBe(true)
-    expect(state.requests).toHaveLength(1)
-    expect(state.scans[0]).toMatchObject({ readOnly: true, ocrEngine: 'combined', deferOnnx: false })
+  it('a counter mismatch does not become a local match', async () => {
+    state.items = [row('Job finished 6/60')]
+    expect(await make(undefined, '').exists('', condition('"Job finished 60/60"'))).toBe(false)
   })
-  it('keeps the entire semantic instruction and allows ONNX line evidence without fake words', async () => {
-    state.items = [row('All jobs completed 60/60')]; respond({ id: 1, reason: 'completed all sixty' })
-    expect(await make().exists('job finished', condition('job finished 60/60 yazıyorsa evet ver'))).toBe(true)
-    const request = state.requests[0]
-    expect(request).toContain('job finished 60/60 yazıyorsa evet ver'); expect(request).toContain('READ-ONLY existence condition')
-    expect(request).toContain('OCR-reader=onnx'); expect(request).toContain('6/60 is not 60/60')
+  it('semantic UIA state is judged by the condition prompt, with one model call', async () => {
+    state.items = [{ ...row('All jobs completed 60/60'), src: 'uia', type: 'Text' }]
+    respond({ id: 1, reason: 'all sixty finished' })
+    expect(await make().exists('', condition('job finished 60/60 yazıyorsa evet ver'))).toBe(true)
+    expect(state.scans).toHaveLength(1); expect(state.requests).toHaveLength(1)
+    expect(state.requests[0]).toContain('cautious, read-only')
+    expect(state.requests[0]).toContain('Source: current UI Automation')
+    expect(state.requests[0]).toContain('job finished 60/60 yazıyorsa evet ver')
   })
-  it('embedded quotes do not bypass the LLM or discard required counters', async () => {
-    state.items = [row('Job finished 6/60')]; respond({ id: null, reason: 'only six finished' })
-    expect(await make().exists('Job finished', condition('"Job finished" ve 60/60 görünüyorsa evet'))).toBe(false)
-    expect(state.requests).toHaveLength(1); expect(state.requests[0]).toContain('60/60 görünüyorsa evet')
+  it('UIA absence proceeds to OCR and preserves the whole semantic instruction', async () => {
+    state.items = [row('All jobs completed 60/60')]; respond({ id: 1 })
+    expect(await make().exists('job finished', condition('"job finished" ve 60/60 görünüyorsa evet'))).toBe(true)
+    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(1)
+    expect(state.requests[0]).toContain('Source: current Windows + ONNX OCR')
+    expect(state.requests[0]).toContain('60/60 görünüyorsa evet')
   })
-  it('absent semantic evidence returns false rather than using stale recorded targets', async () => {
-    state.items = [row('Running')]; respond({ id: null, reason: 'still running' })
+  it('a negative UIA decision still permits fresh OCR evidence', async () => {
+    state.items = [{ ...row('Running'), src: 'uia' }, { ...row('Completed 60/60'), id: 2 }]
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      state.requests.push(String(init.body))
+      return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ id: state.requests.length === 1 ? null : 2 }) } }] }) }
+    }))
+    expect(await make().exists('', condition('60/60 tamamlandı mı?'))).toBe(true)
+    expect(state.requests).toHaveLength(2); expect(state.scans).toHaveLength(2)
+  })
+  it('negative evidence stops after one pass per reader without screenshot fallback', async () => {
+    state.items = [{ ...row('Start'), src: 'uia', type: 'Button' }, { ...row('BAŞLAMADI'), id: 2 }]
+    respond({ id: null, reason: 'not completed' })
+    expect(await make(['tars']).exists('', condition('İş bitti mi?'))).toBe(false)
+    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(2)
+    expect(state.requests.every(r => !r.includes('image_url'))).toBe(true)
+  })
+  it('does not use a recorded target as proof of a semantic state', async () => {
+    state.items = [row('Running')]; respond({ id: null })
     const n = { ...condition('İş bitti mi?'), locator: { controlType: 'Button', name: 'Saved', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
-    expect(await make().exists(n.text, n)).toBe(false)
+    expect(await make().exists('', n)).toBe(false)
   })
-  it('a visual-only configuration uses OCR/text evidence instead of screenshot analysis', async () => {
-    state.items = [row('Bitti')]; respond({ id: 1, reason: 'completion evidence' })
-    expect(await make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).toBe(true)
-    expect(state.scans[0]).toMatchObject({ readOnly: true, uia: false, image: 'none', ocrEngine: 'combined' })
-    expect(state.requests[0]).toContain('READ-ONLY existence condition')
-    expect(state.requests[0]).not.toContain('image_url')
+  it('a picked textless element can be found by live UIA identity', async () => {
+    const n = { ...condition(''), locator: { controlType: 'Button', name: '', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
+    expect(await make(undefined, '').exists('', n)).toBe(true)
+    expect(state.scans).toHaveLength(0)
   })
-  it('missing OCR evidence returns false without opening a menu or using visual fallback', async () => {
-    state.items = [row('BAŞLAMADI')]; respond({ id: null, reason: 'not finished' })
-    expect(await make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).toBe(false)
-    expect(state.requests).toHaveLength(1)
-    expect(state.requests[0]).not.toContain('image_url')
+  it('a picked text label is checked with both readers', async () => {
+    state.items = [{ ...row('Saved'), src: 'uia', type: 'Button' }]
+    const n = { ...condition(''), locator: { controlType: 'Button', name: 'Saved', path: '', windowTitle: 'Fixture' } }
+    expect(await make(undefined, '').exists('', n)).toBe(true)
   })
-  it('text API failures propagate instead of being reported as absence', async () => {
+  it('Stop propagates rather than choosing No', async () => {
+    state.stopped = true
+    await expect(make().exists('', condition('"Done"'))).rejects.toBeInstanceOf(StoppedError)
+  })
+  it('scan failure propagates rather than choosing No', async () => {
+    state.scanError = new Error('capture failed')
+    await expect(make().exists('', condition('"Done"'))).rejects.toThrow('capture failed')
+  })
+  it('semantic conditions require a text model configuration', async () => {
+    await expect(make(undefined, '').exists('', condition('İş bitti mi?'))).rejects.toThrow('API anahtarı')
+  })
+  it('API failure propagates instead of being reported as absence', async () => {
     state.items = [row('Bitti')]
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, text: async () => 'invalid key' })))
-    await expect(make(['tars']).exists('İş bitti mi?', condition('İş bitti mi?'))).rejects.toThrow('401')
+    await expect(make().exists('', condition('İş bitti mi?'))).rejects.toThrow('401')
   })
-  it('the real runner follows Yes/No while passing the full instruction unchanged', async () => {
+  it('sends each saved condition prompt only to its own reader stage', async () => {
+    state.items = [{ ...row('Running'), src: 'uia' }, { ...row('Completed'), id: 2 }]
+    respond({ id: null })
+    const prompts = { list: 'CLICK_ONLY', conditionUia: 'MY_UIA_OBSERVER', conditionOcr: 'MY_OCR_OBSERVER' }
+    expect(await make(undefined, 'test-key', prompts).exists('', condition('İş bitti mi?'))).toBe(false)
+    expect(state.requests).toHaveLength(2)
+    expect(state.requests[0]).toContain('MY_UIA_OBSERVER'); expect(state.requests[0]).not.toContain('MY_OCR_OBSERVER')
+    expect(state.requests[1]).toContain('MY_OCR_OBSERVER'); expect(state.requests[1]).not.toContain('MY_UIA_OBSERVER')
+    expect(state.requests.every(r => !r.includes('CLICK_ONLY'))).toBe(true)
+  })
+  it('empty reader lists produce No without paying for model calls', async () => {
+    respond({ id: 1 })
+    expect(await make().exists('', condition('İş bitti mi?'))).toBe(false)
+    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(0)
+  })
+  it('the runner follows Yes/No from observed evidence', async () => {
     for (const yes of [true, false]) {
       state.items = [row('All jobs completed 60/60')]; respond({ id: yes ? 1 : null })
       const ex = make(), seen: string[] = []
@@ -85,81 +134,104 @@ describe('Condition uses the shared resolver without desktop input', () => {
       const good = { ...createNode('end', 0, 0), id: 'yes' }, bad = { ...createNode('end', 0, 0), id: 'no' }
       await runGraph({ nodes: [n, good, bad], edges: [{ id: 'true', from: n.id, fromPort: 'true', to: 'yes' }, { id: 'false', from: n.id, fromPort: 'false', to: 'no' }] }, ex, { maxSteps: 10, stepDelayMs: 0, startId: n.id })
       expect(seen).toContain(yes ? 'yes' : 'no'); expect(seen).not.toContain(yes ? 'no' : 'yes')
-      expect(state.requests.at(-1)).toContain('60/60 görünüyorsa evet')
     }
   })
-  it('Stop is an error, not a false condition', async () => {
-    state.stopped = true
-    await expect(make().exists('"Done"', condition('"Done"'))).rejects.toBeInstanceOf(StoppedError)
+})
+describe('Condition window is a read-only search preference', () => {
+  const scoped = (text = '"Toplama tamamlandı"') => ({ ...condition(text), conditionWindow: 'Fixture', conditionSource: 'uia' as const })
+  it('uses the chosen window without focusing it', async () => {
+    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia', type: 'Button' }]
+    expect(await make(undefined, '').exists('', scoped())).toBe(true)
+    expect(state.scans[0]).toMatchObject({ windowTitle: 'Fixture', strictWindow: 'exact', fresh: true, readOnly: true })
   })
-  it('scan failures and missing API configuration are errors, not false evidence', async () => {
-    state.scanError = new Error('capture failed')
-    await expect(make().exists('"Done"', condition('"Done"'))).rejects.toThrow('capture failed')
-    await expect(make(undefined, '').exists('İş bitti mi?', condition('İş bitti mi?'))).rejects.toThrow('API anahtarı')
+  it('an old UIA-only setting still permits OCR evidence', async () => {
+    state.items = [row('Toplama tamamlandı')]
+    expect(await make(undefined, '').exists('', scoped())).toBe(true)
+    expect(state.scans).toHaveLength(2)
+    expect(state.scans[1]).toMatchObject({ windowTitle: 'Fixture', uia: false, ocr: true })
   })
-  it('captured text without an instruction is found by OCR, never by UIA', async () => {
-    state.items = [row('Saved')]
-    const n = { ...condition(''), locator: { controlType: 'Button', name: 'Saved', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
-    expect(await make(undefined, '').exists('', n)).toBe(true)
-    expect(state.scans[0]).toMatchObject({ readOnly: true, uia: false, image: 'none' })
-    state.items = [{ ...row('Saved'), src: 'uia', type: 'Button' }]
-    expect(await make(undefined, '').exists('', n)).toBe(false)
+  it('a semantic instruction no longer requires quotes when scoped', async () => {
+    state.items = [row('Completed 60/60')]; respond({ id: 1 })
+    expect(await make().exists('', scoped('60/60 tamamlandı mı?'))).toBe(true)
   })
-  it('BAŞLAMADI cannot turn into Yes through UI-TARS after the text model says No', async () => {
-    state.items = [row('BAŞLAMADI')]
-    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      state.requests.push(String(init.body))
-      const content = state.requests.length === 1
-        ? JSON.stringify({ id: null, reason: 'BAŞLAMADI is not BİTTİ' })
-        : "Thought: I see BAŞLAMADI\nIntent: target\nAction: click(start_box='(644,215)')"
-      return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) }
-    }))
-    expect(await make(['windows', 'onnx', 'list', 'tars', 'offset']).exists('BİTTİ', condition('BİTTİ'))).toBe(false)
-    expect(state.requests).toHaveLength(1)
+  it('missing or changed window titles broaden the search and keep requested window context', async () => {
+    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia' }]
+    state.missingWindow = 'Fixture'; respond({ id: 1 })
+    expect(await make().exists('', scoped())).toBe(true)
+    expect(state.scans).toHaveLength(2)
+    expect(state.scans[1]).not.toHaveProperty('windowTitle')
+    expect(state.requests[0]).toContain('Preferred application/window: Fixture')
+    expect(state.requests[0]).toContain('unrelated application')
+    state.scans = []; state.requests = []; state.missingWindow = ''
+    expect(await make().exists('', { ...scoped(), conditionWindow: 'Old title' })).toBe(true)
+    expect(state.scans).toHaveLength(2)
+    expect(state.requests[0]).toContain('Old title')
   })
-  it('quoted and semantic conditions ignore UIA-only text and never send screenshots', async () => {
-    state.items = [{ ...row('Bitti'), src: 'uia', type: 'Pane' }]
-    respond({ id: 1, reason: 'UIA says finished' })
-    expect(await make().exists('"Bitti"', condition('"Bitti"'))).toBe(false)
-    expect(await make(['chrome', 'uia', 'icon', 'windows', 'onnx', 'list', 'tars', 'offset']).exists('Bitti', condition('Bitti'))).toBe(false)
-    expect(state.requests).toHaveLength(1)
-    expect(state.requests[0]).not.toContain('#1 Pane')
-    expect(state.requests[0]).not.toContain('image_url')
-    expect(state.scans.every(s => (s as {image: string; uia: boolean}).image === 'none' && (s as {uia: boolean}).uia === false)).toBe(true)
+  it('a scoped worker failure is not mistaken for a missing window', async () => {
+    state.scanError = new Error('WORKER_CRASH')
+    await expect(make().exists('', scoped())).rejects.toThrow('WORKER_CRASH')
+    expect(state.scans).toHaveLength(1)
   })
-  it('fast/local-only stages do not re-enable model calls for semantic conditions', async () => {
-    state.items = [row('Bitti')]; respond({ id: 1 })
-    expect(await make(['uia', 'windows', 'onnx']).exists('Bitti', condition('Bitti'))).toBe(false)
-    expect(state.requests).toHaveLength(0)
+  it('ambiguous window titles broaden once and never retry the ambiguous selection', async () => {
+    state.items = [row('Toplama tamamlandı')]; respond({ id: 1 })
+    state.scanError = new Error('WINDOW_AMBIGUOUS: Fixture')
+    // Only the scoped request fails; broad screen observation succeeds.
+    const { scan } = await import('../electron/a11y-bridge')
+    const original = scan
+    const spy = vi.spyOn(await import('../electron/a11y-bridge'), 'scan').mockImplementation(async opts => {
+      state.scanError = opts.strictWindow ? new Error('WINDOW_AMBIGUOUS: Fixture') : null
+      return original(opts)
+    })
+    try {
+      expect(await make().exists('', scoped())).toBe(true)
+      expect(state.scans).toHaveLength(3)
+      expect(state.scans.slice(1).every(s => !(s as { strictWindow?: string }).strictWindow)).toBe(true)
+    } finally { spy.mockRestore() }
   })
 })
 
-describe('Window-scoped waiting evidence', () => {
-  const scoped = () => ({ ...condition('"Toplama tamamlandı"'), conditionWindow: 'Fixture', conditionSource: 'uia' as const })
-  it('accepts only the exact native status in the requested window', async () => {
-    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia', type: 'Text' }]
-    expect(await make(undefined, '').exists('', scoped())).toBe(true)
-    expect(state.scans[0]).toMatchObject({ windowTitle: 'Fixture', strictWindow: 'exact', fresh: false, uia: true, ocr: false })
-    expect(state.requests).toEqual([])
+describe('condition review fixes', () => {
+  it('a quoted status embedded in an instruction or historical log is not positive evidence', async () => {
+    state.items = [{ ...row('Log: Toplama tamamlandı yazısını bekle'), src: 'uia' }, { ...row('Log: Toplama tamamlandı yazısını bekle'), id: 2 }]
+    expect(await make(undefined, '').exists('', condition('"Toplama tamamlandı"'))).toBe(false)
+    expect(state.requests).toHaveLength(0)
   })
-  it('rejects the same words in OCR logs and longer native log rows', async () => {
-    state.items = [row('Toplama tamamlandı'), { ...row('Log: Toplama tamamlandı yazısını bekle'), src: 'uia' }]
-    expect(await make(undefined, '').exists('', scoped())).toBe(false)
+  it('literal fallback evidence from an unrelated application is evaluated rather than matched blindly', async () => {
+    state.missingWindow = 'Blender Project A'; state.items = [row('Toplama tamamlandı')]
+    respond({ id: null, reason: 'This status belongs to another application' })
+    expect(await make().exists('', { ...condition('"Toplama tamamlandı"'), conditionWindow: 'Blender Project A' })).toBe(false)
+    expect(state.requests[0]).toContain('Blender Project A')
   })
-  it('missing windows and different titles never fall back to desktop evidence', async () => {
-    state.items = [{ ...row('Toplama tamamlandı'), src: 'uia' }]
-    state.missingWindow = 'Fixture'
-    expect(await make(undefined, '').exists('', scoped())).toBe(false)
-    state.missingWindow = ''
-    expect(await make(undefined, '').exists('', { ...scoped(), conditionWindow: 'Another' })).toBe(false)
+  it('UIA errors for a textless saved target are not turned into absence', async () => {
+    const bridge = await import('../electron/a11y-bridge')
+    const spy = vi.spyOn(bridge, 'locate').mockRejectedValue(new Error('WORKER_CRASH'))
+    try {
+      const n = { ...condition(''), locator: { controlType: 'Button', name: '', path: '', automationId: 'saved', windowTitle: 'Fixture' } }
+      await expect(make().exists('', n)).rejects.toThrow('WORKER_CRASH')
+    } finally { spy.mockRestore() }
   })
-  it('ambiguity is an error and does not turn into completion', async () => {
-    state.scanError = new Error('WINDOW_AMBIGUOUS: Fixture')
-    await expect(make().exists('', scoped())).rejects.toThrow('WINDOW_AMBIGUOUS')
+  it('icon reader errors for a textless saved target are not turned into absence', async () => {
+    const bridge = await import('../electron/a11y-bridge')
+    const spy = vi.spyOn(bridge, 'findImage').mockRejectedValue(new Error('IMAGE_READER_FAILED'))
+    try {
+      const n = { ...condition(''), locator: { controlType: 'Point', name: '', path: '', icon: 'saved-image' } }
+      await expect(make().exists('', n)).rejects.toThrow('IMAGE_READER_FAILED')
+    } finally { spy.mockRestore() }
   })
-  it('scoped Chrome OCR keeps its unique title constraint', async () => {
-    state.items = [row('下载')]
-    expect(await make(undefined, '').exists('', { ...condition('"下载"'), conditionWindow: 'Fix', conditionSource: 'ocr', conditionWindowMatch: 'contains' })).toBe(true)
-    expect(state.scans[0]).toMatchObject({ strictWindow: 'contains', uia: false, ocr: true, readOnly: false })
+  it('deadline aborts a pending model request without retries or a false decision', async () => {
+    state.items = [row('Running')]
+    let requestSignal: AbortSignal | undefined
+    const fetchMock = vi.fn(async (_url, init) => {
+      requestSignal = init.signal
+      return new Promise<never>((_, reject) => requestSignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const pending = make().exists('', condition('İş bitti mi?'), { signal: controller.signal })
+    const assertion = expect(pending).rejects.toBeInstanceOf(ObservationTimeoutError)
+    await vi.waitFor(() => expect(requestSignal).toBeDefined())
+    controller.abort(new ObservationTimeoutError()); await assertion
+    expect(requestSignal!.aborted).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

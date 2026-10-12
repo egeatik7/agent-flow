@@ -1,3 +1,4 @@
+import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
 import { refineWordTarget } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
@@ -10,7 +11,6 @@ import { NODE_SPECS, modelChain, screenCheckMode, type AgentNode, type AppSettin
 import { clickableBy, writableBy } from './target-match'
 import {
   containsText,
-  containsTextStrict,
   describeItems,
   extractTarget,
   matchFuzzy,
@@ -24,7 +24,7 @@ import {
   type Target,
   type TiePolicy,
 } from './matcher'
-import { activeFindOrder, promptOf } from './llm-flow'
+import { activeFindOrder, promptOf, DEFAULT_PROMPTS } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
 import {
@@ -929,27 +929,28 @@ export function createAgent(ctx: AgentContext) {
    * Koşul with a picked element: its own UI element (enabled), or its saved picture, is on screen right now.
    * Returns how it was seen, or null.
    */
-  async function savedTargetVisible(node: AgentNode): Promise<string | null> {
+  async function savedTargetVisible(node: AgentNode, options?: ObservationOptions): Promise<string | null> {
     const loc = node.locator!
     const win = loc.windowTitle || getSettings().targetWindow || ''
     if (win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point', 'Custom'].includes(loc.controlType)) {
       try {
-        const r = await bridge.locate(loc, win, true)
+        const r = await observeWithin(bridge.locate(loc, win, true, options?.signal), options?.signal)
         if (r && r.w * r.h < 600 * 400) {
           if (r.enabled === false) {
             noteOnce(node.id, 'disabled', `“${r.name || loc.name}” ekranda ama pasif (tıklanamaz); hazır sayılmıyor.`)
           } else return `uygulama öğesi “${r.name || loc.name}”`
         }
-      } catch {
-        /* not there, try the picture */
+      } catch (e) {
+        if (!(e instanceof Error) || !/^(WINDOW_NOT_FOUND|NO_TARGET_WINDOW|Hedef pencere bulunamadı)/.test(e.message)) throw e
+        // Missing window is absence; a worker/permission error is not.
       }
     }
     if (loc.icon) {
       try {
-        const hit = await bridge.findImage(loc.icon)
+        const hit = await observeWithin(bridge.findImage(loc.icon, undefined, undefined, options?.signal), options?.signal)
         if (hit && hit.score >= ICON_CHECK_MIN) return `simge resmi (%${Math.round(hit.score * 100)} benzer, @${hit.x},${hit.y})`
       } catch (e) {
-        log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
+        throw e
       }
     }
     return null
@@ -1058,10 +1059,10 @@ export function createAgent(ctx: AgentContext) {
 
   // ---------- safety around input ----------
 
-  async function waitUnlocked() {
-    if (!(await bridge.isLocked())) return
+  async function waitUnlocked(signal?: AbortSignal) {
+    if (!(await observeWithin(bridge.isLocked(), signal))) return
     log('warn', 'Ekran kilitli ya da güvenlik ekranı açık; kilit açılana kadar bekleniyor (Ctrl+Shift+Q durdurur).')
-    while (await bridge.isLocked()) await pause(5000)
+    while (await observeWithin(bridge.isLocked(), signal)) await observeWithin(pause(5000), signal)
     log('info', 'Kilit açıldı, devam ediliyor.')
     await pause(1500)
   }
@@ -1173,10 +1174,13 @@ export function createAgent(ctx: AgentContext) {
       checkStopped()
       await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
     },
-    exists: async (text, node) => {
-      await waitUnlocked()
+    exists: async (text, node, options) => {
+      const signal = options?.signal
+      checkObservation(signal)
+      await waitUnlocked(signal)
       checkStopped()
       // The runner may pass an extracted needle. Always keep the full user's instruction.
+      checkObservation(signal)
       const instruction = node.text?.trim() || text.trim()
       const found = (how: string) => {
         log('info', `“${node.title}” gördü: ${how}.`)
@@ -1184,41 +1188,70 @@ export function createAgent(ctx: AgentContext) {
       }
       const literal = instruction.match(/^(?:"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“)$/)
       const savedText = !instruction ? (node.locator?.text || node.locator?.name || '').trim() : ''
-      if (node.conditionWindow?.trim()) {
-        if (!literal && !savedText) throw new Error('Pencereye bağlı koşul için aranan metni tırnak içine al.')
-        const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
-        const windowTitle = node.conditionWindow.trim()
-        const match = node.conditionWindowMatch || 'exact'
-        const native = node.conditionSource === 'uia'
-        const res = await bridge.scan({ windowTitle, strictWindow: match, image: 'none', uia: native, ocr: !native, fresh: false, readOnly: false, tilt: !native, ocrEngine: 'combined' })
+      // Same readers and target-list model as Click, but one UIA pass then one
+      // combined OCR pass. No Click retries, popup recovery, input or memory writes.
+      const preferredWindow = node.conditionWindow?.trim() || ''
+      const match = node.conditionWindowMatch || 'exact'
+      let scoped = !!preferredWindow
+      const scanCondition = async (source: 'uia' | 'ocr'): Promise<ScanResult> => {
+        const scanOptions = { signal, image: 'none' as const, uia: source === 'uia', ocr: source === 'ocr',
+          fresh: true, readOnly: true, tilt: source === 'ocr', ocrEngine: 'combined' as const }
+        if (scoped) {
+          try {
+            const res = await observeWithin(bridge.scan({ ...scanOptions, windowTitle: preferredWindow, strictWindow: match }), signal)
+            checkStopped()
+            const title = res.window?.toLocaleLowerCase() || ''
+            const wanted = preferredWindow.toLocaleLowerCase()
+            if (!res.missingWindow && title && (match === 'exact' ? title === wanted : title.includes(wanted))) return res
+          } catch (e) {
+            if (!(e instanceof Error) || !e.message.includes('WINDOW_AMBIGUOUS')) throw e
+          }
+          scoped = false
+          log('warn', `Koşul penceresi “${preferredWindow}” bulunamadı veya tekil değil; tüm ekranda arama sürüyor.`)
+        }
+        const res = await observeWithin(bridge.scan(scanOptions), signal)
         checkStopped()
-        if (res.missingWindow || !res.window) return false
-        const a = res.window.toLocaleLowerCase(), b = windowTitle.toLocaleLowerCase()
-        if (match === 'exact' ? a !== b : !a.includes(b)) return false
-        const items = res.items.filter(item => item.src === (native ? 'uia' : 'ocr'))
-        const hit = native ? items.find(item => item.type === 'Text' && item.text.trim() === wanted) : containsTextStrict(items, wanted)
-        return hit ? found(`${res.window}: “${hit.text}”`) : false
+        checkObservation(signal)
+        return res
       }
-      if (literal || savedText) {
-        const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
-        const res = await bridge.scan({ image: 'none', uia: false, fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
+      // An explicitly picked, textless element can be observed by its live UIA
+      // identity or saved icon, rather than being silently discarded.
+      if (!instruction && !savedText && node.locator) {
+        const visible = await savedTargetVisible(node, options)
         checkStopped()
-        noteCjk(res, node.id)
-        const hit = containsTextStrict(res.items.filter(item => item.src === 'ocr'), wanted)
-        return hit ? found(`birleşik OCR “${hit.text}”`) : false
+        return visible ? found(visible) : false
       }
-      if (!instruction) return false
-      if (!getSettings().apiKey && !localConfigured()) throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
-      try {
-        // Same target resolver as Click, without dispatch, popup recovery or memory writes.
-        // A text edit cannot inherit an old recorded target as positive evidence.
-        const target = await resolveTarget({ ...node, prompt: instruction, locator: undefined }, 0, true, true)
-        checkStopped()
-        return found(target.label)
-      } catch (e) {
-        if (e instanceof NotFoundError) return false
-        throw e
+      const wanted = literal ? literal.slice(1).find(Boolean)!.trim() : savedText
+      const semantic = !literal && !savedText
+      if (semantic && !getSettings().apiKey && !localConfigured()) {
+        throw new Error('Koşul tarifini yorumlamak için API anahtarı gerekli. Yerel eşleştirme için yalnız aranan metni tırnak içine al.')
       }
+      for (const source of ['uia', 'ocr'] as const) {
+        ctx.setMethod?.(source === 'uia' ? 'Koşul: uygulama öğeleri (UIA)' : 'Koşul: Windows + ONNX OCR')
+        const res = await scanCondition(source)
+        if (source === 'ocr') noteCjk(res, node.id)
+        const items = res.items.filter(item => item.src === source)
+        const needsContextJudge = !!preferredWindow && !scoped
+        if (!semantic && !needsContextJudge) {
+          const hit = items.find(item => norm(item.text) === norm(wanted))
+          if (hit) return found(`${source}: “${hit.text}”`)
+        } else if (items.length) {
+          const s = getSettings()
+          if (!s.apiKey && !localConfigured()) throw new Error('Pencere dışındaki koşul kanıtının bağlamını değerlendirmek için metin modeli gerekli.')
+          const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
+          const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: textModels(s), signal,
+            context: preferredWindow ? `Preferred application/window: ${preferredWindow}. ${scoped ? 'Evidence is from the selected window.' : 'That window was missing or ambiguous; this is a broader screen search. Accept only evidence belonging to the intended application/task; a status from an unrelated application or historical log is not proof. If the application context cannot be established, return id:null. A changed title alone does not disqualify the same application.'}` : undefined,
+            kind: 'condition', prompt: instruction || wanted, scan: { ...res, items, image: null },
+            stepTitle: 'Koşul', sendImage: false,
+            system: promptOf(s.llmPrompts, promptId) || DEFAULT_PROMPTS[promptId] }), signal)
+          checkStopped()
+          checkObservation(signal)
+          const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
+          if (hit) return found(`${source}: “${hit.text}”${choice.reason ? ` — ${choice.reason}` : ''}`)
+          log('info', `Koşul ${source}: açık kanıt yok${choice.reason ? ` — ${choice.reason}` : ''}.`)
+        }
+      }
+      return false
     },
     captureFailure: async (label) => {
       if (!failDir) return

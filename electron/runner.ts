@@ -1,3 +1,4 @@
+import { ObservationTimeoutError, observeWithin, type ObservationOptions } from './observation-budget'
 import {
   NODE_SPECS,
   baseName,
@@ -47,7 +48,7 @@ export type Executor = {
   pointerPosition?: () => Promise<{ x: number; y: number } | undefined>
   type: (node: AgentNode, stepNo: number, ahead?: StepAhead) => Promise<void>
   key: (node: AgentNode, ahead?: StepAhead) => Promise<void>
-  exists: (text: string, node: AgentNode) => Promise<boolean>
+  exists: (text: string, node: AgentNode, options?: ObservationOptions) => Promise<boolean>
   /** Yap: reach the goal in a few actions. */
   initiative?: (node: AgentNode, stepNo: number, ahead?: StepAhead, vars?: Record<string, string>) => Promise<boolean>
   /** Persist a change to a node (which item is on screen, memory) in the editor. */
@@ -306,12 +307,21 @@ export async function runGraph(
         const until = Date.now() + wait
         if (wait > 0) ex.log('info', `[${stepNo}] ${label} bekleniyor (en çok ${Math.round(wait / 1000)} sn)…`)
         for (;;) {
-          if (await ex.exists(text, live)) {
+          const controller = new AbortController()
+          const remaining = wait > 0 ? until - Date.now() : undefined
+          if (remaining !== undefined && remaining <= 0) break
+          const timer = remaining === undefined ? undefined : setTimeout(() => controller.abort(new ObservationTimeoutError()), remaining)
+          let exists = false
+          try { exists = await observeWithin(ex.exists(text, live, { signal: controller.signal }), controller.signal) }
+          catch (e) { if (ex.shouldStop()) throw new StoppedError(); if (!(e instanceof ObservationTimeoutError)) throw e; break }
+          finally { if (timer) clearTimeout(timer) }
+          if (wait > 0 && Date.now() >= until) break
+          if (exists) {
             ex.log('info', `[${stepNo}] Koşul ${label}: var`)
             return 'true'
           }
           if (Date.now() >= until) break
-          await interruptibleSleep(700, ex.shouldStop)
+          await interruptibleSleep(Math.min(700, Math.max(0, until - Date.now())), ex.shouldStop)
         }
         ex.log('info', `[${stepNo}] Koşul ${label}: yok${wait > 0 ? ` (${Math.round(wait / 1000)} sn beklendi)` : ''}`)
         return wait > 0 ? 'timeout' : 'false'

@@ -19,6 +19,7 @@ function agent(overrides = {}, settings = {}) {
     locate: async () => { calls.push(['locate']); return { x: 10, y: 20, w: 80, h: 20, name: 'OLD', enabled: true }; },
     scan: async (opts) => { calls.push(['scan', opts]); return scan; },
     applyOnnx: async res => res,
+    findImage: async () => null,
     discardShot: () => {},
     clickAt: async (...args) => calls.push(['click', ...args]),
     moveMouse: async (x,y) => {cursor={x,y};calls.push(['move',x,y]);return {hwnd:1};},
@@ -76,21 +77,24 @@ test('edited condition still succeeds when the new text is actually visible', as
   assert.equal(await a.ex.exists('BİTTİ', node('condition', { locator: loc, text: '“BİTTİ”' })), true);
 });
 
-test('picked condition text requires current combined OCR evidence, not a saved UIA target', async () => {
+test('picked condition text requires current UIA or combined OCR evidence, not a stale saved target', async () => {
   const a = agent();
   assert.equal(await a.ex.exists('', node('condition', { locator: loc })), false);
   a.scan.items = [{ id: 1, text: 'OLD', type: 'Text', src: 'ocr', x: 20, y: 20, w: 50, h: 20 }];
   assert.equal(await a.ex.exists('', node('condition', { locator: loc })), true);
   assert(!a.calls.some(x => x[0] === 'locate'));
   const options = a.calls.filter(x => x[0] === 'scan').map(x => x[1]);
-  assert(options.every(o => o.readOnly && o.uia === false && o.image === 'none' && o.ocrEngine === 'combined'));
+  assert(options.every(o => o.readOnly && o.image === 'none' && o.ocrEngine === 'combined'));
+  assert(options.some(o => o.uia === true && o.ocr === false));
+  assert(options.some(o => o.uia === false && o.ocr === true));
 });
 
-test('icon-only conditions cannot succeed from an image match or send input', async () => {
+test('icon-only conditions can observe a saved image without sending input', async () => {
   const a = agent();
   a.bridge.findImage = async () => { a.calls.push(['findImage']); return { score: 0.99, x: 10, y: 10 }; };
-  assert.equal(await a.ex.exists('', node('condition', { locator: { controlType: 'Point', icon: 'saved-image' } })), false);
-  assert(!a.calls.some(x => ['findImage', 'locate', 'click', 'move', 'keys', 'write'].includes(x[0])));
+  assert.equal(await a.ex.exists('', node('condition', { locator: { controlType: 'Point', icon: 'saved-image' } })), true);
+  assert(a.calls.some(x => x[0] === 'findImage'));
+  assert(!a.calls.some(x => ['click', 'move', 'keys', 'write'].includes(x[0])));
 });
 
 test('disabled saved UIA target is not clicked', async () => {

@@ -1,3 +1,4 @@
+import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES } from './word-targets'
 import type { NodeKind } from './graph-types'
@@ -18,9 +19,12 @@ export function setStopCheck(fn: () => boolean) {
 class TransientError extends Error { readonly serviceFailure = true }
 
 /** fetch + body read, with a time limit and the stop hotkey. */
-async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS, localStop: () => boolean = () => false): Promise<{ ok: boolean; status: number; text: string }> {
+async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS, localStop: () => boolean = () => false, signal?: AbortSignal): Promise<{ ok: boolean; status: number; text: string }> {
+  checkObservation(signal)
   if (stopCheck() || localStop()) throw new StoppedError()
   const ctrl = new AbortController()
+  const abort = () => ctrl.abort()
+  signal?.addEventListener('abort', abort, { once: true })
   let byUser = false
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   const poll = setInterval(() => {
@@ -34,12 +38,14 @@ async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_
     const text = await res.text()
     return { ok: res.ok, status: res.status, text }
   } catch (e) {
+    checkObservation(signal)
     if (byUser) throw new StoppedError()
     if (ctrl.signal.aborted) throw new TransientError(`Model ${Math.round(timeoutMs / 1000)} sn içinde cevap vermedi.`)
     throw new TransientError(`Bağlantı hatası: ${redact((e as Error).message)}`)
   } finally {
     clearTimeout(timer)
     clearInterval(poll)
+    signal?.removeEventListener('abort', abort)
   }
 }
 
@@ -326,7 +332,7 @@ function brief(err: unknown): string {
  * Stops when the user stops, the key / balance is rejected, or every model was rejected for good
  * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits retry within the total cycle/time bound.
  */
-export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number } = {}): Promise<T> {
+export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number; signal?: AbortSignal } = {}): Promise<T> {
   const chain = asModelChain(models)
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
   let rejectedCycles = 0
@@ -337,12 +343,14 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
     let allRejected = true
     let lastError = ''
     for (let i = 0; i < chain.length; i++) {
+      checkObservation(limits.signal)
       if (stopCheck()) throw new StoppedError()
       if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
       const model = chain[i]
       try {
         return await run(model)
       } catch (e) {
+        checkObservation(limits.signal)
         if (e instanceof StoppedError || e instanceof FatalApiError) throw e
         if (!(e instanceof ModelRejected)) allRejected = false
         lastError = brief(e)
@@ -385,9 +393,10 @@ async function chatOnce(
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean } = {}
+  opts: { json?: boolean; signal?: AbortSignal } = {}
 ): Promise<string> {
   const once = async (json: boolean) => {
+    checkObservation(opts.signal)
     const target = targetFor(model)
     if (!target.local) validateApiKey(apiKey)
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
@@ -410,7 +419,8 @@ async function chatOnce(
         messages,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
-    }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS)
+    }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, () => false, opts.signal)
+    checkObservation(opts.signal)
     if (!res.ok) {
       reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
@@ -455,11 +465,12 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void } = {},
+  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
   return runModelChain(asModelChain(model), async (name) => {
+    checkObservation(opts.signal)
     try {
       const text = await chatOnce(apiKey, name, messages, hasImage, opts)
       if (!text.trim()) throw new ModelRejected('boş yanıt')
@@ -474,7 +485,7 @@ async function chat(
       opts.validate?.(text)
       return text
     }
-  })
+  }, CYCLE_PAUSE_MS, { signal: opts.signal })
 }
 
 function parseJson(content: string): Record<string, unknown> {
@@ -506,6 +517,8 @@ export async function chooseScreenTarget(opts: {
   kind: NodeKind
   scan: ScanResult
   stepTitle: string
+  signal?: AbortSignal
+  context?: string
   sendImage: boolean
   onImageFallback?: (msg: string) => void
   /** What worked on earlier laps, or why this lap looks different. */
@@ -529,7 +542,7 @@ ${OCR_READER_RULES}
 Reply with JSON only: {"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}
 
 Step: ${opts.stepTitle}
-Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
+Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
 
   const withImage = opts.sendImage && !!scan.image
   const build = (img: boolean): Message[] => [
@@ -548,12 +561,12 @@ Instruction: ${opts.prompt}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is on
   let content: string
   let usedImage = withImage
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateTargetReply }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateTargetReply, signal: opts.signal }, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
-    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateTargetReply })
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateTargetReply, signal: opts.signal })
   }
 
   const decoded = parseJson(content)

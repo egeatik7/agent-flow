@@ -1,3 +1,4 @@
+import { checkObservation, observeWithin } from './observation-budget'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -134,25 +135,32 @@ class Worker {
    * One request at a time. The worker answers in order, so a request's time limit has to count from when it is
    * written, not from when it queued behind a long scan; otherwise a short call times out and kills a healthy worker.
    */
-  async call<T>(op: string, payload: object = {}, timeoutMs = 60000): Promise<T> {
+  async call<T>(op: string, payload: object = {}, timeoutMs = 60000, signal?: AbortSignal): Promise<T> {
     const turn = this.tail
     let release!: () => void
     this.tail = new Promise<void>((resolve) => (release = resolve))
-    await turn
+    try { await observeWithin(turn, signal) }
+    catch (e) { void turn.then(release, release); throw e }
     try {
-      return await this.send<T>(op, payload, timeoutMs)
+      checkObservation(signal)
+      return await this.send<T>(op, payload, timeoutMs, signal)
     } finally {
       release()
     }
   }
 
-  private async send<T>(op: string, payload: object, timeoutMs: number): Promise<T> {
-    if (!this.proc || !this.ready) this.ready = this.start()
-    await this.ready
+  private async send<T>(op: string, payload: object, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+    const startedHere = !this.proc || !this.ready
+    if (startedHere) this.ready = this.start()
+    const startupProc = this.proc
+    try { await observeWithin(this.ready!, signal) }
+    catch (e) { if (signal?.aborted && startedHere && startupProc) this.drop(startupProc); throw e }
+    checkObservation(signal)
     const proc = this.proc
     if (!proc) throw new Error('Otomasyon işçisi çalışmıyor.')
     const id = String(++this.seq)
     const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
+    let abort: (() => void) | undefined
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
@@ -161,8 +169,15 @@ class Worker {
         this.drop(proc)
       }, timeoutMs)
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, proc })
+      abort = () => {
+        if (!this.pending.has(id)) return
+        this.pending.delete(id); clearTimeout(timer)
+        try { checkObservation(signal) } catch (e) { reject(e) }
+        this.drop(proc)
+      }
+      signal?.addEventListener('abort', abort, { once: true })
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
-    })
+    }).finally(() => { if (abort) signal?.removeEventListener('abort', abort) })
   }
 
   kill() {
@@ -243,6 +258,7 @@ function readPreview(file: string, w: number, h: number, mime?: string): ScanRes
 }
 
 export async function scan(opts: {
+  signal?: AbortSignal
   windowTitle?: string
   strictWindow?: 'exact' | 'contains'
   image?: 'none' | 'plain' | 'marked'
@@ -303,7 +319,7 @@ export async function scan(opts: {
       valueHi,
       readOnly: opts.readOnly === true,
     }),
-    180000
+    180000, opts.signal
   )
   const original = Array.isArray(r.items) ? r.items : r.items ? [r.items as unknown as ScreenItem] : []
   const items = original.map(i => i.src === 'ocr' ? { ...i, ocrSources: i.ocrSources ?? ['windows' as const] } : i)
@@ -318,6 +334,7 @@ export async function scan(opts: {
     try {
       const raw = readRawShot(fs.readFileSync(shot))
       const lines = await recognizeBgra(raw.bgra, raw.w, raw.h, r.area?.x ?? 0, r.area?.y ?? 0)
+      checkObservation(opts.signal)
       const merged = mergeOnnxLines(items, lines, prefer)
       items.splice(0, items.length, ...merged.items)
       onnxAdded = merged.added
@@ -331,6 +348,7 @@ export async function scan(opts: {
         }
       }
     } catch {
+      checkObservation(opts.signal)
       onnx = false
     } finally {
       fs.unlink(shot, () => {})
@@ -434,10 +452,11 @@ export async function clickCurrentAt(x: number, y: number, hwnd?: number, target
 export async function locate(
   locator: Locator,
   windowTitle: string,
-  readOnly = false
+  readOnly = false,
+  signal?: AbortSignal
 ): Promise<{ x: number; y: number; w: number; h: number; name: string; enabled?: boolean } | null> {
   if (!IS_WIN) return null
-  return worker.call('locate', { locator, windowTitle, readOnly }, 30000)
+  return worker.call('locate', { locator, windowTitle, readOnly }, 30000, signal)
 }
 
 export async function windowRect(windowTitle: string): Promise<{ x: number; y: number; w: number; h: number }> {
@@ -569,10 +588,11 @@ export async function pickAt(box: { x: number; y: number; w: number; h: number }
 export async function findImage(
   icon: string,
   windowTitle?: string,
-  region?: { x: number; y: number; w: number; h: number }
+  region?: { x: number; y: number; w: number; h: number },
+  signal?: AbortSignal
 ): Promise<{ x: number; y: number; score: number; window: string } | null> {
   if (!IS_WIN) return null
-  return worker.call('findImage', withHud({ icon, windowTitle: windowTitle || '', region: region ?? null }), 30000)
+  return worker.call('findImage', withHud({ icon, windowTitle: windowTitle || '', region: region ?? null }), 30000, signal)
 }
 
 export async function drag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
