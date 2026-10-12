@@ -1,4 +1,4 @@
-import { contextOf } from './tool-context'
+import { contextOf, findPlace } from './tool-context'
 import { runYap } from './yap'
 import { validateApiKey } from './openrouter'
 import { pruneScreenFiles } from './screen-files'
@@ -43,6 +43,7 @@ import {
   cleanBackups,
   DEFAULT_SETTINGS,
   modelChain,
+  NODE_SPECS,
   normalizeCanvasBook,
   normalizeGraph,
   type AgentGraph,
@@ -101,6 +102,12 @@ let closeBoot: () => void = () => {}
 let appRevealed = false
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 let running = false
+/**
+ * The graph the current run walks (packages included). The desktop card names the node that is
+ * running NOW, and a step start is the moment that name changes: keeping the run's own graph here
+ * lets the card resolve a step id without touching the saved workspace on every step.
+ */
+let hudRunGraph: AgentGraph | null = null
 let stopRequested = false
 /** "Bu oturumda hep izin ver" from the approval dialog; the app restart clears it. */
 let sessionApproved = false
@@ -141,6 +148,8 @@ function send(channel: string, payload: unknown) {
   if (channel === 'agent:step') {
     // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
     noteStep(payload)
+    // The desktop card names the running node: a step start is when that name changes.
+    hudStep(payload)
   }
   // A branch test must change only its own copy: see electron/run-events.ts for why both steps
   // and patches are held back while the run is derived.
@@ -600,6 +609,33 @@ function pushMethod(text: string) {
   deliverHud('hud:method', { text: recoveryActive ? `Kurtarma ajanı${text ? ` · ${text}` : ''}` : text }, false)
 }
 
+/** Node kinds whose step already logs its own opening line (see runner's execStep). */
+const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 'ai'])
+
+/**
+ * The card must name the node that is running NOW.
+ *
+ * Ölçülen kusur: yöntem satırını yalnız Tıkla/Yaz/Koşul yolları yazıyordu ve hiçbir node
+ * başlangıcında sıfırlanmıyordu; bu yüzden Koşul'dan Zamanlayıcı'ya (ya da Tuş Gönder/Yap/döngüye)
+ * geçildiğinde kartta hâlâ "Koşul: …" yazıyordu. Her adım başlangıcı düğüm etiketini yazar; ajan
+ * kendi yöntemini (ör. "Koşul: uygulama öğeleri (UIA)") sonra inceltir.
+ *
+ * Döngü/paket/Başlangıç/Bitir kendi günlük satırını yazmadığı için bu türlerde kart metni de
+ * buradan güncellenir; diğer türler satırı zaten kendi adım günlüğüyle tazeler (çift satır olmasın).
+ */
+function hudStep(payload: unknown) {
+  if (!running || derivedRun || !hudRunGraph || !hudWindow || hudWindow.isDestroyed()) return
+  const p = payload as { id?: unknown; status?: unknown }
+  if (p?.status !== 'running' || typeof p.id !== 'string') return
+  const place = findPlace(hudRunGraph, p.id)
+  if (!place) return
+  const kind = place.node.kind
+  const label = NODE_SPECS[kind]?.label ?? kind
+  const title = String(place.node.title ?? '').trim()
+  pushMethod(title && title !== label ? `${label} · ${title}` : label)
+  if (!LOGGED_STEP_KINDS.has(kind)) pushHud('info', title ? `${label}: ${title}` : label)
+}
+
 function recoveryStatus(active: boolean, nodeTitle: string, message: string) {
   const payload = { active, nodeTitle, message }
   send('recovery:status', payload)
@@ -719,6 +755,8 @@ async function runFlow(
   const tally = newTally()
   try {
     const graph = normalizeGraph(raw)
+    // The desktop card resolves every step id in this run's own graph (packages included).
+    hudRunGraph = graph
     // A test of an agent branch is not the saved flow: it runs, but it is not written down as
     // the active flow, so a branch test can never overwrite what the user has open.
     if (!opts?.derived) store.set('graph', graph)
@@ -884,6 +922,7 @@ async function runFlow(
     // still ask how the run ended after it is over.
     endRun(outcome)
     if(runId)viewerState.finish(outcome)
+    hudRunGraph = null
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
     recoveryActive = false
     running = false
