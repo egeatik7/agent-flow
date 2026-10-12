@@ -705,6 +705,29 @@ function GeneralSettings(p: Props) {
           </datalist>
         </div>
       </fieldset>
+      <fieldset className="xp-group">
+        <legend>Koşul modeli</legend>
+        <div className="field">
+          <label htmlFor="conditionModel">Model adı</label>
+          <ModelChain
+            localModels={localModels}
+            primary={s.conditionModel}
+            backups={s.conditionBackups}
+            listId="condition-model-list"
+            inputId="conditionModel"
+            placeholder="Koşul için metin modeli (boş = Metin Modeli)"
+            onChange={(conditionModel, conditionBackups) => set({ conditionModel, conditionBackups })}
+          />
+          <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ conditionModel: s.conditionModel.trim(), conditionBackups: s.conditionBackups ?? [] })}>
+            Kaydet
+          </button>
+          <datalist id="condition-model-list">
+            {p.models.map((m) => (
+              <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
+            ))}
+          </datalist>
+        </div>
+      </fieldset>
 
       <label className="check">
         <input

@@ -23,6 +23,20 @@ export type LogEntry = {
 
 export type ModelInfo = { id: string; vision: boolean; pricing?: { promptPerM: number; completionPerM: number } }
 
+/** Sohbet turunun nereye gittiği: yerel sunucu mu, OpenRouter mı. */
+export type LocalChatTarget = 'local' | 'api'
+
+/** `local:chat` yanıtı. `gpu` yalnız ölçülebilen VRAM metnini taşır; ölçülemezse boş kalır. */
+export type LocalChatReply = {
+  ok: boolean
+  reply: string
+  target: LocalChatTarget
+  model: string
+  ms: number
+  gpu: string
+  error?: string
+}
+
 export type XpAgentApi = {
   /** Empty for the person's own instance; the profile name for a test instance. */
   profile?: string
@@ -77,6 +91,8 @@ export type XpAgentApi = {
   listModels: () => Promise<ModelInfo[]>
   /** Yerel (OpenAI uyumlu) sunucunun model listesi; adres açık mı sınaması olarak da kullanılır. */
   listLocalModels?: (base?: string) => Promise<ModelInfo[]>
+  /** Yerel Model sekmesindeki sohbet kutusu: tek mesaj, tek tur; cevabı kimin verdiği yanıtta yazar. */
+  localChat?: (payload: { prompt: string; target?: LocalChatTarget; model?: string }) => Promise<LocalChatReply>
   /** Verilen mutlak yollardan diskte OLMAYANLARI döndürür (koşu öncesi döngü denetimi). */
   missingPaths?: (paths: string[]) => Promise<string[]>
   testVision: () => Promise<{ model: string; text: string }>

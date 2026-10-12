@@ -36,7 +36,7 @@ import {
   setErrorStopHook,
   setStopAtHook,
 } from './tool-state'
-import { listModels, listLocalModels, recoveryToolTurn, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, listLocalModels, directChat, gpuInfo, recoveryToolTurn, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
 import { newTally, runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -133,6 +133,9 @@ function getSettings(): AppSettings {
   s.modelBackups = cleanBackups(s.modelBackups)
   s.visionBackups = cleanBackups(s.visionBackups)
   s.agentBackups = cleanBackups(s.agentBackups)
+  // Koşul zinciri de diğerleri gibi taşınır; eski ayar dosyasında yoksa boş kalır.
+  s.conditionModel = String(s.conditionModel ?? '').trim()
+  s.conditionBackups = cleanBackups(s.conditionBackups)
   s.recovery = recoverySettings(s.recovery)
   bridge.setOcrEngine(s.ocrEngine)
   return s
@@ -996,6 +999,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.modelBackups = cleanBackups(next.modelBackups).filter((name) => name !== next.model.trim())
     next.visionBackups = cleanBackups(next.visionBackups).filter((name) => name !== next.visionModel.trim())
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
+    next.conditionBackups = cleanBackups(next.conditionBackups).filter((name) => name !== next.conditionModel.trim())
     next.recovery = recoverySettings(next.recovery)
     store.set('settings', next)
     bridge.setOcrEngine(next.ocrEngine)
@@ -1342,6 +1346,54 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
   ipcMain.handle('openrouter:models', () => listModels())
   ipcMain.handle('local:models', (_e, base?: string) => listLocalModels(base))
+  /**
+   * Yerel Model sekmesindeki sohbet kutusu: tek mesaj, tek tur. Hangi tarafın cevap verdiği
+   * hem yanıtta (target/model) hem Ajan Günlüğü'nde ([yerel]/[API] etiketiyle) açıkça yazılır;
+   * VRAM yalnız gerçekten ölçülebiliyorsa raporlanır, ölçülemiyorsa uydurulmaz.
+   */
+  ipcMain.handle('local:chat', async (_e, payload?: { prompt?: string; target?: 'local' | 'api'; model?: string }) => {
+    const s = getSettings()
+    const target: 'local' | 'api' = payload?.target === 'api' ? 'api' : 'local'
+    const bosCevap = (error: string) => ({ ok: false, reply: '', target, model: '', ms: 0, gpu: '', error })
+    const prompt = String(payload?.prompt ?? '').trim()
+    if (!prompt) return bosCevap('Mesaj boş; bir şeyler yaz.')
+    const secilen = String(payload?.model ?? '').trim()
+    const zincir = modelChain(s.model, s.modelBackups)
+    // Yerel: verilen `local:` model ya da ayarlardaki ilk `local:` satırı (bulut adı yerele kaçmaz).
+    // API: OpenRouter metin zinciri; seçilen bulut modeli başa alınır.
+    const secilenYerel = /^local:/i.test(secilen) ? secilen : ''
+    const denemeler = (target === 'api'
+      ? (secilen && !/^local:/i.test(secilen)
+        ? [secilen, ...zincir.filter((m) => !/^local:/i.test(m) && m !== secilen)]
+        : zincir.filter((m) => !/^local:/i.test(m)))
+      : [secilenYerel || zincir.find((m) => /^local:/i.test(m)) || '']).slice(0, 5)
+    if (!denemeler.length || !denemeler[0]) {
+      return target === 'api'
+        ? bosCevap('OpenRouter metin modeli kayıtlı değil; Genel sekmesinden bir model seç.')
+        : bosCevap('Yerel model kayıtlı değil; Yerel Model sekmesinden sunucuya bağlan ve modeli ekle.')
+    }
+    if (target === 'local' && !localConfigured()) return bosCevap('Yerel sunucu adresi kayıtlı değil; Yerel Model sekmesinden kur.')
+    if (target === 'api' && !String(s.apiKey ?? '').trim()) return bosCevap('OpenRouter API anahtarı yok; Genel sekmesinden anahtarı kaydet.')
+
+    const etiket = target === 'api' ? '[API]' : '[yerel]'
+    const basladi = Date.now()
+    let sonHata = ''
+    for (const model of denemeler) {
+      // Satırda modelin kullanıcıya görünen adı yazılır; yerellik zaten etikette belli.
+      const gorunen = target === 'local' ? model.replace(/^local:/i, '') : model
+      log('chat', `${etiket} ${gorunen} → istek gönderildi`)
+      try {
+        const r = await directChat({ apiKey: s.apiKey, model, prompt, allowLocal: target === 'local' })
+        const gpu = await gpuInfo()
+        log('chat', `${etiket} ← ${(r.ms / 1000).toFixed(2)} sn · ${r.text.length} karakter${gpu ? ` · VRAM ${gpu}` : ''}`)
+        return { ok: true, reply: r.text, target: r.local ? 'local' as const : 'api' as const, model: r.model, ms: r.ms, gpu }
+      } catch (e) {
+        sonHata = (e as Error)?.message || String(e)
+        log('warn', `${etiket} ${gorunen} ← hata: ${sonHata}`)
+      }
+    }
+    return { ok: false, reply: '', target, model: denemeler[denemeler.length - 1] ?? '', ms: Date.now() - basladi, gpu: '', error: sonHata || 'Model cevap vermedi.' }
+  })
   // Koşu öncesi denetim: verilen mutlak yollardan DİSKTE OLMAYANLARI döndürür. Hiçbir şey açmaz/yazmaz.
   ipcMain.handle('paths:missing', (_e, paths: unknown) => {
     const liste = Array.isArray(paths) ? paths : []

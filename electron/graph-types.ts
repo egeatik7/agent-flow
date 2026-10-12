@@ -181,6 +181,10 @@ export type AppSettings = {
   model: string
   /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */
   modelBackups: string[]
+  /** Model that answers Koşul (condition) checks. Empty = the Metin Modeli chain answers them. */
+  conditionModel: string
+  /** Tried, in order, when `conditionModel` cannot be reached. */
+  conditionBackups: string[]
   /**
    * OpenAI uyumlu YEREL sunucu adresi (llama.cpp / Ollama / LM Studio). Boş = yalnız OpenRouter.
    * Zincirde `local:<model>` yazan satır bu adrese gider; diğer bütün satırlar OpenRouter'da kalır.
@@ -274,6 +278,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   model: 'openai/gpt-4o-mini',
   modelBackups: [],
+  conditionModel: '',
+  conditionBackups: [],
   localBaseUrl: '',
   localTimeoutMs: 180_000,
   localVision: false,

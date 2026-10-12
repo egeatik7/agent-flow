@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
@@ -84,8 +85,8 @@ export async function recoveryToolTurn(args: {
     if (args.shouldStop() || stopCheck()) throw new StoppedError()
     if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
     try {
-      chatLogger?.(`Kurtarma API → ${model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
       const target = args.allowLocal ? targetFor(model) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+      chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
       if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
       if (target.local && args.messages.some(m => Array.isArray(m.content)) && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
       const res = await guardedFetch(target.url, {
@@ -106,10 +107,10 @@ export async function recoveryToolTurn(args: {
         !c || typeof c.id !== 'string' || !c.id || c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string'))) {
         throw new Error('Kurtarma modeli geçersiz araç çağrısı verdi.')
       }
-      reportIn(JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
+      reportIn(target.local, JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
       const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
       const answered = typeof data.model === 'string' && data.model ? data.model : model
-      chatLogger?.(`Kurtarma API ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
+      chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
       return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
         ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
         ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
@@ -236,8 +237,75 @@ export async function listLocalModels(base?: string): Promise<{ id: string; visi
     .sort((a, b) => a.id.localeCompare(b.id))
 }
 
-type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }
+// ---------- VRAM raporu: yalnız ÖLÇÜLEN değer yazılır, tahmin/uydurma yok ----------
 
+/** MB cinsinden kullanılan/toplam belleği "5.0/12.0 GB" yapar. Okunamayan değerde boş dize. */
+export function formatVram(usedMb: unknown, totalMb: unknown): string {
+  const mb = (v: unknown): number => (String(v ?? '').trim() ? Number(String(v).trim()) : NaN)
+  const used = mb(usedMb)
+  const total = mb(totalMb)
+  if (!Number.isFinite(used) || !Number.isFinite(total) || used < 0 || total <= 0) return ''
+  return `${(used / 1024).toFixed(1)}/${(total / 1024).toFixed(1)} GB`
+}
+
+/** `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits` çıktısının ilk satırı. */
+export function parseNvidiaSmi(out: unknown): string {
+  const line = String(out ?? '').split(/\r?\n/).map((s) => s.trim()).find(Boolean) ?? ''
+  const m = line.match(/^(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/)
+  return m ? formatVram(m[1], m[2]) : ''
+}
+
+/**
+ * Ollama `/api/ps` yanıtındaki yüklü modellerin `size_vram` toplamı.
+ * Buradan TOPLAM GPU belleği bilinmez, yalnız kullanılan yazılır; yüklü model yoksa boş.
+ */
+export function parseOllamaPs(json: unknown): string {
+  const models = (json as { models?: unknown } | null | undefined)?.models
+  if (!Array.isArray(models)) return ''
+  let bytes = 0
+  for (const m of models) {
+    const v = Number((m as { size_vram?: unknown } | null | undefined)?.size_vram)
+    if (Number.isFinite(v) && v > 0) bytes += v
+  }
+  return bytes > 0 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : ''
+}
+
+/** NVIDIA sürücüsü varsa gerçek VRAM kullanımı; sürücü/araç yoksa boş dize (~1,5 sn sınır). */
+function nvidiaSmiVram(): string {
+  try {
+    const r = spawnSync('nvidia-smi', ['--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'], {
+      timeout: 1500, windowsHide: true, encoding: 'utf8',
+    })
+    return r.status === 0 ? parseNvidiaSmi(r.stdout) : ''
+  } catch {
+    return ''
+  }
+}
+
+/** Ollama adresiyse `/api/ps`; başka yerel sunucuda hiç denenmez. Toplam bilinmediği için tek değer yazılır. */
+async function ollamaVram(): Promise<string> {
+  if (!localBase || !localNeedsNoThinking()) return ''
+  let root = ''
+  try {
+    const u = new URL(localBase)
+    root = `${u.origin}${u.pathname.replace(/\/v1\/?$/i, '')}`
+  } catch {
+    return ''
+  }
+  try {
+    const res = await guardedFetch(`${root}/api/ps`, {}, 1500)
+    return res.ok ? parseOllamaPs(JSON.parse(res.text)) : ''
+  } catch {
+    return ''
+  }
+}
+
+/** Ölçülebilen VRAM metni: önce nvidia-smi, sonra Ollama /api/ps. Ölçülemiyorsa boş dize. */
+export async function gpuInfo(): Promise<string> {
+  return nvidiaSmiVram() || await ollamaVram()
+}
+
+type Message = { role: 'system' | 'user' | 'assistant'; content: string | object[] }
 let chatLogger: ((line: string) => void) | null = null
 let voiceLogger: ((line: string) => void) | null = null
 
@@ -288,12 +356,22 @@ function describeMessages(messages: Message[]): string {
     .join('\n\n')
 }
 
-function reportOut(model: string, messages: Message[]) {
-  chatLogger?.(`API → ${model}\n${clip(describeMessages(messages))}`)
+/** Günlükte cevabı kimin verdiği tek bakışta görünsün: [yerel] mi, [API] mi. */
+function targetTag(local: boolean): string {
+  return local ? '[yerel]' : '[API]'
 }
 
-function reportIn(text: string) {
-  chatLogger?.(`API ← ${clip(text.trim() || '(boş yanıt)')}`)
+/** Bir zincir satırının yerel tabana mı gideceğini söyler (adres/anahtar denetimi yapmaz). */
+function isLocalName(model: string): boolean {
+  return /^local:/i.test(String(model ?? ''))
+}
+
+function reportOut(model: string, local: boolean, messages: Message[]) {
+  chatLogger?.(`${targetTag(local)} → ${model}\n${clip(describeMessages(messages))}`)
+}
+
+function reportIn(local: boolean, text: string) {
+  chatLogger?.(`${targetTag(local)} ← ${clip(text.trim() || '(boş yanıt)')}`)
 }
 
 class ImageUnsupportedError extends Error {}
@@ -356,7 +434,7 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         lastError = brief(e)
         const last = i === chain.length - 1
         const next = chain[(i + 1) % chain.length]
-        chatLogger?.(last ? `${model} olmadı (${brief(e)}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${model} olmadı (${brief(e)}). ${next} deneniyor.`)
+        chatLogger?.(last ? `${targetTag(isLocalName(model))} ${model} olmadı (${brief(e)}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${targetTag(isLocalName(model))} ${model} olmadı (${brief(e)}). ${next} deneniyor.`)
       }
     }
     rejectedCycles = allRejected ? rejectedCycles + 1 : 0
@@ -405,7 +483,7 @@ async function chatOnce(
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
     const effort = target.local ? localReasoningEffort() : null
-    reportOut(target.model, messages)
+    reportOut(target.model, target.local, messages)
     const res = await guardedFetch(target.url, {
       method: 'POST',
       headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
@@ -422,7 +500,7 @@ async function chatOnce(
     }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, () => false, opts.signal)
     checkObservation(opts.signal)
     if (!res.ok) {
-      reportIn(`hata ${res.status}: ${res.text.slice(0, 2000)}`)
+      reportIn(target.local, `hata ${res.status}: ${res.text.slice(0, 2000)}`)
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
       if (!target.local && res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
       if (!target.local && res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
@@ -439,13 +517,13 @@ async function chatOnce(
     }
     if (data.error) {
       const msg = providerError(data.error)
-      reportIn(`hata: ${msg}`)
+      reportIn(target.local, `hata: ${msg}`)
       if (!target.local && /invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
       if (!target.local && /insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
       throw permanentFailure(0, msg) ? new ModelRejected(`${where}: ${msg.slice(0, 200)}`) : new ModelFailed(`${where}: ${msg.slice(0, 200)}`)
     }
     const content = responseText(data.choices?.[0]?.message?.content)
-    reportIn(content)
+    reportIn(target.local, content)
     if (data.choices?.[0]?.finish_reason === 'length') throw new ModelRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
     const said = modelSaid(model, content)
     if (said) voiceLogger?.(said)
@@ -486,6 +564,36 @@ async function chat(
       return text
     }
   }, CYCLE_PAUSE_MS, { signal: opts.signal, maxCycles: opts.maxCycles })
+}
+
+export type DirectChatResult = { text: string; model: string; local: boolean; ms: number }
+
+/**
+ * Yerel Model sekmesindeki sohbet kutusu için TEK mesajlık doğrudan istek.
+ * Burada zincir/tekrar yoktur: cevabı bekleyen kullanıcıya hatayı gecikmeden söylemek gerekir.
+ * `local:` ile başlayan model yerel tabana gider (gövdede öneksiz ad), diğerleri OpenRouter'a.
+ * `allowLocal === false` iken yerel satır açıkça reddedilir; sessizce OpenRouter'a kaymaz.
+ */
+export async function directChat(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  allowLocal: boolean
+  signal?: AbortSignal
+}): Promise<DirectChatResult> {
+  const requested = String(opts.model ?? '').trim()
+  if (!requested) throw new ModelRejected('Model adı boş; Yerel Model sekmesinden bir model seç.')
+  if (isLocalName(requested) && !opts.allowLocal) {
+    throw new ModelRejected('Yerel model kapalı; bu sohbet turu yalnız OpenRouter ile yapılabilir.')
+  }
+  const prompt = String(opts.prompt ?? '').trim()
+  if (!prompt) throw new ModelRejected('Mesaj boş.')
+  // Hedef burada çözülür; adres kapalı/eksikse targetFor mevcut ModelRejected davranışını korur.
+  const target = targetFor(requested)
+  const started = Date.now()
+  const text = await chatOnce(opts.apiKey, requested, [{ role: 'user', content: prompt }], false, { json: false, signal: opts.signal })
+  if (!text.trim()) throw new ModelRejected('Model boş yanıt verdi.')
+  return { text, model: target.model, local: target.local, ms: Date.now() - started }
 }
 
 function parseJson(content: string): Record<string, unknown> {

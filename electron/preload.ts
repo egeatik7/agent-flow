@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   testOpenRouter: () => ipcRenderer.invoke('openrouter:test'),
   listModels: () => ipcRenderer.invoke('openrouter:models'),
   listLocalModels: (base?: string) => ipcRenderer.invoke('local:models', base),
+  localChat: (payload: { prompt: string; target?: 'local' | 'api'; model?: string }) => ipcRenderer.invoke('local:chat', payload),
   missingPaths: (paths: string[]) => ipcRenderer.invoke('paths:missing', paths),
   testVision: () => ipcRenderer.invoke('openrouter:testVision'),
 

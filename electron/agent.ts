@@ -116,6 +116,12 @@ function agentModels(s: AppSettings): string[] {
   return agent.length ? agent : visionModels(s)
 }
 
+/** Koşul checks ask their own model first; an empty field keeps the Metin Modeli chain. */
+function conditionModels(s: AppSettings): string[] {
+  const c = modelChain(s.conditionModel, s.conditionBackups)
+  return c.length ? c : textModels(s)
+}
+
 export function createAgent(ctx: AgentContext) {
   const { log, send } = ctx
   const getSettings = ctx.settings
@@ -1179,7 +1185,7 @@ export function createAgent(ctx: AgentContext) {
         const items = res.items.filter(item => item.src === source)
         const s = getSettings()
         const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
-        const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: textModels(s), signal,
+        const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: conditionModels(s), signal,
           context: preferredWindow ? `Requested application/window context: ${preferredWindow}. The observation covers the whole screen; no window was selected or matched. Determine whether the evidence belongs to the intended application/task. A status from an unrelated application or historical log is not proof. If the intended context cannot be established, answer satisfied:false. A changed title alone does not disqualify the same application.` : undefined,
           kind: 'condition', prompt: instruction, scan: { ...res, items, image: null },
           stepTitle: 'Koşul', sendImage: false,

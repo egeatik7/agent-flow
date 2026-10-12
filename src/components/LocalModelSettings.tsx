@@ -2,6 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from 'react'
 import type { AppSettings, ModelInfo } from '../types'
 
 import NumberDraft from './NumberDraft'
+import LocalChat from './LocalChat'
 
 const PRESETS = [
   { title: 'llama.cpp', url: 'http://127.0.0.1:8080/v1' },
@@ -74,6 +75,8 @@ export default function LocalModelSettings({ settings: s, setSettings, onSave, o
       </fieldset>
       <button type="button" className="xp-btn save block" onClick={() => onSave({ localBaseUrl: (s.localBaseUrl ?? '').trim(), localTimeoutMs: s.localTimeoutMs ?? 180_000, localVision: s.localVision === true, localOff: s.localOff === true, localThink: s.localThink ?? '' })}>Yerel ayarları kaydet</button>
       <p className="hint">Kurtarma ajanı kendi OpenRouter bağlantısını kullanmaya devam eder.</p>
+      {/* "Yerel model mi, API mi cevap veriyor" sorusunu canlı denemeyle yanıtlar. */}
+      <LocalChat settings={s} models={models} disabled={disabled} />
     </div>
   </fieldset>
 }
