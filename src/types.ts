@@ -106,6 +106,8 @@ export type XpAgentApi = {
   onHudMethod?: (cb: (payload: unknown) => void) => () => void
   /** Zamanlayıcı adımı sürerken karttaki canlı geri sayım satırı. */
   onHudCountdown?: (cb: (payload: unknown) => void) => () => void
+  /** Kart şeridi: son üç aşama ve süreleri (1.9.119). */
+  onHudStages?: (cb: (payload: unknown) => void) => () => void
   pickFolder: (extensions: string[]) => Promise<{ folder: string; files: string[] } | null>
   listDir: (dir: string) => Promise<string[] | null>
   pickDir: () => Promise<string | null>

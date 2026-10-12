@@ -54,7 +54,7 @@ import {
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
 import { chooseLibraryDirectory, isProtectedPath } from './library-path'
-import { sendMarkerInfo, setDiagnosticsRoot, shortModelName, stopwatchText } from './send-log'
+import { adaySayisi, sendMarkerInfo, setDiagnosticsRoot, shortModelName, stageStripText, stopwatchText } from './send-log'
 // Kanıt dosyaları kullanıcı veri klasörü altına yazılır; API anahtarı/başlık asla kaydedilmez.
 setDiagnosticsRoot(path.join(app.getPath('userData'), 'diagnostics'))
 import { zipDocumentFor } from './zip-workspace'
@@ -360,9 +360,13 @@ setChatLogger((line) => {
   if (isaret?.kind === 'gonderim') {
     hudSonModel = shortModelName(isaret.model)
     const kelimeSecimi = (isaret.stage ?? '') === 'ocr-word-choice'
+    // OCR/tarama aşaması burada kapanır: aday listesi hazır ve istek yazıldı (süresi aradan ölçülür).
+    const aday = adaySayisi(line)
+    pushAsama(kelimeSecimi ? 'Kelime seçimi' : 'OCR + liste', aday ? `${aday} aday` : '')
     startHudStopwatch(kelimeSecimi ? 'Kelime seçimi' : 'Model cevabı bekleniyor', hudSonModel)
   } else if (isaret?.kind === 'yanit') {
     finishHudStopwatch('Model cevabı', hudSonModel)
+    pushAsama('Model', hudSonModel)
   }
   log('chat', line)
 })
@@ -721,6 +725,25 @@ function finishHudStopwatch(label: string, extra = ''): string {
   const metin = stopwatchText(label, extra, sure)
   pushCountdown(metin)
   return metin
+}
+
+/**
+ * KART ŞERİDİ (1.9.119): son üç aşama ve süreleri. "Kart her güncellemeyi geçmiyor" şikâyetinin
+ * çözümü: tek satırlık durum yerine aşamalar birikerek görünür (OCR + liste → Model → Kelime seçimi).
+ * Süre, iki aşama arasındaki gerçek aralıktır; 60 sn'den uzun boşluk (adımlar arası bekleme) süre
+ * sayılmaz ve "—" yazılır.
+ */
+let hudAsamalar: { ad: string; ms: number | null }[] = []
+let hudSonAsamaTs = 0
+
+function pushAsama(ad: string, extra = '') {
+  const simdi = Date.now()
+  const ara = hudSonAsamaTs ? simdi - hudSonAsamaTs : 0
+  hudSonAsamaTs = simdi
+  hudAsamalar = [...hudAsamalar, { ad: extra ? `${ad} · ${extra}` : ad, ms: ara > 0 && ara < 60_000 ? ara : null }].slice(-3)
+  const metin = stageStripText(hudAsamalar)
+  viewerState.event('hud:stages', { text: metin })
+  if (running && hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:stages', { text: metin }, false)
 }
 
 /** Node kinds whose step already logs its own opening line (see runner's execStep). */const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 'ai'])

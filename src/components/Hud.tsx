@@ -15,6 +15,8 @@ export default function Hud() {
   const [method, setMethod] = useState(() => (window.xpAgent ? '' : 'Windows OCR'))
   /** Zamanlayıcı adımı sürerken kalan süre; adım bitince boşalır. */
   const [countdown, setCountdown] = useState('')
+  /** Son üç aşama ve süreleri (1.9.119): OCR + liste → Model → Kelime seçimi. */
+  const [stages, setStages] = useState('')
   const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
@@ -50,6 +52,10 @@ export default function Hud() {
       const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
       setCountdown(text)
     })
+    const offStages = window.xpAgent?.onHudStages?.((payload) => {
+      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      setStages(text)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
@@ -57,6 +63,7 @@ export default function Hud() {
       offMethod?.()
       offRecovery?.()
       offCountdown?.()
+      offStages?.()
     }
   }, [])
 
@@ -73,6 +80,7 @@ export default function Hud() {
         </div>
         <p className="hud-text">{status.text}</p>
         {countdown && <p className="hud-countdown" role="timer">{countdown}</p>}
+      {stages && <p className="hud-stages">{stages}</p>}
       </div>
       <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
       <p className={`hud-line hud-loop${loop ? ' on' : ''}`}>{loop}</p>

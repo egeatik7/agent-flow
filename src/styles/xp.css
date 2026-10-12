@@ -2177,3 +2177,14 @@ html.hud-root #root {
 .llm-fixed { margin: 6px 0; font-size: 11px; }
 .llm-fixed summary { cursor: pointer; color: #003c74; }
 .llm-fixed pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #bbb; background: #f3f3f0; padding: 6px; font: 11px/1.4 var(--font-mono); max-height: 220px; overflow-y: auto; }
+
+/* 1.9.119: kart şeridi — son üç aşama ve süreleri (XP kimliği korunur). */
+.hud-stages {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #4a4a4a;
+  border-top: 1px dotted #b9b9b9;
+  padding-top: 3px;
+  word-break: break-word;
+}

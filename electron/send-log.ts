@@ -122,6 +122,22 @@ export function stopwatchText(label: string, extra: string, ms: number): string 
   return `${label}${extra ? ` · ${extra}` : ''} · ${s} sn`
 }
 
+/**
+ * Kart şeridi (1.9.119): son üç aşama ve süreleri tek satırda —
+ * "OCR + liste · 147 aday 1,2 sn · Model qwen3.5-64k:latest 3,1 sn". Ölçülemeyen aralık "—" yazılır
+ * (adımlar arası bekleme süre sayılmaz), böylece kart yanlış bir süre uydurmaz.
+ */
+export function stageStripText(items: { ad: string; ms: number | null }[]): string {
+  return items
+    .map((a) => `${a.ad} ${a.ms === null ? '—' : `${(a.ms / 1000).toFixed(1).replace('.', ',')} sn`}`)
+    .join(' · ')
+}
+
+/** İstek satırından aday sayısını çıkarır: "aday=uretilen:147 gonderilen:147" → "147". */
+export function adaySayisi(line: string): string {
+  return (String(line ?? '').match(/aday=uretilen:(\d+)/) ?? [])[1] ?? ''
+}
+
 /** Gerçekten GÖNDERİLEN aday sayısı: liste metnindeki "#numara " satırları sayılır (kesilmemiş kanıt). */
 export function countSentCandidates(listText: string): number {
   return (listText.match(/^#\d+\s/gm) ?? []).length

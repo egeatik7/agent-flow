@@ -35,3 +35,19 @@ describe('kart kronometresi işaretleri tanır', () => {
     expect(shortModelName(undefined)).toBe('')
   })
 })
+
+describe('kart seridi asamlari', () => {
+  it('serit metni asamalari ve sureleri Turkce virgulle yazar; olculemeyen aralik "—"', async () => {
+    const { stageStripText } = await import('../electron/send-log')
+    expect(stageStripText([{ ad: 'OCR + liste · 147 aday', ms: 1230 }, { ad: 'Model · qwen3.5-64k:latest', ms: 3120 }]))
+      .toBe('OCR + liste · 147 aday 1,2 sn · Model · qwen3.5-64k:latest 3,1 sn')
+    expect(stageStripText([{ ad: 'Model', ms: null }])).toBe('Model —')
+    expect(stageStripText([])).toBe('')
+  })
+
+  it('aday sayisi istek satirindan cikarilir (OCR/liste asamasi etiketi)', async () => {
+    const { adaySayisi } = await import('../electron/send-log')
+    expect(adaySayisi('GONDERIM id=x | asama=click | aday=uretilen:147 gonderilen:147 | istem-uzunlugu=24181')).toBe('147')
+    expect(adaySayisi('GONDERIM id=x | asama=click')).toBe('')
+  })
+})
