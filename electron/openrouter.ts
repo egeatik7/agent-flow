@@ -624,7 +624,7 @@ export function validateConditionReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number }
+export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -691,9 +691,14 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   const raw = parsed.id ?? parsed.i ?? parsed.index
   const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
   const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
+  // Ölçülen kusur (1.9.110): reddin SEBEBİ kaydedilmiyordu, günlük yalnız "uygun öğe bulamadı" diyordu.
+  // Artık: numara bu listede yok / var ama tıklanabilir değil / listeye alınmamış / numara yok.
+  const aday = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id) : undefined
+  const rejected = id === null || selected ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
   return {
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
     id: selected?.parentId ?? null,
+    ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
     ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
     text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
     reason: String(parsed.reason ?? ''),

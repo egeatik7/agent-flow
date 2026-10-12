@@ -194,7 +194,9 @@ describe('tur3/3 — model aday listesi sınırı (word-targets.ts)', () => {
     const metin = describeWordCandidates(scan, wordCandidates(scan), () => {})
     expect(metin).toContain('"Run" @100,80 40x20')
     expect(metin).toContain('"Remesh" @300,80 80x20')
-    expect(metin).toContain('OCR-word parent=#7')
+    // 1.9.110: üst satır numarayla değil METNİYLE anılır; listede tek numara dünyası kalır.
+    expect(metin).toContain('OCR-word parent-line="')
+    expect(metin).not.toContain('parent=#')
     expect(metin).toContain('center=')
   })
 

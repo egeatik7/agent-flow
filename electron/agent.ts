@@ -271,7 +271,24 @@ export function createAgent(ctx: AgentContext) {
         how = `LLM${choice.reason ? ` — ${choice.reason}` : ''}`
         byLlm = true
       } else {
-        log('warn', `LLM uygun öğe bulamadı${choice.reason ? `: ${choice.reason}` : ''}.`)
+        // Modelin numarası çözülemedi: SEBEBİNİ söyle ve elindeki METİNLE kurtarmayı dene.
+        // Ölçülen kusur (1.9.110): günlük yalnız "uygun öğe bulamadı" diyordu; model "User Perspective"
+        // için 179/143/141 gibi listede olmayan numaralar döndürüyor, elindeki doğru metin atılıyordu.
+        const neden = choice.rejected === 'absent' ? 'bu listede yok'
+          : choice.rejected === 'not-selectable' ? 'listede var ama tıklanabilir değil (OCR-context-only)'
+            : choice.rejected === 'not-listed' ? 'listeye alınmamış (aday sınırı)' : 'numara döndürmedi'
+        const stated = choice.text?.trim() ?? ''
+        const kurtarma = stated.length >= 2
+          ? matchText(items, stated, { anchor, prefer, tie, note: tieNote }) ?? matchFuzzy(items, stated, { anchor, prefer, tie, note: tieNote })
+          : null
+        if (kurtarma) {
+          log('warn', `LLM’in numarası çözülemedi (#${choice.rawId ?? '?'}: ${neden}); yazdığı metinle eşleşti: “${kurtarma.text}”.`)
+          hit = kurtarma
+          how = `LLM numarası geçersiz (${neden}) — verdiği metin eşleşti`
+          byLlm = true
+        } else {
+          log('warn', `LLM uygun öğe bulamadı (#${choice.rawId ?? '?'} ${neden})${choice.reason ? `: ${choice.reason}` : ''}.`)
+        }
       }
     }
     if (!hit && !llmOnly) {
@@ -393,6 +410,8 @@ export function createAgent(ctx: AgentContext) {
       }
       return winScan
     }
+    // Eşit puanlı adaylar "OCR'da yok" gibi görünmesin: sebep ayrı bir satırda söylenir (1.9.110).
+    let esitAdayNotu = ''
     const quoteOnScreen = (scan: ScanResult, text: string, where: string): TargetPick | null => {
       const mem = node.templated ? undefined : memoFor(node)
       const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
@@ -400,7 +419,7 @@ export function createAgent(ctx: AgentContext) {
       const items = asksDesktopShortcut(prompt) ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
       // Birebir tırnaklı hedefte de iki aday eşit olabilir: model varsa seçim modele bırakılır.
       const tie: TiePolicy = s.apiKey || localConfigured() ? 'ask' : 'first'
-      const hit = matchText(items, text, { anchor, minScore: 100, prefer, tie, note: (m) => log('warn', m) })
+      const hit = matchText(items, text, { anchor, minScore: 100, prefer, tie, note: (m) => { esitAdayNotu = m; log('warn', m) } })
       if (!hit) return null
       return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }
@@ -506,7 +525,11 @@ export function createAgent(ctx: AgentContext) {
             const reader = pick.item.src === 'ocr' ? (pick.item.ocrSources ?? ['windows']).join('+') : 'uygulama öğesi'
             return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'windows', pick.target, pick.item)
           }
-          log('info', `“${quoted}” birleşik OCR’da yok.`)
+          log('info', `“${quoted}” birleşik OCR’da doğrudan bulunamadı.`)
+          if (esitAdayNotu) {
+            log('info', `Sebep: ${esitAdayNotu} Seçim sıradaki aşamada modele bırakılıyor.`)
+            esitAdayNotu = ''
+          }
         }
         if (stage === 'list' && hasText) {
           ctx.setMethod?.('Kelime listesi')

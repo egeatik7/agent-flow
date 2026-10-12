@@ -23,9 +23,11 @@ describe('OCR words to model and exact selected word', () => {
   ] }
   const before = JSON.stringify(evidence)
   const lines = describeWordCandidates(evidence, wordCandidates(evidence)).split('\n')
-  expect(lines[0]).toContain('overlapping-OCR=#2(100%)')
+  // 1.9.110: örtüşme artık numara taşımaz (yalnız yüzde): modelin iki numara dünyası karışmasın.
+  expect(lines[0]).toContain('overlapping-OCR=100%')
+  expect(lines[0]).not.toContain('overlapping-OCR=#')
   expect(lines[0]).not.toContain('#4(')
-  expect(lines[1]).toContain('overlapping-OCR=#1(100%),#4(100%)')
+  expect(lines[1]).toContain('overlapping-OCR=100%,100%')
   expect(lines[2]).not.toContain('overlapping-OCR=')
   expect(lines[0]).toContain('@-20,30 100x20')
   expect(lines[1]).toContain('@-19,30 98x20')

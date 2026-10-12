@@ -19,8 +19,9 @@ describe('target response failures', () => {
     const result = await chooseScreenTarget({ apiKey: 'fake', model: 'valid', prompt: 'Chrome', kind, stepTitle: kind, scan: observed, sendImage: false })
     expect(req.messages[1].content).toContain('#3 Text "Chrome" @20,30 100x20 OCR-reader=windows')
     expect(req.messages[1].content).toContain('#4 Text "Chrome" @21,30 98x20 OCR-reader=onnx')
-    expect(req.messages[1].content).toContain('overlapping-OCR=#4(100%)')
-    expect(req.messages[1].content).toContain('overlapping-OCR=#3(100%)')
+    // 1.9.110: örtüşme artık numara taşımaz (yalnız yüzde), böylece modelin iki numara dünyası karışmaz.
+    expect(req.messages[1].content).toContain('overlapping-OCR=100%')
+    expect(req.messages[1].content).not.toContain('overlapping-OCR=#')
     expect(req.messages[1].content).toContain('Select only ONE listed candidate')
     expect(result).toMatchObject({ id: 2, candidateId: 4, wordIndex: 0 })
   })

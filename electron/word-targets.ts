@@ -97,6 +97,11 @@ function boundedCandidates(candidates: WordCandidate[], area: ScanResult['area']
 export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[], note?: WordLimitNote, options?: { fullText?: boolean }): string {
   const overlaps = readerOverlaps(candidates)
   const kept = boundedCandidates(candidates, scan.area)
+  // Ölçülen kusur (1.9.110): listede İKİ numara dünyası vardı — satır başındaki seçilebilir aday
+  // numaraları ve `parent=#13` / `overlapping-OCR=#124(100%)` gibi ASIL öğe kimlikleri. Küçük yerel
+  // model bunları karıştırıp listede olmayan bir numara döndürüyordu ("LLM uygun öğe bulamadı").
+  // Artık referanslar numara taşımaz: üst satır METNİYLE, örtüşme YÜZDEYLE anılır.
+  const parentText = new Map(scan.items.map((item) => [item.id, item.text.replace(/"/g, "'").slice(0, 60)]))
   if (kept.length < candidates.length) {
     // §9: aday listesi sınırsız büyümesin. Tek satır bilgi, aday başına değil.
     const say = `Aday listesi sınırlandı: ${candidates.length} adaydan ${kept.length} tanesi modele gönderiliyor (üst sınır ${WORD_CANDIDATE_LIMIT}).`
@@ -107,9 +112,9 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
     const x = (item.x + item.w / 2 - scan.area.x) / Math.max(1, scan.area.w) * 100
     const y = (item.y + item.h / 2 - scan.area.y) / Math.max(1, scan.area.h) * 100
     const links = overlaps.get(item.id)
-    const overlapHint = links?.size ? ` overlapping-OCR=${[...links].map(([id, percent]) => `#${id}(${percent}%)`).join(',')}` : ''
+    const overlapHint = links?.size ? ` overlapping-OCR=${[...links].map(([, percent]) => `${percent}%`).join(',')}` : ''
     const clipped = !options?.fullText && item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
-    return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
+    return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent-line="${parentText.get(parentId) ?? ''}"` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
 }
 
