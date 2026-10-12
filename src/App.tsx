@@ -1,3 +1,8 @@
+import { exportCanvasFile, importCanvasFile, readCanvasFile, type CanvasDocument } from '../electron/canvas-file'
+import { CanvasIdentityConflictError } from '../electron/canvas-identity'
+import CanvasImportConflictDialog from './components/CanvasImportConflictDialog'
+import { deleteLibraryItems, libraryDeletionPlan } from '../electron/library-delete'
+import type { LibraryRef } from '../electron/library-tree'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import TabletDialog from './components/TabletDialog'
@@ -197,7 +202,8 @@ export default function App() {
   const missingAnswer = useRef<((run: boolean) => void) | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' | 'automation' } | null>(null)
-  const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas' | 'sequence'; tabId?: string; initial: string } | null>(null)
+  const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas' | 'sequence' | 'importCanvas' | 'importAutomation'; tabId?: string; document?: CanvasDocument; raw?: unknown; initial: string } | null>(null)
+  const [importQuestion, setImportQuestion] = useState<{ document?: CanvasDocument; raw?: unknown; canvasId: string; name: string } | null>(null)
   const saveAnswer = useRef<((answer: SaveDecision) => void) | null>(null)
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
@@ -298,7 +304,7 @@ export default function App() {
   /** Aynı kütüphane hatası her otomatik taslak yazımında günlüğü doldurmasın. */
   const libraryErrorRef = useRef<string | null>(null)
 
-  const persistBook = useCallback((book: CanvasBook): Promise<boolean> => {
+  const persistBook = useCallback((book: CanvasBook, requireCatalog = false): Promise<boolean> => {
     const snapshot = structuredClone(book)
     const serial = ++writeSerial.current
     setSaveStatus('saving')
@@ -307,7 +313,9 @@ export default function App() {
       try {
         if (api) {
           // `canvases:save` yanıtı: `{ conflict }` = kütüphane çakışması, `{ libraryError }` = katalog yazılamadı.
-          const answer = (await api.saveCanvases(snapshot)) as
+          // `{ catalog: requireCatalog }` katalogun YALNIZ açık kütüphane işlemlerinde yayınlanmasını söyler;
+          // otomatik taslak/oturum yazımları katalog dosyasına dokunmaz.
+          const answer = (await api.saveCanvases(snapshot, { catalog: requireCatalog })) as
             | boolean
             | { conflict?: boolean; libraryError?: string }
             | undefined
@@ -334,6 +342,13 @@ export default function App() {
               pushLog('warn', `Kütüphane yazılamadı: ${kutuphaneHatasi} · çalışman oturumda duruyor; kaydetmeyi tekrar dene.`)
             }
           } else if (libraryErrorRef.current) libraryErrorRef.current = null
+          // AÇIK kütüphane işlemi katalogu yayınlayamadıysa işlem tamamlanmış sayılmaz: durum hata,
+          // işlem iptal, taslak korunur (otomatik taslak yazımları bu yolda durmaz).
+          if ((cakisti || kutuphaneHatasi) && requireCatalog) {
+            if (serial === writeSerial.current) setSaveStatus('error')
+            pushLog('error', 'Kütüphane değişikliği diske uygulanmadı; işlem tamamlanmadı. Taslak korunuyor. Kütüphaneyi yeniden yükleyip tekrar dene.')
+            return false
+          }
         }
         else localStorage.setItem(LOCAL_BOOK, JSON.stringify(snapshot))
         if (serial === writeSerial.current) setSaveStatus('saved')
@@ -662,9 +677,10 @@ export default function App() {
   const settleChanges = async (ids?: string[]) => {
     try {
       return await settleCanvasChanges(commitActive, askCanvasSave, async book => {
+        // Kapanış/işlem öncesi yazım: katalog yayınlanmalı (requireCatalog=true). Yazılamazsa işlem
+        // durur ve kitap temiz taban sayılmaz; çalışma taslakta kalır.
         catalogFailureRef.current = null
-        if (!await persistBook(book)) return false
-        // Katalog yazılmadıysa bu kitap temiz taban sayılmaz; kapanış/işlem durur, iş kaybolmaz.
+        if (!await persistBook(book, true)) return false
         if (catalogFailureRef.current) { adoptBook(commitActive()); return false }
         adoptBook(book)
         return true
@@ -716,22 +732,22 @@ export default function App() {
   }
 
   /** Critical library writes are acknowledged before the UI discards or replaces data. */
-  const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false, reviewingClose = false) => {
+  const saveLibraryChange = async (change: (book: CanvasBook) => CanvasBook, message: string, open = false, reviewingClose = false, reportIdentityConflict = false, requireCatalog = true) => {
     if (!loaded || runningRef.current || libraryBusyRef.current || confirmAnswer.current || (!reviewingClose && closingRef.current) || saveAnswer.current) return false
     libraryBusyRef.current = true
     setLibraryBusy(true)
     try {
       const next = change(commitActive())
+      // AÇIK kütüphane işlemi: katalog yayınlanmalı (requireCatalog). Yazılamazsa başarı mesajı YOK,
+      // yeni kayıt tabanı benimsenmez, sekme kirli kalır (sonraki açılışta kurtarma taslağı olarak durur).
       catalogFailureRef.current = null
-      if (!await persistBook(next)) return false
-      // KÜTÜPHANE/KATALOG yazılamadıysa: başarı mesajı yok, yeni kayıt tabanı benimsenmez,
-      // sekme kirli kalır (sonraki açılışta kurtarma taslağı olarak durur).
+      if (!await persistBook(next, requireCatalog)) return false
       if (catalogFailureRef.current) { adoptBook(commitActive()); return false }
       if (open) showCanvas(next, next.activeId, false)
       else adoptBook(next)
       pushLog('success', message)
       return true
-    } catch (e) { pushLog('error', errText(e)); return false }
+    } catch (e) { if (reportIdentityConflict && e instanceof CanvasIdentityConflictError) throw e; pushLog('error', errText(e)); return false }
     finally { libraryBusyRef.current = false; setLibraryBusy(false) }
   }
   const saveCurrentCanvas = () => {
@@ -751,21 +767,45 @@ export default function App() {
     const question = nameQuestion
     setNameQuestion(null)
     if (!question || name === null) return
+    if (question.kind === 'importCanvas' && question.document) {
+      await saveLibraryChange(b => importCanvasFile(b, question.document!, name), `“${name}” yeni kimlikle kaydedildi.`, true)
+      return
+    }
+    if (question.kind === 'importAutomation' && question.raw) {
+      await saveLibraryChange(b => importAutomation(b, question.raw, { copyConflicts: true, name }), `“${name}” çakışan tuvallerin ayrı kopyalarıyla kaydedildi.`)
+      return
+    }
     await saveLibraryChange(b => question.kind === 'canvas' ? saveCanvasAs(b, question.tabId!, name) : saveOpenSequence(b, name),
       question.kind === 'canvas' ? `“${name}” ayrı tuval olarak kaydedildi.` : `“${name}” açık sıradan kaydedildi.`)
   }
-  const restoreDraft = (id: string) => saveLibraryChange(b => restoreCanvasDraft(b, id), 'Kurtarma taslağı açıldı; kayıtlı tuval değiştirilmedi.', true)
+  const restoreDraft = (id: string) => saveLibraryChange(b => restoreCanvasDraft(b, id), 'Kurtarma taslağı açıldı; kayıtlı tuval değiştirilmedi.', true, false, false, false)
   const removeDraft = async (id: string) => {
     if (!await askSure('Bu kurtarma taslağı silinsin mi? Kayıtlı tuval silinmez.')) return
-    await saveLibraryChange(b => discardCanvasDraft(b, id), 'Kurtarma taslağı silindi.')
+    await saveLibraryChange(b => discardCanvasDraft(b, id), 'Kurtarma taslağı silindi.', false, false, false, false)
   }
-  const openLibraryCanvas = (canvas: SavedCanvas) => saveLibraryChange(b => openSavedCanvas(b, canvas), `“${canvas.name}” yeni sekmede açıldı.`, true)
+  const openLibraryCanvas = (canvas: SavedCanvas) => saveLibraryChange(b => openSavedCanvas(b, canvas), `“${canvas.name}” yeni sekmede açıldı.`, true, false, false, false)
   const deleteLibraryCanvas = async (id: string) => {
     if (runningRef.current || libraryBusyRef.current) return
     const c = libraryOf(bookRef.current).canvases.find(c => c.id === id)
     if (!c || !await askSure(`“${c.name}” kayıtlı tuvalini silmek istediğinize emin misiniz? Bu kaydı kullanan otomasyonlardaki bağlantıları da silinecek. Açık çalışma sekmeleri silinmez.`)) return
     await saveLibraryChange(b => deleteSavedCanvas(b, id), `“${c.name}” kayıtlı tuvali silindi.`)
   }
+  const deleteLibrarySelection = async (refs: LibraryRef[], draft?: { key: string; name: string }): Promise<boolean> => {
+    if (runningRef.current || libraryBusyRef.current || confirmAnswer.current || (!refs.length && !draft)) return false
+    try {
+      const book = bookRef.current, plan = libraryDeletionPlan(libraryOf(book), refs)
+      if (draft && (book.automationDraft?.key !== draft.key || book.automationDraft.id)) throw new Error('Silinecek taslak artık aynı değil; seçimi yenile.')
+      const expectedDraft = draft ? JSON.stringify(book.automationDraft) : undefined
+      const counts = `${plan.canvases.length} tuval, ${plan.automations.length} otomasyon, ${plan.folders.length} klasör${draft ? ` ve “${draft.name}” kaydedilmemiş taslağı` : ''}`
+      if (!await askSure(`Seçilen ${counts} silinsin mi? Seçilen klasörlerin içeriği de silinir. Silinen tuvalleri kullanan otomasyon bağlantıları kaldırılır. Açık çalışma sekmeleri taslak olarak korunur.`)) return false
+      return await saveLibraryChange(b => {
+        if (draft && JSON.stringify(b.automationDraft) !== expectedDraft) throw new Error('Silinecek taslak onay sırasında değişti; seçimi yenile.')
+        const next = deleteLibraryItems(b, refs, plan.fingerprint)
+        return draft ? { ...next, automationDraft: undefined } : next
+      }, `${counts} silindi.`, false, false, false, refs.length > 0)
+    } catch (e) { pushLog('error', errText(e)); return false }
+  }
+
   const closeLibraryCanvas = (id: string) => {
     const tabs = commitActive().tabs.filter(t => t.savedId === id)
     const tab = tabs.find(t => t.id === activeIdRef.current) ?? tabs[tabs.length - 1]
@@ -945,7 +985,7 @@ export default function App() {
       const key = e.key.toLowerCase()
       if (mod && key === 's') {
         e.preventDefault()
-        if (!loaded || workspacePicker || nameQuestion || confirmQuestion || missingReport || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current || scanner) return
+        if (!loaded || workspacePicker || nameQuestion || importQuestion || confirmQuestion || missingReport || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current || scanner) return
         if (e.shiftKey) void saveAllWorkspace()
         else if (activeIdRef.current) void saveCurrentCanvas()
         return
@@ -953,7 +993,7 @@ export default function App() {
       const t = e.target as HTMLElement
       if(t?.closest?.('.canvas-library,.library-canvas-picker,.library-context-menu'))return
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || (typeof t.closest === 'function' && (t.closest('[data-template-editor]') || t.closest('[data-template-field]'))))) return
-      if (!activeIdRef.current || workspacePicker || nameQuestion || confirmQuestion || missingReport || scanner || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
+      if (!activeIdRef.current || workspacePicker || nameQuestion || importQuestion || confirmQuestion || missingReport || scanner || saveAnswer.current || closingRef.current || runningRef.current || libraryBusyRef.current) return
       if (scanner && mod) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedEdgeId) deleteEdge(selectedEdgeId)
@@ -1377,22 +1417,40 @@ export default function App() {
   }
 
   const exportGraph = () => {
-    downloadJson(rooted(graphRef.current, stackRef.current), canvasName())
-    pushLog('info', `“${canvasName()}” dışa aktarıldı.`)
+    const book = commitActive(), tab = book.tabs.find(t => t.id === book.activeId)
+    if (!tab) return
+    downloadJson(exportCanvasFile(tab), tab.name)
+    pushLog('info', `“${tab.name}” kimliğiyle dışa aktarıldı.`)
   }
   const importGraph = async (file: File) => {
-    if (runningRef.current || libraryBusyRef.current) return
+    if (runningRef.current || libraryBusyRef.current || importQuestion) return
+    let document: CanvasDocument | undefined, raw: unknown
     try {
-      const raw = JSON.parse(await file.text())
-      if (raw?.format === 'nubbo-automation') {
-        await saveLibraryChange(b => importAutomation(b, raw), `“${raw.name}” otomasyonu içe aktarıldı. Aç ile kayıtlı listeyi yükleyebilirsin.`)
+      raw = JSON.parse(await file.text())
+      if ((raw as { format?: string })?.format === 'nubbo-automation') {
+        const name = (raw as { name: string }).name
+        await saveLibraryChange(b => importAutomation(b, raw), `“${name}” otomasyonu içe aktarıldı.`, false, false, true)
         return
       }
-      if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) throw new Error('Geçerli bir akış veya otomasyon JSON dosyası değil.')
-      const g = reconcileLoopMembership(normalizeGraph(raw)), id = newId()
-      const name = file.name.replace(/\.json$/i, '').trim().slice(0, 48) || 'Tuval'
-      await saveLibraryChange(b => saveCanvas({ ...b, activeId: id, tabs: [...b.tabs, { id, name, graph: g }] }, id), `“${name}” kaydedildi ve yeni sekmede açıldı.`, true)
-    } catch (e) { pushLog('error', `Dosya okunamadı: ${errText(e)}`) }
+      document = readCanvasFile(raw, file.name.replace(/\.json$/i, ''))
+      document.graph = reconcileLoopMembership(document.graph)
+      await saveLibraryChange(b => importCanvasFile(b, document!), `“${document.name}” kimliği korunarak açıldı.`, true, false, true)
+    } catch (e) {
+      if (e instanceof CanvasIdentityConflictError) { setImportQuestion({ document, ...(document ? {} : { raw }), canvasId: e.canvasId, name: e.canvasName }); return }
+      pushLog('error', `Dosya okunamadı: ${errText(e)}`)
+    }
+  }
+  const copyImportedFile = () => {
+    const question = importQuestion
+    if (!question) return
+    setImportQuestion(null)
+    setNameQuestion({ kind: question.document ? 'importCanvas' : 'importAutomation', document: question.document, raw: question.raw,
+      initial: `${(question.document?.name || (question.raw as { name?: string })?.name || question.name).slice(0, 36)} (Kopya)` })
+  }
+  const openExistingImportedFile = async () => {
+    const question = importQuestion; setImportQuestion(null)
+    const canvas = question && libraryOf(bookRef.current).canvases.find(c => c.id === question.canvasId)
+    if (canvas) await openLibraryCanvas(canvas)
   }
 
   const resetLoops = async () => {
@@ -1474,7 +1532,7 @@ export default function App() {
   const hasStart = graph.nodes.some((n) => n.kind === 'start')
   const counts = graph.nodes.filter((n) => n.kind !== 'start').length
   const hasCanvas = !!activeId
-  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion || !!workspacePicker || !!nameQuestion
+  const editorLocked = libraryBusy || closing || !!confirmQuestion || !!saveQuestion || !!workspacePicker || !!nameQuestion || !!importQuestion
 
   const closeProgram = async (requestId?: number) => {
     if (closingRef.current) return
@@ -1484,7 +1542,7 @@ export default function App() {
       if (requestId !== undefined) await api?.finishClose?.(requestId, true)
       return
     }
-    if (!loaded || libraryBusyRef.current || confirmAnswer.current || saveAnswer.current || nameQuestion || capturing || scanner) {
+    if (!loaded || libraryBusyRef.current || confirmAnswer.current || saveAnswer.current || nameQuestion || importQuestion || capturing || scanner) {
       pushLog('warn', 'Açık işlemi tamamladıktan sonra programı kapatabilirsiniz.')
       if (requestId !== undefined) await api?.finishClose?.(requestId, false)
       return
@@ -1724,7 +1782,7 @@ export default function App() {
             canvasPanel={<CanvasLibraryPanel directory={libraryDirectory} onLibraryChange={organizeLibrary}
               onManageLibrary={api?.manageLibrary ? mode=>void manageLibrary(mode) : undefined}
               onNewCanvas={folderId=>void newLibraryCanvas(folderId)} onDuplicateCanvas={id=>void duplicateLibraryCanvas(id)}
-              onExportCanvas={id=>{const c=library.canvases.find(c=>c.id===id);if(c)downloadJson(c.graph,c.name)}} library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
+              onExportCanvas={id=>{const c=library.canvases.find(c=>c.id===id);if(c)downloadJson(exportCanvasFile(c),c.name)}} library={library} tabs={bookRef.current.tabs} hasCanvas={hasCanvas} disabled={running || editorLocked || !loaded}
               draft={automationDraft}
               onDraftChange={changeAutomationDraft}
               onAskSave={name => askCanvasSave({ name }, 'automation')}
@@ -1738,6 +1796,7 @@ export default function App() {
               onCloseCanvas={closeLibraryCanvas}
               onRenameCanvas={(id, name, reviewingClose) => saveLibraryChange(b => renameSavedCanvas(b, id, name), 'Tuval adı depoda ve onu kullanan otomasyonlarda güncellendi.', false, reviewingClose)}
               onDeleteCanvas={id => void deleteLibraryCanvas(id)}
+              onDeleteItems={deleteLibrarySelection}
               onOpenAutomation={id => void loadAutomation(id)}
               onSaveAutomation={saveAutomationEditor}
               onDeleteAutomation={id => void removeAutomation(id)}
@@ -1869,7 +1928,8 @@ export default function App() {
         onOpen={async id => workspacePicker === 'automation' ? loadAutomation(id) : await openLibraryCanvas(library.canvases.find(c => c.id === id)!)} />}
       {missingReport && <MissingPathsNote items={missingReport.items} onAnswer={(a) => missingReport.answer(a === 'run')} />}
       {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion.name} kind={saveQuestion.kind} onAnswer={answerCanvasSave} />}
-      {nameQuestion && <WorkspaceNameDialog title={nameQuestion.kind === 'canvas' ? 'Tuvali Farklı Kaydet' : 'Açık Sırayı Otomasyon Olarak Kaydet'} initial={nameQuestion.initial} onAnswer={name => void answerName(name)} />}
+      {importQuestion && <CanvasImportConflictDialog name={importQuestion.name} canvasId={importQuestion.canvasId} automation={!importQuestion.document} onCopy={copyImportedFile} onOpen={importQuestion.document ? () => void openExistingImportedFile() : undefined} onCancel={() => setImportQuestion(null)} />}
+      {nameQuestion && <WorkspaceNameDialog title={nameQuestion.kind === 'canvas' || nameQuestion.kind === 'importCanvas' ? 'Tuvali Farklı Kaydet' : nameQuestion.kind === 'importAutomation' ? 'Otomasyonu Farklı Kaydet' : 'Açık Sırayı Otomasyon Olarak Kaydet'} initial={nameQuestion.initial} onAnswer={name => void answerName(name)} />}
       {scanner && (
         <ScreenScanner
           targetLabel={

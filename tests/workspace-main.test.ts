@@ -1,11 +1,13 @@
+import { saveCanvas } from '../electron/canvas-library'
+import { startCanvasSession } from '../electron/canvas-session'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createNode, normalizeCanvasBook, normalizeGraph, type CanvasBook } from '../electron/graph-types'
-import { readWorkspace, writeWorkspace } from '../electron/workspace-store'
+import { readWorkspace, writeWorkspace, unpublishedCatalogSession } from '../electron/workspace-store'
 import { toolLayerSave } from '../electron/tool-branch'
-import { librarySession, isLibraryConflict } from '../electron/library-storage'
+import { librarySession, isLibraryConflict, LibraryConflictError } from '../electron/library-storage'
 
 // Run the actual main-process persistence functions and registered callbacks, without
 // starting Electron or substituting another implementation of the two-writer boundary.
@@ -35,7 +37,7 @@ it('main tool saves survive subsequent calls and stale window saves without modi
     set: (values: { canvases: CanvasBook }) => { disk = structuredClone(values.canvases) },
   }
   const callbacks = runInNewContext(compiled, {
-    store, structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict,
+    store, structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict, unpublishedCatalogSession,
     savedLibrary: structuredClone(original.library), libraryStorage: { save: () => {} }, viewerState: { setBook: () => {} },
   }) as { toolsSave(book: CanvasBook): void; windowSave(event: unknown, book: CanvasBook): void; loadCanvases(): CanvasBook }
   for (const branches of [[{ id: 'created', groups: [] }], [{ id: 'created', groups: [{ id: 'edited' }] }], []]) {
@@ -49,4 +51,69 @@ it('main tool saves survive subsequent calls and stale window saves without modi
     expect(loaded.branches ?? []).toEqual(branches)
     expect(loaded.library).toEqual(original.library)
   }
+})
+
+it('session-only saves and tool saves never publish a stale catalog, but preserve drafts and tool branches', () => {
+  const graph = { nodes: [createNode('start', 0, 0)], edges: [] }
+  const catalog = { schemaVersion: 2 as const, canvases: [{ id: 'saved', name: 'Current', graph, updatedAt: 1 }], automations: [] }
+  let disk = normalizeCanvasBook({ activeId: 'tab', tabs: [{ id: 'tab', name: 'Current', graph }], library: catalog })
+  const save = vi.fn(), views: CanvasBook[] = []
+  const callbacks = runInNewContext(compiled, {
+    store: { get: (key: string) => key === 'canvases' ? librarySession(disk) : key === 'libraryMigrated' ? true : undefined,
+      set: (value: { canvases: CanvasBook }) => { disk = value.canvases } },
+    structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict, unpublishedCatalogSession,
+    savedLibrary: structuredClone(catalog), libraryStorage: { save }, viewerState: { setBook: (book: CanvasBook) => views.push(book) },
+  }) as { windowSave(e: unknown, b: CanvasBook, options?: { catalog?: boolean }): { conflict: boolean }; toolsSave(b: CanvasBook): void; loadCanvases(): CanvasBook }
+  const stale = normalizeCanvasBook({ ...disk, library: { canvases: [], automations: [] } })
+  stale.tabs[0].graph.nodes[0].title = 'Draft edit'
+  callbacks.windowSave(undefined, stale, { catalog: false })
+  expect(save).not.toHaveBeenCalled(); expect(callbacks.loadCanvases().library).toEqual(catalog)
+  expect(callbacks.loadCanvases().tabs[0].graph.nodes[0].title).toBe('Draft edit')
+  expect(views.at(-1)!.library).toEqual(catalog)
+  callbacks.toolsSave({ ...stale, branches: [{ id: 'tools' }] })
+  expect(save).not.toHaveBeenCalled(); expect(callbacks.loadCanvases().branches).toEqual([{ id: 'tools' }])
+})
+
+it('a rejected catalog update keeps the previous save baseline so an edited draft is recoverable after restart', () => {
+  const graph = { nodes: [createNode('start', 0, 0)], edges: [] }
+  const catalog = { schemaVersion: 2 as const, canvases: [{ id: 'saved', name: 'Current', graph, updatedAt: 1 }], automations: [] }
+  let disk = normalizeCanvasBook({ activeId: 'tab', tabs: [{ id: 'tab', savedId: 'saved', name: 'Current', graph, baseline: { name: 'Current', graph } }], library: catalog })
+  const callbacks = runInNewContext(compiled, {
+    store: { get: (key: string) => key === 'canvases' ? librarySession(disk) : key === 'libraryMigrated' ? true : undefined,
+      set: (value: { canvases: CanvasBook }) => { disk = value.canvases } },
+    structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict, unpublishedCatalogSession,
+    savedLibrary: structuredClone(catalog), libraryStorage: { save: () => { throw new LibraryConflictError('external change') } }, viewerState: { setBook: () => {} },
+  }) as { windowSave(e: unknown, b: CanvasBook): { conflict: boolean }; loadCanvases(): CanvasBook }
+  const incoming = structuredClone(callbacks.loadCanvases())
+  incoming.tabs[0].graph.nodes[0].title = 'Unpublished edit'
+  const published = saveCanvas(incoming, 'tab')
+  expect(callbacks.windowSave(undefined, published).conflict).toBe(true)
+  const loaded = callbacks.loadCanvases()
+  expect(loaded.library).toEqual(catalog)
+  expect(loaded.tabs[0].baseline!.graph.nodes[0].title).not.toBe('Unpublished edit')
+  expect(startCanvasSession(loaded).recovery![0].graph.nodes[0].title).toBe('Unpublished edit')
+})
+
+it('a catalog IO error still preserves the edited session baseline before reporting failure', () => {
+  const graph = { nodes: [createNode('start', 0, 0)], edges: [] }
+  const catalog = { schemaVersion: 2 as const, canvases: [{ id: 'saved', name: 'Current', graph, updatedAt: 1 }], automations: [] }
+  let disk = normalizeCanvasBook({ activeId: 'tab', tabs: [{ id: 'tab', savedId: 'saved', name: 'Current', graph, baseline: { name: 'Current', graph } }], library: catalog })
+  const callbacks = runInNewContext(compiled, {
+    store: { get: (key: string) => key === 'canvases' ? librarySession(disk) : key === 'libraryMigrated' ? true : undefined,
+      set: (value: { canvases: CanvasBook }) => { disk = value.canvases } },
+    structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict, unpublishedCatalogSession,
+    savedLibrary: structuredClone(catalog), libraryStorage: { save: () => { throw new Error('disk full') } }, viewerState: { setBook: () => {} },
+  }) as { windowSave(e: unknown, b: CanvasBook): { conflict: boolean; libraryError?: string }; loadCanvases(): CanvasBook }
+  const incoming = structuredClone(callbacks.loadCanvases()); incoming.tabs[0].graph.nodes[0].title = 'Retained draft'
+  // Birleşik sözleşme (1.9.99): katalog yazımı başarısız olduğunda hata YÜKSELTİLMEZ. Oturum yine yazılır,
+  // çağırana `libraryError` döner (IPC sarmalı olmayan net mesaj + sekme kirli kalır) ve taban korunur.
+  expect(callbacks.windowSave(undefined, saveCanvas(incoming, 'tab'))).toEqual({ conflict: false, libraryError: 'disk full' })
+  expect(startCanvasSession(callbacks.loadCanvases()).recovery![0].graph.nodes[0].title).toBe('Retained draft')
+})
+
+it('a session-only call cannot migrate tabs into a missing catalog',()=>{
+ const current:CanvasBook={activeId:'',tabs:[]},written:CanvasBook={activeId:'tab',tabs:[{id:'tab',name:'Draft',graph:{nodes:[],edges:[]}}]}
+ const set=vi.fn();writeWorkspace({set},written,current,'session')
+ expect(set.mock.calls[0][0].canvases.library.canvases).toEqual([])
+ expect(set.mock.calls[0][0].canvases.tabs[0].savedId).toBeUndefined()
 })

@@ -1,3 +1,5 @@
+import { exportCanvasFile } from '../electron/canvas-file'
+import CanvasImportConflictDialog from '../src/components/CanvasImportConflictDialog'
 // @vitest-environment jsdom
 import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
@@ -8,6 +10,7 @@ import CanvasLibrary from '../src/components/CanvasLibrary'
 import CanvasTabs from '../src/components/CanvasTabs'
 import SaveCanvasDialog from '../src/components/SaveCanvasDialog'
 import WorkspaceNameDialog from '../src/components/WorkspaceNameDialog'
+import ConfirmDialog from '../src/components/ConfirmDialog'
 import NodeCanvas from '../src/components/NodeCanvas'
 
 vi.mock('react-dom',()=>({createPortal:(children:unknown)=>children}))
@@ -23,13 +26,15 @@ let renderer: ReactTestRenderer | undefined
 let seed: CanvasBook, disk: CanvasBook | undefined
 let fail = false, loadFail = false
 let requestClose: (id: unknown) => void = () => {}
-let saveOverride: ((book: CanvasBook) => Promise<boolean>) | undefined
+let saveOverride: ((book: CanvasBook) => Promise<boolean | { conflict: true }>) | undefined
 const replies: { id: number; allow: boolean }[] = []
 const writes: CanvasBook[] = []
+const writeModes: (boolean | undefined)[] = []
 const api = {
   getSettings: async () => DEFAULT_SETTINGS,
   getCanvases: async () => { if (loadFail) throw new Error('profile read failed'); return structuredClone(seed) },
-  saveCanvases: async (book: CanvasBook) => {
+  saveCanvases: async (book: CanvasBook, options?: { catalog?: boolean }) => {
+    writeModes.push(options?.catalog)
     writes.push(structuredClone(book))
     if (saveOverride) return saveOverride(book)
     if (fail) return false
@@ -67,7 +72,7 @@ beforeAll(async () => {
   App = (await import('../src/App')).default
 })
 beforeEach(() => {
-  vi.useFakeTimers(); replies.length = 0; writes.length = 0; disk = undefined
+  vi.useFakeTimers(); replies.length = 0; writes.length = 0; writeModes.length = 0; disk = undefined
   fail = false; loadFail = false; saveOverride = undefined
   api.manageLibrary.mockReset()
   seed = normalizeCanvasBook({ activeId: '', tabs: [], library: { canvases: [{ id: 'saved', name: 'Shared', updatedAt: 1, graph: { nodes: [createNode('start', 0, 0)], edges: [] } }], automations: [] } })
@@ -261,4 +266,63 @@ it.skip('recovers a modified canvas separately and updates the original only aft
     expect(disk!.library!.automations[0].name).toBe('From tabs')
     expect(disk!.library!.automations[0].entries[0].canvasId).toBe(disk!.tabs[0].savedId)
   })
+})
+
+it('a catalog conflict does not acknowledge a delete or remove the record from the UI', async () => {
+  await mount()
+  saveOverride = async () => ({ conflict: true })
+  let deleting: Promise<boolean> | undefined
+  await act(async () => { deleting = renderer!.root.findByType(CanvasLibrary).props.onDeleteItems([{ kind: 'canvas', id: 'saved' }]) })
+  await act(async () => { renderer!.root.findByType(ConfirmDialog).props.onYes(); await deleting })
+  expect(await deleting).toBe(false)
+  expect(renderer!.root.findByType(CanvasLibrary).props.library.canvases.map((c: { id: string }) => c.id)).toContain('saved')
+})
+
+it('batch deletion saves once and a later session autosave does not recreate deleted library canvases', async () => {
+  seed.library!.canvases.push({...structuredClone(seed.library!.canvases[0]),id:'second',name:'Second'})
+  await mount();await act(async()=>renderer!.root.findByType(CanvasLibrary).props.onOpenCanvas(seed.library!.canvases[0]))
+  const before = writes.length
+  let deleting: Promise<boolean> | undefined
+  await act(async()=>{deleting=renderer!.root.findByType(CanvasLibrary).props.onDeleteItems([{kind:'canvas',id:'saved'},{kind:'canvas',id:'second'}])})
+  await act(async()=>{renderer!.root.findByType(ConfirmDialog).props.onYes();await deleting})
+  expect(await deleting).toBe(true);expect(writes.length-before).toBe(1)
+  expect(disk!.library!.canvases).toEqual([]);expect(disk!.tabs).toHaveLength(1);expect(disk!.tabs[0].savedId).toBeUndefined()
+  const tabs=renderer!.root.findByType(CanvasTabs).props
+  await act(async()=>tabs.onRename(tabs.activeId,'Surviving draft'));await tick()
+  expect(disk!.library!.canvases).toEqual([])
+})
+
+it('identified import conflict never writes over the catalog and Cancel preserves the existing canvas',async()=>{
+ await mount();const file=exportCanvasFile(seed.library!.canvases[0]);file.nodes[0].title='Imported version'
+ const before=writes.length
+ await act(async()=>{renderer!.root.findAllByType('input').find(n=>n.props.type==='file')!.props.onChange({target:{files:[{name:'Incoming.json',text:async()=>JSON.stringify(file)}],value:''}});for(let i=0;i<8;i++)await Promise.resolve()})
+ expect(renderer!.root.findByType(CanvasImportConflictDialog).props.canvasId).toBe('saved')
+ expect(writes).toHaveLength(before);expect(renderer!.root.findByType(CanvasLibrary).props.library.canvases[0].graph.nodes[0].title).not.toBe('Imported version')
+ await act(async()=>renderer!.root.findByType(CanvasImportConflictDialog).props.onCancel())
+ expect(renderer!.root.findAllByType(CanvasImportConflictDialog)).toHaveLength(0);expect(writes).toHaveLength(before)
+})
+it('identified import conflict Save As stores a new record and leaves the old version intact',async()=>{
+ await mount();const file=exportCanvasFile(seed.library!.canvases[0]);file.nodes[0].title='Imported version'
+ await act(async()=>{renderer!.root.findAllByType('input').find(n=>n.props.type==='file')!.props.onChange({target:{files:[{name:'Incoming.json',text:async()=>JSON.stringify(file)}],value:''}});for(let i=0;i<8;i++)await Promise.resolve()})
+ await act(async()=>renderer!.root.findByType(CanvasImportConflictDialog).props.onCopy())
+ await act(async()=>{renderer!.root.findByType(WorkspaceNameDialog).props.onAnswer('Separate version');for(let i=0;i<8;i++)await Promise.resolve()})
+ const lib=renderer!.root.findByType(CanvasLibrary).props.library
+ expect(lib.canvases).toHaveLength(2);expect(lib.canvases[0].id).toBe('saved');expect(lib.canvases[0].graph.nodes[0].title).not.toBe('Imported version')
+ expect(lib.canvases[1].id).not.toBe('saved');expect(lib.canvases[1].name).toBe('Separate version');expect(lib.canvases[1].graph.nodes[0].title).toBe('Imported version')
+})
+
+it('automatic canvas/draft writes are session-only, while explicit library Save publishes the catalog',async()=>{
+ await mount();expect(writeModes[0]).toBe(false)
+ await act(async()=>renderer!.root.findByType(CanvasLibrary).props.onOpenCanvas(seed.library!.canvases[0]))
+ await tick();const graph=renderer!.root.findByType(NodeCanvas).props.graph
+ await act(async()=>renderer!.root.findByType(NodeCanvas).props.onMoveNodes({[graph.nodes[0].id]:{x:99,y:0}}));await tick()
+ expect(writeModes.at(-1)).toBe(false)
+ await act(async()=>renderer!.root.findByType(CanvasLibrary).props.onSaveCanvas());expect(writeModes.at(-1)).toBe(true)
+})
+it('batch deletion can discard a selected new automation draft and stored records with one acknowledgement',async()=>{
+ await mount();await draft();const local=renderer!.root.findByType(CanvasLibrary).props.draft
+ let deleting:Promise<boolean>|undefined
+ await act(async()=>{deleting=renderer!.root.findByType(CanvasLibrary).props.onDeleteItems([{kind:'canvas',id:'saved'}],{key:local.key,name:local.name})})
+ await act(async()=>{renderer!.root.findByType(ConfirmDialog).props.onYes();await deleting})
+ expect(await deleting).toBe(true);expect(disk!.library!.canvases).toEqual([]);expect(disk!.automationDraft).toBeUndefined()
 })

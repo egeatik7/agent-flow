@@ -50,7 +50,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { readWorkspace, writeWorkspace, type WorkspaceWriter } from './workspace-store'
+import { readWorkspace, writeWorkspace, unpublishedCatalogSession, type WorkspaceWriter } from './workspace-store'
 import { LibraryStorage, librarySession, isLibraryConflict } from './library-storage'
 import { initializeLibraryDatabase } from './library-database'
 import type { CanvasLibrary } from './graph-types'
@@ -1135,14 +1135,21 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     let conflict = false
     let libraryError: string | undefined
     writeWorkspace({ set: ({ canvases, graph }) => {
-      try { libraryStorage!.save(canvases.library!); savedLibrary = structuredClone(canvases.library!) }
-      catch (e) {
-        // Katalog yazılmadı. Çakışma ayrı bildirilir; kilit kaybı/okuma hatası mesajıyla döner.
-        if (isLibraryConflict(e)) conflict = true
-        else libraryError = (e as Error).message
+      let session = canvases
+      // Katalog dosyasını YALNIZ pencere kaydı yazar; oturum/taslak ve araç katmanı kayıtları
+      // katalogu yayınlamaz (patch 1.9.93 sözleşmesi).
+      if (writer === 'window') {
+        try { libraryStorage!.save(canvases.library!); savedLibrary = structuredClone(canvases.library!) }
+        catch (e) {
+          // Katalog yazılmadı. Çakışma ayrı bildirilir; kilit kaybı/okuma hatası mesajıyla döner.
+          // Reddedilen kayıtta ESKİ yayınlanmış taban korunur: taslak kirli kalır, veri kaybolmaz.
+          conflict = isLibraryConflict(e)
+          if (!conflict) libraryError = (e as Error).message
+          session = unpublishedCatalogSession(canvases, current)
+        }
       }
-      store.set({ canvases: librarySession(canvases), graph })
-      viewerState.setBook(canvases)
+      store.set({ canvases: librarySession(session), graph })
+      viewerState.setBook(session)
     } }, book, current, writer)
     return libraryError === undefined ? { conflict } : { conflict, libraryError }
   }
@@ -1196,10 +1203,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     catch(e){return {...await viewerInfo(),error:(e as Error).message}}
   })
   if(store.get('viewerEnabled'))void ensureViewer().then(()=>{try{loadCanvases();viewerState.setReports(readRecoveryReports())}catch(e){log('warn',`Tablet kayıtları açılamadı: ${(e as Error).message}`)}}).catch(e=>log('warn',`Tablet izleme açılamadı: ${(e as Error).message}`))
-  ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
+  ipcMain.handle('canvases:save', (_e, book: CanvasBook, options?: { catalog?: boolean }) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
-    return storeWorkspace(book)
+    return storeWorkspace(book, options?.catalog === false ? 'session' : 'window')
   })
   ipcMain.handle('windows:list', () => bridge.listWindows())
 

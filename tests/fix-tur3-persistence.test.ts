@@ -9,7 +9,7 @@ import { newTally, runGraph, type Executor } from '../electron/runner'
 import { toolLayerSave } from '../electron/tool-branch'
 import { beginRun, endRun } from '../electron/tool-state'
 import { callTool, type ToolContext } from '../electron/tools'
-import { readWorkspace, writeWorkspace } from '../electron/workspace-store'
+import { readWorkspace, unpublishedCatalogSession, writeWorkspace } from '../electron/workspace-store'
 import { CLOSE_REPLY_TIMEOUT_MS, WindowCloseGuard } from '../electron/window-close'
 
 // 3. tur (1.9.95) düzeltmelerinin ölçümü: kütüphane hatasında oturum kaydı, kapanış zaman aşımı,
@@ -49,6 +49,7 @@ function harness(save: (library: unknown) => void, disk = bookOf()) {
       set: (values: { canvases: CanvasBook; graph: AgentGraph }) => { writes.push(structuredClone(values)) },
     },
     structuredClone, normalizeGraph, readWorkspace, writeWorkspace, toolLayerSave, librarySession, isLibraryConflict,
+    unpublishedCatalogSession,
     savedLibrary: structuredClone(disk.library),
     libraryStorage: { save },
     viewerState: { setBook: (book: CanvasBook) => { books.push(book) } },

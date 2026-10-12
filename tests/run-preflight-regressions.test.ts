@@ -61,7 +61,7 @@ it('N4: actual App keyboard handler protects the graph while missing-path dialog
  const to=source.indexOf("    window.addEventListener('keydown', onKey)",from)
  const js=ts.transpileModule(source.slice(from,to)+'\nreturn onKey;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText
  const deleteSelection=vi.fn()
- const ctx:any={activeIdRef:{current:'tab'},workspacePicker:null,confirmQuestion:null,saveAnswer:{current:null},closingRef:{current:false},runningRef:{current:false},libraryBusyRef:{current:false},scanner:null,nameQuestion:null,missingReport:{items:[{path:'C:\\missing.glb'}]},selectedEdgeId:null,selectedIdsRef:{current:['selected']},selectedNodeId:'selected',deleteSelection}
+ const ctx:any={activeIdRef:{current:'tab'},workspacePicker:null,confirmQuestion:null,saveAnswer:{current:null},closingRef:{current:false},runningRef:{current:false},libraryBusyRef:{current:false},scanner:null,nameQuestion:null,importQuestion:null,missingReport:{items:[{path:'C:\\missing.glb'}]},selectedEdgeId:null,selectedIdsRef:{current:['selected']},selectedNodeId:'selected',deleteSelection}
  const handler=new Function('ctx','with(ctx){'+js+'}')(ctx)
  handler({key:'Delete',ctrlKey:false,metaKey:false,target:{tagName:'BUTTON',closest:()=>null}})
  expect(deleteSelection).not.toHaveBeenCalled()

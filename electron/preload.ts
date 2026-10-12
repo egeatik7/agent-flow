@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   manageViewer: (action: string) => ipcRenderer.invoke('viewer:manage', action),
   manageLibrary: (mode: string) => ipcRenderer.invoke('library:manage', mode),
   getCanvases: () => ipcRenderer.invoke('canvases:get'),
-  saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
+  saveCanvases: (book: unknown, options?: { catalog?: boolean }) => ipcRenderer.invoke('canvases:save', book, options),
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => ipcRenderer.invoke('screen:scan', windowTitle, ramp),

@@ -66,3 +66,15 @@ describe('kütüphane kayıt çakışması ve toparlanma', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }) }
   })
 })
+
+it('moving a folder cannot create a second same-name sibling', () => {
+ const initial: CanvasBook = { tabs: [], activeId: '', library: { folders: [{ id: 'parent', name: 'P', section: 'canvas' }, { id: 'one', name: 'Same', section: 'canvas' }, { id: 'two', name: 'same', parentId: 'parent', section: 'canvas' }], canvases: [], automations: [] } }
+ const before = structuredClone(initial)
+ expect(() => changeLibrary(initial, { action: 'move', refs: [{ kind: 'folder', id: 'one' }], parentId: 'parent' })).toThrow('aynı adlı')
+ expect(initial).toEqual(before)
+})
+it('cross-section moves preserve visible folder content instead of retagging it into the wrong section', () => {
+ const initial: CanvasBook = { tabs: [], activeId: '', library: { folders: [{ id: 'source', name: 'S', section: 'canvas' }, { id: 'target', name: 'T', section: 'automation' }], canvases: [{ id: 'canvas', name: 'C', folderId: 'source', graph: { nodes: [], edges: [] }, updatedAt: 0 }], automations: [] } }
+ expect(() => changeLibrary(initial, { action: 'move', refs: [{ kind: 'folder', id: 'source' }], parentId: 'target' })).toThrow('bölümle uyuşmuyor')
+ expect(() => changeLibrary(initial, { action: 'move', refs: [{ kind: 'canvas', id: 'canvas' }], parentId: 'target' })).toThrow('bölümle uyuşmuyor')
+})

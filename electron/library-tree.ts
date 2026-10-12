@@ -90,12 +90,18 @@ export function changeLibrary(book: CanvasBook, change: LibraryChange): CanvasBo
    if (change.action === 'archive') { item.archived = change.archived; if (!change.archived && isArchived(lib, item)) { if (ref.kind === 'folder') (item as LibraryFolder).parentId = undefined; else (item as {folderId?:string}).folderId = undefined } }
    else if (ref.kind === 'folder') {
      const folder = item as LibraryFolder
-     folder.parentId = change.parentId
-     // Bir klasör, başka bölümün klasörüne taşınırsa o bölüme geçer: ağaçta karışık dal kalmasın.
      const target = change.parentId ? lib.folders.find(f => f.id === change.parentId) : undefined
-     if (target?.section) folder.section = target.section
+     const descendants = new Set([folder.id]); let grew = true
+     while (grew) { grew = false; for (const child of lib.folders) if (child.parentId && descendants.has(child.parentId) && !descendants.has(child.id)) { descendants.add(child.id); grew = true } }
+     if (change.parentId && descendants.has(change.parentId)) throw Error('Klasör kendi içine taşınamaz.')
+     if (target?.section && ((target.section === 'automation' && lib.canvases.some(c => c.folderId && descendants.has(c.folderId))) || (target.section === 'canvas' && lib.automations.some(a => a.folderId && descendants.has(a.folderId))))) throw Error('Klasör içeriği hedef bölümle uyuşmuyor; farklı bölümün içine taşınmadı.')
+     folder.parentId = change.parentId
+     if (target?.section) for (const child of lib.folders) if (descendants.has(child.id)) child.section = target.section
+     if (lib.folders.some(other => other.id !== folder.id && other.parentId === folder.parentId && other.section === folder.section && other.name.trim().toLocaleLowerCase('tr') === folder.name.trim().toLocaleLowerCase('tr'))) throw Error('Hedefte aynı adlı bir klasör var; taşıma yapılmadı.')
    }
    else {
+     const target = change.parentId ? lib.folders.find(f => f.id === change.parentId) : undefined
+     if (target?.section && target.section !== ref.kind) throw Error('Öğe hedef bölümle uyuşmuyor; farklı bölümün içine taşınmadı.')
      const row = item as { folderId?: string; section?: never }
      row.folderId = change.parentId
    }

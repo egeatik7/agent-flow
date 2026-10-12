@@ -143,6 +143,8 @@ export type CanvasTab = {
   graph: AgentGraph
   /** Explicit library record this open tab was loaded from. */
   savedId?: string
+  /** Stable document identity, including unsaved/exported working copies. */
+  canvasId?: string
   /** Last explicitly saved/opened state; also the untouched state of a new canvas. */
   baseline?: { name: string; graph: AgentGraph }
 }
@@ -873,15 +875,19 @@ export function normalizeGraph(raw: unknown): AgentGraph {
 }
 
 /** Independent snapshots. Empty arrays mean intentionally deleted, never reseed them. */
-function normalizeSavedCanvases(raw: unknown): SavedCanvas[] {
+function normalizeSavedCanvases(raw: unknown, strictIdentity = false): SavedCanvas[] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
   return raw.flatMap((value, i) => {
     if (!value || typeof value !== 'object') return []
     const r = value as Partial<SavedCanvas>
     if (!r.graph || !Array.isArray(r.graph.nodes) || !Array.isArray(r.graph.edges)) return []
+    if (strictIdentity && (typeof r.id !== 'string' || !r.id.trim() || r.id !== r.id.trim())) throw new Error('Kütüphanedeki tuval kimliği geçersiz; kayıtlar değiştirilmedi.')
     let id = typeof r.id === 'string' && r.id ? r.id : rid()
-    if (seen.has(id)) id = rid()
+    if (seen.has(id)) {
+      if (strictIdentity) throw new Error('Kütüphanede aynı kimlikte birden fazla tuval var; kayıtlar değiştirilmedi. Çakışan sürümü ayrı kimlikle aktar.')
+      id = rid()
+    }
     seen.add(id)
     return [{ id, name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
       graph: normalizeGraph(r.graph), ...(typeof r.folderId === 'string' ? { folderId: r.folderId } : {}), ...(r.archived === true ? { archived: true } : {}), updatedAt: Number.isFinite(r.updatedAt) && r.updatedAt! >= 0 ? r.updatedAt! : 0 }]
@@ -898,14 +904,15 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
     seen.add(id)
     return { id, name: typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
       graph: normalizeGraph(t?.graph), ...(typeof t?.savedId === 'string' ? { savedId: t.savedId } : {}),
+      ...(typeof t?.canvasId === 'string' && t.canvasId ? { canvasId: t.canvasId } : {}),
       ...(t?.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
         ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}) }
   }) : [{ id: rid(), name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }]
   const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0]?.id ?? ''
   let library: CanvasLibrary
   if (rec?.library && typeof rec.library === 'object') {
-    const lib = rec.library as { canvases?: unknown; automations?: unknown; folders?: LibraryFolder[] }
-    const catalog = normalizeSavedCanvases(lib.canvases)
+    const lib = rec.library as { schemaVersion?: unknown; canvases?: unknown; automations?: unknown; folders?: LibraryFolder[] }
+    const catalog = normalizeSavedCanvases(lib.canvases, lib.schemaVersion === 2)
     const legacyMembers = new Set<string>()
     const ids = new Set<string>()
     const automations: CanvasAutomation[] = Array.isArray(lib.automations) ? lib.automations.flatMap(value => {
@@ -963,6 +970,7 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
     recoveryIds.add(t.id)
     return [{ id: t.id, name: typeof t.name === 'string' ? t.name.slice(0, 48) : 'Kurtarılan Tuval', graph: normalizeGraph(t.graph),
       ...(typeof t.savedId === 'string' ? { savedId: t.savedId } : {}),
+      ...(typeof t.canvasId === 'string' && t.canvasId ? { canvasId: t.canvasId } : {}),
       ...(t.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
         ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}),
       recoveredAt: typeof t.recoveredAt === 'number' && Number.isFinite(t.recoveredAt) ? t.recoveredAt : 0 }]

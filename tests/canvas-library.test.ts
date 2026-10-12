@@ -56,8 +56,9 @@ describe('one canonical canvas catalog with ordered automation references', () =
     expect(reloaded.library!.automations[0].entries).toEqual([])
     expect(b.tabs.map(t => t.savedId)).toEqual([undefined, undefined])
   })
-  it('repairs duplicate IDs and drops invalid references from corrupt stored records', () => {
+  it('repairs legacy duplicate IDs and drops invalid legacy references', () => {
     const b = group(book()), id = b.library!.automations[0].id
+    b.library!.schemaVersion = undefined
     b.tabs[1].id = 'a'; b.library!.canvases[1].id = 'a'
     b.library!.automations[0].entries.push({ id: 'entry-0', canvasId: 'a' }, { id: 'missing', canvasId: 'missing' })
     const n = normalizeCanvasBook(b)

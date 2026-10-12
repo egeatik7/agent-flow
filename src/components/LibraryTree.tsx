@@ -13,6 +13,7 @@ export default function LibraryTree(p: {
  itemName?: (item: LibraryItem) => string
  renderAfter?: (item: LibraryItem) => ReactNode
  reveal?: LibraryRef; draftId?:string
+ onDelete?: (refs: LibraryRef[]) => void
  onMove?: (refs: LibraryRef[], parentId?: string) => void
 }) {
  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -26,7 +27,7 @@ export default function LibraryTree(p: {
  useEffect(()=>()=>{cleanup.current?.();clearTimeout(expandTimer.current)},[])
  const bolum = p.mode === 'automation' ? 'automation' as const : 'canvas' as const
   // Bolumu olmayan (eski) klasorler iki bolumde de gorunur; boylece hicbir klasor kaybolmaz.
-  const items: LibraryItem[] = [ ...(p.library.folders ?? []).filter(f => f.section === bolum).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => p.mode === 'automation' ? true : isArchived(p.library, item) === !!p.archived)
+  const items: LibraryItem[] = [ ...(p.library.folders ?? []).filter(f => !f.section || f.section === bolum).map(f => ({ ...f, kind: 'folder' as const })), ...(p.mode === 'automation' ? p.library.automations.map(a => ({ ...a, kind: 'automation' as const })) : p.library.canvases.map(c => ({ ...c, kind: 'canvas' as const }))) ].filter(item => p.mode === 'automation' ? true : isArchived(p.library, item) === !!p.archived)
  const parentOf = (item: LibraryItem) => {
   const parent = item.kind === 'folder' ? item.parentId : item.folderId
   // Gorunmeyen ebeveyn: ogeyi koke bagla ki hicbir kayit ekrandan dusmesin.
@@ -63,7 +64,7 @@ export default function LibraryTree(p: {
  }
  const accepts=(e:React.DragEvent)=>p.onMove&&!p.disabled&&(dragging.current.length||Array.from(e.dataTransfer.types??[]).includes('application/x-nubbo-library'))
  return <div ref={tree} tabIndex={0} className={`library-tree${over==='@root'?' root-drop-target':''}`} role="tree" aria-multiselectable="true" aria-label={p.mode === 'automation' ? 'Otomasyon klasörleri' : 'Tuval klasörleri'} onContextMenu={e => { e.preventDefault(); p.onContext?.(e) }} onMouseDown={marquee}
-  onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();select(visible.map(({item})=>({kind:item.kind,id:item.id}))) }if(e.key==='Escape'){e.stopPropagation();select([])}}}
+  onKeyDown={e=>{if((e.target as HTMLElement).closest('input,textarea,[contenteditable=true]'))return;if(e.key==='Delete'&&!p.disabled&&selected.length&&p.onDelete){e.preventDefault();e.stopPropagation();p.onDelete(selected);return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();select(visible.map(({item})=>({kind:item.kind,id:item.id}))) }if(e.key==='Escape'){e.stopPropagation();select([])}}}
   onDragOver={e => { if (accepts(e)) {e.preventDefault();e.dataTransfer.dropEffect='move';setOver('@root')} }} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setOver('')}} onDrop={e => drop(e)}>
   {!visible.length && <div className="library-empty">{p.archived ? 'Arşiv boş.' : p.touch ? 'Kütüphane boş.' : 'Sağ tıkla bir klasör veya tuval oluştur.'}</div>}
   {visible.map(({item,depth}) => {
@@ -77,7 +78,7 @@ export default function LibraryTree(p: {
     onDragOver={e=>{e.stopPropagation();if(folder&&accepts(e)){e.preventDefault();if(over!==key){clearTimeout(expandTimer.current);expandTimer.current=setTimeout(()=>setExpanded(s=>new Set([...s,item.id])),600)}setOver(key);e.dataTransfer.dropEffect='move'}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node)){setOver('');clearTimeout(expandTimer.current)}}}
     onDrop={e=>{if(folder)drop(e,item.id);else{e.preventDefault();e.stopPropagation()}}}>
     <button type="button" className={`tree-expander${!folder?' empty':''}`} tabIndex={-1} aria-label={folder ? `${expanded.has(item.id)?'Daralt':'Genişlet'} ${item.name}` : undefined} onClick={e=>{e.stopPropagation();if(folder)toggle(item.id)}}>{folder?(expanded.has(item.id)?'−':'+'):''}</button>
-    <FileIcon kind={item.kind}/><span className="library-tree-name" title={item.name}>{p.itemName?.(item) ?? item.name}</span>
+    <FileIcon kind={item.kind}/><span className="library-tree-name" title={item.kind==='canvas'?`${item.name} — Kimlik: ${item.id}`:item.name}>{p.itemName?.(item) ?? item.name}</span>
    </div>{p.renderAfter?.(item)} </Fragment>
   })}
   {box&&<div className="library-marquee" style={{left:box.x,top:box.y,width:box.w,height:box.h}}/>}

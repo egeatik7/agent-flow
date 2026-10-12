@@ -3,7 +3,7 @@ import { addCanvasTab, libraryOf, openSavedCanvas, saveCanvas, saveCanvasAs, sav
 import { canvasDirty, discardCanvasDraft, restoreCanvasDraft, startCanvasSession } from '../electron/canvas-session'
 import { createNode, normalizeCanvasBook, type AgentGraph, type CanvasBook } from '../electron/graph-types'
 import { saveOpenSequence, saveWorkspace } from '../electron/workspace-save'
-import { readWorkspace, writeWorkspace } from '../electron/workspace-store'
+import { readWorkspace, writeWorkspace, unpublishedCatalogSession } from '../electron/workspace-store'
 import { librarySession } from '../electron/library-storage'
 
 const empty = (): CanvasBook => normalizeCanvasBook({ activeId: '', tabs: [], library: { canvases: [], automations: [] }, branches: [{ id: 'tool' }] })
@@ -189,4 +189,19 @@ describe('atomic Electron workspace boundary', () => {
     expect(disk.branches).toEqual([])
     expect(set.mock.calls.at(-1)![0].graph).toEqual(original.tabs[0].graph)
   })
+})
+
+it('a rejected Save As or new automation stays unpublished and recoverable', () => {
+  const current = saved(), changed = structuredClone(current)
+  changed.tabs[0].graph.nodes[0].title = 'Unpublished copy'
+  let incoming = saveCanvasAs(changed, changed.activeId, 'New copy')
+  incoming = saveAutomation(incoming, { name: 'New list', entries: [{ id: 'entry', canvasId: incoming.tabs[0].savedId! }] })
+  const newAutomation = incoming.library!.automations.at(-1)!
+  incoming.automationDraft = { key: 'draft', ...newAutomation, expected: structuredClone(newAutomation) }
+  const rolledBack = unpublishedCatalogSession(incoming, current)
+  expect(rolledBack.library).toEqual(current.library)
+  expect(rolledBack.tabs[0].savedId).toBeUndefined(); expect(rolledBack.tabs[0].baseline).toBeUndefined()
+  expect(rolledBack.tabs[0].canvasId).toBe(incoming.tabs[0].canvasId)
+  expect(rolledBack.automationDraft!.id).toBeUndefined(); expect(rolledBack.automationDraft!.expected).toBeUndefined()
+  expect(startCanvasSession(rolledBack).recovery![0].graph.nodes[0].title).toBe('Unpublished copy')
 })

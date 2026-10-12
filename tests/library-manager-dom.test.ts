@@ -78,3 +78,47 @@ it('does not save a different automation editor from another row context menu',a
  await event(row('Production'),'contextmenu');await event(button('Yeniden Adlandır…',document.querySelector('[role=menu]')!),'click');const input=document.querySelector<HTMLInputElement>('[role=dialog] input')!;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;await act(async()=>{setter.call(input,'Changed');input.dispatchEvent(new Event('input',{bubbles:true}))});await event(button('Kaydet',document.querySelector('[role=dialog]')!),'click')
  await event(row('Other'),'contextmenu');const save=button('Değişiklikleri Kaydet',document.querySelector('[role=menu]')!);expect(save.disabled).toBe(true);await event(save,'click');expect(p.onSaveAutomation).not.toHaveBeenCalled()
 })
+
+it('deletes the whole multi-selection from the context menu in one batch',async()=>{
+ const p={...props(),onDeleteItems:vi.fn(async(_refs: import('../electron/library-tree').LibraryRef[])=>true)};await act(async()=>root.render(createElement(CanvasLibrary,p)))
+ await event(host.querySelector('[aria-label="Genişlet Hunyuan"]')!,'click')
+ await event(row('Image 1'),'click');await event(row('Image 2'),'click',{ctrlKey:true});await event(row('Image 1'),'contextmenu')
+ const menu=document.querySelector('[role=menu]')!;expect(button('Sil…',menu)).toBeUndefined()
+ await event(button('Seçilenleri Sil… (2)',menu),'click')
+ expect(p.onDeleteItems).toHaveBeenCalledTimes(1)
+ expect(p.onDeleteItems.mock.calls[0][0]).toEqual([{kind:'canvas',id:'one'},{kind:'canvas',id:'two'}])
+ expect(p.onDeleteCanvas).not.toHaveBeenCalled()
+})
+it('Delete key sends the whole selection and a failed save keeps it selected',async()=>{
+ const p={...props(),onDeleteItems:vi.fn(async(_refs: import('../electron/library-tree').LibraryRef[])=>false)};await act(async()=>root.render(createElement(CanvasLibrary,p)))
+ await event(host.querySelector('[aria-label="Genişlet Hunyuan"]')!,'click')
+ await event(row('Image 1'),'click');await event(row('Image 2'),'click',{ctrlKey:true})
+ await act(async()=>row('Image 2').dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true})))
+ expect(p.onDeleteItems).toHaveBeenCalledTimes(1)
+ expect(host.querySelectorAll('[aria-selected=true][role=treeitem]')).toHaveLength(2)
+})
+
+it('marquee selection is deleted as one batch through Delete',async()=>{
+ const p={...props(),onDeleteItems:vi.fn(async(_refs: import('../electron/library-tree').LibraryRef[])=>true)};await act(async()=>root.render(createElement(CanvasLibrary,p)));await event(host.querySelector('[aria-label="Genişlet Hunyuan"]')!,'click')
+ const tree=host.querySelector('[role=tree]')!;vi.spyOn(tree,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,260,320))
+ Array.from(tree.querySelectorAll('[role=treeitem]')).forEach((el,i)=>vi.spyOn(el,'getBoundingClientRect').mockReturnValue(new DOMRect(0,i*30,200,25)))
+ await event(tree,'mousedown',{button:0,clientX:240,clientY:70});await act(async()=>window.dispatchEvent(new MouseEvent('mousemove',{clientX:50,clientY:119})));await act(async()=>window.dispatchEvent(new MouseEvent('mouseup')))
+ await act(async()=>tree.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true})))
+ expect(p.onDeleteItems).toHaveBeenCalledTimes(1)
+ expect(p.onDeleteItems.mock.calls[0][0].map(r=>r.id)).toEqual(['one','two'])
+})
+
+it('legacy mixed folders are visible in both sections instead of losing their hierarchy',async()=>{
+ const p=props();p.library.folders!.push({id:'legacy',name:'Mixed legacy'});p.library.canvases[0].folderId='legacy';p.library.automations[0].folderId='legacy'
+ await act(async()=>root.render(createElement(CanvasLibrary,p)));expect(row('Mixed legacy')).toBeTruthy()
+ await event(button('Otomasyonlar',host),'click');expect(row('Mixed legacy')).toBeTruthy()
+})
+it('a selected synthetic automation draft is passed separately from stored batch refs',async()=>{
+ const p={...props(),onDeleteItems:vi.fn(async(_refs:import('../electron/library-tree').LibraryRef[],_draft?:{key:string;name:string})=>true)}
+ await act(async()=>root.render(createElement(CanvasLibrary,p)));await event(button('Otomasyonlar',host),'click');await event(host.querySelector('[role=tree]')!,'contextmenu');await event(button('Yeni Otomasyon',document.querySelector('[role=menu]')!),'click')
+ const draftRow=host.querySelector('.library-tree-row.draft')!;const key=draftRow.getAttribute('data-library-key')!.replace('automation:','')
+ await event(draftRow,'click');await event(row('Production'),'click',{ctrlKey:true})
+ await act(async()=>host.querySelector('[role=tree]')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true})))
+ expect(p.onDeleteItems).toHaveBeenCalledWith([{kind:'automation',id:'run'}],expect.objectContaining({key,name:'Otomasyon 1'}))
+ expect(host.querySelector('.library-tree-row.draft')).toBeNull()
+})

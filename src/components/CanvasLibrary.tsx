@@ -29,6 +29,7 @@ type Props = {
   onCloseCanvas: (id: string) => void
   onRenameCanvas: (id: string, name: string, reviewingClose?: boolean) => Promise<boolean>
   onDeleteCanvas: (id: string) => void
+  onDeleteItems?: (refs: LibraryRef[], draft?: { key: string; name: string }) => Promise<boolean>
   onOpenAutomation: (id: string) => void
   onSaveAutomation: (draft: AutomationDraft) => Promise<CanvasAutomation | null>
   onDeleteAutomation: (id: string) => void
@@ -64,6 +65,7 @@ export default function CanvasLibrary(p: Props) {
   useEffect(()=>{if(!menu)return;const close=(e:PointerEvent)=>{if(!(e.target as Element)?.closest('.library-context-menu'))setMenu(null)};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')setMenu(null)};window.addEventListener('pointerdown',close);window.addEventListener('keydown',key);return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',key)}},[menu])
   const [pending, setPending] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [deleteFailed, setDeleteFailed] = useState(false)
   const busy = useRef(false)
   const locked = p.disabled || pending
   const dirty = !!editor && automationDraftDirty(editor)
@@ -144,6 +146,15 @@ export default function CanvasLibrary(p: Props) {
   const askName = (title:string,initial:string,answer:(name:string)=>void) => {setMenu(null);setQuestion({title,initial,answer})}
   const action = (fn:()=>void) => {setMenu(null);fn()}
   const refs = menu?.item ? (selection.some(r=>refKey(r)===refKey(menu.item!))?selection:[{kind:menu.item.kind,id:menu.item.id}]) : selection
+  const eraseSelected = async (refs: LibraryRef[]) => {
+    if (!p.onDeleteItems || locked || busy.current || !refs.length) return
+    const unsaved = editorRef.current && !editorRef.current.id && refs.some(ref => ref.kind === 'automation' && ref.id === editorRef.current!.key) ? editorRef.current : undefined
+    const snapshot = refs.filter(ref => ref.kind !== 'automation' || ref.id !== unsaved?.key).map(ref => ({ ...ref }))
+    setMenu(null); busy.current = true; setPending(true); setDeleteFailed(false)
+    try { if (await p.onDeleteItems(snapshot, unsaved ? { key: unsaved.key, name: unsaved.name } : undefined)) { setSelection([]); if (unsaved) setEditor(null) } else setDeleteFailed(true) }
+    catch { setDeleteFailed(true) }
+    finally { busy.current = false; setPending(false) }
+  }
   const parent = menu?.item?.kind==='folder' ? menu.item.id : menu?.item?.folderId
   const addPicked = () => {
     if(!editor || locked || stale || missing)return
@@ -172,9 +183,10 @@ export default function CanvasLibrary(p: Props) {
       <button className={`xp-btn ${view==='canvas-archive'?'primary':''}`} role="tab" aria-selected={view==='canvas-archive'} onClick={()=>{setView('canvas-archive');setSelection([])}}>Arşivlenmiş Tuvaller</button>
       <button className={`xp-btn ${view==='automations'?'primary':''}`} role="tab" aria-selected={view==='automations'} onClick={()=>{setView('automations');setSelection([])}}>Otomasyonlar</button>
     </div>
-    <div className="library-explorer-toolbar"><span title={p.directory||'Kütüphane'}>{p.directory?.split(/[\\/]/).slice(-1)[0]||'Nubbo'}</span></div>
+    <div className="library-explorer-toolbar"><span title={p.directory||'Kütüphane'}>{p.directory?.split(/[\\/]/).slice(-1)[0]||'Nubbo'}</span>{selection.length>0&&p.onDeleteItems&&<button className="xp-btn" disabled={locked} onClick={()=>void eraseSelected(selection)}>Seçilenleri Sil… ({selection.length})</button>}</div>
+    {deleteFailed&&<p className="hint" role="status">Silme tamamlanmadı; seçim korundu.</p>}
     <div className="canvas-library-scroll" onContextMenu={e=>context(e)}>
-      <LibraryTree library={treeLibrary} draftId={draftId} reveal={editor?{kind:'automation',id:editor.id??editor.key}:undefined} mode={view==='automations'?'automation':'canvas'} archived={archived} disabled={locked} selected={selection} onSelect={setSelection} onContext={(e,item)=>context(e,item?.id===draftId?undefined:item)} onMove={p.onLibraryChange?(refs,parentId)=>void p.onLibraryChange?.({action:'move',refs,parentId}):undefined} onOpen={item=>{if(item.kind==='canvas'){const c=p.library.canvases.find(c=>c.id===item.id);if(c)p.onOpenCanvas(c)}else if(item.kind==='automation'){if(item.id===(editor?.id??editor?.key))setCollapsed(!collapsed);else{const a=p.library.automations.find(a=>a.id===item.id);if(a)void choose(a)}}}} itemName={item=>item.kind==='automation'&&(editor?.id??editor?.key)===item.id?editor!.name+(dirty?' *':''):item.name} renderAfter={item=>view==='automations'&&(editor?.id??editor?.key)===item.id&&!collapsed?<div className="automation-editor-attached">{editView}</div>:null}/>
+      <LibraryTree library={treeLibrary} draftId={draftId} reveal={editor?{kind:'automation',id:editor.id??editor.key}:undefined} mode={view==='automations'?'automation':'canvas'} archived={archived} disabled={locked} selected={selection} onSelect={setSelection} onDelete={p.onDeleteItems?refs=>void eraseSelected(refs):undefined} onContext={(e,item)=>context(e,item?.id===draftId?undefined:item)} onMove={p.onLibraryChange?(refs,parentId)=>void p.onLibraryChange?.({action:'move',refs,parentId}):undefined} onOpen={item=>{if(item.kind==='canvas'){const c=p.library.canvases.find(c=>c.id===item.id);if(c)p.onOpenCanvas(c)}else if(item.kind==='automation'){if(item.id===(editor?.id??editor?.key))setCollapsed(!collapsed);else{const a=p.library.automations.find(a=>a.id===item.id);if(a)void choose(a)}}}} itemName={item=>item.kind==='automation'&&(editor?.id??editor?.key)===item.id?editor!.name+(dirty?' *':''):item.name} renderAfter={item=>view==='automations'&&(editor?.id??editor?.key)===item.id&&!collapsed?<div className="automation-editor-attached">{editView}</div>:null}/>
     </div>
     <div className="library-statusbar">{view==='automations'?'Otomasyonlar':archived?'Arşivlenmiş tuvaller':'Tuvaller'} · {selection.length?`${selection.length} öğe seçili`:'Sağ tık: işlemler'}</div>
     {menu&&createPortal(<div className="library-context-menu" role="menu" style={{left:menu.x,top:menu.y}}><fieldset disabled={locked} style={{border:0,padding:0,margin:0}}>
@@ -184,16 +196,17 @@ export default function CanvasLibrary(p: Props) {
         <button role="menuitem" onClick={()=>action(()=>editor&&setEditor({...editor,entries:editAutomationEntries(editor.entries,menu.entryId!,'down')}))}>Aşağı Taşı</button>
         <button role="menuitem" onClick={()=>action(()=>void removeEntry(menu.entryId!))}>Listeden Çıkar</button>
       </> : <>
-        {menu.item?.kind==='canvas'&&<><button role="menuitem" onClick={()=>action(()=>{const c=p.library.canvases.find(c=>c.id===menu.item!.id);if(c)p.onOpenCanvas(c)})}>Aç</button><button role="menuitem" onClick={()=>askName('Tuvali Yeniden Adlandır',menu.item!.name,name=>void p.onRenameCanvas(menu.item!.id,name))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>p.onDuplicateCanvas?.(menu.item!.id))}>Çoğalt</button><button role="menuitem" onClick={()=>action(()=>p.onExportCanvas?.(menu.item!.id))}>Dışa Aktar…</button><button role="menuitem" onClick={()=>action(()=>p.onCloseCanvas(menu.item!.id))}>Açık Sekmesini Kapat</button><button role="menuitem" onClick={()=>action(()=>p.onDeleteCanvas(menu.item!.id))}>Sil…</button><hr/></>}
+        {menu.item?.kind==='canvas'&&<><button role="menuitem" onClick={()=>action(()=>{const c=p.library.canvases.find(c=>c.id===menu.item!.id);if(c)p.onOpenCanvas(c)})}>Aç</button><button role="menuitem" onClick={()=>askName('Tuvali Yeniden Adlandır',menu.item!.name,name=>void p.onRenameCanvas(menu.item!.id,name))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>p.onDuplicateCanvas?.(menu.item!.id))}>Çoğalt</button><button role="menuitem" onClick={()=>action(()=>p.onExportCanvas?.(menu.item!.id))}>Dışa Aktar…</button><button role="menuitem" onClick={()=>action(()=>p.onCloseCanvas(menu.item!.id))}>Açık Sekmesini Kapat</button>{refs.length<=1&&<button role="menuitem" onClick={()=>action(()=>p.onDeleteCanvas(menu.item!.id))}>Sil…</button>}<hr/></>}
         {(menu.item?.kind==='automation'||menu.automation||(!menu.item&&editor))&&<>
           <button role="menuitem" onClick={()=>action(()=>{const a=p.library.automations.find(a=>a.id===(menu.item?.id??menu.automation?.id??editor?.id));if(a)void choose(a)})}>Düzenle / Genişlet</button><button role="menuitem" disabled={dirty} onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onOpenAutomation(id)})}>Otomasyonu Aç</button>
           <button role="menuitem" onClick={()=>askName('Otomasyonu Yeniden Adlandır',menu.item?.name??menu.automation?.name??editor?.name??'',async name=>{const id=menu.item?.id??menu.automation?.id??editor?.id;const a=p.library.automations.find(a=>a.id===id);if(id&&editor?.id!==id&&a){if(await reviewDraft())setEditor({...editorFor(a),name})}else change(e=>({...e,name}))})}>Yeniden Adlandır…</button>
           <button role="menuitem" disabled={!contextIsEditor||!dirty} onClick={()=>action(()=>{if(contextIsEditor&&editor)void persist(editor)})}>Değişiklikleri Kaydet</button><button role="menuitem" disabled={!contextIsEditor} onClick={()=>action(()=>void discard())}>Değişikliklerden Vazgeç…</button>
           <button role="menuitem" disabled={dirty} onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onExportAutomation(id)})}>Dışa Aktar…</button>
-          <button role="menuitem" onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onDeleteAutomation(id);else void discard()})}>Sil…</button>
+          {refs.length<=1&&<button role="menuitem" onClick={()=>action(()=>{const id=menu.item?.id??menu.automation?.id??editor?.id;if(id)p.onDeleteAutomation(id);else void discard()})}>Sil…</button>}
           {stale&&<button role="menuitem" onClick={()=>action(()=>void(async()=>{if(!dirty||await p.onConfirm('Güncel kaydı yüklemek için taslaktan vazgeçilsin mi?')){setEditor(source?editorFor(source):null);setFailed(false)}})())}>Yeniden Yükle</button>}<hr/>
         </>}
         {menu.item?.kind==='folder'&&<><button role="menuitem" onClick={()=>askName('Klasörü Yeniden Adlandır',menu.item!.name,name=>void p.onLibraryChange?.({action:'renameFolder',id:menu.item!.id,name}))}>Yeniden Adlandır…</button><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'deleteFolder',id:menu.item!.id}))}>Boş Klasörü Sil</button><hr/></>}
+        {refs.length>1&&p.onDeleteItems&&<button role="menuitem" onClick={()=>void eraseSelected(refs)}>Seçilenleri Sil… ({refs.length})</button>}
         {refs.length>0&&<><button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'move',refs,parentId:undefined}))}>Ana Klasöre Taşı</button><hr/></>}
         {refs.length>0&&view!=='automations'&&<button role="menuitem" onClick={()=>action(()=>void p.onLibraryChange?.({action:'archive',refs,archived:!archived}))}>{archived?'Arşivden Geri Al':'Arşivle'}</button>}
         {view!=='canvas-archive'&&<button role="menuitem" onClick={()=>askName('Yeni Klasör','Yeni Klasör',name=>void p.onLibraryChange?.({action:'newFolder',name,parentId:parent,section:view==='automations'?'automation':'canvas'}))}>Yeni Klasör…</button>}
