@@ -6,7 +6,10 @@ import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'rea
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createNode, DEFAULT_SETTINGS, normalizeCanvasBook, type AgentGraph, type CanvasBook } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'
-import CanvasLibrary from '../src/components/CanvasLibrary'
+import CanvasLibrary from '../src/components/ZipCanvasLibrary'
+import { withZipFixture } from './helpers/zip-fixture'
+import { zipDocumentFor } from '../electron/zip-workspace'
+import type { ZipLibraryAction } from '../electron/zip-library-api'
 import CanvasTabs, { type CanvasTabItem } from '../src/components/CanvasTabs'
 import NodeCanvas from '../src/components/NodeCanvas'
 import NodeNavigator from '../src/components/NodeNavigator'
@@ -47,6 +50,15 @@ describe('1) katalog yazılamadıysa sahte başarı ve ilerleyen taban yok', () 
       if (conflict) return { conflict: true }
       return true
     },
+    zipLibraryAction: async (action: ZipLibraryAction) => {
+      if (libraryError) throw Error('Kütüphane yazılamadı: '+libraryError)
+      if (conflict) throw Error('ZIP grubu değişti; yeniden yükle ve tekrar dene.')
+      if (action.action !== 'saveCanvas') throw Error('Unexpected action')
+      const canvas = zipDocumentFor(action.tab)
+      const library = structuredClone(seed.zipLibrary!)
+      library.groups[0].canvases = [canvas]
+      return {library,canvas}
+    },
     listWindows: async () => [], bootReady: () => {}, manageLibrary: vi.fn(),
     onCloseRequested: () => () => {}, finishClose: async () => {},
     onAgentLog: () => () => {}, onAgentStep: () => () => {}, onAgentEdge: () => () => {}, onAgentPatch: () => () => {},
@@ -61,11 +73,8 @@ describe('1) katalog yazılamadıysa sahte başarı ve ilerleyen taban yok', () 
   beforeEach(() => {
     vi.useFakeTimers()
     conflict = false; libraryError = undefined; writes.length = 0
-    seed = normalizeCanvasBook({
-      activeId: '',
-      tabs: [],
-      library: { canvases: [{ id: 'saved', name: 'Shared', updatedAt: 1, graph: { nodes: [createNode('start', 0, 0)], edges: [] } }], automations: [] },
-    })
+    seed = withZipFixture(normalizeCanvasBook({activeId:'',tabs:[{id:'saved',name:'Shared',graph:{nodes:[createNode('start',0,0)],edges:[]}}]}))
+
   })
   afterEach(() => { if (renderer) act(() => renderer!.unmount()); renderer = undefined; vi.useRealTimers() })
   afterAll(() => { delete (window as unknown as { xpAgent?: unknown }).xpAgent; vi.unstubAllGlobals() })
@@ -78,12 +87,21 @@ describe('1) katalog yazılamadıysa sahte başarı ve ilerleyen taban yok', () 
   const openCanvasAndEdit = async () => {
     await act(async () => { renderer = create(createElement(App), options) })
     const lib = renderer!.root.findByType(CanvasLibrary)
-    await act(async () => { lib.props.onOpenCanvas((seed.library as NonNullable<CanvasBook['library']>).canvases[0]) })
+    await act(async () => { lib.props.onOpenCanvas(seed.zipLibrary!.groups[0].canvases[0].canvasId) })
     const graph = renderer!.root.findByType(NodeCanvas).props.graph as AgentGraph
     await act(async () => { renderer!.root.findByType(NodeCanvas).props.onMoveNodes({ [graph.nodes[0].id]: { x: 77, y: 0 } }) })
     expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].dirty).toBe(true)
   }
   const saveOpenCanvas = async () => { await menuClick('Dosya'); await menuClick('Tuvali Kaydet') }
+
+  it('automatic session payload never copies the complete ZIP library into IPC/profile writes', async () => {
+    await openCanvasAndEdit()
+    await act(async()=>{await vi.advanceTimersByTimeAsync(500)})
+    expect(writes.length).toBeGreaterThan(0)
+    expect(writes.every(w=>!Object.prototype.hasOwnProperty.call(w,'zipLibrary'))).toBe(true)
+    expect(writes.at(-1)!.tabs).toHaveLength(1)
+    expect(seed.zipLibrary!.groups[0].canvases).toHaveLength(1)
+  })
 
   it('çakışma yanıtında başarı mesajı çıkmaz, sekme kirli kalır', async () => {
     await openCanvasAndEdit()
@@ -91,8 +109,8 @@ describe('1) katalog yazılamadıysa sahte başarı ve ilerleyen taban yok', () 
     await saveOpenCanvas()
     const shown = text(renderer!.root)
     expect(shown).not.toContain("Tuvaller'e kaydedildi")
-    expect(shown).toContain('katalog yazılmadı')
-    expect(shown).toContain('Kütüphaneyi Yeniden Yükle')
+    expect(shown).toContain('ZIP grubu değişti')
+    expect(shown).toContain('yeniden yükle')
     expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].dirty).toBe(true)
   })
 
@@ -110,7 +128,7 @@ describe('1) katalog yazılamadıysa sahte başarı ve ilerleyen taban yok', () 
     await openCanvasAndEdit()
     await saveOpenCanvas()
     const shown = text(renderer!.root)
-    expect(shown).toContain("“Shared” Tuvaller'e kaydedildi")
+    expect(shown).toContain("“Shared” ZIP’e kaydedildi")
     expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].dirty).toBe(false)
   })
 

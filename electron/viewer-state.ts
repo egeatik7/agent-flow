@@ -4,7 +4,7 @@ import type { ViewerMessage, ViewerSnapshot, ViewerBook, ViewerRun } from './vie
 import type { RecoveryReport } from './recovery'
 import { viewerNodePath } from './viewer-progress'
 export function viewerBook(book:CanvasBook):ViewerBook {
- return structuredClone({library:book.library??{canvases:[],automations:[]},tabs:book.tabs.map(({id,savedId,name,graph})=>({id,savedId,name,graph}))})
+ return structuredClone({zipLibrary:book.zipLibrary??{directory:'',groups:[]},tabs:book.tabs.map(({id,savedId,name,graph})=>({id,savedId,name,graph}))})
 }
 export function patchViewerGraph(graph:AgentGraph,id:string,patch:Record<string,unknown>):void {
  for(const node of graph.nodes){if(node.id===id)Object.assign(node,patch);if(node.inner)patchViewerGraph(node.inner,id,patch)}
@@ -13,13 +13,13 @@ export class ViewerState {
  private listeners=new Set<(message:ViewerMessage)=>void>()
  private bookJSON=''
  state:ViewerSnapshot
- constructor(version:string){this.state={protocol:1,version,session:randomUUID(),seq:0,at:Date.now(),book:{library:{canvases:[],automations:[]},tabs:[]},run:null,logs:[],reports:[]}}
+ constructor(version:string){this.state={protocol:1,version,session:randomUUID(),seq:0,at:Date.now(),book:{zipLibrary:{directory:'',groups:[]},tabs:[]},run:null,logs:[],reports:[]}}
  snapshot():ViewerSnapshot{return structuredClone(this.state)}
  subscribe(fn:(message:ViewerMessage)=>void){this.listeners.add(fn);return()=>this.listeners.delete(fn)}
  private emit(channel:string,payload:unknown){this.state.seq++;this.state.at=Date.now();const message:ViewerMessage={type:'event',session:this.state.session,seq:this.state.seq,at:this.state.at,channel,payload};for(const fn of this.listeners){try{fn(message)}catch{/* Viewing never interrupts a run. */}}}
  setBook(book:CanvasBook){const next=viewerBook(book),json=JSON.stringify(next);if(json===this.bookJSON)return;this.bookJSON=json;this.state.book=next;this.emit('book',next)}
  setReports(reports:RecoveryReport[]){this.state.reports=structuredClone(reports.slice(-100));this.emit('reports',this.state.reports)}
- begin(id:string,canvasId:string,graph:AgentGraph){const record=this.state.book.tabs.find(t=>t.id===canvasId||t.savedId===canvasId||`tab:${t.id}`===canvasId)??this.state.book.library.canvases.find(c=>c.id===canvasId);this.state.run={id,canvasId,name:record?.name??'Çalışan tuval',graph:structuredClone(graph),phase:'running',nodeId:null,status:{},edges:[],loop:'',method:''};this.emit('run',this.state.run)}
+ begin(id:string,canvasId:string,graph:AgentGraph){const record=this.state.book.tabs.find(t=>t.id===canvasId||t.savedId===canvasId||`tab:${t.id}`===canvasId)??this.state.book.zipLibrary.groups.filter(g=>!g.problem).flatMap(g=>g.canvases).find(c=>c.canvasId===canvasId);this.state.run={id,canvasId,name:record?.name??'Çalışan tuval',graph:structuredClone(graph),phase:'running',nodeId:null,status:{},edges:[],loop:'',method:''};this.emit('run',this.state.run)}
  finish(outcome:{ok?:boolean;stopped?:boolean}|undefined){if(!this.state.run)return;this.state.run.phase=outcome?.stopped?'stopped':outcome?.ok?'completed':'failed';this.emit('run:finish',{phase:this.state.run.phase})}
  event(channel:string,payload:unknown){
   const run=this.state.run

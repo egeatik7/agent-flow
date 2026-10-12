@@ -51,10 +51,12 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { readWorkspace, writeWorkspace, unpublishedCatalogSession, type WorkspaceWriter } from './workspace-store'
-import { LibraryStorage, librarySession, isLibraryConflict } from './library-storage'
-import { initializeLibraryDatabase } from './library-database'
-import type { CanvasLibrary } from './graph-types'
+type WorkspaceWriter = 'window' | 'tools' | 'session'
+import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
+import { zipDocumentFor } from './zip-workspace'
+import { copyZipCanvas } from './zip-canvas-document'
+import { sameCanvasContent } from './canvas-content'
+import type { ZipLibraryAction, ZipLibraryResult } from './zip-library-api'
 import { randomBytes, createHash } from 'node:crypto'
 import QRCode from 'qrcode'
 import { ViewerState } from './viewer-state'
@@ -70,7 +72,7 @@ const APPROVAL_TIMEOUT_MS = 120_000
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases?: CanvasBook; libraryPath?: string; libraryMigrated?: boolean; viewerEnabled?:boolean; viewerSecret?:string; viewerOrigin?:string }>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; zipCanvases?: CanvasBook; zipLibraryPath?: string; viewerEnabled?:boolean; viewerSecret?:string; viewerOrigin?:string }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
   // The real profile keeps the file exactly where it has always lived. A test profile
@@ -78,8 +80,8 @@ const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; canvases
   ...(storeCwd(process.env.NUBBO_PROFILE, app.getPath('userData')) ? { cwd: app.getPath('userData') } : {}),
 })
 
-let libraryStorage: LibraryStorage | undefined
-let savedLibrary: CanvasLibrary | undefined
+let zipStorage: ZipLibraryStorage | undefined
+let zipSnapshot: ZipLibrarySnapshot | undefined
 const viewerState=new ViewerState(app.getVersion())
 let viewerServer:Awaited<ReturnType<typeof startViewerServer>>|undefined
 let viewerPending:Promise<void>|undefined
@@ -476,7 +478,7 @@ function createWindow() {
 
 /**
  * The bounded way out of a close that the renderer never confirmed. This path writes nothing: the
- * tabs and drafts belong to the window, and the main process only holds `savedLibrary`. So the log
+ * tabs and drafts belong to the window, and the main process cannot read the renderer’s unflushed edits. So the log
  * says out loud that whatever the window had not saved yet can be lost — it must not claim a save.
  */
 function forceClose(reason: string): void {
@@ -1013,7 +1015,6 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
 
   report(58, 'Kayıtlar okunuyor…')
-  await initializeLibraryDatabase()
   getSettings()
   try {
     ensureLogsDir()
@@ -1070,15 +1071,18 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return next
   })
 
-  ipcMain.handle('graph:get', () => normalizeGraph(store.get('graph')))
+  const currentGraph = () => { const book = loadCanvases(false); return book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] } }
+  ipcMain.handle('graph:get', currentGraph)
   ipcMain.handle('graph:save', (_e, graph: AgentGraph) => {
-    store.set('graph', normalizeGraph(graph))
+    const book = loadCanvases()
+    if (!book.activeId) throw Error('Önce bir tuval aç.')
+    storeWorkspace({ ...book, tabs: book.tabs.map(t => t.id === book.activeId ? { ...t, graph: normalizeGraph(graph) } : t) })
     return true
   })
 
   // Developer/test tool layer; ordinary agent settings do not call these tools.
   const toolContext = {
-    getGraph: () => normalizeGraph(store.get('graph')),
+    getGraph: currentGraph,
     getSettings,
     log,
     isRunning: () => running,
@@ -1214,87 +1218,95 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return info ? info.file : null
   })
   void syncEndpoint()
-  /** An explicitly empty session must not fall back to the old graph and resurrect a tab. */
-  function loadCanvases(): CanvasBook {
-    const session = readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')),
-      store.get('libraryMigrated') ? savedLibrary ?? { schemaVersion: 2, canvases: [], automations: [] } : undefined)
-    if (!libraryStorage || !savedLibrary) {
-      libraryStorage = new LibraryStorage(store.get('libraryPath') || path.join(app.getPath('userData'), 'Library'))
-      savedLibrary = libraryStorage.load(store.get('libraryMigrated') ? undefined : session.library)
-      store.set('libraryMigrated', true)
-      // Kütüphane bazında yazıcı sahipliği: başka bir Nubbo tutuyorsa açıkça söyle, kaydı zorlamayız.
-      try { libraryStorage.claim() } catch (e) { log('warn', `Kütüphane sahipliği alınamadı: ${(e as Error).message}`) }
-    }
-    const book={ ...session, library: structuredClone(savedLibrary) }
+  function loadCanvases(refresh = true): CanvasBook {
+    zipStorage ??= new ZipLibraryStorage(store.get('zipLibraryPath') || path.join(app.getPath('documents'), 'Nubbo', 'Kütüphane'))
+    const raw = store.get('zipCanvases')
+    const session = normalizeCanvasBook(raw ?? { workspaceVersion: 3, activeId: '', tabs: [] })
+    if (refresh || !zipSnapshot) zipSnapshot = zipStorage.load()
+    const book = { ...session, workspaceVersion: 3 as const, zipLibrary: zipSnapshot }
     viewerState.setBook(book)
     return book
   }
-  /**
-   * Oturum kaydı ile kütüphane kaydı ayrıdır: kütüphane yazımı HATA VERİRSE (başka bir programda
-   * değişmiş olması, kilidin kaybı ya da okuma hatası) YALNIZCA katalog yazımı atlanır;
-   * sekmeler/taslaklar/işaret her zaman yazılır. Hata çağırana döner (`conflict` ya da `libraryError`).
-   * Ölçülen kusur: çakışma dışındaki hata yeniden fırlatılıyordu ve kullanıcının açık oturumu
-   * hiç diske inmiyordu; çakışmada da katalog atlanıp oturum yazılıyordu ama hata sessiz kalıyordu.
-   */
-  function storeWorkspace(book: CanvasBook, writer: WorkspaceWriter = 'window'): { conflict: boolean; libraryError?: string } {
-    const current = loadCanvases()
-    let conflict = false
-    let libraryError: string | undefined
-    writeWorkspace({ set: ({ canvases, graph }) => {
-      let session = canvases
-      // Katalog dosyasını YALNIZ pencere kaydı yazar; oturum/taslak ve araç katmanı kayıtları
-      // katalogu yayınlamaz (patch 1.9.93 sözleşmesi).
-      if (writer === 'window') {
-        try { libraryStorage!.save(canvases.library!); savedLibrary = structuredClone(canvases.library!) }
-        catch (e) {
-          // Katalog yazılmadı. Çakışma ayrı bildirilir; kilit kaybı/okuma hatası mesajıyla döner.
-          // Reddedilen kayıtta ESKİ yayınlanmış taban korunur: taslak kirli kalır, veri kaybolmaz.
-          conflict = isLibraryConflict(e)
-          if (!conflict) libraryError = (e as Error).message
-          session = unpublishedCatalogSession(canvases, current)
-        }
-      }
-      store.set({ canvases: librarySession(session), graph })
-      viewerState.setBook(session)
-    } }, book, current, writer)
-    return libraryError === undefined ? { conflict } : { conflict, libraryError }
+  function storeWorkspace(book: CanvasBook, writer: WorkspaceWriter = 'window'): { conflict: boolean } {
+    const current = loadCanvases(false)
+    const { zipLibrary: _library, ...input } = writer === 'tools' ? { ...current, branches: book.branches ?? [] } : { ...book, workspaceVersion: 3 as const, branches: current.branches ?? [] }
+    const session = normalizeCanvasBook(input)
+    store.set({ zipCanvases: session, graph: session.tabs.find(t => t.id === session.activeId)?.graph ?? { nodes: [], edges: [] } })
+    viewerState.setBook({ ...session, zipLibrary: current.zipLibrary })
+    return { conflict: false }
   }
-  ipcMain.handle('library:info', () => {
-    loadCanvases(); return { directory: libraryStorage!.directory, file: libraryStorage!.file, conflict: libraryStorage!.stale() }
-  })
-  app.on('will-quit', () => { try { libraryStorage?.release() } catch { /* Kilit zaten yabancı olabilir. */ } })
+  ipcMain.handle('library:info', () => { const book = loadCanvases(); return { directory: book.zipLibrary!.directory } })
   ipcMain.handle('library:manage', async (_e, mode: string) => {
     if (running || recoveryActive || !mainWindow) throw Error('Çalışma sürerken kütüphane değiştirilemez.')
-    // Opening another catalog must also work when the previously chosen folder is missing.
-    const current = mode === 'open' ? undefined : loadCanvases(), active = libraryStorage
-    if (mode !== 'open' && !active) throw Error('Kütüphane açılamadı.')
-    if (mode === 'reveal') { await shell.openPath(active!.directory); return { directory: active!.directory } }
-    if (mode === 'backup') { active!.backup(); return { directory: active!.directory } }
-    if (mode === 'reload') { const library = active!.reload(); const book: CanvasBook = { ...current!, library }; savedLibrary = library; viewerState.setBook(book); return { directory: active!.directory, book } }
-    if (!['open', 'copy', 'restore'].includes(mode)) throw Error('Geçersiz kütüphane işlemi.')
-    if (mode === 'restore') {
-      const answer = await dialog.showOpenDialog(mainWindow, { title: 'Kütüphane yedeğini seç', defaultPath: path.join(active!.directory, 'Backups'), properties: ['openFile'], filters: [{ name: 'Nubbo kütüphanesi', extensions: ['library','json'] }] })
-      if (answer.canceled) return null
-      const library = active!.restore(answer.filePaths[0])
-      const book: CanvasBook = { tabs: [], activeId: '', library }
-      store.set({ canvases: librarySession(book), graph: { nodes: [], edges: [] } }); savedLibrary = library
-      viewerState.setBook(book)
-      return { directory: active!.directory, book }
-    }
-    const answer = await dialog.showOpenDialog(mainWindow, { title: mode === 'copy' ? 'Kütüphaneyi kaydedeceğin klasörü seç' : 'Nubbo kütüphanesi bulunan klasörü seç', properties: ['openDirectory', 'createDirectory'] })
+    const current = loadCanvases()
+    if (mode === 'reveal') { await shell.openPath(zipStorage!.directory); return { directory: zipStorage!.directory } }
+    if (mode === 'reload') return { directory: zipStorage!.directory, book: current }
+    if (mode !== 'open') throw Error('Bu eski katalog işlemi kaldırıldı.')
+    const answer = await dialog.showOpenDialog(mainWindow, { title: 'ZIP kütüphanesi klasörünü seç', properties: ['openDirectory','createDirectory'] })
     if (answer.canceled) return null
-    const target = new LibraryStorage(answer.filePaths[0])
-    if (mode === 'copy' && target.directory === active!.directory) return { directory: active!.directory }
-    if (mode === 'copy' && (fs.existsSync(target.file)||fs.existsSync(target.legacyFile))) throw Error('Bu klasörde kütüphane zaten var. Aç seçeneğini kullan; üzerine yazılmadı.')
-    const library = target.load(mode === 'copy' ? current!.library : undefined)
-    const book: CanvasBook = mode === 'copy' ? { ...current!, library } : { tabs: [], activeId: '', library }
-    const graph = book.tabs.find(t => t.id === book.activeId)?.graph ?? { nodes: [], edges: [] }
-    store.set({ libraryPath: target.directory, libraryMigrated: true, canvases: librarySession(book), graph })
-    libraryStorage = target; savedLibrary = library
-    // Eski klasordeki oturum kilidi birakilir, yeni klasor sahiplenilir (pid canli kalirsa kilit asili kalirdi).
-    if (target !== active) { try { active?.release() } catch { /* Yabanci kilit yerinde kalmali. */ } try { target.claim() } catch (e) { log('warn', `Kutuphane sahipligi alinamadi: ${(e as Error).message}`) } }
-    viewerState.setBook(book)
+    const target = new ZipLibraryStorage(answer.filePaths[0]), library = target.load()
+    const book: CanvasBook = { workspaceVersion: 3, activeId: '', tabs: [], zipLibrary: library }
+    zipStorage = target; zipSnapshot = library; store.set('zipLibraryPath', target.directory); storeWorkspace(book)
     return { directory: target.directory, book }
+  })
+  ipcMain.handle('zip-library:action', async (_e, action: ZipLibraryAction): Promise<ZipLibraryResult | null> => {
+    if (running || recoveryActive || !mainWindow) throw Error('Çalışma sürerken ZIP kütüphanesi düzenlenemez.')
+    const book = loadCanvases(), storage = zipStorage!, library = book.zipLibrary!
+    const selected = 'id' in action ? library.groups.find(g => g.id === action.id) : undefined
+    const requireGroup = () => { if (!selected || !('revision' in action) || selected.revision !== action.revision) throw Error('ZIP grubu değişti; yeniden yükle ve tekrar dene.'); if (selected.problem && action.action !== 'deleteGroup') throw Error(selected.problem); return selected }
+    let next = library, canvas: import('./zip-canvas-document').ZipCanvasDocument | undefined
+    switch (action.action) {
+      case 'create': next = storage.createGroup(action.name, action.archived); break
+      case 'rename': requireGroup(); next = storage.renameGroup(action.id, action.name, action.revision); break
+      case 'archive': requireGroup(); next = storage.archiveGroup(action.id, action.archived, action.revision); break
+      case 'deleteGroup': requireGroup(); next = storage.deleteGroup(action.id, action.revision); break
+      case 'reorder': requireGroup(); next = storage.reorderGroup(action.id, action.order, action.revision); break
+      case 'deleteCanvas':
+      case 'deleteCanvases': {
+        const g = requireGroup(), ids = action.action === 'deleteCanvas' ? [action.canvasId] : action.canvasIds
+        if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !g.canvases.some(c => c.canvasId === id))) throw Error('Silinecek tuval seçimi değişti; yeniden seç.')
+        next = storage.saveGroup(g.id, g.canvases.filter(c => !ids.includes(c.canvasId)), g.revision); break
+      }
+      case 'renameCanvas': { const g = requireGroup(); if (!g.canvases.some(c => c.canvasId === action.canvasId)) throw Error('Tuval bulunamadı.'); next = storage.saveGroup(g.id, g.canvases.map(c => c.canvasId === action.canvasId ? { ...c, name: action.name } : c), g.revision); break }
+      case 'copyCanvas': { const g = requireGroup(), source = g.canvases.find(c => c.canvasId === action.canvasId); if (!source) throw Error('Tuval bulunamadı.'); canvas = copyZipCanvas(source, source.name.slice(0,152) + ' (Kopya)'); next = storage.saveGroup(g.id, [...g.canvases, canvas], g.revision); break }
+      case 'saveCanvas': {
+        canvas = zipDocumentFor(action.tab, action.copy)
+        const owner = !action.copy && action.tab.savedId ? library.groups.find(g => g.canvases.some(c => c.canvasId === action.tab.savedId)) : undefined
+        const old = owner?.canvases.find(c => c.canvasId === action.tab.savedId)
+        if (action.tab.savedId && !action.copy && !owner) throw Error('Kayıtlı tuval artık ZIP’te yok; Farklı Kaydet gerekli.')
+        if (!old && library.groups.some(g => g.canvases.some(c => c.canvasId === canvas!.canvasId))) throw Error('Bu tuval kimliği ZIP kütüphanesinde zaten var; Farklı Kaydet veya kopya olarak içe aktar.')
+        if (owner && action.id && action.id !== owner.id) throw Error('Başka ZIP’e kaydetmek için Farklı Kaydet gerekli.')
+        if (old && !action.tab.baseline) throw Error('Tuvalin kayıt tabanı yok; yeniden aç veya Farklı Kaydet.')
+        if (old && action.tab.baseline && (old.name !== action.tab.baseline.name || !sameCanvasContent({ nodes: old.nodes, edges: old.edges }, action.tab.baseline.graph))) throw Error('Tuval dışarıda değişti; eski sekme üzerine yazamaz. Yeniden aç veya Farklı Kaydet.')
+        const target = owner ?? selected
+        if (target) {
+          if (action.revision !== target.revision || target.problem) throw Error('ZIP grubu değişti; yeniden yükle ve tekrar dene.')
+          const docs = target.canvases.some(c => c.canvasId === canvas!.canvasId) ? target.canvases.map(c => c.canvasId === canvas!.canvasId ? canvas! : c) : [...target.canvases, canvas]
+          next = storage.saveGroup(target.id, docs, target.revision)
+        } else next = storage.importDocuments(action.name ?? canvas.name, [canvas])
+        break
+      }
+      case 'import': {
+        const answer = await dialog.showOpenDialog(mainWindow, { title: 'Tuval JSON’larını içeren ZIP seç', properties: ['openFile'], filters: [{ name: 'ZIP grubu', extensions: ['zip'] }] })
+        if (answer.canceled) return null
+        const file = answer.filePaths[0]
+        if (fs.statSync(file).size > 64 * 1024 * 1024) throw Error('ZIP çok büyük.')
+        let name = path.basename(file).replace(/\.zip$/i, '')
+        if (action.copy) { let count = 1; while (library.groups.some(g => g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) name = `${path.basename(file).replace(/\.zip$/i, '')} (Kopya ${count++})` }
+        next = storage.importZip(name, fs.readFileSync(file), action.archived, action.copy)
+        break
+      }
+      case 'export': {
+        const g = requireGroup(), bytes = storage.exportGroup(g.id, g.revision)
+        const answer = await dialog.showSaveDialog(mainWindow, { title: 'ZIP grubunu dışa aktar', defaultPath: g.name + '.zip', filters: [{ name: 'ZIP grubu', extensions: ['zip'] }] })
+        if (answer.canceled || !answer.filePath) return null
+        fs.writeFileSync(answer.filePath, bytes); break
+      }
+      default: throw Error('Geçersiz ZIP işlemi.')
+    }
+    zipSnapshot = next
+    viewerState.setBook({ ...book, zipLibrary: next })
+    return { library: next, ...(canvas ? { canvas } : {}) }
   })
 
   ipcMain.handle('canvases:get', () => loadCanvases())
@@ -1309,10 +1321,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     catch(e){return {...await viewerInfo(),error:(e as Error).message}}
   })
   if(store.get('viewerEnabled'))void ensureViewer().then(()=>{try{loadCanvases();viewerState.setReports(readRecoveryReports())}catch(e){log('warn',`Tablet kayıtları açılamadı: ${(e as Error).message}`)}}).catch(e=>log('warn',`Tablet izleme açılamadı: ${(e as Error).message}`))
-  ipcMain.handle('canvases:save', (_e, book: CanvasBook, options?: { catalog?: boolean }) => {
+  ipcMain.handle('canvases:save', (_e, book: CanvasBook) => {
     // The window writes the flows; the branch records belong to the tool layer, so they are
     // taken from what the tool layer last wrote instead of from the window's own copy.
-    return storeWorkspace(book, options?.catalog === false ? 'session' : 'window')
+    return storeWorkspace(book)
   })
   ipcMain.handle('windows:list', () => bridge.listWindows())
 

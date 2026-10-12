@@ -117,8 +117,9 @@ it('D6: actual settings loader preserves a deliberate maxSteps=500',()=>{
 it('Q7: legacy graph IPC writes normalized data, not raw unsupported nodes',()=>{
  const source=fs.readFileSync(new URL('../electron/main.ts',import.meta.url),'utf8'),from=source.indexOf("  ipcMain.handle('graph:save'"),to=source.indexOf('\n  // Developer/test',from)
  const js=ts.transpileModule(source.slice(from,to),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText
- let handler:any;const store={set:vi.fn()};new Function('ctx','with(ctx){'+js+'}')({ipcMain:{handle:(_name:string,h:any)=>handler=h},store,normalizeGraph})
- const raw={nodes:[],edges:[]};expect(handler({},raw)).toBe(true);expect(store.set).toHaveBeenCalledWith('graph',expect.objectContaining({nodes:[expect.objectContaining({kind:'start'})],edges:[]}));expect(store.set.mock.calls[0][1]).not.toBe(raw)
+ let handler:any;const storeWorkspace=vi.fn(),book={activeId:'tab',tabs:[{id:'tab',name:'Canvas',graph:{nodes:[],edges:[]}}]};new Function('ctx','with(ctx){'+js+'}')({ipcMain:{handle:(_name:string,h:any)=>handler=h},loadCanvases:()=>book,storeWorkspace,normalizeGraph})
+ const raw={nodes:[],edges:[]};expect(handler({},raw)).toBe(true);expect(storeWorkspace).toHaveBeenCalledWith(expect.objectContaining({tabs:[expect.objectContaining({graph:{nodes:[expect.objectContaining({kind:'start'})],edges:[]}})]}));expect(storeWorkspace.mock.calls[0][0].tabs[0].graph).not.toBe(raw)
+
 })
 
 it.each([false,true])('Q6: debug reaches nested package loops (manual package path=%s)',async manual=>{

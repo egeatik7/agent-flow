@@ -2124,21 +2124,6 @@ html.hud-root #root {
 .canvas-library .panel-header .xp-btn { font-size: 11px; min-height: 22px; padding: 1px 7px; }
 .canvas-library-scroll { flex: 1; overflow: auto; min-height: 0; padding: 2px; }
 .canvas-library h3 { margin: 3px 0 6px; font-size: 12px; }
-.automation-create, .automation-name-row, .automation-actions { display: flex; align-items: center; gap: 4px; }
-.automation-create { margin-bottom: 7px; }
-.automation-create .xp-input, .automation-name-row .xp-input { flex: 1; min-width: 0; width: 100%; }
-.automation-create .xp-btn { white-space: nowrap; padding: 2px 6px; }
-.automation-card { border: 1px solid #7f9db9; box-shadow: inset 1px 1px #fff; padding: 5px; margin-bottom: 6px; background: #f5f7fb; }
-.automation-name-row strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.automation-actions { margin: 5px 0; }
-.automation-actions .xp-btn { min-width: 0; padding: 2px 6px; }
-.automation-actions span { margin-left: auto; font-size: 10px; color: #555; }
-.saved-canvases, .automation-canvases { margin: 0; padding: 0; list-style: none; }
-.saved-canvases li, .automation-canvases li { display: flex; align-items: center; gap: 3px; padding: 3px 0; border-top: 1px solid #e1e5ec; }
-.library-canvas-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.library-mini { flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border: 1px solid #7f9db9; border-radius: 2px; background: linear-gradient(#fff,#d6e4f7); color: #003c74; cursor: pointer; }
-.library-delete { background: #c4312b; border-color: #8f1a16; color: white; font-weight: bold; }
-.library-mini:disabled { opacity: .45; cursor: default; }
 .canvas-sequence-play, .canvas-sequence-stop { flex: 0 0 auto; align-self: center; min-width: 28px; height: 23px; padding: 1px 6px; }
 .canvas-sequence-stop { color: #a32a21; }
 .canvas-sequence-label { flex: 0 0 auto; align-self: center; font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2154,26 +2139,10 @@ html.hud-root #root {
 .canvas-sequence-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; padding-left: 8px; }
 .canvas-tabs-row .canvas-tab { flex-shrink: 0; }
 
-.library-views, .library-view-heading, .automation-add-row { display: flex; align-items: center; gap: 5px; }
 .library-views { padding-bottom: 8px; flex: 0 0 auto; }
 .library-views .xp-btn { flex: 1; min-width: 0; }
-.library-view-heading { justify-content: space-between; margin-bottom: 7px; }
-.library-view-heading h3 { margin: 0; }
-.library-name-input { flex: 1; min-width: 0; width: 70px; }
-.library-close { flex: 0 0 auto; font-size: 10px; padding: 2px 3px; border: 1px solid #7f9db9; background: #edf2f9; cursor: pointer; }
-.library-close:disabled { opacity: .45; cursor: default; }
-.automation-card.selected { border-color: #003c74; background: #dfe8f5; }
-.automation-name-row > span { font-size: 10px; white-space: nowrap; }
-.automation-editor { border: 1px solid #7f9db9; padding: 7px; margin-top: 8px; background: #f5f7fb; }
-.automation-editor > .xp-input { width: 100%; box-sizing: border-box; }
-.automation-add-row { margin-top: 8px; }
-.automation-add-row select { flex: 1; min-width: 0; width: 100%; }
-.automation-editor-status { font-size: 11px; margin: 5px 0; }
 .workspace-save-status { white-space: nowrap; }
 .workspace-save-status.error { color: #a51a1a; font-weight: bold; }
-.workspace-recovery { border: 1px solid #c5a04a; background: #fff7d8; padding: 7px; margin: 7px 0; }
-.workspace-recovery-row { display: flex; align-items: center; gap: 5px; margin: 4px 0; }
-.workspace-recovery-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-load-error { padding: 24px; max-width: 560px; }
 .library-warning { color: #9b2b20; }
 

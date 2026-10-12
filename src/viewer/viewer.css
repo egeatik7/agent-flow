@@ -15,15 +15,15 @@
 .viewer-sidebar .panel-body { min-height:0; overflow:auto; display:flex; flex-direction:column; }
 .viewer-sidebar .node-navigator { flex:1; min-height:0; }
 .viewer-sidebar .navigator-node { min-height:44px; }
-.viewer-sidebar .library-tree-row { min-height:39px; }
 .viewer-sidebar .tree-expander { width:18px; height:18px; font-size:14px; line-height:13px; flex-basis:18px; }
 .viewer-inspector { padding:8px; border-top:2px solid #aca899; max-height:42%; overflow:auto; user-select:text; }
 .viewer-inspector h3 { font-size:13px; margin:0 0 5px; }
 .viewer-inspector pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px Tahoma,sans-serif; background:white; padding:5px; border:1px solid #7f9db9; }
-.viewer-automation-entry { display:block; width:100%; text-align:left; margin:3px 0; }
 .viewer-reports { padding:7px; overflow:auto; }
 .viewer-reports .xp-btn { display:block; width:100%; margin:4px 0; text-align:left; }
 .viewer-log { flex:0 0 140px; min-height:0; overflow:hidden; }
 .viewer-log .log-body { height:110px; overflow:auto; user-select:text; }
 .viewer-mode > .recovery-note { top:12%; right:20px; max-height:75%; }
 @media(max-width:780px){.viewer-workspace{grid-template-columns:minmax(0,1fr) 235px}.viewer-sidebar .tab{padding:5px}.viewer-toolbar>span{width:100%;margin:0}.viewer-log{flex-basis:100px}.viewer-log .log-body{height:70px}}
+
+.viewer-sidebar .library-row { min-height:39px; }

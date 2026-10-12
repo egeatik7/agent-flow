@@ -8,7 +8,10 @@ import NodeCanvas from '../src/components/NodeCanvas'
 import CanvasTabs from '../src/components/CanvasTabs'
 import LogPanel from '../src/components/LogPanel'
 import SidePanel from '../src/components/SidePanel'
-import { saveAutomation, saveCanvas } from '../electron/canvas-library'
+import { withZipFixture } from './helpers/zip-fixture'
+import { zipDocumentFor } from '../electron/zip-workspace'
+import type { ZipLibrarySnapshot } from '../electron/zip-library-storage'
+import type { ZipLibraryAction } from '../electron/zip-library-api'
 import SaveCanvasDialog from '../src/components/SaveCanvasDialog'
 
 // Exercise App's real callbacks and the real runner. Only rendering and desktop input
@@ -26,6 +29,7 @@ vi.mock('../src/components/SaveCanvasDialog', () => ({ default: () => null }))
 let App: typeof import('../src/App').default
 let book: CanvasBook
 let lastSaved: CanvasBook | undefined
+let persistedLibrary: ZipLibrarySnapshot
 let mounted: ReactTestRenderer | undefined
 let stopped = false
 let onPatch = (_p: unknown) => {}
@@ -41,7 +45,16 @@ const windowListeners = new Map<string, Set<(event: unknown) => void>>()
 const api = {
   getSettings: async () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, maxSteps: 100 }),
   getCanvases: async () => structuredClone(book),
-  saveCanvases: async (b: CanvasBook) => { if (failPersistence) return false; lastSaved = structuredClone(b); return true },
+  saveCanvases: async (b: CanvasBook) => { if (failPersistence) return false; lastSaved = {...structuredClone(b),zipLibrary:structuredClone(persistedLibrary)}; return true },
+  zipLibraryAction: async (action: ZipLibraryAction) => {
+    if (failPersistence) throw Error('disk write failed')
+    if (action.action !== 'saveCanvas') throw Error('Unexpected action')
+    const canvas = zipDocumentFor(action.tab,action.copy)
+    const group = persistedLibrary.groups.find(g => g.id === action.id)
+    if (group) { group.canvases = group.canvases.some(c => c.canvasId === canvas.canvasId) ? group.canvases.map(c => c.canvasId === canvas.canvasId ? canvas : c) : [...group.canvases,canvas]; group.revision += 'x' }
+    else persistedLibrary.groups.push({id:canvas.name+'.zip',name:canvas.name,archived:false,revision:'new',canvases:[canvas]})
+    return {library:structuredClone(persistedLibrary),canvas}
+  },
   onCloseRequested: (cb: (id: unknown) => void) => { onCloseRequested = cb; return () => { onCloseRequested = () => {} } },
   finishClose: async (id: number, allow: boolean) => { closeReplies.push({ id, allow }) },
   listWindows: async () => [],
@@ -116,7 +129,7 @@ describe('real App empty startup and close review', () => {
     expect(mounted!.root.findByType(CanvasTabs).props.tabs).toEqual([])
     expect(mounted!.root.findAllByType(NodeCanvas)).toEqual([])
     expect(mounted!.root.findByType(SidePanel).props.tab).toBe('canvases')
-    expect(mounted!.root.findByType(SidePanel).props.canvasPanel.props.library.canvases).toHaveLength(3)
+    expect(mounted!.root.findByType(SidePanel).props.canvasPanel.props.library.groups[0].canvases).toHaveLength(3)
     await act(async () => { mounted!.root.findByType(CanvasTabs).props.onAdd() })
     expect(mounted!.root.findByType(NodeCanvas).props.graph.nodes[0].kind).toBe('start')
   })
@@ -125,7 +138,7 @@ describe('real App empty startup and close review', () => {
     const first = book.tabs[0].id, second = book.tabs[1].id
     await act(async () => { mounted!.root.findByType(CanvasTabs).props.onSelect(first) }); await changeActive()
     await act(async () => { mounted!.root.findByType(CanvasTabs).props.onSelect(second) }); await changeActive()
-    const secondSaved = structuredClone(lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!.graph)
+    const secondSaved = structuredClone({nodes:persistedLibrary.groups[0].canvases[1].nodes,edges:persistedLibrary.groups[0].canvases[1].edges})
     await requestClose()
     expect(mounted!.root.findByType(SaveCanvasDialog).props.name).toBe('Left')
     await answer('save')
@@ -133,8 +146,8 @@ describe('real App empty startup and close review', () => {
     await answer('discard')
     expect(closeReplies).toEqual([{ id: 1, allow: true }])
     expect(lastSaved!.tabs).toEqual([])
-    expect(lastSaved!.library!.canvases.find(c => c.id === book.tabs[0].savedId)!.graph.nodes[0].x).toBe(book.tabs[0].graph.nodes[0].x + 20)
-    expect(lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!.graph).toEqual(secondSaved)
+    expect(persistedLibrary.groups[0].canvases[0].nodes[0].x).toBe(book.tabs[0].graph.nodes[0].x + 20)
+    expect({nodes:persistedLibrary.groups[0].canvases[1].nodes,edges:persistedLibrary.groups[0].canvases[1].edges}).toEqual(secondSaved)
   })
   it('Cancel keeps the edited canvas open and a later failed Save also blocks native closure', async () => {
     scenario(0); await mount(); await changeActive(); await requestClose()
@@ -154,7 +167,7 @@ describe('real App empty startup and close review', () => {
     await answer('save')
     expect(mounted!.root.findByType(CanvasTabs).props.tabs).toEqual([])
     expect(mounted!.root.findAllByType(NodeCanvas)).toEqual([])
-    expect(lastSaved!.library!.canvases.some(c => c.name === 'Tuval 1')).toBe(true)
+    expect(persistedLibrary.groups.some(g => g.canvases.some(c => c.name === 'Tuval 1'))).toBe(true)
   })
   it('waits for a stopped run and its final node patches before asking to save', async () => {
     const s = scenario(0); await mount()
@@ -166,8 +179,8 @@ describe('real App empty startup and close review', () => {
     await act(async () => { onPatch({ id: s.selected.id, patch: { text: 'Final stopped patch' } }); release(); await Promise.resolve() })
     await answer('save')
     expect(closeReplies).toEqual([{ id: 1, allow: true }])
-    const saved = lastSaved!.library!.canvases.find(c => c.id === book.tabs[1].savedId)!
-    expect(saved.graph.nodes.find(n => n.id === s.selected.id)!.text).toBe('Final stopped patch')
+    const saved = persistedLibrary.groups[0].canvases[1]
+    expect(saved.nodes.find(n => n.id === s.selected.id)!.text).toBe('Final stopped patch')
   })
 })
 
@@ -197,19 +210,19 @@ function scenario(depth = 1, withLoop = false, connectedEnd = true) {
     const start = graph.nodes[0], pkg = graph.nodes[1], end = graph.nodes[2]
     graph = { nodes: [start, loop, pkg, end], edges: [edge(start, loop), edge(loop, end, 'done')] }
   }
-  book = normalizeCanvasBook({ activeId: 'active', tabs: [
+  book = withZipFixture(normalizeCanvasBook({ activeId: 'active', tabs: [
     { id: 'left', name: 'Left', graph: nextCanvas().graph },
     { id: 'active', name: 'Active', graph }, nextCanvas(),
-  ] })
+  ] }))
+  persistedLibrary = structuredClone(book.zipLibrary!)
   return { path, selected, loop }
 }
 async function mount() {
+  book = withZipFixture(book)
+  persistedLibrary = structuredClone(book.zipLibrary!)
   const originalActive = book.activeId
-  for (const tab of book.tabs) book = saveCanvas(book, tab.id)
-  book = saveAutomation(book, { name: 'Test sequence', entries: book.tabs.map(t => ({ id: `entry-${t.id}`, canvasId: t.savedId! })) })
-  const automationId = book.library!.automations.at(-1)!.id
   await act(async () => { mounted = create(createElement(App)) })
-  await act(async () => { await mounted!.root.findByType(SidePanel).props.canvasPanel.props.onOpenAutomation(automationId) })
+  await act(async () => { await mounted!.root.findByType(SidePanel).props.canvasPanel.props.onOpenGroup('Test.zip') })
   const opened = mounted!.root.findByType(CanvasTabs).props.tabs as { id: string; name: string }[]
   const index = book.tabs.findIndex(t => t.id === originalActive)
   book.tabs = book.tabs.map((t, i) => ({ ...t, id: opened[i].id }))
@@ -455,9 +468,10 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
   it('opens the actual failed loop member even if execution later reaches End', async () => {
     const start = createNode('start', 0, 0), write = task('loop member'), end = createNode('end', 900, 0)
     const loop = { ...createNode('loop', 200, 0), items: ['one', 'two'], members: [write.id] }
-    book = normalizeCanvasBook({ activeId: 'active', tabs: [{ id: 'active', name: 'Active', graph: {
+    book = withZipFixture(normalizeCanvasBook({ activeId: 'active', tabs: [{ id: 'active', name: 'Active', graph: {
       nodes: [start, loop, write, end], edges: [edge(start, loop), edge(loop, end, 'done')],
-    } }] })
+    } }] }))
+    persistedLibrary = structuredClone(book.zipLibrary!)
     const r = await mount()
     let actions = 0
     beforeAction = async () => { if (++actions === 1) throw new Error('first item failed') }

@@ -1,10 +1,6 @@
-import { CanvasIdentityConflictError } from './canvas-identity'
-import { newId, normalizeGraph, type AgentGraph, type CanvasBook, type CanvasLibrary, type CanvasTab, type SavedCanvas, type CanvasAutomation, type AutomationEntry } from './graph-types'
-import { sameCanvasContent } from './canvas-content'
-
-export const libraryOf = (book: CanvasBook): CanvasLibrary => book.library ?? { schemaVersion: 2, canvases: [], automations: [] }
-const copy = <T>(value: T): T => structuredClone(value)
-const nameOf = (name: string) => name.trim().slice(0, 48)
+import { newId, type AgentGraph, type CanvasBook, type CanvasTab } from './graph-types'
+const copy = <T>(value:T):T => structuredClone(value)
+const nameOf = (name:string) => name.trim().slice(0,160)
 
 /** Tab operations keep the library and tool-owned book metadata intact. */
 export function addCanvasTab(book: CanvasBook, name: string, graph: AgentGraph): CanvasBook {
@@ -24,48 +20,6 @@ export function activateCanvasSnapshot(book: CanvasBook, tab: CanvasTab): Canvas
   return { ...book, activeId: tab.id, tabs: book.tabs.map(t => t.id === tab.id ? copy(tab) : t) }
 }
 
-/** Explicit Save updates only the record this tab belongs to, not other same-name flows. */
-export function saveCanvas(book: CanvasBook, tabId: string): CanvasBook {
-  const tab = book.tabs.find(t => t.id === tabId)
-  if (!tab) throw new Error('Kaydedilecek tuval bulunamadı.')
-  const lib = libraryOf(book)
-  const existing = lib.canvases.find(c => c.id === tab.savedId)
-  if (existing && tab.baseline && (
-    existing.name !== tab.baseline.name || !sameCanvasContent(existing.graph, tab.baseline.graph)
-  )) {
-    throw new Error('Bu tuval başka bir sekmeden kaydedildi; eski kopya yeni kaydı ezmemesi için kaydedilmedi. Değişikliklerin bu sekmede duruyor. Farklı Kaydet ile ayrı bir kayıt oluşturabilir veya güncel tuvali Tuvaller’den yeniden açabilirsin.')
-  }
-  if (tab.savedId && !existing) throw new Error('Bu tuvalin kayıtlı sürümü artık kütüphanede yok. Farklı Kaydet ile yeni kayıt oluştur.')
-  const id = existing?.id ?? tab.canvasId ?? tab.id
-  if (!existing && lib.canvases.some(c => c.id === id)) throw new CanvasIdentityConflictError(id, tab.name)
-  const record: SavedCanvas = { ...existing, id, name: tab.name, graph: copy(tab.graph), updatedAt: Date.now() }
-  return { ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, savedId: id, canvasId: id, baseline: { name: tab.name, graph: copy(tab.graph) } } : t), library: { ...lib,
-    canvases: existing ? lib.canvases.map(c => c.id === id ? record : c) : [...lib.canvases, record] } }
-}
-/** Save As gives this working tab a new identity; shared automations keep the old one. */
-export function saveCanvasAs(book: CanvasBook, tabId: string, name: string): CanvasBook {
-  const clean = nameOf(name)
-  if (!clean) throw new Error('Tuval adı boş olamaz.')
-  return saveCanvas({ ...book, tabs: book.tabs.map(t => t.id === tabId ? { ...t, name: clean, savedId: undefined, canvasId: newId(), baseline: undefined } : t) }, tabId)
-}
-export function deleteSavedCanvas(book: CanvasBook, id: string): CanvasBook {
-  const lib = libraryOf(book)
-  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, savedId: undefined, baseline: undefined } : t),
-    library: { ...lib, canvases: lib.canvases.filter(c => c.id !== id), automations: lib.automations.map(a => ({ ...a, entries: a.entries.filter(e => e.canvasId !== id) })) } }
-}
-export function renameSavedCanvas(book: CanvasBook, id: string, name: string): CanvasBook {
-  const clean = nameOf(name), lib = libraryOf(book)
-  if (!clean) throw new Error('Tuval adı boş olamaz.')
-  if (!lib.canvases.some(c => c.id === id)) throw new Error('Tuval artık depoda yok.')
-  return { ...book, tabs: book.tabs.map(t => t.savedId === id ? { ...t, name: clean, ...(t.baseline ? { baseline: { ...t.baseline, name: clean } } : {}) } : t),
-    library: { ...lib, canvases: lib.canvases.map(c => c.id === id ? { ...c, name: clean, updatedAt: Date.now() } : c) } }
-}
-export function openSavedCanvas(book: CanvasBook, canvas: SavedCanvas): CanvasBook {
-  const current = libraryOf(book).canvases.find(c => c.id === canvas.id)
-  if (!current) throw new Error('Tuval artık depoda yok.')
-  const id = newId()
-  return { ...book, activeId: id, tabs: [...book.tabs, { id, name: current.name, graph: copy(current.graph), savedId: current.id, canvasId: current.id, baseline: { name: current.name, graph: copy(current.graph) } }] }
-}
 export function moveCanvasTab(book: CanvasBook, id: string, delta: -1 | 1): CanvasBook {
   const index = book.tabs.findIndex(t => t.id === id), next = index + delta
   if (index < 0 || next < 0 || next >= book.tabs.length) return book
@@ -77,91 +31,4 @@ export function reorderCanvasTab(book:CanvasBook,id:string,targetId:string,after
  const moved=book.tabs.find(t=>t.id===id);if(!moved||!book.tabs.some(t=>t.id===targetId))return book
  const tabs=book.tabs.filter(t=>t.id!==id),at=tabs.findIndex(t=>t.id===targetId);tabs.splice(at+(after?1:0),0,moved)
  return {...book,tabs}
-}
-export type AutomationDraft = { id?: string; name: string; folderId?: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
-export function automationDraftDirty(draft: AutomationDraft): boolean {
-  return draft.expected ? draft.name !== draft.expected.name || JSON.stringify(draft.entries) !== JSON.stringify(draft.expected.entries)
-    : !!draft.name.trim() || draft.entries.length > 0
-}
-export function addAutomationEntry(entries: AutomationEntry[], canvasId: string): AutomationEntry[] {
-  return entries.some(e => e.canvasId === canvasId) ? entries : [...entries, { id: newId(), canvasId }]
-}
-export function editAutomationEntries(entries: AutomationEntry[], id: string, action: 'delete' | 'up' | 'down'): AutomationEntry[] {
-  if (action === 'delete') return entries.filter(e => e.id !== id)
-  const index = entries.findIndex(e => e.id === id), next = index + (action === 'up' ? -1 : 1)
-  if (index < 0 || next < 0 || next >= entries.length) return entries
-  const moved = [...entries]; [moved[index], moved[next]] = [moved[next], moved[index]]
-  return moved
-}
-/** Save changes membership/order only. Canvas content has exactly one owner: the catalog. */
-export function saveAutomation(book: CanvasBook, draft: AutomationDraft): CanvasBook {
-  const name = nameOf(draft.name), lib = libraryOf(book)
-  if (!name) throw new Error('Otomasyon adı boş olamaz.')
-  const existing = lib.automations.find(a => a.id === draft.id)
-  if (draft.id && !existing) throw new Error('Güncellenecek otomasyon artık yok.')
-  if (existing && (!draft.expected || JSON.stringify(existing) !== JSON.stringify(draft.expected))) throw new Error('Otomasyon kaydı değişti; yeniden yükle ve tekrar düzenle.')
-  if (draft.entries.some(e => !lib.canvases.some(c => c.id === e.canvasId))) throw new Error('Listedeki bir tuval artık depoda yok; otomasyon kaydedilmedi.')
-  if (new Set(draft.entries.map(e => e.id)).size !== draft.entries.length || draft.entries.some(e => !e.id)) throw new Error('Otomasyon listesinde geçersiz satır kimliği var.')
-  if (!existing && draft.folderId && !lib.folders?.some(f => f.id === draft.folderId)) throw new Error('Otomasyonun oluşturulduğu klasör artık yok.')
-  const record: CanvasAutomation = { ...existing, ...(!existing && draft.folderId ? { folderId: draft.folderId } : {}), id: existing?.id ?? newId(), name, entries: copy(draft.entries), updatedAt: Date.now() }
-  return { ...book, library: { ...lib, automations: existing ? lib.automations.map(a => a.id === record.id ? record : a) : [...lib.automations, record] } }
-}
-export function deleteAutomation(book: CanvasBook, id: string): CanvasBook {
-  const lib = libraryOf(book)
-  return { ...book, library: { ...lib, automations: lib.automations.filter(a => a.id !== id) } }
-}
-export function automationCanvases(book: CanvasBook, id: string): SavedCanvas[] {
-  const lib = libraryOf(book), a = lib.automations.find(a => a.id === id)
-  if (!a) throw new Error('Otomasyon bulunamadı.')
-  return a.entries.map(e => {
-    const canvas = lib.canvases.find(c => c.id === e.canvasId)
-    if (!canvas) throw new Error('Otomasyondaki bir tuval depoda bulunamadı.')
-    return canvas
-  })
-}
-export function openAutomation(book: CanvasBook, id: string): CanvasBook {
-  const canvases = automationCanvases(book, id)
-  if (!canvases.length) throw new Error('Otomasyon boş.')
-  const tabs = canvases.map(c => ({ id: newId(), name: c.name, graph: copy(c.graph), savedId: c.id, canvasId: c.id, baseline: { name: c.name, graph: copy(c.graph) } }))
-  return { ...book, activeId: tabs[0].id, tabs }
-}
-export type AutomationFile = { format: 'nubbo-automation'; version: 2; name: string; canvases: { id: string; name: string; graph: AgentGraph }[]; order: string[] }
-export function exportAutomation(book: CanvasBook, id: string): AutomationFile {
-  const a = libraryOf(book).automations.find(a => a.id === id)
-  if (!a) throw new Error('Otomasyon bulunamadı.')
-  const canvases = automationCanvases(book, id)
-  return { format: 'nubbo-automation', version: 2, name: a.name,
-    canvases: [...new Map(canvases.map(c => [c.id, c])).values()].map(c => ({ id: c.id, name: c.name, graph: copy(c.graph) })), order: canvases.map(c => c.id) }
-}
-export function importAutomation(book: CanvasBook, raw: unknown, options: { copyConflicts?: boolean; name?: string } = {}): CanvasBook {
-  const r = raw as { format?: unknown; version?: unknown; name?: unknown; canvases?: unknown; order?: unknown } | null
-  if (!r || r.format !== 'nubbo-automation' || (r.version !== 1 && r.version !== 2) || typeof r.name !== 'string' || !nameOf(r.name) || !Array.isArray(r.canvases)) throw new Error('Geçerli bir Nubbo otomasyon dosyası değil.')
-  if (options.name !== undefined && !nameOf(options.name)) throw new Error('Otomasyon adı boş olamaz.')
-  const lib = libraryOf(book), catalog = [...lib.canvases], mapped = new Map<string, string>()
-  const snapshots = r.canvases.map((value, index) => {
-    const c = value as { id?: unknown; name?: unknown; graph?: AgentGraph } | null
-    if (!c || typeof c.name !== 'string' || !c.name.trim() || !c.graph || !Array.isArray(c.graph.nodes) || !Array.isArray(c.graph.edges)) throw new Error('Otomasyonda bozuk tuval var; içe aktarılmadı.')
-    const key = r.version === 2 ? c.id : String(index)
-    if (typeof key !== 'string' || !key || mapped.has(key)) throw new Error('Otomasyon dosyasında geçersiz veya tekrarlı tuval kimliği var.')
-    const name = nameOf(c.name), graph = normalizeGraph(copy(c.graph))
-    let record: SavedCanvas | undefined
-    if (r.version === 2) {
-      record = catalog.find(c => c.id === key)
-      if (record && (record.name !== name || !sameCanvasContent(record.graph, graph))) {
-        if (!options.copyConflicts) throw new CanvasIdentityConflictError(key, name)
-        record = { id: newId(), name: (name.slice(0, 39) + ' (Kopya)'), graph, updatedAt: Date.now() }; catalog.push(record)
-      }
-      if (!record) { record = { id: key, name, graph, updatedAt: Date.now() }; catalog.push(record) }
-    } else {
-      // Legacy v1 has no document identity. Preserve its previous content-based migration.
-      record = catalog.find(c => c.name === name && sameCanvasContent(c.graph, graph))
-      if (!record) { record = { id: newId(), name, graph, updatedAt: Date.now() }; catalog.push(record) }
-    }
-    mapped.set(key, record.id)
-    return key
-  })
-  const order = r.version === 2 ? r.order : snapshots
-  if (!Array.isArray(order) || order.some(key => typeof key !== 'string' || !mapped.has(key))) throw new Error('Otomasyonun sırası geçersiz; içe aktarılmadı.')
-  const entries = order.map(key => ({ id: newId(), canvasId: mapped.get(key as string)! }))
-  return { ...book, library: { ...lib, schemaVersion: 2, canvases: catalog, automations: [...lib.automations, { id: newId(), name: nameOf(options.name ?? r.name), entries, updatedAt: Date.now() }] } }
 }

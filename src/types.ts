@@ -50,13 +50,14 @@ export type XpAgentApi = {
   saveSettings: (partial: Partial<AppSettings>) => Promise<AppSettings>
   getGraph: () => Promise<AgentGraph>
   saveGraph: (graph: AgentGraph) => Promise<boolean>
-  libraryInfo?: () => Promise<{ directory: string; file: string; conflict?: boolean }>
+  libraryInfo?: () => Promise<{ directory: string }>
   viewerInfo?: () => Promise<import('../electron/viewer-types').ViewerInfo>
   manageViewer?: (action:'enable'|'disable'|'rotate') => Promise<import('../electron/viewer-types').ViewerInfo>
-  manageLibrary?: (mode: 'open' | 'copy' | 'backup' | 'restore' | 'reveal' | 'reload') => Promise<{ directory: string; book?: CanvasBook } | null>
+  manageLibrary?: (mode: 'open' | 'reveal' | 'reload') => Promise<{ directory: string; book?: CanvasBook } | null>
+  zipLibraryAction?: (action: import('../electron/zip-library-api').ZipLibraryAction) => Promise<import('../electron/zip-library-api').ZipLibraryResult | null>
   getCanvases: () => Promise<CanvasBook>
-  /** `false` = yazılamadı; `{ conflict: true }` = kütüphane başka programda değişti, oturum yine kaydedildi. */
-  saveCanvases: (book: CanvasBook, options?: { catalog?: boolean }) => Promise<boolean | { conflict: boolean }>
+  /** Saves only the working session. ZIP documents use zipLibraryAction. */
+  saveCanvases: (book: CanvasBook) => Promise<boolean | { conflict: boolean }>
   listWindows: () => Promise<{ title: string; handle: string }[]>
   scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => Promise<ScanResult>
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => Promise<{ text: string; type: string } | null>

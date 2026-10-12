@@ -4,28 +4,27 @@ const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { LibraryStorage } = require('../dist-electron/library-storage.js')
-const { initializeLibraryDatabase } = require('../dist-electron/library-database.js')
+const { ZipLibraryStorage } = require('../dist-electron/zip-library-storage.js')
+const { claimLibraryLock } = require('../dist-electron/library-lock.js')
 
 if (process.argv[2] === '--child') {
   ;(async () => {
-    await initializeLibraryDatabase()
-    const storage = new LibraryStorage(process.argv[3]), book = storage.load()
+    const storage = new ZipLibraryStorage(process.argv[3]); let lock
     process.on('message', message => {
       if (message === 'claim') {
         try {
-          storage.claim()
+          lock = claimLibraryLock(storage.directory)
           const owner = JSON.parse(fs.readFileSync(path.join(storage.directory, '.nubbo-library.lock'), 'utf8'))
           process.send({ event: 'claimed', pid: process.pid, nonce: owner.nonce })
         } catch (e) { process.send({ event: 'rejected', pid: process.pid, message: e.message }) }
       }
       if (message === 'save') {
         try {
-          storage.save({ ...book, folders: [{ id: `writer-${process.pid}`, name: `Writer ${process.pid}`, section: 'canvas' }] })
-          storage.release(); process.send({ event: 'saved', pid: process.pid }); process.disconnect()
+          storage.createGroup(`Writer ${process.pid}`)
+          lock?.release(); process.send({ event: 'saved', pid: process.pid }); process.disconnect()
         } catch (e) { process.send({ event: 'error', message: e.message }); process.disconnect() }
       }
-      if (message === 'stop') { storage.release(); process.disconnect() }
+      if (message === 'stop') { lock?.release(); process.disconnect() }
     })
     process.send({ event: 'ready', pid: process.pid })
   })().catch(e => { process.send({ event: 'error', message: e.message }); process.exitCode = 1; process.disconnect() })
@@ -51,12 +50,11 @@ if (process.argv[2] === '--child') {
   }
   const exit = child => new Promise(resolve => { if (child.process.exitCode !== null || child.process.signalCode !== null) resolve(); else child.process.once('exit', resolve) })
 
-  test('two real processes reclaim a dead writer; exactly one owns and writes the catalog', { timeout: 30_000 }, async () => {
-    await initializeLibraryDatabase()
+  test('two real processes reclaim a dead writer; exactly one owns and writes a ZIP', { timeout: 30_000 }, async () => {
     for (let round = 0; round < 6; round++) {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nubbo-lock-race-')), children = []
       try {
-        const storage = new LibraryStorage(directory); storage.load({ folders: [], canvases: [], automations: [] })
+        const storage = new ZipLibraryStorage(directory); storage.load()
         const previous = child(directory); children.push(previous); await previous.next(['ready']); previous.process.send('claim'); await previous.next(['claimed'])
         previous.process.kill('SIGKILL'); await exit(previous)
         const contenders = [child(directory), child(directory)]; children.push(...contenders)
@@ -69,8 +67,8 @@ if (process.argv[2] === '--child') {
         assert.equal(owner.pid, results[winnerIndex].pid); assert.equal(owner.nonce, results[winnerIndex].nonce)
         winner.process.send('save'); await winner.next(['saved']); loser.process.send('stop')
         await Promise.all(contenders.map(exit))
-        const library = new LibraryStorage(directory).load()
-        assert.equal(library.folders[0].id, `writer-${owner.pid}`)
+        const library = new ZipLibraryStorage(directory).load()
+        assert.equal(library.groups[0].id, `Writer ${owner.pid}.zip`)
         assert.equal(fs.existsSync(path.join(directory, '.nubbo-library.lock')), false)
       } finally {
         for (const c of children) if (c.process.exitCode === null && c.process.signalCode === null) c.process.kill('SIGKILL')

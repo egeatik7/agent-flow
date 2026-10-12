@@ -149,24 +149,15 @@ export type CanvasTab = {
   baseline?: { name: string; graph: AgentGraph }
 }
 
-/** Klasörün hangi bölüme ait olduğu. Eski kayıtlarda yoktur: o klasörler iki bölümde de görünür. */
-export type LibrarySection = 'canvas' | 'automation'
-export type LibraryFolder = { id: string; name: string; parentId?: string; archived?: boolean; section?: LibrarySection }
-export type SavedCanvas = { folderId?: string; archived?: boolean; id: string; name: string; graph: AgentGraph; updatedAt: number }
-export type AutomationEntry = { id: string; canvasId: string }
-export type CanvasAutomation = { folderId?: string; archived?: boolean; id: string; name: string; entries: AutomationEntry[]; updatedAt: number }
-export type CanvasLibrary = { folders?: LibraryFolder[]; schemaVersion?: 2; canvases: SavedCanvas[]; automations: CanvasAutomation[] }
-/** A working automation is a draft, never a second owner of canvas contents. */
-export type AutomationEditor = { key: string; id?: string; name: string; folderId?: string; entries: AutomationEntry[]; expected?: CanvasAutomation }
 export type RecoveredCanvas = CanvasTab & { recoveredAt: number }
 
 export type CanvasBook = {
   activeId: string
   tabs: CanvasTab[]
-  library?: CanvasLibrary
+  workspaceVersion?: 3
+  zipLibrary?: import('./zip-library-storage').ZipLibrarySnapshot
   /** Interrupted edits awaiting an explicit Open/Discard decision; not library records. */
   recovery?: RecoveredCanvas[]
-  automationDraft?: AutomationEditor
   /**
    * Agent branches: recipes of edits over a canvas, kept as they are, never copies of a flow.
    * Their shape lives in electron/tool-branch.ts; this layer only carries them so a save does
@@ -877,119 +868,25 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   return { nodes, edges }
 }
 
-/** Independent snapshots. Empty arrays mean intentionally deleted, never reseed them. */
-function normalizeSavedCanvases(raw: unknown, strictIdentity = false): SavedCanvas[] {
-  if (!Array.isArray(raw)) return []
-  const seen = new Set<string>()
-  return raw.flatMap((value, i) => {
-    if (!value || typeof value !== 'object') return []
-    const r = value as Partial<SavedCanvas>
-    if (!r.graph || !Array.isArray(r.graph.nodes) || !Array.isArray(r.graph.edges)) return []
-    if (strictIdentity && (typeof r.id !== 'string' || !r.id.trim() || r.id !== r.id.trim())) throw new Error('Kütüphanedeki tuval kimliği geçersiz; kayıtlar değiştirilmedi.')
-    let id = typeof r.id === 'string' && r.id ? r.id : rid()
-    if (seen.has(id)) {
-      if (strictIdentity) throw new Error('Kütüphanede aynı kimlikte birden fazla tuval var; kayıtlar değiştirilmedi. Çakışan sürümü ayrı kimlikle aktar.')
-      id = rid()
-    }
-    seen.add(id)
-    return [{ id, name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
-      graph: normalizeGraph(r.graph), ...(typeof r.folderId === 'string' ? { folderId: r.folderId } : {}), ...(r.archived === true ? { archived: true } : {}), updatedAt: Number.isFinite(r.updatedAt) && r.updatedAt! >= 0 ? r.updatedAt! : 0 }]
-  })
-}
-
+/** Profile sessions contain working tabs only; ZIP documents never migrate from old catalogs. */
 export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): CanvasBook {
-  const rec = raw as { activeId?: unknown; tabs?: unknown; branches?: unknown; library?: unknown; recovery?: unknown; automationDraft?: unknown } | null
+  const rec = raw as Partial<CanvasBook> | null
   const seen = new Set<string>()
-  const tabs: CanvasTab[] = rec && Array.isArray(rec.tabs) ? rec.tabs.map((item, i) => {
-    const t = item as Partial<CanvasTab> | null
+  const tabs: CanvasTab[] = Array.isArray(rec?.tabs) ? rec.tabs.map((t, i) => {
     let id = typeof t?.id === 'string' && t.id ? t.id : rid()
     if (seen.has(id)) id = rid()
     seen.add(id)
-    return { id, name: typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 48) : `Tuval ${i + 1}`,
+    return { id, name: typeof t?.name === 'string' && t.name.trim() ? t.name.trim().slice(0,160) : `Tuval ${i + 1}`,
       graph: normalizeGraph(t?.graph), ...(typeof t?.savedId === 'string' ? { savedId: t.savedId } : {}),
-      ...(typeof t?.canvasId === 'string' && t.canvasId ? { canvasId: t.canvasId } : {}),
+      canvasId: typeof t?.canvasId === 'string' && t.canvasId ? t.canvasId : id,
       ...(t?.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
         ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}) }
-  }) : [{ id: rid(), name: 'Tuval 1', graph: normalizeGraph(fallback ?? { nodes: [], edges: [] }) }]
+  }) : fallback ? [{id:rid(),name:'Tuval 1',graph:normalizeGraph(fallback)}] : []
   const activeId = tabs.some(t => t.id === rec?.activeId) ? String(rec!.activeId) : tabs[0]?.id ?? ''
-  let library: CanvasLibrary
-  if (rec?.library && typeof rec.library === 'object') {
-    const lib = rec.library as { schemaVersion?: unknown; canvases?: unknown; automations?: unknown; folders?: LibraryFolder[] }
-    const catalog = normalizeSavedCanvases(lib.canvases, lib.schemaVersion === 2)
-    const legacyMembers = new Set<string>()
-    const ids = new Set<string>()
-    const automations: CanvasAutomation[] = Array.isArray(lib.automations) ? lib.automations.flatMap(value => {
-      if (!value || typeof value !== 'object') return []
-      const a = value as { id?: unknown; name?: unknown; entries?: unknown; canvases?: unknown; updatedAt?: unknown; folderId?: string; archived?: boolean }
-      if (!Array.isArray(a.entries) && !Array.isArray(a.canvases)) return []
-      let id = typeof a.id === 'string' && a.id ? a.id : rid()
-      if (ids.has(id)) id = rid()
-      ids.add(id)
-      const entryIds = new Set<string>()
-      const makeEntry = (rawId: unknown, canvasId: string): AutomationEntry => {
-        let entryId = typeof rawId === 'string' && rawId ? rawId : rid()
-        if (entryIds.has(entryId)) entryId = rid()
-        entryIds.add(entryId)
-        return { id: entryId, canvasId }
-      }
-      const entries = Array.isArray(a.entries) ? a.entries.flatMap(value => {
-        const e = value as Partial<AutomationEntry> | null
-        return e && typeof e.canvasId === 'string' && catalog.some(c => c.id === e.canvasId) ? [makeEntry(e.id, e.canvasId)] : []
-      }) : normalizeSavedCanvases(a.canvases).map(snapshot => {
-        // V1 automation snapshots move into the single catalog. A differing old
-        // copy must survive migration; never overwrite an already-saved canvas.
-        const identical = (c: SavedCanvas) => c.name === snapshot.name && JSON.stringify(c.graph) === JSON.stringify(snapshot.graph)
-        const same = catalog.find(c => c.id === snapshot.id && identical(c)) ?? catalog.find(identical)
-        let canvasId = same?.id
-        if (!canvasId) {
-          canvasId = catalog.some(c => c.id === snapshot.id) ? rid() : snapshot.id
-          catalog.push({ ...snapshot, id: canvasId })
-        }
-        legacyMembers.add(canvasId)
-        return makeEntry(snapshot.id, canvasId)
-      })
-      return [{ id, ...(typeof a.folderId === 'string' ? { folderId: a.folderId } : {}), ...(a.archived === true ? { archived: true } : {}), name: typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 48) : 'Otomasyon', entries,
-        updatedAt: typeof a.updatedAt === 'number' && Number.isFinite(a.updatedAt) && a.updatedAt >= 0 ? a.updatedAt : 0 }]
-    }) : []
-    library = { schemaVersion: 2, canvases: catalog, automations, ...(Array.isArray(lib.folders) ? { folders: structuredClone(lib.folders) } : {}) }
-    // Old group-open tabs had no savedId. Reattach an exact, unambiguous
-    // legacy working copy so its next Save updates the shared group record.
-    for (const tab of tabs) if (!tab.savedId) {
-      const matches = catalog.filter(c => legacyMembers.has(c.id) && c.name === tab.name && JSON.stringify(c.graph) === JSON.stringify(tab.graph))
-      if (matches.length === 1) tab.savedId = matches[0].id
-    }
-
-  } else {
-    // Upgrade old saved tabs once; closing a tab will no longer remove its saved flow.
-    library = { schemaVersion: 2, canvases: tabs.map(t => ({ id: t.id, name: t.name, graph: structuredClone(t.graph), updatedAt: 0 })), automations: [] }
-    for (const t of tabs) t.savedId = t.id
-  }
-  const branches = Array.isArray(rec?.branches) ? rec!.branches.filter(b => !!b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string') : undefined
-  // Normalize recovery separately: it must never enter legacy catalog migration.
-  const recoveryIds = new Set<string>()
-  const recovery: RecoveredCanvas[] = Array.isArray(rec?.recovery) ? rec.recovery.flatMap(value => {
-    const t = value as Partial<RecoveredCanvas> | null
-    if (!t || typeof t.id !== 'string' || !t.id || recoveryIds.has(t.id) || !Array.isArray(t.graph?.nodes) || !Array.isArray(t.graph?.edges)) return []
-    recoveryIds.add(t.id)
-    return [{ id: t.id, name: typeof t.name === 'string' ? t.name.slice(0, 48) : 'Kurtarılan Tuval', graph: normalizeGraph(t.graph),
-      ...(typeof t.savedId === 'string' ? { savedId: t.savedId } : {}),
-      ...(typeof t.canvasId === 'string' && t.canvasId ? { canvasId: t.canvasId } : {}),
-      ...(t.baseline && typeof t.baseline.name === 'string' && Array.isArray(t.baseline.graph?.nodes) && Array.isArray(t.baseline.graph?.edges)
-        ? { baseline: { name: t.baseline.name, graph: normalizeGraph(t.baseline.graph) } } : {}),
-      recoveredAt: typeof t.recoveredAt === 'number' && Number.isFinite(t.recoveredAt) ? t.recoveredAt : 0 }]
-  }) : []
-  const draft = rec?.automationDraft as Partial<AutomationEditor> | undefined
-  const automationDraft = draft && typeof draft.key === 'string' && typeof draft.name === 'string' && Array.isArray(draft.entries)
-    ? { key: draft.key, name: draft.name.slice(0, 48), ...(typeof draft.id === 'string' ? { id: draft.id } : {}),
-      ...(typeof draft.folderId === 'string' ? { folderId: draft.folderId } : {}),
-      entries: draft.entries.filter(e => e && typeof e.id === 'string' && typeof e.canvasId === 'string').map(e => ({ id: e.id, canvasId: e.canvasId })),
-      // Preserve the expected revision, including references deleted since the draft was made.
-      // Replacing it with the current record would turn a stale draft into an overwrite.
-      ...(draft.expected && typeof draft.expected.id === 'string' && typeof draft.expected.name === 'string' && Array.isArray(draft.expected.entries)
-        ? { expected: structuredClone(draft.expected) } : {}) } : undefined
-  return { activeId, tabs, library, ...(branches?.length ? { branches } : {}), ...(recovery.length ? { recovery } : {}), ...(automationDraft ? { automationDraft } : {}) }
+  const branches = Array.isArray(rec?.branches) ? structuredClone(rec.branches) : undefined
+  const recovery = Array.isArray(rec?.recovery) ? rec.recovery.filter(t => t && typeof t.id === 'string' && Array.isArray(t.graph?.nodes) && Array.isArray(t.graph?.edges)).map(t => ({...structuredClone(t),name:t.name.slice(0,160),graph:normalizeGraph(t.graph)})) : undefined
+  return { workspaceVersion:3, activeId, tabs, ...(rec?.zipLibrary ? { zipLibrary:structuredClone(rec.zipLibrary) } : {}), ...(branches?.length ? {branches} : {}), ...(recovery?.length ? {recovery} : {}) }
 }
-
 
 /** Old screen selections cannot silently decide a condition under the model-only contract. */
 export function conditionCompatibilityError(n: AgentNode): string | undefined {

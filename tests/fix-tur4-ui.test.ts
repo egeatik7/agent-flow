@@ -15,7 +15,8 @@ import {
   type Locator,
 } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'
-import CanvasLibrary from '../src/components/CanvasLibrary'
+import CanvasLibrary from '../src/components/ZipCanvasLibrary'
+import { withZipFixture } from './helpers/zip-fixture'
 import NodeCanvas from '../src/components/NodeCanvas'
 import ScreenScanner from '../src/components/ScreenScanner'
 import SidePanel from '../src/components/SidePanel'
@@ -156,17 +157,8 @@ describe('2) App: koşul seçim yollarını reddeder, diğer türler korunur', (
   beforeEach(() => {
     vi.useFakeTimers()
     picked = 0; captured = 0
-    seed = normalizeCanvasBook({
-      activeId: '',
-      tabs: [],
-      library: {
-        canvases: [{
-          id: 'saved', name: 'Shared', updatedAt: 1,
-          graph: { nodes: [createNode('start', 0, 0), createNode('click', 300, 0), createNode('condition', 0, 200)], edges: [] },
-        }],
-        automations: [],
-      },
-    })
+    seed = withZipFixture(normalizeCanvasBook({activeId:'',tabs:[{id:'saved',name:'Shared',graph:{nodes:[createNode('start',0,0),createNode('click',300,0),createNode('condition',0,200)],edges:[]}}]}))
+
   })
   afterEach(() => { if (renderer) act(() => renderer!.unmount()); renderer = undefined; vi.useRealTimers() })
   afterAll(() => { delete (window as unknown as { xpAgent?: unknown }).xpAgent; vi.unstubAllGlobals() })
@@ -174,7 +166,7 @@ describe('2) App: koşul seçim yollarını reddeder, diğer türler korunur', (
   const openCanvas = async () => {
     await act(async () => { renderer = create(createElement(App), options) })
     const lib = renderer!.root.findByType(CanvasLibrary)
-    await act(async () => { lib.props.onOpenCanvas((seed.library as NonNullable<CanvasBook['library']>).canvases[0]) })
+    await act(async () => { lib.props.onOpenCanvas(seed.zipLibrary!.groups[0].canvases[0].canvasId) })
   }
   const graph = () => renderer!.root.findByType(NodeCanvas).props.graph as AgentGraph
   const select = async (id: string) => { await act(async () => { renderer!.root.findByType(NodeCanvas).props.onSelectNode(id) }) }

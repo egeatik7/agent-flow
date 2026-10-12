@@ -28,8 +28,9 @@ contextBridge.exposeInMainWorld('xpAgent', {
   viewerInfo: () => ipcRenderer.invoke('viewer:info'),
   manageViewer: (action: string) => ipcRenderer.invoke('viewer:manage', action),
   manageLibrary: (mode: string) => ipcRenderer.invoke('library:manage', mode),
+  zipLibraryAction: (action: unknown) => ipcRenderer.invoke('zip-library:action', action),
   getCanvases: () => ipcRenderer.invoke('canvases:get'),
-  saveCanvases: (book: unknown, options?: { catalog?: boolean }) => ipcRenderer.invoke('canvases:save', book, options),
+  saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
 
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => ipcRenderer.invoke('screen:scan', windowTitle, ramp),

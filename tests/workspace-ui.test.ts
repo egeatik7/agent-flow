@@ -31,10 +31,10 @@ describe('workspace document controls', () => {
     act(() => flush!())
     expect(p.onRename).not.toHaveBeenCalled()
   })
-  it('uses the same three Save/Discard/Cancel choices for an automation and Escape cancels', () => {
+  it('uses the same three Save/Discard/Cancel choices for a canvas and Escape cancels', () => {
     const answer = vi.fn()
-    act(() => { mounted = create(createElement(SaveCanvasDialog, { name: 'Pipeline', kind: 'automation', onAnswer: answer })) })
-    expect(JSON.stringify(mounted!.toJSON())).toContain('otomasyonundaki')
+    act(() => { mounted = create(createElement(SaveCanvasDialog, { name: 'Pipeline', kind: 'canvas', onAnswer: answer })) })
+    expect(JSON.stringify(mounted!.toJSON())).toContain('tuvalindeki')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(answer.mock.calls).toEqual([['cancel']])
   })

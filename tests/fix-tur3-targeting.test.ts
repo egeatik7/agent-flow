@@ -215,7 +215,7 @@ describe('tur3/4 — eksik Başlangıç kimliği deterministik (graph-types.ts)'
   const hamGraf = () => ({ nodes: [{ id: 'n1', kind: 'click', title: 'Tıkla 1', x: 400, y: 120, prompt: 'Kaydet' }], edges: [] })
   const startId = (g: { nodes: { kind: string; id: string }[] }) => g.nodes.find((n) => n.kind === 'start')?.id
 
-  it('sekme + baseline + katalog kaydı AYNI Başlangıç kimliğini üretir', () => {
+  it('sekme + baseline + JSON AYNI Başlangıç kimliğini üretir', () => {
     const book = normalizeCanvasBook({
       activeId: 't1',
       tabs: [{ id: 't1', name: 'Tuval 1', graph: hamGraf(), baseline: { name: 'Temel', graph: hamGraf() } }],
@@ -224,7 +224,7 @@ describe('tur3/4 — eksik Başlangıç kimliği deterministik (graph-types.ts)'
     const kimlikler = [
       startId(book.tabs[0].graph),
       startId(book.tabs[0].baseline!.graph),
-      startId(book.library!.canvases[0].graph),
+      startId(normalizeGraph(hamGraf())),
     ]
     expect(kimlikler.filter(Boolean).length).toBe(3)
     expect(new Set(kimlikler).size).toBe(1)

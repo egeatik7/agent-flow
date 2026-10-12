@@ -111,7 +111,7 @@
 .recovery-note-paper { user-select: text; }
 .recovery-note > header, .recovery-note > nav, .recovery-note > footer { flex-shrink: 0; }
 
-/* XP Explorer: the content belongs to the catalog; the companion has its own dock. */
+/* XP Explorer: the content belongs to ZIP groups; the companion has its own dock. */
 .canvas-tab-content { gap:0; min-height:0; height:100%; }
 .library-brand { margin-top:0; padding:10px 4px 4px; border-top:2px solid #aca899; box-shadow:inset 0 1px #fff; background:linear-gradient(#eeede4,#e5e2d5); min-height:148px; max-height:190px; overflow:hidden; }
 .library-brand .nubbo-mascot { width:110px; height:110px; }
@@ -125,11 +125,7 @@
 .library-explorer-toolbar .xp-btn[aria-pressed=true] { box-shadow:inset 1px 1px #7c7a70; background:#d7d6cc; }
 .library-explorer-toolbar > span { flex:1; min-width:0; color:#67675f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
 .canvas-library-scroll { background:#fff; padding:3px; border:1px solid #7f9db9; box-shadow:inset 1px 1px #e5e5e5; }
-.library-tree { min-height:100px; padding-bottom:16px; user-select:none; }
-.library-tree { position:relative; min-height:100%; box-sizing:border-box; padding-bottom:48px; }
-.library-tree.root-drop-target { box-shadow:inset 0 0 0 2px #316ac5; background:#f2f7ff; }
 .library-marquee { position:absolute; pointer-events:none; z-index:5; border:1px solid #316ac5; background:#316ac52b; }
-.library-tree-row.draft .library-tree-name { font-style:italic; }
 .canvas-tabs-row .canvas-tab { box-sizing:border-box; flex:0 0 auto; max-width:80px; gap:3px; padding-left:5px; background:linear-gradient(#f2f5fa,#dbe3ef); border-color:#93a9c6; border-top:3px solid #a9bcd6; }
 .canvas-tabs-row .canvas-tab-rename { flex:1; min-width:0; width:100%; }
 .canvas-tabs-row .canvas-tab.active { background:linear-gradient(#ffffff,#eaf0f9); border-bottom-color:#eaf0f9; box-shadow:inset 0 1px #fff; }
@@ -138,37 +134,14 @@
 .canvas-tab[draggable=true] { cursor:grab; }
 .canvas-tab-name { min-width:0; }
 .canvas-tab-x { flex-shrink:0; }
-.library-tree-row { display:flex; align-items:center; min-height:26px; gap:4px; margin:1px 0; color:#222; border:1px solid transparent; cursor:default; overflow:hidden; }
-.library-tree-row.selected { background:#316ac5; color:#fff; }
-.library-tree-row:focus-visible { outline:1px dotted currentColor; outline-offset:-2px; }
-.library-tree-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.35; }
 .library-file-icon { width:20px; height:20px; flex:0 0 20px; }
-.tree-expander { border:1px solid #909090; background:#fff; width:11px; height:11px; font:11px/8px Tahoma,sans-serif; padding:0; color:#333; flex:0 0 11px; cursor:pointer; }
-.tree-expander.empty { visibility:hidden; }
 .library-empty { padding:12px 6px; color:#777; font-size:11px; line-height:1.5; }
-.library-tree-row.drop-target { border:1px dotted #fff; outline:2px solid #316ac5; background:#e2ecfb; color:#111; }
 .library-statusbar { padding:4px 5px; min-height:20px; border:1px solid #aca899; border-top:0; box-shadow:inset 1px 1px #fff; color:#5b5b54; background:#ece9d8; }
 .library-context-menu { position:fixed; z-index:1600; min-width:232px; max-height:calc(100vh - 12px); overflow:auto; background:#f4f3ee; color:#111; border:1px solid #85847b; box-shadow:2px 2px 2px #0005,inset 1px 1px #fff; padding:3px; font:11px Tahoma,sans-serif; }
 .library-context-menu button { display:block; width:100%; border:0; background:transparent; padding:5px 17px; text-align:left; font:inherit; color:inherit; cursor:default; }
 .library-context-menu button:hover:not(:disabled),.library-context-menu button:focus-visible { background:#316ac5; color:#fff; outline:0; }
 .library-context-menu button:disabled { color:#999; }
 .library-context-menu hr { margin:3px; border:0; border-top:1px solid #aca899; border-bottom:1px solid #fff; }
-.automation-editor-attached { margin:0 0 7px 17px; border-left:1px solid #7f9db9; border-right:1px solid #7f9db9; border-bottom:1px solid #7f9db9; }
-.automation-editor-attached .automation-editor,.automation-card .automation-editor { margin:0; border:0; padding:6px; background:#f9fafb; }
-.automation-card { padding:0; margin:0 0 8px; background:#f9fafb; }
-.automation-header { display:flex; align-items:center; gap:5px; width:100%; padding:5px; background:#e2eaf7; color:#17498b; border:0; border-bottom:1px solid #7f9db9; font:11px Tahoma,sans-serif; text-align:left; }
-.automation-header strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.automation-header .automation-disclosure { border:1px solid #7f9db9; background:#fff; padding:0 2px; }
-.automation-editor-status { font-size:10px; color:#697184; padding:0 0 5px; }
-.automation-entry { min-height:25px; cursor:default; }
-.automation-entry:hover { background:#e8eff9; }
-.automation-entry-number { min-width:18px; color:#6c7480; font-size:10px; }
-.automation-editor-footer { display:flex; gap:5px; padding-top:7px; border-top:1px solid #e1e5ec; }
-.automation-editor-footer .xp-btn { min-height:23px; font-size:11px; }
-.library-canvas-picker { width:420px; max-width:calc(100vw - 30px); }
-.library-picker-body { padding:12px; }
-.library-picker-body .library-tree { border:1px solid #7f9db9; background:#fff; height:300px; overflow:auto; }
-.library-canvas-picker .xp-dialog-title { color:white; font:bold 13px Tahoma,sans-serif; background:linear-gradient(#0969ed,#0052c8); padding:8px; }
 .tablet-dialog { width:560px; max-width:calc(100vw - 30px); max-height:calc(100dvh - 30px); }
 .tablet-dialog-title { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; color:white; font:bold 13px Tahoma,sans-serif; background:linear-gradient(#0969ed,#0052c8); padding:5px 6px; }
 .tablet-dialog-title .xp-btn { width:23px; min-width:23px; height:23px; padding:0; color:white; background:linear-gradient(#ee9b86,#c73d25); border-color:white; font:bold 17px Tahoma,sans-serif; }
@@ -178,3 +151,18 @@
 .tablet-dialog-url { width:100%; box-sizing:border-box; }
 .tablet-dialog .workspace-picker-actions { flex-wrap:wrap; }
 @media(max-height:700px) { .library-brand { min-height:110px; max-height:130px; padding:5px 4px 0; } .library-brand .nubbo-mascot { width:66px; height:66px; } .library-brand .nubbo-logo { max-width:112px; } }
+
+/* ZIP groups use one vertical order; that order also defines the open tab sequence. */
+.library-row { display:flex; align-items:center; gap:6px; width:100%; min-height:27px; padding:4px 6px; border:0; background:transparent; color:inherit; font:11px Tahoma,sans-serif; text-align:left; }
+.library-row-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.library-row small { flex:0 0 auto; color:#666; }
+.library-row:hover:not(:disabled) { background:#e4edf8; }
+.library-row.selected,.library-row:focus-visible { background:#316ac5; color:white; outline:1px dotted white; outline-offset:-3px; }
+.library-row.selected small { color:white; }
+.library-views [aria-selected=true] { font-weight:bold; background:#fff; }
+
+.zip-library-tree { position:relative; user-select:none; padding-bottom:50px; min-height:100px; }
+.library-row .workspace-icon { width:22px; height:22px; flex-shrink:0; }
+.zip-recovery { border-top:1px solid #aca899; padding:5px; max-height:130px; overflow:auto; }
+.zip-recovery > div { display:flex; align-items:center; gap:4px; padding:3px 0; }
+.zip-recovery > div > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
