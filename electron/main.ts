@@ -54,6 +54,9 @@ import {
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
 import { chooseLibraryDirectory, isProtectedPath } from './library-path'
+import { setDiagnosticsRoot } from './send-log'
+// Kanıt dosyaları kullanıcı veri klasörü altına yazılır; API anahtarı/başlık asla kaydedilmez.
+setDiagnosticsRoot(path.join(app.getPath('userData'), 'diagnostics'))
 import { zipDocumentFor } from './zip-workspace'
 import { copyZipCanvas } from './zip-canvas-document'
 import { sameCanvasContent } from './canvas-content'

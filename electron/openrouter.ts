@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
@@ -662,6 +663,25 @@ Step: ${opts.stepTitle}
 Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
 
   const withImage = opts.sendImage && !!scan.image
+  // KANIT (1.9.113): gövdeden ÖNCE tek satırlık KESİLMEYEN özet + aynı istek kimliğiyle diske kanıt.
+  const istekId = nextRequestId()
+  const resim = withImage ? imageBytes(scan.image?.data) : null
+  const gonderimOzeti = (goruntusuzDonus: boolean) => {
+    const ilk = Array.isArray(opts.model) ? opts.model[0] : opts.model
+    const ozet = sendSummaryText({
+      id: istekId, node: opts.stepTitle, stage: String(opts.kind), model: Array.isArray(opts.model) ? opts.model.join(',') : opts.model,
+      target: isLocalName(ilk) ? 'local' : 'api',
+      image: resim
+        ? { sent: true, w: scan.image?.w, h: scan.image?.h, bytes: resim.buffer.length, mime: resim.mime }
+        : { sent: false, reason: opts.sendImage ? 'tarama görüntüsü boş (kare alınamadı)' : 'ayar kapalı: numaralı ekran görüntüsü gönder' },
+      fallbackNoImage: goruntusuzDonus,
+      candidates: { built: candidates.length, sent: countSentCandidates(listText) },
+      promptChars: listText.length,
+    })
+    chatLogger?.(ozet)
+    saveRequestEvidence(istekId, { summary: ozet, system, instruction: opts.prompt, candidates: listText, image: resim ?? undefined })
+  }
+  gonderimOzeti(false)
   const build = (img: boolean): Message[] => [
     { role: 'system', content: system },
     {
@@ -683,6 +703,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
+    gonderimOzeti(true)
     content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined })
   }
 
@@ -695,6 +716,15 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   // Artık: numara bu listede yok / var ama tıklanabilir değil / listeye alınmamış / numara yok.
   const aday = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id) : undefined
   const rejected = id === null || selected ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
+  // YANIT KANITI (1.9.113): ham cevap, dönen id, listede var mı, seçilebilir mi, red sebebi ve çözülen öğe.
+  const gonderilenMi = id !== null && Number.isInteger(id) ? new RegExp(`^#${id}\\s`, 'm').test(listText) : false
+  chatLogger?.(responseSummaryText({
+    id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!selected, rejected,
+    resolvedItem: selected ? `${selected.item.src}/${selected.item.type} "${selected.item.text.slice(0, 60)}"` : undefined,
+    resolvedWord: selected?.wordIndex !== undefined ? `#${selected.item.id} w${selected.wordIndex}` : undefined,
+    targetText: selected?.item.text.slice(0, 80),
+  }))
+  saveRequestEvidence(istekId, { response: content })
   return {
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
     id: selected?.parentId ?? null,
