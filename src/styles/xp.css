@@ -2093,6 +2093,19 @@ html.hud-root #root {
   -webkit-box-orient: vertical;
 }
 
+/* Zamanlayıcı adımının canlı geri sayımı: kartın içinde, metnin altında. */
+.hud-countdown {
+  margin: 0;
+  padding: 3px 7px 6px;
+  border-top: 1px dotted #b5ab8e;
+  font: bold 12px Tahoma, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: #3a3226;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .icon-preview {
   display: block;
   max-width: 100%;

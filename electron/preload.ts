@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   onHud: on('hud:status'),
   onHudLoop: on('hud:loop'),
   onHudMethod: on('hud:method'),
+  onHudCountdown: on('hud:countdown'),
   pickFolder: (extensions: string[]) => ipcRenderer.invoke('dialog:pickFolder', extensions),
   listDir: (dir: string) => ipcRenderer.invoke('dialog:listDir', dir),
   pickDir: () => ipcRenderer.invoke('dialog:pickDir'),

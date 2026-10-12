@@ -612,6 +612,56 @@ function pushMethod(text: string) {
   deliverHud('hud:method', { text: recoveryActive ? `Kurtarma ajanı${text ? ` · ${text}` : ''}` : text }, false)
 }
 
+/** Zamanlayıcı adımı sürerken kartta canlı geri sayım; adım bitince veya koşu sonunda temizlenir. */
+let hudCountdown: ReturnType<typeof setInterval> | null = null
+/** Kart 5 kez/sn tazelenir: insan gözü için akıcı, IPC için ucuz. */
+const HUD_COUNTDOWN_MS = 200
+
+/** Saniyeyi Türkçe ondalık virgülle yazar: 3200 → "3,2". */
+function sn(ms: number): string {
+  return (Math.max(0, ms) / 1000).toFixed(1).replace('.', ',')
+}
+
+function pushCountdown(text: string) {
+  viewerState.event('hud:countdown', { text })
+  if (!running || !hudWindow || hudWindow.isDestroyed()) return
+  deliverHud('hud:countdown', { text }, false)
+}
+
+/**
+ * Geri sayımı durdurur ve karttaki satırı temizler. `sil=false` yalnız zamanlayıcıyı bırakır
+ * (yeni bir geri sayım hemen ardından satırı zaten yeniden yazar).
+ */
+function stopHudCountdown(sil = true) {
+  if (hudCountdown) {
+    clearInterval(hudCountdown)
+    hudCountdown = null
+  }
+  if (sil) pushCountdown('')
+}
+
+/**
+ * Zamanlayıcı (wait) adımı sürerken kalan süre kartta görünür. Toplam süre adım başında node'dan
+ * okunur; adım gerçekten bitince (`done`/`error`) veya koşu sonunda satır temizlenir. Süre bitince
+ * sayaç kendini bırakır ama satır "0,0 sn" olarak kalır, ta ki adım olayı temizleyene kadar — böylece
+ * kart, adımın gerçekten bittiğini söyleyen olayı beklerken yanlış bir "sürüyor" izlenimi vermez.
+ */
+function startHudCountdown(title: string, totalMs: number) {
+  stopHudCountdown(false)
+  if (!running || !hudWindow || hudWindow.isDestroyed() || totalMs <= 0) return
+  const bitis = Date.now() + totalMs
+  const yaz = () => {
+    const kalan = Math.max(0, bitis - Date.now())
+    pushCountdown(`Zamanlayıcı${title ? ` · ${title}` : ''} · kalan ${sn(kalan)} / ${sn(totalMs)} sn`)
+    if (kalan <= 0 && hudCountdown) {
+      clearInterval(hudCountdown)
+      hudCountdown = null
+    }
+  }
+  yaz()
+  hudCountdown = setInterval(yaz, HUD_COUNTDOWN_MS)
+}
+
 /** Node kinds whose step already logs its own opening line (see runner's execStep). */
 const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 'ai'])
 
@@ -629,13 +679,24 @@ const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 
 function hudStep(payload: unknown) {
   if (!running || derivedRun || !hudRunGraph || !hudWindow || hudWindow.isDestroyed()) return
   const p = payload as { id?: unknown; status?: unknown }
-  if (p?.status !== 'running' || typeof p.id !== 'string') return
+  if (typeof p.id !== 'string') return
+  // Adım bitti ya da hata verdi: karttaki geri sayım bekleyeni yanıltmasın.
+  if (p.status !== 'running') {
+    stopHudCountdown()
+    return
+  }
   const place = findPlace(hudRunGraph, p.id)
   if (!place) return
   const kind = place.node.kind
   const label = NODE_SPECS[kind]?.label ?? kind
   const title = String(place.node.title ?? '').trim()
   pushMethod(title && title !== label ? `${label} · ${title}` : label)
+  if (kind === 'wait') {
+    // Zamanlayıcı: adı yöntem satırında kalır, kartın içinde canlı geri sayım yürür.
+    startHudCountdown(title, Math.max(0, Number(place.node.ms ?? 0)))
+    return
+  }
+  stopHudCountdown()
   if (!LOGGED_STEP_KINDS.has(kind)) pushHud('info', title ? `${label}: ${title}` : label)
 }
 
@@ -665,6 +726,7 @@ function hideHudSoon() {
       hudWindow.hide()
       hudWindow.webContents.send('hud:loop', { text: '' })
       hudWindow.webContents.send('hud:method', { text: '' })
+      hudWindow.webContents.send('hud:countdown', { text: '' })
     }
   }, 2200)
 }
@@ -926,6 +988,7 @@ async function runFlow(
     endRun(outcome)
     if(runId)viewerState.finish(outcome)
     hudRunGraph = null
+    stopHudCountdown()
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
     recoveryActive = false
     running = false

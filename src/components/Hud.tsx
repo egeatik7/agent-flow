@@ -13,6 +13,8 @@ export default function Hud() {
   )
   const [loop, setLoop] = useState(() => (window.xpAgent ? '' : 'Modeller · 3/12 · kedi.png'))
   const [method, setMethod] = useState(() => (window.xpAgent ? '' : 'Windows OCR'))
+  /** Zamanlayıcı adımı sürerken kalan süre; adım bitince boşalır. */
+  const [countdown, setCountdown] = useState('')
   const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
@@ -44,12 +46,17 @@ export default function Hud() {
       setRecovering(payload.active)
       setStatus({ level: payload.active ? 'warn' : 'info', text: `${payload.nodeTitle}: ${payload.message}` })
     })
+    const offCountdown = window.xpAgent?.onHudCountdown?.((payload) => {
+      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      setCountdown(text)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
       offLoop?.()
       offMethod?.()
       offRecovery?.()
+      offCountdown?.()
     }
   }, [])
 
@@ -65,6 +72,7 @@ export default function Hud() {
           Nubbo
         </div>
         <p className="hud-text">{status.text}</p>
+        {countdown && <p className="hud-countdown" role="timer">{countdown}</p>}
       </div>
       <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
       <p className={`hud-line hud-loop${loop ? ' on' : ''}`}>{loop}</p>

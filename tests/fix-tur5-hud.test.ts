@@ -11,16 +11,18 @@ import { createNode, NODE_SPECS, type AgentGraph } from '../electron/graph-types
  */
 const source = ts.createSourceFile('main.ts', readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
 const parts: string[] = []
+const FUNCS = ['pushMethod', 'hudStep', 'sn', 'pushCountdown', 'stopHudCountdown', 'startHudCountdown']
+const CONSTS = ['LOGGED_STEP_KINDS', 'HUD_COUNTDOWN_MS', 'hudCountdown']
 function visit(node: ts.Node) {
-  if (ts.isFunctionDeclaration(node) && node.name && ['pushMethod', 'hudStep'].includes(node.name.text)) parts.push(node.getText(source))
+  if (ts.isFunctionDeclaration(node) && node.name && FUNCS.includes(node.name.text)) parts.push(node.getText(source))
   if (ts.isVariableStatement(node)) {
     const name = node.declarationList.declarations[0]?.name
-    if (ts.isIdentifier(name) && name.text === 'LOGGED_STEP_KINDS') parts.push(node.getText(source))
+    if (ts.isIdentifier(name) && CONSTS.includes(name.text)) parts.push(node.getText(source))
   }
   ts.forEachChild(node, visit)
 }
 visit(source)
-if (parts.length !== 3) throw Error('hudStep, pushMethod ve LOGGED_STEP_KINDS main.ts içinde bulunmalı.')
+if (parts.length !== FUNCS.length + CONSTS.length) throw Error(`hudStep, pushMethod ve geri sayım gövdeleri main.ts içinde bulunmalı: ${FUNCS.join(', ')}`)
 
 const compiled = ts.transpileModule(`${parts.join('\n')}\n({ hudStep, pushMethod, LOGGED_STEP_KINDS });`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -50,6 +52,11 @@ function harness(graph: AgentGraph): Harness {
     },
     NODE_SPECS,
     viewerState: { event: () => {} },
+    // Bu dosya yalnız yöntem/kart satırını ölçer; geri sayımın kendi testi fix-tur7'dedir.
+    // Sahte zamanlayıcı: gerçek interval kurulmaz, test süreci asılı kalmaz.
+    setInterval: () => 1,
+    clearInterval: () => {},
+    Date: { now: () => Date.now() },
     get running() { return state.running },
     get derivedRun() { return state.derived },
     get recoveryActive() { return state.recovery },

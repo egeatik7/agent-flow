@@ -63,6 +63,8 @@ function harness(overrides = {}) {
     STOP_HOTKEY: 'Ctrl+Shift+Q',
     powerSaveBlocker: { start: () => { events.push('awake'); return 0; }, isStarted: () => true, stop: () => events.push('awake-stopped') },
     log: () => {}, hideSelf: async () => false, revealHud: () => {}, hideHudSoon: () => {},
+    // 1.9.104: runFlow kosu sonunda zamanlayici geri sayimini da birakir; yuzeyin aynisi burada da var.
+    stopHudCountdown: () => events.push('countdown-stop'),
     showSelf: () => {}, runGraph: async () => ({ failed: 0 }),
     ...overrides,
   };
