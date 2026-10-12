@@ -551,6 +551,11 @@ export default function NodeCanvas(p: Props) {
   const menuNode = menu?.mode === 'node' ? byId.get(menu.nodeId) : undefined
   const menuOwner = menuNode ? ownerOf(p.graph, menuNode.id) : undefined
   const multi = p.selectedIds.length > 1
+  // Başlangıç node'u silinemez: motor, silinen Başlangıç yerine rastgele id'li yenisini enjekte
+  // ediyor ve sekme/katalog kimlikleri ayrışıyor. Çoklu seçimde start ATLANIR.
+  const menuSelection = menu?.mode === 'node' ? (multi ? p.selectedIds : [menu.nodeId]) : []
+  const deletable = menuSelection.filter((id) => byId.get(id)?.kind !== 'start')
+  const showDelete = menu?.mode === 'node' && deletable.length > 0
 
   return (
     <div
@@ -995,13 +1000,14 @@ export default function NodeCanvas(p: Props) {
                     Bağla… (hedefe tıkla)
                   </button>
                 )}
-                <button type="button" className="danger" onClick={() => {
-                  if (multi) p.selectedIds.forEach((id) => p.onDeleteNode(id))
-                  else p.onDeleteNode(menu.nodeId)
-                  setMenu(null)
-                }}>
-                  {menuNode?.kind === 'loop' && !multi ? 'Kutuyu sil (içindekiler kalır)' : 'Sil'}
-                </button>
+                {showDelete && (
+                  <button type="button" className="danger" onClick={() => {
+                    deletable.forEach((id) => p.onDeleteNode(id))
+                    setMenu(null)
+                  }}>
+                    {menuNode?.kind === 'loop' && !multi ? 'Kutuyu sil (içindekiler kalır)' : 'Sil'}
+                  </button>
+                )}
               </>
             ) : (
               <>

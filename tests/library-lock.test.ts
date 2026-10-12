@@ -155,12 +155,14 @@ it('does not use a descendant recovery ticket when a new live root owner replace
   expect(fs.readFileSync(file, 'utf8')).toBe(raw)
   expect(fs.readFileSync(ticket, 'utf8')).toBe(replacement)
 })
-it('detects ownership loss and leaves the replacement owner and catalog untouched on release', () => {
+it('refuses a live replacement lock and leaves the replacement owner and catalog untouched on release', () => {
   const storage = make(), file = lockPath(storage), before = fs.readFileSync(storage.file)
   storage.claim()
   const other = JSON.stringify({ format: 'nubbo-lock', pid: process.pid, nonce: 'replacement' }); fs.writeFileSync(file, other)
-  expect(() => storage.save(empty())).toThrow(/sahipliği kayboldu/)
-  expect(() => storage.claim()).toThrow(/sahipliği kayboldu/)
+  // The replacement names a live process: the stale session record is dropped, but
+  // saving and re-claiming both refuse with busy() instead of deleting that lock.
+  expect(() => storage.save(empty())).toThrow(/başka bir Nubbo/)
+  expect(() => storage.claim()).toThrow(/başka bir Nubbo/)
   storage.release()
   expect(fs.readFileSync(file, 'utf8')).toBe(other)
   expect(fs.readFileSync(storage.file)).toEqual(before)

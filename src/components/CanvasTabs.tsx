@@ -25,6 +25,7 @@ export default function CanvasTabs(p: Props) {
   const dragging=useRef('')
   const [drop,setDrop]=useState<{id:string;after:boolean}|null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const rename = useRef<{ id: string | null; name: string }>({ id: null, name: '' })
   rename.current = { id: editId, name: draft }
   useEffect(() => {
@@ -49,6 +50,33 @@ export default function CanvasTabs(p: Props) {
     p.onRename(id, name)
   }
 
+  /** Sekmeye geç ve odağı taşı (WAI-ARIA sekme deseni, otomatik etkinleştirme). */
+  const goTo = (id: string) => {
+    if (!id) return
+    if (id !== p.activeId) p.onSelect(id)
+    tabRefs.current.get(id)?.focus?.()
+  }
+
+  const onTabKey = (e: { key: string; preventDefault: () => void }, tab: CanvasTabItem) => {
+    if (p.disabled) return
+    const index = p.tabs.findIndex((t) => t.id === tab.id)
+    if (index < 0) return
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      const next = p.tabs[index + (e.key === 'ArrowRight' ? 1 : -1)]
+      if (!next) return
+      e.preventDefault()
+      goTo(next.id)
+    } else if (e.key === 'Home' || e.key === 'End') {
+      const next = e.key === 'Home' ? p.tabs[0] : p.tabs[p.tabs.length - 1]
+      if (!next || next.id === tab.id) return
+      e.preventDefault()
+      goTo(next.id)
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      if (tab.id !== p.activeId) p.onSelect(tab.id)
+    }
+  }
+
   return (
     <div className="canvas-tabs-row">
       {p.tabs.length > 0 && <div className="canvas-sequence-controls">
@@ -63,6 +91,7 @@ export default function CanvasTabs(p: Props) {
         return (
           <div
             key={tab.id}
+            ref={(el) => { if (el) tabRefs.current.set(tab.id, el); else tabRefs.current.delete(tab.id) }}
             className={`canvas-tab${on ? ' active' : ''}${drop?.id===tab.id?(drop.after?' drop-after':' drop-before'):''}`}
             draggable={!p.disabled&&!editing&&!!p.onReorder}
             onDragStart={e=>{if(p.disabled||editing){e.preventDefault();return}dragging.current=tab.id;e.dataTransfer.setData('application/x-nubbo-tab',tab.id);e.dataTransfer.effectAllowed='move'}}
@@ -71,7 +100,9 @@ export default function CanvasTabs(p: Props) {
             onDragEnd={()=>{dragging.current='';setDrop(null)}}
             role="tab"
             aria-selected={on}
+            tabIndex={p.disabled ? -1 : on ? 0 : -1}
             title={editing ? 'Adı yaz, Enter ile bırak' : tab.name}
+            onKeyDown={(e) => onTabKey(e, tab)}
             onClick={() => {
               if (!p.disabled && !editing) p.onSelect(tab.id)
             }}

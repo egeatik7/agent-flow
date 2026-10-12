@@ -22,6 +22,7 @@ import {
   type ScanResult,
   type ScreenItem,
   type Target,
+  type TiePolicy,
 } from './matcher'
 import { activeFindOrder, promptOf } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
@@ -224,12 +225,17 @@ export function createAgent(ctx: AgentContext) {
     const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, area, win)) : undefined
     const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
     const useLlm = allowLlm && (!!s.apiKey || localConfigured()) && !!prompt
+    // Eşit adaylar (aynı yazıdan birden fazla): model varsa ayırt edici yoksa SEÇİM YAPILMAZ ve
+    // karar modele bırakılır. Model yoksa eski deterministik davranış (ilk aday) korunur; yoksa
+    // modelsiz çalışan akışlar hedef bulamayıp durur.
+    const tie: TiePolicy = useLlm ? 'ask' : 'first'
+    const tieNote = (m: string) => log('warn', m)
 
     let hit: Target | null = null
     let how = ''
     let exact = false
     if (!llmOnly && explicit?.quoted) {
-      hit = matchText(items, explicit.text, { anchor, minScore: 60, prefer }) ?? matchFuzzy(items, explicit.text, { anchor, minScore: 80, prefer })
+      hit = matchText(items, explicit.text, { anchor, minScore: 60, prefer, tie, note: tieNote }) ?? matchFuzzy(items, explicit.text, { anchor, minScore: 80, prefer, tie, note: tieNote })
       exact = !!hit
       how = 'yazı'
     }
@@ -266,11 +272,11 @@ export function createAgent(ctx: AgentContext) {
     }
     if (!hit && !llmOnly) {
       hit =
-        matchPrompt(items, prompt || recordedText, anchor, prefer) ??
-        (explicit ? matchText(items, explicit.text, { anchor, prefer }) : null) ??
-        (recordedText ? matchText(items, recordedText, { anchor, prefer }) : null) ??
-        matchFuzzy(items, explicit?.text || prompt || recordedText, { anchor, prefer }) ??
-        (recordedText && prompt ? matchFuzzy(items, recordedText, { anchor, prefer }) : null)
+        matchPrompt(items, prompt || recordedText, anchor, prefer, { tie, note: tieNote }) ??
+        (explicit ? matchText(items, explicit.text, { anchor, prefer, tie, note: tieNote }) : null) ??
+        (recordedText ? matchText(items, recordedText, { anchor, prefer, tie, note: tieNote }) : null) ??
+        matchFuzzy(items, explicit?.text || prompt || recordedText, { anchor, prefer, tie, note: tieNote }) ??
+        (recordedText && prompt ? matchFuzzy(items, recordedText, { anchor, prefer, tie, note: tieNote }) : null)
       how = 'yazı eşleşmesi'
     }
     if (!hit) return null
@@ -381,7 +387,9 @@ export function createAgent(ctx: AgentContext) {
       const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
       const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
       const items = asksDesktopShortcut(prompt) ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
-      const hit = matchText(items, text, { anchor, minScore: 100, prefer })
+      // Birebir tırnaklı hedefte de iki aday eşit olabilir: model varsa seçim modele bırakılır.
+      const tie: TiePolicy = s.apiKey || localConfigured() ? 'ask' : 'first'
+      const hit = matchText(items, text, { anchor, minScore: 100, prefer, tie, note: (m) => log('warn', m) })
       if (!hit) return null
       return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }

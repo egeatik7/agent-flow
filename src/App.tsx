@@ -289,6 +289,14 @@ export default function App() {
 
   
   const libraryConflictRef = useRef(false)
+  /**
+   * Katalog (kütüphane) yazımı bu turda başarısız olduysa dolu kalır. Oturum yazılmış olsa da
+   * başarı mesajı gösterilmez ve kayıt tabanı (baseline/savedId/name) İLERLETİLMEZ; böylece
+   * sekme kirli kalır ve çalışma kurtarma taslağına girer.
+   */
+  const catalogFailureRef = useRef<null | { kind: 'conflict' | 'error'; message?: string }>(null)
+  /** Aynı kütüphane hatası her otomatik taslak yazımında günlüğü doldurmasın. */
+  const libraryErrorRef = useRef<string | null>(null)
 
   const persistBook = useCallback((book: CanvasBook): Promise<boolean> => {
     const snapshot = structuredClone(book)
@@ -298,15 +306,34 @@ export default function App() {
     const next = writeQueue.current.then(async () => {
       try {
         if (api) {
-          const answer = await api.saveCanvases(snapshot)
+          // `canvases:save` yanıtı: `{ conflict }` = kütüphane çakışması, `{ libraryError }` = katalog yazılamadı.
+          const answer = (await api.saveCanvases(snapshot)) as
+            | boolean
+            | { conflict?: boolean; libraryError?: string }
+            | undefined
           if (answer === false) throw new Error('Tuvaller diske kaydedilemedi.')
           // Kütüphane çakışması AYRI bir durumdur: oturum yazıldı, yalnız kütüphane atlandı.
-          const cakisti = typeof answer === 'object' && answer.conflict === true
+          const cakisti = typeof answer === 'object' && answer !== null && answer.conflict === true
+          const kutuphaneHatasi =
+            typeof answer === 'object' && answer !== null && typeof answer.libraryError === 'string' && answer.libraryError
+              ? answer.libraryError
+              : null
+          catalogFailureRef.current = kutuphaneHatasi
+            ? { kind: 'error', message: kutuphaneHatasi }
+            : cakisti
+              ? { kind: 'conflict' }
+              : null
           if (cakisti && !libraryConflictRef.current) {
             libraryConflictRef.current = true
-            
-            pushLog('warn', 'Kütüphane başka bir programda değişti: kütüphane kaydı durdu, çalışman taslakta duruyor. Sağ tık → Kütüphaneyi Yeniden Yükle ile güncel kaydı al.')
+
+            pushLog('warn', 'Kütüphane başka bir programda değişti; katalog yazılmadı, çalışman taslakta duruyor. Sağ tık → Kütüphaneyi Yeniden Yükle ile güncel kaydı al.')
           } else if (!cakisti && libraryConflictRef.current) { libraryConflictRef.current = false }
+          if (kutuphaneHatasi) {
+            if (libraryErrorRef.current !== kutuphaneHatasi) {
+              libraryErrorRef.current = kutuphaneHatasi
+              pushLog('warn', `Kütüphane yazılamadı: ${kutuphaneHatasi} · çalışman oturumda duruyor; kaydetmeyi tekrar dene.`)
+            }
+          } else if (libraryErrorRef.current) libraryErrorRef.current = null
         }
         else localStorage.setItem(LOCAL_BOOK, JSON.stringify(snapshot))
         if (serial === writeSerial.current) setSaveStatus('saved')
@@ -635,7 +662,10 @@ export default function App() {
   const settleChanges = async (ids?: string[]) => {
     try {
       return await settleCanvasChanges(commitActive, askCanvasSave, async book => {
+        catalogFailureRef.current = null
         if (!await persistBook(book)) return false
+        // Katalog yazılmadıysa bu kitap temiz taban sayılmaz; kapanış/işlem durur, iş kaybolmaz.
+        if (catalogFailureRef.current) { adoptBook(commitActive()); return false }
         adoptBook(book)
         return true
       }, ids)
@@ -692,7 +722,11 @@ export default function App() {
     setLibraryBusy(true)
     try {
       const next = change(commitActive())
+      catalogFailureRef.current = null
       if (!await persistBook(next)) return false
+      // KÜTÜPHANE/KATALOG yazılamadıysa: başarı mesajı yok, yeni kayıt tabanı benimsenmez,
+      // sekme kirli kalır (sonraki açılışta kurtarma taslağı olarak durur).
+      if (catalogFailureRef.current) { adoptBook(commitActive()); return false }
       if (open) showCanvas(next, next.activeId, false)
       else adoptBook(next)
       pushLog('success', message)
@@ -863,7 +897,14 @@ export default function App() {
     selectNode(res.id)
   }
 
+  /** Başlangıç node'u silinmez: motor silinen Başlangıç yerine rastgele id'li yenisini enjekte eder. */
+  const isStartNode = (id: string) => graphRef.current.nodes.find((n) => n.id === id)?.kind === 'start'
+
   const deleteNode = (id: string) => {
+    if (isStartNode(id)) {
+      pushLog('warn', 'Başlangıç node’u silinemez; akışın girişi olarak kalıyor.')
+      return
+    }
     setGraph((g) => removeNode(g, id))
     const next = selectedIdsRef.current.filter((x) => x !== id)
     selectedIdsRef.current = next
@@ -877,10 +918,20 @@ export default function App() {
       if (selectedNodeId) deleteNode(selectedNodeId)
       return
     }
-    setGraph((g) => ids.reduce((acc, id) => removeNode(acc, id), g))
-    selectedIdsRef.current = []
-    setSelectedIds([])
-    setSelectedNodeId(null)
+    // Çoklu seçimde Başlangıç ATLANIR; kalanlar silinir ve kullanıcıya kısa bir uyarı düşülür.
+    const atlanan = ids.filter(isStartNode)
+    const silinen = ids.filter((id) => !atlanan.includes(id))
+    if (atlanan.length) pushLog('warn', 'Başlangıç node’u silinmedi; seçimdeki diğer node’lar silindi.')
+    if (!silinen.length) {
+      selectedIdsRef.current = atlanan
+      setSelectedIds(atlanan)
+      setSelectedNodeId(atlanan[0] ?? null)
+      return
+    }
+    setGraph((g) => silinen.reduce((acc, id) => removeNode(acc, id), g))
+    selectedIdsRef.current = atlanan
+    setSelectedIds(atlanan)
+    setSelectedNodeId(atlanan[0] ?? null)
   }
 
   const deleteEdge = (id: string) => {

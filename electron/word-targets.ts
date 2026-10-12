@@ -61,14 +61,55 @@ function readerOverlaps(candidates: WordCandidate[]): Map<number, Map<number, nu
   return links
 }
 
-export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[]): string {
+/**
+ * Modele gönderilen aday listesinin üst sınırı: satır sayısı.
+ *
+ * Adaylar tek tek `describeItems([item])` ile yazıldığı için `describeItems`'ın 400 öğelik sınırı
+ * etkisiz kalıyordu ve liste ekrandaki HER OCR kelimesini içeriyordu; prompt on binlerce token
+ * olabiliyordu. Sınır tek yerde durur.
+ */
+export const WORD_CANDIDATE_LIMIT = 400
+/** Satır başına yazı üst sınırı: tek bir OCR çöp satırı prompt'u şişirmesin (kimlik/kutu korunur). */
+export const WORD_TEXT_LIMIT = 120
+
+/** Sınır aşıldığında bir kez yazılacak bilgi satırı; çağıran isterse kendi günlüğüne yönlendirir. */
+export type WordLimitNote = (message: string) => void
+
+/** Hangi adayların tutulacağı DETERMİNİSTİK: önce tıklanabilir adaylar (contextOnly olmayanlar),
+ *  sonra ekran merkezine yakınlık, sonra listedeki okuma sırası. Rastgelelik yok. */
+function boundedCandidates(candidates: WordCandidate[], area: ScanResult['area']): WordCandidate[] {
+  if (candidates.length <= WORD_CANDIDATE_LIMIT) return candidates
+  const cx = area.x + area.w / 2
+  const cy = area.y + area.h / 2
+  return candidates
+    .map((c, i) => ({
+      c,
+      i,
+      ctx: c.contextOnly ? 1 : 0,
+      d: Math.hypot(c.item.x + c.item.w / 2 - cx, c.item.y + c.item.h / 2 - cy),
+    }))
+    .sort((a, b) => a.ctx - b.ctx || a.d - b.d || a.i - b.i)
+    .slice(0, WORD_CANDIDATE_LIMIT)
+    .sort((a, b) => a.i - b.i)
+    .map((r) => r.c)
+}
+
+export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[], note?: WordLimitNote): string {
   const overlaps = readerOverlaps(candidates)
-  return candidates.map(({ item, parentId, wordIndex, contextOnly }) => {
+  const kept = boundedCandidates(candidates, scan.area)
+  if (kept.length < candidates.length) {
+    // §9: aday listesi sınırsız büyümesin. Tek satır bilgi, aday başına değil.
+    const say = `Aday listesi sınırlandı: ${candidates.length} adaydan ${kept.length} tanesi modele gönderiliyor (üst sınır ${WORD_CANDIDATE_LIMIT}).`
+    if (note) note(say)
+    else console.warn(`[hedef] ${say}`)
+  }
+  return kept.map(({ item, parentId, wordIndex, contextOnly }) => {
     const x = (item.x + item.w / 2 - scan.area.x) / Math.max(1, scan.area.w) * 100
     const y = (item.y + item.h / 2 - scan.area.y) / Math.max(1, scan.area.h) * 100
     const links = overlaps.get(item.id)
     const overlapHint = links?.size ? ` overlapping-OCR=${[...links].map(([id, percent]) => `#${id}(${percent}%)`).join(',')}` : ''
-    return `${describeItems([item])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
+    const clipped = item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
+    return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
 }
 

@@ -17,6 +17,8 @@ export default function NodeNavigator(p: {
 }) {
   const nodes = useMemo(() => canvasNodes(p.graph), [p.graph])
   const pending = useRef<ReturnType<typeof setTimeout>>()
+  /** Son klavye (Enter) açması: tarayıcının ürettiği takip eden click ikinci kez açmasın. */
+  const keyOpen = useRef<{ id: string; at: number } | null>(null)
   const cancel = () => { if (pending.current) clearTimeout(pending.current); pending.current = undefined }
   useEffect(() => cancel, [p.locationKey, p.active, p.disabled])
   return <section className={`node-navigator${p.inspecting ? ' inspecting' : ''}`} aria-label="Tuval gezgini">
@@ -36,6 +38,9 @@ export default function NodeNavigator(p: {
           title={`${node.title} — ${spec.label} · Tek tık: ${node.kind === 'package' ? 'içine gir' : 'merkeze git'} · Çift tık: ayarlar`}
           onClick={e => {
             cancel()
+            // Aynı satırda Enter'dan sonra gelen native click yok sayılır; fare tıklaması bozulmaz.
+            const klavye = keyOpen.current
+            if (klavye && klavye.id === node.id && Date.now() - klavye.at < 600) { keyOpen.current = null; return }
             if(p.touch){p.onNavigate?.(node.id,node.kind!=='package');return}
             if (e.detail > 1) return
             // Keep the row stable until a possible double click, so package
@@ -44,7 +49,7 @@ export default function NodeNavigator(p: {
             else p.onNavigate?.(node.id, false)
           }}
           onDoubleClick={() => { cancel(); p.onNavigate?.(node.id, true) }}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); cancel(); p.onNavigate?.(node.id, e.ctrlKey || e.metaKey) } }}>
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); cancel(); keyOpen.current = { id: node.id, at: Date.now() }; p.onNavigate?.(node.id, e.ctrlKey || e.metaKey) } }}>
           <span className={`navigator-node-icon ${node.kind === 'package' ? 'package' : ''}`} style={{ color: spec.color }} aria-hidden>{node.kind === 'package' ? '▰' : spec.icon}</span>
           <span className="navigator-node-name">{node.title || spec.label}<small>{spec.label}</small></span>
           {state && <span className={`navigator-status ${state}`}>{state === 'running' ? 'Çalışıyor' : state === 'stopped' ? 'Durdu' : state === 'error' ? 'Hata' : 'Bitti'}</span>}

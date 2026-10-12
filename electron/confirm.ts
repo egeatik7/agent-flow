@@ -1,4 +1,4 @@
-import { containsText, norm } from './matcher'
+import { commandNeedle, containsTextStrict, norm } from './matcher'
 import { NODE_SPECS, type AgentNode } from './graph-types'
 import type { StepAhead } from './runner'
 
@@ -34,11 +34,14 @@ export function expectation(ahead?: StepAhead): string {
     return (n.locator?.text || '').trim()
   }
   if (n.kind === 'click' || n.kind === 'type' || n.kind === 'key') {
+    // İğne, ekrana gerçekten gelmesi beklenen HEDEF yazısıdır: tırnaklı ifade, yoksa kaydedilmiş
+    // locator metni; ikisi de yoksa komutun kendisinden türetilir (komutun tamamı çoğu zaman
+    // ekranda hiç görünmediği için "hazır" kararı hiç oluşmuyordu).
     const quoted = (n.prompt || '').match(/[“"«„]([^”"»“]{1,80})[”"»“]/)
     if (quoted?.[1]?.trim()) return quoted[1].trim()
-    const prompt = (n.prompt || '').trim()
-    if (prompt && prompt.length <= 48) return prompt
-    return (n.locator?.text || n.locator?.name || '').trim()
+    const loc = (n.locator?.text || n.locator?.name || '').trim()
+    if (loc) return loc
+    return commandNeedle(n.prompt || '')
   }
   return ''
 }
@@ -67,11 +70,22 @@ export function judgeScreen(before: string[], after: string[], expected: string)
     return k.length >= 2 && !A.has(k)
   })
   const fresh = [...new Set(freshRaw.map((t) => t.trim()))].slice(0, 8)
-  const has = (texts: string[]) => (expected ? containsText(texts.map((text, id) => ({ id, text, type: 'Text', src: 'ocr' as const, x: 0, y: 0, w: 0, h: 0 })), expected) : false)
+  // Tam KELİME/ifade eşleşmesi: "İndirilenler" gelince "İndir", "Tamamlanıyor" gelince "Tamam"
+  // doğrulanmış sayılmaz (üst-küme yazı "hazır" üretmez).
+  const has = (texts: string[]) => (expected ? containsTextStrict(texts.map((text, id) => ({ id, text, type: 'Text', src: 'ocr' as const, x: 0, y: 0, w: 0, h: 0 })), expected) !== undefined : false)
   const had = has(before)
   const now = has(after)
+  // Yüklenme/tamamlanma sinyali "hazır"dan ÖNCE değerlendirilir. Kapsam DAR tutulur: ekranın
+  // tamamı tarandığı için sürekli duran ilgisiz bir "işleniyor/bekleyin" etiketi varsa hazır kararı
+  // sonsuza kadar hiç oluşmazdı (hafızaya doğrulanmış hedef yazılmaz, "on" modunda gereksiz model
+  // çağrısı). Bu yüzden yalnız (1) bu karede YENİ çıkan yüklenme yazısı ya da (2) beklenen iğneyi
+  // kendisi İÇEREN üst-küme yazı (ör. beklenen "Tamam", ekranda "Tamamlanıyor") sinyal sayılır.
   const loading = fresh.some((t) => LOADING.test(norm(t)))
+    || (!!expected && after.some((t) => LOADING.test(norm(t)) && norm(t).includes(norm(expected))))
 
+  if (loading) {
+    return { kind: 'loading', reason: 'ekranda yüklenme/tamamlanma yazısı var; hedef doğrulanmış sayılmaz', expected, fresh, changed }
+  }
   if (expected && now && !had) {
     return { kind: 'ready', reason: `sıradaki “${expected}” ekrana geldi`, expected, fresh, changed }
   }
@@ -83,9 +97,6 @@ export function judgeScreen(before: string[], after: string[], expected: string)
   }
   if (!changed) {
     return { kind: 'missed', reason: 'ekran değişmedi, tuş tepki vermemiş olabilir', expected, fresh, changed }
-  }
-  if (loading) {
-    return { kind: 'loading', reason: 'yüklenme yazısı var, sıradaki hedef henüz yok', expected, fresh, changed }
   }
   if (!expected && changed) {
     return { kind: 'unknown', reason: 'ekran değişti; beklenen sonuç belirtilmediği için eylem doğrulanamadı', expected, fresh, changed }

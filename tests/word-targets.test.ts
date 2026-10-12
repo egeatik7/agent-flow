@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chooseScreenTarget, setStopCheck } from '../electron/openrouter'
-import { wordCandidates, describeWordCandidates, refineWordTarget } from '../electron/word-targets'
+import { wordCandidates, describeWordCandidates, refineWordTarget, WORD_CANDIDATE_LIMIT } from '../electron/word-targets'
 import type { ScanResult, ScreenItem } from '../electron/matcher'
 const row: ScreenItem = { id: 7, text: 'Run Remesh', type: 'Text', src: 'ocr', x: 100, y: 80, w: 280, h: 20, words: [
  { t: 'Run', x: 100, y: 80, w: 40, h: 20 }, { t: 'Remesh', x: 300, y: 80, w: 80, h: 20 }
@@ -68,11 +68,25 @@ describe('OCR words to model and exact selected word', () => {
   expect(describeWordCandidates(legacy, candidates)).toContain('word geometry unavailable')
   expect(candidates[0].contextOnly).toBe(true)
  })
- it('does not impose the old 400-row truncation on the word cloud', () => {
+ it('bounds the word cloud at WORD_CANDIDATE_LIMIT, deterministically and with one log line', () => {
+  // KASITLI SÖZLEŞME DEĞİŞİKLİĞİ (tur3): bu test eskiden kelime bulutunun TAMAMININ anlatılmasını
+  // şart koşuyordu. Adaylar tek tek `describeItems([item])` ile yazıldığı için `describeItems`'ın
+  // 400 öğelik sınırı etkisiz kalıyor, prompt ekrandaki her OCR kelimesini alıp on binlerce token
+  // olabiliyordu. Yeni sözleşme: liste `WORD_CANDIDATE_LIMIT` ile sınırlanır, tutulan adaylar
+  // deterministiktir ve sınır aşılırsa TEK satır bilgi yazılır.
   const many = { ...scan, items: Array.from({ length: 450 }, (_, id) => ({ ...row, id })) }
   const candidates = wordCandidates(many)
   expect(candidates).toHaveLength(900)
-  expect(describeWordCandidates(many, candidates)).toContain(`#${candidates.at(-1)!.item.id} `)
+  const notlar: string[] = []
+  const a = describeWordCandidates(many, candidates, (m) => notlar.push(m))
+  const b = describeWordCandidates(many, candidates, () => {})
+  expect(a.split('\n')).toHaveLength(WORD_CANDIDATE_LIMIT)
+  expect(a).toBe(b)
+  // Tutulanlar merkeze en yakın adaylardır: "Remesh" (x=340) "Run"dan (x=120) merkeze yakın
+  // olduğu için 400 satırın tamamı "Remesh" olur; uzaktaki aday düşer.
+  expect(a).not.toContain('"Run" @100,80 40x20')
+  expect(a).toContain(`#${candidates[1].item.id} `)
+  expect(notlar).toEqual([expect.stringContaining(`900 adaydan ${WORD_CANDIDATE_LIMIT}`)])
  })
  it('rejects invalid word boxes/indices and clicks inside a one-pixel or negative-origin word', () => {
   expect(refineWordTarget(row, 99)).toBeNull(); expect(refineWordTarget(row, -1)).toBeNull()

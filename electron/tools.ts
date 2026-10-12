@@ -1765,7 +1765,12 @@ const runState: ToolDef = {
       const l = s.last
       const how = l.stopped ? 'kullanıcı durdurdu' : l.error ? `hata: ${l.error}` : l.ok ? 'tamamlandı' : 'hata ile bitti'
       const secs = Math.max(0, Math.round((l.endedAt - l.startedAt) / 1000))
-      parts.push(`Son koşu (${l.runId}): ${how} · ${l.steps ?? 0} adım · ${l.failed ? `${l.failed} hatalı öğe/tur` : 'hatalı öğe yok'} · ${secs} sn.`)
+      // Koşu bir hata ile bittiyse "hatalı öğe yok" demek yalandır: hata vardır, elde olan sayı ise
+      // adım/öğe karışık olabilir (döngüsüz biten koşuda sayaç 0 kalır). Metin ne saydığını söyler.
+      const failedText = l.failed
+        ? (l.error ? `${l.failed} hatalı adım/öğe` : `${l.failed} hatalı öğe/tur`)
+        : l.error ? 'hata ile bitti (öğe sayacı yok)' : 'hatalı öğe yok'
+      parts.push(`Son koşu (${l.runId}): ${how} · ${l.steps ?? 0} adım · ${failedText} · ${secs} sn.`)
     }
     const message = parts.join(' ')
     if (running || s.probing) ctx.log('info', `Ajan · durum · ${message}`)

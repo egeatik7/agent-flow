@@ -103,6 +103,10 @@ jobs:
           exit $LASTEXITCODE
       - name: Target selection and recorded-response regression tests
         run: npm run test:targeting
+      - name: Library lock two-process race (npm run test:lock, part of npm run test:all)
+        run: |
+          npm run test:lock
+          exit $LASTEXITCODE
       - name: PowerShell 5.1 and PowerShell 7 worker tests (mock input)
         run: |
           foreach ($engine in @('powershell.exe', 'pwsh.exe')) {

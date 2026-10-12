@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const { normalizeGraph, createNode } = require('../dist-electron/graph-types.js');
-const { StoppedError, runGraph } = require('../dist-electron/runner.js');
+const { StoppedError, runGraph, newTally } = require('../dist-electron/runner.js');
 const { recoverySettings } = require('../dist-electron/recovery-settings.js');
 const { runRecovery } = require('../dist-electron/recovery.js');
 
@@ -26,7 +26,7 @@ const compiled = ts.transpileModule('const handler = ' + callback.getText(source
 function harness(overrides = {}) {
   const events = [];
   const context = {
-    running: false, stopRequested: false, runLog: 'old', recoveryActive: false, StoppedError,
+    running: false, stopRequested: false, runLog: 'old', recoveryActive: false, StoppedError, newTally,
     recoverySettings, runRecovery, modelChain: (primary, backups) => [primary, ...backups],
     recoveryStatus: (active, title, message) => events.push({ active, title, message }),
     pushMethod: () => {}, recentLogLines: () => [], readRecoveryReports: () => [],

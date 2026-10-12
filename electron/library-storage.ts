@@ -73,7 +73,12 @@ export class LibraryStorage {
  }
  /** Kütüphane bazında yazıcı sahipliği: oturum boyu tutulur, ölü sahipten devralınır. */
  claim(): void {
-  if (this.claimLock) { this.claimLock.assertOwned(); return }
+  const lock = this.claimLock
+  if (lock) {
+   // Kilit dosyası dışarıdan silinip/yeniden adlandırılırsa bu tutamak bayatlar.
+   // Bayat tutamak bırakılır ve yeniden sahiplenilir; canlı yabancı kilit yine reddeder.
+   try { lock.assertOwned(); return } catch { this.claimLock = undefined; lock.release() }
+  }
   this.claimLock = claimLibraryLock(this.directory)
  }
  release(): void {

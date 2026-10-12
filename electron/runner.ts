@@ -77,10 +77,20 @@ class LapLimitError extends Error {}
 
 type Budget = { used: number }
 
-/** Counts shared by a whole run, including the packages it climbs out of. `failed` is loop items or laps that ended on an error. */
-type Tally = { n: number; failed: number }
+/**
+ * Counts shared by a whole run, including the packages it climbs out of. `failed` is loop items or
+ * laps that ended on an error; `stepFailures` is steps that ended on an error OUTSIDE a box (an
+ * unconnected failure output, a step that threw). `loopDepth` is how many box laps are open right
+ * now, so a step failure inside a lap is not counted twice (once as a step, once as an item).
+ */
+export type Tally = { n: number; failed: number; stepFailures: number; loopDepth: number }
 
-/** What a run reports when it ends without being stopped: steps taken, and loop items or laps that ended on an error. */
+/** A fresh tally for one run. */
+export function newTally(): Tally {
+  return { n: 0, failed: 0, stepFailures: 0, loopDepth: 0 }
+}
+
+/** What a run reports when it ends without being stopped: steps taken, and the failures it counted. */
 export type RunSummary = { steps: number; failed: number; incomplete?: boolean; reachedEnd?: boolean; packageExitReached?: boolean }
 
 /** At most this many item names are listed in the end-of-loop summary. */
@@ -180,7 +190,7 @@ export async function runGraph(
       resumeLoopId: opts.resumeLoopId,
       resumeItem: opts.resumeItem,
       resumeState,
-      tally: opts.tally ?? { n: 0, failed: 0 },
+      tally: opts.tally ?? newTally(),
     }
     let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true, packageExit: layers[layers.length - 1].pkg.packageExit })
     for (let i = layers.length - 1; i >= 0; i--) {
@@ -210,7 +220,7 @@ export async function runGraph(
   const host = !opts.vars && graph !== root ? packageHost(root, graph) : undefined
   let vars: Record<string, string> = opts.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
   const loopNotes: string[] = []
-  const tally: Tally = opts.tally ?? { n: 0, failed: 0 }
+  const tally: Tally = opts.tally ?? newTally()
   const warnedLeave = new Set<string>()
 
   /** The closing line of a run: green only if no loop item ended on an error. */
@@ -529,6 +539,9 @@ export async function runGraph(
     let succeeded = 0
     const failedItems: string[] = []
     loopNotes.push('')
+    // Bir tur açıkken adım hataları ÖĞE hatası olarak sayılır (aşağıdaki catch): aynı hata
+    // runGraph'un çıkışında bir kez daha "adım hatası" diye sayılmasın.
+    tally.loopDepth++
     try {
       for (let idx = from; idx < keys.length; idx++) {
         const key = keys[idx]
@@ -570,6 +583,7 @@ export async function runGraph(
       loopNotes.pop()
       ex.setLoop?.(loopNotes.join('   ·   '))
       vars = outer
+      tally.loopDepth--
     }
 
     // Aynı hata kümesi ikinci kez görülürse dur: yüzlerce öğeyi boşa geçirmenin önü kesilir.
@@ -676,12 +690,24 @@ export async function runGraph(
       }
     }
   } catch (e) {
-    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed, ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
+    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed + tally.stepFailures, ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
+    // Döngü DIŞINDA kalan bir adım hatası: hata yine yukarı çıkar (davranış aynı), ama sayaç
+    // doğruyu söyler. Ölçülen kusur: sayaç yalnız öğe hatasında artıyordu, bu yüzden koşu
+    // "hata: …" ile biterken "hatalı öğe yok" yazıyordu.
+    if (!isFatal(e)) {
+      const sayilan = (typeof e === 'object' && e !== null ? e : {}) as { runnerSaydi?: boolean }
+      // Paket katmanlarından yukarı çıkarken aynı hata yeniden sayılmaz; tur içindeyse öğe
+      // sayacı zaten sayar (yukarıdaki catch).
+      if (!sayilan.runnerSaydi) {
+        sayilan.runnerSaydi = true
+        if (tally.loopDepth === 0) tally.stepFailures++
+      }
+    }
     throw e
   }
   if (!opts.nested) {
     if (incomplete) ex.log('warn', `Akış tamamlanmadan sonlandı (${tally.n} adım): koşul sağlanmadı.`)
     else ex.log(...closing(`Akış tamamlandı (${tally.n} adım).`))
   }
-  return { steps: tally.n, failed: tally.failed, ...(incomplete ? { incomplete: true } : {}), ...exitEvidence(), ...(opts.reportEnd ? { reachedEnd: false } : {}) }
+  return { steps: tally.n, failed: tally.failed + tally.stepFailures, ...(incomplete ? { incomplete: true } : {}), ...exitEvidence(), ...(opts.reportEnd ? { reachedEnd: false } : {}) }
 }

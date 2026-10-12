@@ -68,15 +68,25 @@ export default function ScreenScanner(p: Props) {
     return p.onSave(now.lo, now.hi)
   }
 
-  const scan = async () => {
+  // Aynı anda TEK tarama: tarama sürerken gelen istek en son kapsamla bir kez kuyruklanır.
+  const scanningRef = useRef(false)
+  const pendingScopeRef = useRef<string | null>(null)
+
+  const scan = async (target: string = scope): Promise<void> => {
+    if (scanningRef.current) { pendingScopeRef.current = target; return }
+    scanningRef.current = true
     setLoading(true)
     setError(null)
     try {
-      setResult(await p.onScan(scope, { lo, hi }))
+      setResult(await p.onScan(target, { lo, hi }))
     } catch (e) {
       setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
     } finally {
+      scanningRef.current = false
       setLoading(false)
+      const queued = pendingScopeRef.current
+      pendingScopeRef.current = null
+      if (queued !== null && queued !== target) void scan(queued)
     }
   }
 
@@ -84,6 +94,15 @@ export default function ScreenScanner(p: Props) {
     void scan()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Kapsam değişince ekran yeniden taranır: eski pencerenin karesi ve eski koordinatlı kutular kalmasın.
+  const scopeSeen = useRef(scope)
+  useEffect(() => {
+    if (scopeSeen.current === scope) return
+    scopeSeen.current = scope
+    void scan(scope)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope])
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -214,7 +233,7 @@ export default function ScreenScanner(p: Props) {
           </div>
         </div>
         <div className="toolbar">
-          <button type="button" className="xp-btn primary" onClick={scan} disabled={loading}>
+          <button type="button" className="xp-btn primary" onClick={() => void scan()} disabled={loading}>
             {loading ? 'Taranıyor…' : 'Ekranı Tara'}
           </button>
           <select className="xp-select scope" value={scope} onChange={(e) => setScope(e.target.value)}>

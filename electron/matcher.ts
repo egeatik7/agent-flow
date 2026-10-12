@@ -92,8 +92,82 @@ export function extractTarget(prompt: string): { text: string; quoted: boolean }
   return null
 }
 
+/**
+ * Komuttan ekranda gerçekten görünmesi beklenen HEDEF yazısını çıkarır.
+ *
+ * Sıra: tırnaklı ifade → kesme işareti öncesi ad → tırnaksız komutun anlamlı kelimeleri
+ * (matchPrompt'un kullandığı stopword listesi) → komutun kendisi. Komutun TAMAMI çoğu zaman
+ * ekranda hiç görünmediği için doğrulama iğnesi olarak kullanılamaz.
+ */
+export function commandNeedle(prompt: string): string {
+  const t = String(prompt ?? '').trim()
+  if (!t) return ''
+  const marked = extractTarget(t)
+  if (marked?.text) return marked.text.slice(0, 80)
+  // Özgün yazım korunur; yalnız stopword denetimi için normalleştirilir (günlükte "Kaydet" okunsun).
+  const words = t.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]+/gu, '')).filter((w) => norm(w).length >= 2 && !STOPWORDS.has(norm(w)))
+  if (words.length) return words.join(' ').slice(0, 80)
+  return t.slice(0, 80)
+}
+
 function center(t: { x: number; y: number; w: number; h: number }) {
   return { cx: t.x + t.w / 2, cy: t.y + t.h / 2 }
+}
+
+/**
+ * Eşit adaylar arasında seçim kararı.
+ *
+ * `first`: eski deterministik davranış — ilk aday kullanılır (model yoksa akış kırılmasın).
+ * `ask`: puan ve ayırt edici (prefer/anchor) eşitse **seçim yapılmaz**; çağıran (resolveTarget)
+ * model aşamasına geçebilsin diye eşleşme yok sayılır. Bu bir seçim kararıdır, eylemi engelleyen
+ * bir kapı değildir: model yolu açık kalır.
+ */
+export type TiePolicy = 'first' | 'ask'
+
+/** Kararın gerekçesini çağıranın günlüğüne taşır (matcher saf kalır, kendi günlüğü yoktur). */
+export type TieNote = (message: string) => void
+
+const TIE_ASK = 'Aynı yazıdan birden fazla aday var (eşit puan); seçim modelden isteniyor.'
+const TIE_FIRST = 'Aynı yazıdan birden fazla aday var; model yok, ilk aday kullanıldı.'
+
+/** Ayırt edici yoksa (prefer farkı <= .08, anchor farkı <= 20 px, puan eşit) 0 döner. */
+function tieCompare(
+  a: Scored,
+  b: Scored,
+  like: Map<Scored, number>,
+  anchor?: { x: number; y: number }
+): number {
+  const d = (like.get(b) ?? 0) - (like.get(a) ?? 0)
+  if (Math.abs(d) > 0.08) return d
+  if (anchor) {
+    const da = Math.hypot(center(a.item).cx - anchor.x, center(a.item).cy - anchor.y)
+    const db = Math.hypot(center(b.item).cx - anchor.x, center(b.item).cy - anchor.y)
+    if (Math.abs(da - db) > 20) return da - db
+  }
+  if (b.score !== a.score) return b.score - a.score
+  return 0
+}
+
+function pickBest(
+  scored: Scored[],
+  anchor?: { x: number; y: number },
+  prefer?: Prefer,
+  tie: TiePolicy = 'first',
+  note?: TieNote
+): Scored | null {
+  if (!scored.length) return null
+  const top = Math.max(...scored.map((s) => s.score))
+  const best = scored.filter((s) => s.score >= top - 4)
+  const like = new Map(prefer ? best.map((s) => [s, prefer(s.item)] as const) : [])
+  best.sort((a, b) => tieCompare(a, b, like, anchor) || a.item.id - b.item.id)
+  // Aynı yazıdan birden fazla FARKLI aday ve aralarında karar verecek ayırt edici yok.
+  const belirsiz = best.some((s) => s.item.id !== best[0].item.id && tieCompare(best[0], s, like, anchor) === 0)
+  if (belirsiz) {
+    const yaz = note ?? ((m: string) => console.warn(`[hedef] ${m}`))
+    yaz(tie === 'ask' ? TIE_ASK : TIE_FIRST)
+    if (tie === 'ask') return null
+  }
+  return best[0]
 }
 
 function refineToWords(item: ScreenItem, q: string): { x: number; y: number; w: number; h: number } | null {
@@ -123,27 +197,6 @@ type Scored = { item: ScreenItem; score: number; box: { x: number; y: number; w:
 /** 0–1 likeness to what worked on earlier laps; only breaks ties between near-equal matches. */
 export type Prefer = (item: ScreenItem) => number
 
-function pickBest(scored: Scored[], anchor?: { x: number; y: number }, prefer?: Prefer): Scored | null {
-  if (!scored.length) return null
-  const top = Math.max(...scored.map((s) => s.score))
-  const best = scored.filter((s) => s.score >= top - 4)
-  const like = new Map(prefer ? best.map((s) => [s, prefer(s.item)] as const) : [])
-  best.sort((a, b) => {
-    if (prefer) {
-      const d = (like.get(b) ?? 0) - (like.get(a) ?? 0)
-      if (Math.abs(d) > 0.08) return d
-    }
-    if (anchor) {
-      const da = Math.hypot(center(a.item).cx - anchor.x, center(a.item).cy - anchor.y)
-      const db = Math.hypot(center(b.item).cx - anchor.x, center(b.item).cy - anchor.y)
-      if (Math.abs(da - db) > 20) return da - db
-    }
-    if (b.score !== a.score) return b.score - a.score
-    return a.item.id - b.item.id
-  })
-  return best[0]
-}
-
 function typeBonus(item: ScreenItem): number {
   if (item.src !== 'ocr' && CLICKABLE.has(item.type)) return item.src === 'dom' ? 8 : 6
   if (item.src !== 'ocr') return 2
@@ -154,7 +207,7 @@ function typeBonus(item: ScreenItem): number {
 export function matchText(
   items: ScreenItem[],
   text: string,
-  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer } = {}
+  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer; tie?: TiePolicy; note?: TieNote } = {}
 ): Target | null {
   const q = norm(text)
   if (!q) return null
@@ -174,7 +227,7 @@ export function matchText(
     } else if (t.length >= 3 && q.includes(t) && t.length >= q.length * 0.6) score = 35
     if (score) scored.push({ item, score: score + typeBonus(item), box })
   }
-  const best = pickBest(scored, opts.anchor, opts.prefer)
+  const best = pickBest(scored, opts.anchor, opts.prefer, opts.tie, opts.note)
   if (!best || best.score < (opts.minScore ?? 30)) return null
   return toTarget(best.item, best.box)
 }
@@ -184,7 +237,8 @@ export function matchPrompt(
   items: ScreenItem[],
   prompt: string,
   anchor?: { x: number; y: number },
-  prefer?: Prefer
+  prefer?: Prefer,
+  opts: { tie?: TiePolicy; note?: TieNote } = {}
 ): Target | null {
   const pw = norm(prompt)
     .split(' ')
@@ -242,7 +296,7 @@ export function matchPrompt(
       }
     }
   }
-  const best = pickBest(scored, anchor, prefer)
+  const best = pickBest(scored, anchor, prefer, opts.tie, opts.note)
   if (!best || best.score < 12) return null
   return toTarget(best.item, best.box)
 }
@@ -280,7 +334,7 @@ function wordSimilarity(q: string, w: string): number {
 export function matchFuzzy(
   items: ScreenItem[],
   text: string,
-  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer } = {}
+  opts: { anchor?: { x: number; y: number }; minScore?: number; prefer?: Prefer; tie?: TiePolicy; note?: TieNote } = {}
 ): Target | null {
   const qw = norm(text)
     .split(' ')
@@ -316,7 +370,7 @@ export function matchFuzzy(
     const extra = iw.length - used.size
     scored.push({ item, score: coverage * 100 - extra * 2 + typeBonus(item), box: null })
   }
-  const best = pickBest(scored, opts.anchor, opts.prefer)
+  const best = pickBest(scored, opts.anchor, opts.prefer, opts.tie, opts.note)
   if (!best || best.score < (opts.minScore ?? 50)) return null
   return toTarget(best.item, best.box)
 }

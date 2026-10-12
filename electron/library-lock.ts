@@ -145,8 +145,16 @@ function assertOwned(file: string, owner: Owner): void {
 export function claimLibraryLock(directory: string): LibraryLock {
   const file = lockFile(directory)
   let record = held.get(file)
-  if (record) assertOwned(file, record.owner)
-  else { record = { owner: acquire(file), refs: 0 }; held.set(file, record) }
+  // A deletion or rename outside this process leaves our record pointing at a
+  // generation that no longer exists. Forget it and acquire again: a missing or
+  // dead generation is claimed fresh, while a live foreign owner still answers
+  // busy() and is never deleted. Losing ownership during the caller's own work
+  // still surfaces as lost(), so nothing is written under a foreign lock.
+  if (record) {
+    try { assertOwned(file, record.owner) }
+    catch { if (held.get(file) === record) held.delete(file); record = undefined }
+  }
+  if (!record) { record = { owner: acquire(file), refs: 0 }; held.set(file, record) }
   record.refs++
   const owned = record
   let released = false
@@ -156,14 +164,28 @@ export function claimLibraryLock(directory: string): LibraryLock {
       if (released) return
       released = true
       if (--owned.refs > 0) return
-      held.delete(file)
+      // A re-claim may already have installed a newer generation; a stale handle
+      // must not evict it from the map.
+      if (held.get(file) === owned) held.delete(file)
       removeOwned(file, owned.owner)
     },
   }
 }
 export function withLibraryLock<T>(directory: string, fn: () => T): T {
   const file = lockFile(directory), record = held.get(file)
-  if (record) { assertOwned(file, record.owner); return fn() }
+  if (record) {
+    let valid = true
+    try { assertOwned(file, record.owner) } catch { valid = false }
+    if (valid) return fn()
+    // The session record was invalidated by an outside deletion or rename. Fall
+    // through to the normal claim: a missing or dead generation is taken over and
+    // stays as this session's record, while a live foreign owner answers busy()
+    // and is never deleted. Nothing is ever written under a foreign lock.
+    // The returned handle is deliberately not released: the regained record stays
+    // as this session's claim, exactly like a record that was never lost.
+    claimLibraryLock(directory)
+    return fn()
+  }
   const lock = claimLibraryLock(directory)
   try { return fn() } finally { lock.release() }
 }

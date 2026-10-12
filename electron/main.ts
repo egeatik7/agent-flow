@@ -2,10 +2,10 @@ import { contextOf } from './tool-context'
 import { runYap } from './yap'
 import { validateApiKey } from './openrouter'
 import { pruneScreenFiles } from './screen-files'
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, powerSaveBlocker, screen, session, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { WindowCloseGuard } from './window-close'
+import { CLOSE_REPLY_TIMEOUT_MS, WindowCloseGuard } from './window-close'
 import ElectronStore from 'electron-store'
 import * as bridge from './a11y-bridge'
 import { createAgent } from './agent'
@@ -37,7 +37,7 @@ import {
   setStopAtHook,
 } from './tool-state'
 import { listModels, listLocalModels, recoveryToolTurn, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
-import { runGraph, StoppedError } from './runner'
+import { newTally, runGraph, StoppedError } from './runner'
 import {
   clampRamp,
   cleanBackups,
@@ -368,6 +368,43 @@ setStopAtHook(() => {
   stopRequested = true
 })
 
+/**
+ * The app's own page may navigate (its own reload, the Vite server in development). Anything else is
+ * refused: one stray link must not turn the window into a browser on someone else's page.
+ */
+function navigationAllowed(target: string): boolean {
+  const dev = process.env.VITE_DEV_SERVER_URL
+  if (dev) {
+    try { return new URL(target).origin === new URL(dev).origin } catch { return false }
+  }
+  return target.startsWith('file://')
+}
+
+/** Applies to both windows: no new window is ever opened from the page, and no outside navigation. */
+function hardenContents(contents: Electron.WebContents, label: string) {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('will-navigate', (event, target) => {
+    if (navigationAllowed(target)) return
+    event.preventDefault()
+    log('warn', `${label}: sayfa dışı gezinme engellendi: ${target}`)
+  })
+}
+
+/**
+ * Paketlenmiş yolda içerik güvenliği ilkesi. Geliştirmede UYGULANMAZ: Vite HMR satır içi betik ve
+ * websocket kullanır, bu ilke onu kırardı.
+ *
+ * Not: `img-src` içinde `blob:` var. Ekran Tarayıcı kareyi `URL.createObjectURL` ile çiziyor
+ * (`src/components/ScreenScanner.tsx`), `blob:` olmadan o önizleme paketlenmiş sürümde boş kalırdı.
+ */
+function applyContentSecurityPolicy() {
+  if (process.env.VITE_DEV_SERVER_URL) return
+  const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: { ...(details.responseHeaders ?? {}), 'Content-Security-Policy': [csp] } })
+  })
+}
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   mainWindow = new BrowserWindow({
@@ -391,6 +428,7 @@ function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     reportBoot(94, 'Tuval yükleniyor…')
   })
+  hardenContents(mainWindow.webContents, 'Ana pencere')
 
   reportBoot(88, 'Arayüz yükleniyor…')
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -404,15 +442,37 @@ function createWindow() {
   })
 
   mainWindow.on('close', (event) => {
-    if (!closeGuard.request(id => mainWindow?.webContents.send('window:close-requested', id))) {
+    if (!closeGuard.request(id => mainWindow?.webContents.send('window:close-requested', id),
+      { timeoutMs: CLOSE_REPLY_TIMEOUT_MS, onTimeout: () => forceClose('Kapanış onayı gelmedi') })) {
       event.preventDefault()
       return
     }
     destroyHud()
   })
+  // A renderer that crashed or stopped answering must not keep the app (and the session) open:
+  // the same forced path closes the window after writing down why.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    forceClose(`Arayüz süreci kapandı (${details.reason})`)
+  })
+  mainWindow.on('unresponsive', () => {
+    forceClose('Arayüz yanıt vermiyor')
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+}
+
+/**
+ * The bounded way out of a close that the renderer never confirmed. This path writes nothing: the
+ * tabs and drafts belong to the window, and the main process only holds `savedLibrary`. So the log
+ * says out loud that whatever the window had not saved yet can be lost — it must not claim a save.
+ */
+function forceClose(reason: string): void {
+  const w = mainWindow
+  if (!w || w.isDestroyed()) return
+  log('warn', `${reason} (${Math.round(CLOSE_REPLY_TIMEOUT_MS / 1000)} sn); pencere zorla kapatılıyor. Arayüzün henüz kaydetmediği son değişiklikler kaybolabilir.`)
+  closeGuard.force()
+  w.close()
 }
 
 function destroyHud() {
@@ -466,6 +526,7 @@ function createHud() {
     },
   })
   hudWindow.setAlwaysOnTop(true, 'floating')
+  hardenContents(hudWindow.webContents, 'HUD')
   // Set once, before the first show. Applying it again after the window is
   // visible drops a transparent window off the Windows desktop.
   hudWindow.setContentProtection(true)
@@ -652,6 +713,10 @@ async function runFlow(
   let hidden = false
   let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string; reachedEnd?: boolean } | undefined
   let runId = ''
+  // Koşunun sayaçları burada tutulur: hata ile biten bir koşuda runGraph sonuç nesnesini
+  // döndüremez (hata yukarı çıkar), sayaç yine de çağırana ulaşmalı. Şeklin tek tanımı
+  // runner'daki newTally()'dir; burada elle kopyalanmaz ki yeni bir alan sessizce düşmesin.
+  const tally = newTally()
   try {
     const graph = normalizeGraph(raw)
     // A test of an agent branch is not the saved flow: it runs, but it is not written down as
@@ -792,6 +857,7 @@ async function runFlow(
       // Kimlikle devam (varsa): motor öğeyi yeni listede arar, indekse güvenmez.
       ...(opts?.resumeLoopId && opts?.resumeItem ? { resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem } : {}),
       packagePath: Array.isArray(packagePath) && packagePath.length ? packagePath : undefined,
+      tally,
     })
     // A run that went through every step but had loop items end on an error is not a success.
     outcome = { ok: summary.failed === 0 && !summary.incomplete, failed: summary.failed, steps: summary.steps, ...(opts?.requireEnd ? { reachedEnd: summary.reachedEnd === true } : {}) }
@@ -806,7 +872,10 @@ async function runFlow(
     // error. A debug run keeps it too, and a user's Stop never reaches this branch.
     noteRunFailed((e as Error).message)
     log('error', (e as Error).message)
-    outcome = { ok: false, error: (e as Error).message }
+    // Sayaç yine de doğruyu söyler: döngü dışında hata ile biten adımlar da sayılır. Yoksa
+    // "hata: …" ile "hatalı öğe yok" aynı cümlede çelişiyordu.
+    const hatali = tally.failed + tally.stepFailures
+    outcome = { ok: false, error: (e as Error).message, ...(hatali > 0 ? { failed: hatali } : {}) }
     throw e
   } finally {
     // Reset the run state even when preparation failed before a resource
@@ -850,6 +919,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   await Promise.race([bridge.warmUp(), sleep(8000)])
 
   report(78, 'Pencere kuruluyor…')
+  applyContentSecurityPolicy()
   createWindow()
   createHud()
   screen.on('display-metrics-changed', placeHud)
@@ -861,6 +931,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     else mainWindow.maximize()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
+  // `reply` returns `allow`: it is true only when the renderer said "kapat" (and only for the
+  // request that is still pending). So `mainWindow.close()` runs exactly when closing is allowed;
+  // with `allow: false` the gate stays shut and the window keeps running.
   ipcMain.handle('window:finish-close', (event, id: unknown, allow: unknown) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return
     if (closeGuard.reply(id, allow)) mainWindow.close()
@@ -1050,19 +1123,27 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return book
   }
   /**
-   * Oturum kaydı ile kütüphane kaydı ayrıdır: kütüphane diskte başka bir programda değiştiyse
-   * YALNIZCA kütüphane yazımı atlanır, sekmeler/işaret her zaman yazılır ve çakışma çağırana bildirilir.
+   * Oturum kaydı ile kütüphane kaydı ayrıdır: kütüphane yazımı HATA VERİRSE (başka bir programda
+   * değişmiş olması, kilidin kaybı ya da okuma hatası) YALNIZCA katalog yazımı atlanır;
+   * sekmeler/taslaklar/işaret her zaman yazılır. Hata çağırana döner (`conflict` ya da `libraryError`).
+   * Ölçülen kusur: çakışma dışındaki hata yeniden fırlatılıyordu ve kullanıcının açık oturumu
+   * hiç diske inmiyordu; çakışmada da katalog atlanıp oturum yazılıyordu ama hata sessiz kalıyordu.
    */
-  function storeWorkspace(book: CanvasBook, writer: WorkspaceWriter = 'window'): { conflict: boolean } {
+  function storeWorkspace(book: CanvasBook, writer: WorkspaceWriter = 'window'): { conflict: boolean; libraryError?: string } {
     const current = loadCanvases()
     let conflict = false
+    let libraryError: string | undefined
     writeWorkspace({ set: ({ canvases, graph }) => {
       try { libraryStorage!.save(canvases.library!); savedLibrary = structuredClone(canvases.library!) }
-      catch (e) { if (!isLibraryConflict(e)) throw e; conflict = true }
+      catch (e) {
+        // Katalog yazılmadı. Çakışma ayrı bildirilir; kilit kaybı/okuma hatası mesajıyla döner.
+        if (isLibraryConflict(e)) conflict = true
+        else libraryError = (e as Error).message
+      }
       store.set({ canvases: librarySession(canvases), graph })
       viewerState.setBook(canvases)
     } }, book, current, writer)
-    return { conflict }
+    return libraryError === undefined ? { conflict } : { conflict, libraryError }
   }
   ipcMain.handle('library:info', () => {
     loadCanvases(); return { directory: libraryStorage!.directory, file: libraryStorage!.file, conflict: libraryStorage!.stale() }

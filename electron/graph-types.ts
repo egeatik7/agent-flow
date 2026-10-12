@@ -781,6 +781,22 @@ function withoutLegacyProbes(g: { nodes?: LegacyNode[]; edges?: Partial<AgentEdg
   return clean
 }
 
+/**
+ * Eksik Başlangıç enjekte edilirken kullanılan KARARLI kimlik.
+ *
+ * `createNode` kimliği rastgele üretir. Sekme grafiği, sekmenin `baseline` grafiği ve katalog
+ * kaydı ayrı ayrı normalize edildiği için rastgele kimlik üç ayrı Başlangıç demekti; kayıt
+ * karşılaştırması da bunu kalıcı sapma olarak görüyordu. Kimlik yalnız grafik içeriğine bağlıdır
+ * (ilk boş `start`/`start-N`), böylece aynı ham grafik her seferinde aynı kimliği üretir.
+ */
+function stableStartId(ids: Set<string>): string {
+  if (!ids.has('start')) return 'start'
+  for (let i = 2; ; i++) {
+    const id = `start-${i}`
+    if (!ids.has(id)) return id
+  }
+}
+
 export function normalizeGraph(raw: unknown): AgentGraph {
   const g = withoutLegacyProbes((raw ?? {}) as { nodes?: LegacyNode[]; edges?: Partial<AgentEdge>[] })
   const waitIds = new Set<string>()
@@ -842,6 +858,8 @@ export function normalizeGraph(raw: unknown): AgentGraph {
     const firstFree = nodes.find((n) => !edges.some((e) => e.to === n.id))
     const minX = nodes.length ? Math.min(...nodes.map((n) => n.x)) : 300
     const start = createNode('start', Math.max(20, minX - NODE_W - 60), firstFree ? firstFree.y : 80)
+    // Konum/kenar/x kaydırma davranışı aynen kalır; yalnız kimlik kararlı hâle gelir.
+    start.id = stableStartId(ids)
     if (start.x + NODE_W + 40 > minX && nodes.length) {
       for (const n of nodes) n.x += NODE_W + 80
       start.x = 20
