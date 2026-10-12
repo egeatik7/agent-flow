@@ -14,7 +14,7 @@ describe('target response failures', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       req = JSON.parse(init.body)
       // IDs 3 and 4 are request-local word candidates; ONNX owns #4.
-      return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: '{"id":4,"text":"Chrome"}', }, finish_reason: 'stop' }] }) }
+      return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...(kind === 'condition' ? { satisfied: true } : {}), id: 4, text: 'Chrome' }), }, finish_reason: 'stop' }] }) }
     }))
     const result = await chooseScreenTarget({ apiKey: 'fake', model: 'valid', prompt: 'Chrome', kind, stepTitle: kind, scan: observed, sendImage: false })
     expect(req.messages[1].content).toContain('#3 Text "Chrome" @20,30 100x20 OCR-reader=windows')

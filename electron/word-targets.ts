@@ -7,7 +7,7 @@ These IDs belong only to this current list. Screenshot numbers, if present, refe
 Preserve a specifically named application's identity. A generic "browser"/"tarayıcı" label does not identify Google Chrome or any other named application. If the requested application is not identified by observed evidence, return id:null; do not substitute another application with a similar purpose.`
 
 export const OCR_READER_RULES = `OCR-reader identifies the reader of each observation from the SAME captured frame. Windows and ONNX observations are supplied separately even when their text and coordinates overlap. Identical or differing readings at overlapping coordinates can refer to the SAME target; they are not automatically different buttons, additional completed jobs or additional actions. Infer the best reading from nearby words and the instruction. Select only ONE listed candidate for the requested target or condition evidence. Do not concatenate conflicting alternatives or mix observations from unrelated locations. overlapping-OCR lists cross-reader candidate IDs whose boxes geometrically overlap; its percentage is intersection area divided by the smaller box area, NOT a probability or proof of one button. Use it to recognize repeated observations of the same screen location, while still checking text and surrounding context. Each candidate keeps its own measured box; never average boxes or borrow word geometry from another observation. ONNX-confidence is that reader's recognition score, not proof of clickability. Keep counters, totals and negations meaningful: 6/60 is not 60/60, and running is not finished.`
-export const CONDITION_TARGET_RULES = `This is a READ-ONLY existence condition, NOT an action. Interpret the user's whole instruction and decide whether observed screen evidence supports the requested state. Choose one listed word/control or OCR-context-only line as evidence, or id:null if it is absent. For this condition, an unsplit line IS selectable as evidence even without word geometry; no click is sent. Do not open menus, close popups, advance the application or plan steps to make the condition true. A semantic paraphrase can match, but required numbers, totals and negations must agree. For example, "job finished 60/60 yazıyorsa evet ver" needs evidence of completion with 60/60; a running job or 6/60 does not qualify.`
+export const CONDITION_TARGET_RULES = `This is a READ-ONLY existence condition, NOT an action. Interpret the user's whole instruction and decide whether observed screen evidence supports the requested state. Return satisfied:boolean for the whole condition. Choose one listed word/control or OCR-context-only line as positive evidence. An absence condition can be satisfied with id:null only if observed application/context and reading coverage support absence; an empty list or a missing application alone does not prove absence. If uncertain, return satisfied:false. For this condition, an unsplit line IS selectable as evidence even without word geometry; no click is sent. Do not open menus, close popups, advance the application or plan steps to make the condition true. A semantic paraphrase can match, but required numbers, totals and negations must agree. For example, "job finished 60/60 yazıyorsa evet ver" needs evidence of completion with 60/60; a running job or 6/60 does not qualify.`
 
 export type WordCandidate = { item: ScreenItem; parentId: number; wordIndex?: number; contextOnly?: boolean }
 
@@ -94,7 +94,7 @@ function boundedCandidates(candidates: WordCandidate[], area: ScanResult['area']
     .map((r) => r.c)
 }
 
-export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[], note?: WordLimitNote): string {
+export function describeWordCandidates(scan: ScanResult, candidates: WordCandidate[], note?: WordLimitNote, options?: { fullText?: boolean }): string {
   const overlaps = readerOverlaps(candidates)
   const kept = boundedCandidates(candidates, scan.area)
   if (kept.length < candidates.length) {
@@ -108,7 +108,7 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
     const y = (item.y + item.h / 2 - scan.area.y) / Math.max(1, scan.area.h) * 100
     const links = overlaps.get(item.id)
     const overlapHint = links?.size ? ` overlapping-OCR=${[...links].map(([id, percent]) => `#${id}(${percent}%)`).join(',')}` : ''
-    const clipped = item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
+    const clipped = !options?.fullText && item.text.length > WORD_TEXT_LIMIT ? { ...item, text: item.text.slice(0, WORD_TEXT_LIMIT) } : item
     return `${describeItems([clipped])} center=${x.toFixed(1)}%,${y.toFixed(1)}%${item.src === 'ocr' ? wordIndex !== undefined ? ` OCR-word parent=#${parentId}` : contextOnly ? ' OCR-context-only (word geometry unavailable; NOT selectable for clicking)' : ' OCR-single-token (word geometry unavailable)' : ''}${taskbarItem(scan, item) ? ' region=taskbar' : ''}${overlapHint}`
   }).join('\n')
 }

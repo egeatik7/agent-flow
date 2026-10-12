@@ -1,6 +1,7 @@
-import { ObservationTimeoutError, observeWithin, type ObservationOptions } from './observation-budget'
+import { type ObservationOptions } from './observation-budget'
 import {
   NODE_SPECS,
+  conditionCompatibilityError,
   baseName,
   itemVars,
   hasTemplate,
@@ -300,31 +301,15 @@ export async function runGraph(
         return 'next'
       }
       case 'condition': {
+        const compatibility = conditionCompatibilityError(live)
+        if (compatibility) throw new Error(compatibility)
         const text = (live.text ?? '').trim()
-        if (!text && !live.locator) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
-        const label = text ? `“${text}”` : 'seçilen öğe'
-        const wait = Math.max(0, live.timeoutMs ?? 0)
-        const until = Date.now() + wait
-        if (wait > 0) ex.log('info', `[${stepNo}] ${label} bekleniyor (en çok ${Math.round(wait / 1000)} sn)…`)
-        for (;;) {
-          const controller = new AbortController()
-          const remaining = wait > 0 ? until - Date.now() : undefined
-          if (remaining !== undefined && remaining <= 0) break
-          const timer = remaining === undefined ? undefined : setTimeout(() => controller.abort(new ObservationTimeoutError()), remaining)
-          let exists = false
-          try { exists = await observeWithin(ex.exists(text, live, { signal: controller.signal }), controller.signal) }
-          catch (e) { if (ex.shouldStop()) throw new StoppedError(); if (!(e instanceof ObservationTimeoutError)) throw e; break }
-          finally { if (timer) clearTimeout(timer) }
-          if (wait > 0 && Date.now() >= until) break
-          if (exists) {
-            ex.log('info', `[${stepNo}] Koşul ${label}: var`)
-            return 'true'
-          }
-          if (Date.now() >= until) break
-          await interruptibleSleep(Math.min(700, Math.max(0, until - Date.now())), ex.shouldStop)
-        }
-        ex.log('info', `[${stepNo}] Koşul ${label}: yok${wait > 0 ? ` (${Math.round(wait / 1000)} sn beklendi)` : ''}`)
-        return wait > 0 ? 'timeout' : 'false'
+        if (!text) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
+        ex.log('info', `[${stepNo}] Koşul “${text}” bir kez değerlendiriliyor…`)
+        const exists = await ex.exists(text, live)
+        if (ex.shouldStop()) throw new StoppedError()
+        ex.log('info', `[${stepNo}] Koşul “${text}”: ${exists ? 'var' : 'yok'}`)
+        return exists ? 'true' : 'false'
       }
       case 'ai': {
         if (!live.prompt?.trim()) throw new Error(`“${live.title}”: Yap için hedefi yaz.`)
@@ -429,8 +414,6 @@ export async function runGraph(
       }
 
       if (NODE_SPECS[node.kind].outputs.length === 0) return
-      const waitedOut = node.kind === 'condition' && port === 'timeout'
-      if (waitedOut) port = 'false'
       observeExit(node, port, scope)
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {
@@ -440,8 +423,7 @@ export async function runGraph(
         // Bağlanmamış başarısızlık çıkışı da bir node hatasıdır: araç katmanı hatayı yalnız bu olayla
         // öğrenir. Yoksa node "done" görünür, debug koşusu durmaz ve donmuş kayıt oluşmaz (ölçüldü:
         // node iki turda da "done" bildirildi, hiç "error" gönderilmedi).
-        if (FAIL_PORTS.has(port) || waitedOut) ex.step(node.id, 'error')
-        if (waitedOut) throw new StepFailedError(`“${node.title}”: beklenen öğe süresi içinde görünmedi ve “yok” çıkışı bağlı değil.`)
+        if (FAIL_PORTS.has(port)) ex.step(node.id, 'error')
         if (FAIL_PORTS.has(port)) {
           throw new StepFailedError(`“${node.title}”: ${portLabel(node.kind, port)}. Bu çıkış bir yere bağlı değil.`)
         }

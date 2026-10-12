@@ -30,7 +30,7 @@ describe('Provider uses its own output token defaults', () => {
   it.each([
     ['click', false], ['click', true], ['condition', false], ['condition', true],
   ] as const)('does not limit %s target selection (image=%s)', async (kind, sendImage) => {
-    const requests = mockReply('{"id":1}')
+    const requests = mockReply(kind === 'condition' ? '{"satisfied":true,"id":1}' : '{"id":1}')
     expect((await chooseScreenTarget({ apiKey: 'fixture-key', model: 'fixture/model', prompt: 'Chrome', kind, stepTitle: kind, scan, sendImage })).id).toBe(1)
     noAppLimit(requests)
   })

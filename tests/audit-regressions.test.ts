@@ -70,11 +70,10 @@ describe('independent code audit reproductions',()=>{
     const f=fake();const r=await runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})
     expect(r.failed).toBe(0);expect(r.reachedEnd).toBe(false);expect(r.incomplete).toBe(true);expect(f.logs.at(-1)?.level).toBe('warn')
   })
-  it('B4 nuance: positive timeout on the same unconnected false DOES fail',async()=>{
-    vi.useFakeTimers();const s=createNode('start',0,0),c=createNode('condition',100,0);c.text='Ready';c.timeoutMs=1
-    const f=fake();const pending=runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,opts)
-    const assertion=expect(pending).rejects.toThrow('süresi içinde görünmedi')
-    await vi.runAllTimersAsync();await assertion
+  it('B4: legacy condition timeout is ignored; one unconnected false remains incomplete',async()=>{
+    const s=createNode('start',0,0),c=createNode('condition',100,0);c.text='Ready';c.timeoutMs=1
+    const f=fake();const r=await runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})
+    expect(r.failed).toBe(0);expect(r.incomplete).toBe(true)
   })
   it('B5: captureFailure rejection is logged and the original item result is preserved',async()=>{
     const s=createNode('start',0,0),l=createNode('loop',100,0),c=createNode('click',200,0)

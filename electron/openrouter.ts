@@ -1,6 +1,6 @@
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
-import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES } from './word-targets'
+import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
 import type { NodeKind } from './graph-types'
 import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
@@ -356,7 +356,7 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         lastError = brief(e)
         const last = i === chain.length - 1
         const next = chain[(i + 1) % chain.length]
-        chatLogger?.(last ? `${model} olmadı (${brief(e)}). Sıra başa dönüyor.` : `${model} olmadı (${brief(e)}). ${next} deneniyor.`)
+        chatLogger?.(last ? `${model} olmadı (${brief(e)}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${model} olmadı (${brief(e)}). ${next} deneniyor.`)
       }
     }
     rejectedCycles = allRejected ? rejectedCycles + 1 : 0
@@ -465,7 +465,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal } = {},
+  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -485,7 +485,7 @@ async function chat(
       opts.validate?.(text)
       return text
     }
-  }, CYCLE_PAUSE_MS, { signal: opts.signal })
+  }, CYCLE_PAUSE_MS, { signal: opts.signal, maxCycles: opts.maxCycles })
 }
 
 function parseJson(content: string): Record<string, unknown> {
@@ -508,7 +508,15 @@ export function validateTargetReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number }
+/** A condition is a boolean judgement, including absence; id alone cannot express that. */
+export function validateConditionReply(content: string): void {
+  const parsed = parseJson(content)
+  if (typeof parsed.satisfied !== 'boolean' || !(parsed.id === null || typeof parsed.id === 'number' && Number.isInteger(parsed.id))) {
+    throw new ModelRejected('MODEL_CONDITION_JSON_INVALID: Koşul için satisfied:boolean ve id:number|null yanıtı gerekli; geçersiz yanıt yokluk sayılmaz.')
+  }
+}
+
+export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -532,14 +540,15 @@ export async function chooseScreenTarget(opts: {
   const system = listPromptFor(opts.kind, opts.system)
 
   const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
+${opts.kind === 'condition' ? `Reader coverage: ${candidates.length} candidate(s) observed; ${Math.min(candidates.length, WORD_CANDIDATE_LIMIT)} supplied below. ${candidates.length > WORD_CANDIDATE_LIMIT ? 'PARTIAL candidate list: omitted items cannot be assumed absent.' : 'All candidates from this reader result are listed; this does not prove the reader captured every screen element.'}` : ''}
 Items (#number type "text" @x,y widthxheight):
-${describeWordCandidates(scan, candidates)}
+${describeWordCandidates(scan, candidates, undefined, { fullText: opts.kind === 'condition' })}
 
 ${spatialContext(scan)}
 
 ${opts.kind === 'condition' ? CONDITION_TARGET_RULES : WORD_TARGET_RULES}
 ${OCR_READER_RULES}
-Reply with JSON only: {"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}
+Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "id": <one listed evidence id or null for absence>, "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
 
 Step: ${opts.stepTitle}
 Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
@@ -561,12 +570,12 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   let content: string
   let usedImage = withImage
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateTargetReply, signal: opts.signal }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined }, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
-    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateTargetReply, signal: opts.signal })
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined })
   }
 
   const decoded = parseJson(content)
@@ -575,6 +584,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
   const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
   return {
+    ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
     id: selected?.parentId ?? null,
     ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
     text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,

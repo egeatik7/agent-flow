@@ -22,7 +22,7 @@ function make(apiKey = 'test-key') {
 const condition = (text: string) => ({ ...createNode('condition', 0, 0), text })
 const row = (text: string) => ({ id: 1, text, type: 'Text', src: 'ocr', x: 20, y: 30, w: 170, h: 20, ocrSources: ['onnx'] })
 function respond(value: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { state.requests.push(String(init.body)); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }) } }))
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { state.requests.push(String(init.body)); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ satisfied: (value as {id?: unknown}).id != null, ...(value as object) }) } }] }) } }))
 }
 beforeEach(() => { state.stopped = false; state.scans = []; state.actions = []; state.items = []; state.requests = []; setStopCheck(() => false) })
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false); expect(state.actions).toEqual([]) })
@@ -32,7 +32,7 @@ describe('Condition contract 1.9.98: the plain sentence is always judged by the 
     // Reader stages field their own evidence, so each stage asks its own prompt and gets its own answer.
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       state.requests.push(String(init.body))
-      const answer = state.requests.length === 1 ? { id: null, reason: 'UIA shows only a running job' } : { id: 2, reason: 'OCR status line is complete' }
+      const answer = state.requests.length === 1 ? { satisfied: false, id: null, reason: 'UIA shows only a running job' } : { satisfied: true, id: 2, reason: 'OCR status line is complete' }
       return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }) }
     }))
     expect(await make().exists('', condition('iş bitti mi?'))).toBe(true)
@@ -60,13 +60,13 @@ describe('Condition contract 1.9.98: the plain sentence is always judged by the 
     await expect(make('').exists('', condition('iş bitti mi?'))).rejects.toThrow('Koşul artık her zaman metin modeline sorar; API anahtarı ya da yerel model gerekli.')
     expect(state.requests).toHaveLength(0)
   })
-  it('the condition window travels to the model as context and is searched first', async () => {
+  it('the condition window travels to the model as context and does not scope the scan', async () => {
     state.items = [{ ...row('Toplama tamamlandı'), src: 'uia', type: 'Button' }]
     respond({ id: 1, reason: 'the chosen window reports completion' })
     const n = { ...condition('toplama tamamlandı mı?'), conditionWindow: 'Fixture', conditionWindowMatch: 'exact' as const }
     expect(await make().exists('', n)).toBe(true)
-    expect(state.scans[0]).toMatchObject({ windowTitle: 'Fixture', strictWindow: 'exact', readOnly: true })
-    expect(state.requests[0]).toContain('Preferred application/window: Fixture')
+    expect(state.scans[0]).toMatchObject({ readOnly: true }); expect(state.scans[0]).not.toHaveProperty('windowTitle'); expect(state.scans[0]).not.toHaveProperty('strictWindow')
+    expect(state.requests[0]).toContain('Requested application/window context: Fixture')
     expect(state.requests[0]).toContain('toplama tamamlandı mı?')
   })
 })

@@ -109,8 +109,9 @@ Güvenceler:
   döngüsü) orada kalır ve sıradaki öğeye geçilir.
 - **Tepki doğrulanamazsa adım hata sayılmaz.** Sıradaki adım kendi hedefini arar ve bekler. Hafızaya yalnızca
   tepkisi doğrulanan hedefler yazılır. **Koşul node’u kutusundaki cümleyi metin modeline sorar:** her turda önce uygulama
-  öğeleri (UIA), açık kanıt yoksa birleşik Windows + ONNX OCR okunur ve kararı model verir. Tırnak, birebir eşleşme veya
-  yerel arama yoktur; “Önce aranacak pencere” yazarsan önce o pencereye bakılır, bulunamazsa tüm ekran taranır ve bağlamı yine model değerlendirir.
+  öğeleri (UIA), karar doğrulanmazsa birleşik Windows + ONNX OCR tüm ekranda bir kez okunur. Boş sonuçlar da modele
+  sorulur; model koşulun sağlanıp sağlanmadığına karar verir. Pencere kutusu yalnız model bağlamıdır; pencere seçilmez.
+  İç bekleme/tekrar yoktur; tekrar kontrolü Zamanlayıcı ile kurulur. Eski ekran seçimi taşıyan koşullar uyumluluk hatası verir.
 - **Yazı Yaz güvenlidir.** Ctrl+A / Delete yalnızca odak bir yazı alanındayken gönderilir. Klavyeyle yazılamayan karakterler
   (Çince vb.) pano üzerinden yapıştırılır. Alan biçimlendirme yaptıysa (1.5 → 1,5) sadece uyarılır.
 - **Odak kayarsa** (Windows bildirimi, Teams, bu pencere) tuşlar göndermeden önce çalışılan pencere yeniden öne getirilir.
@@ -203,13 +204,13 @@ olabilir; branch silinince akışa hiçbir şey olmaz.
 | Yazı Yaz | Bir alana (veya o an seçili alana) yazar, alanı okuyup doğrular, isteğe bağlı Enter | sonra |
 | Tuş Gönder | Kısayol (`win+r`, `ctrl+s`, `alt+f4`; eski `^s`, `%{F4}`, `#r` de olur) | sonra |
 | Zamanlayıcı | N saniye bekler | sonra |
-| Koşul | Ekranda bir yazı ya da seçilen öğe (simge dahil) var mı? İstersen görünene kadar bekler | var / yok |
+| Koşul | Koşulu UIA ve gerekirse OCR kanıtıyla bir kez modele sorar; boş okuma da değerlendirilir | var / yok |
 | Her Öğe İçin | Kutu: içindekileri listedeki her öğe için, her çalıştırmada baştan çalıştırır | bitti |
 | İnisiyatif | Tarif edilen hedefi model birkaç eylemde yapar | tamam / olmadı |
 | Paket | İçine bir alt akış alır; çalışınca içi baştan sona gider, sonra dışarıdaki sonraki node çalışır | sonra |
 | Bitir | Akışı sonlandırır | — |
 
-“olmadı” çıkışı ve bekleme süresi verilmiş Koşul’un “yok” çıkışı bir yere bağlı değilse adım hata verir. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı kalmışsa o adım **hata verir**; sessizce atlanmaz. Kutu dışındaysa akış o noktada durur, kutunun içindeyse o tur hatalı sayılır ve sıradaki öğeye geçilir. Node’u silip akışa devam et.
+“olmadı” çıkışı bir yere bağlı değilse adım hata verir. Koşul’un bağlı olmayan “yok” çıkışı akışı tamamlanmamış sayar; kendi içinde bekleme yoktur. Kutunun içindeyse o tur orada kalır, sıradaki öğeye geçilir. Eski bir akışta Tarayıcıyı Aç, Dosyayı Bekle veya Dosyayı Taşı kalmışsa o adım **hata verir**; sessizce atlanmaz. Kutu dışındaysa akış o noktada durur, kutunun içindeyse o tur hatalı sayılır ve sıradaki öğeye geçilir. Node’u silip akışa devam et.
 
 ## Örnek: klasördeki her resimden 3D model
 
@@ -233,7 +234,7 @@ Başlangıç → [Her Öğe İçin: C:\Resimler klasörü]
   Seçilen öğe üç yolla hatırlanır: uygulamanın kendi öğesi, öğenin küçük resmi ve (okunabiliyorsa) yazısı. Çalışırken sırayla
   öğe, resmin ekrandaki aynısı, yazı ve en son görsel model (resimle birlikte) denenir; yazısız simgeler de böyle tıklanır.
 - **İmleçle Yakala (3 sn):** imleci hedefe götür, o öğe (resmiyle birlikte) node’a bağlanır.
-- **Beklemek:** Koşul’a “görünene kadar bekle” süresi ver, ya da “yok” çıkışını Zamanlayıcı’ya, Zamanlayıcı’yı tekrar Koşul’a bağla.
+- **Beklemek:** Koşul’un “yok” çıkışını Zamanlayıcı’ya, Zamanlayıcı’yı tekrar Koşul’a bağla; Koşul kendi içinde beklemez.
   Koşul’a Ekrandan Seç / İmleçle Yakala ile bir simge de seçilebilir; yazısı olmasa da resmi ekranda aranır.
 - Çalışırken uygulama kendini küçültür. **Ctrl+Shift+Q** ile durdurursun.
 - **Dışa/İçe Aktar:** akışı JSON olarak kaydet/aç. Akış ve ayarlar ayrıca otomatik kaydedilir.

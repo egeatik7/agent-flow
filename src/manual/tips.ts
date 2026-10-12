@@ -33,7 +33,7 @@ const KIND: Record<string, Tip> = {
   },
   condition: {
     title: 'Koşul',
-    text: 'Ekranda ne aradığını normal cümleyle yazarsın; kararı metin modeli verir. Bir turda önce uygulama öğeleri, olmazsa Windows + ONNX OCR okunur. Pencere yazarsan önce orada aranır. Varsa “var”, yoksa “yok” çıkışından devam eder. Süre verirsen o süre boyunca her turda yeniden bakar ve yeniden değerlendirir.',
+    text: 'Koşulu cümleyle yaz; model tüm ekrandan UIA ve gerekirse OCR kanıtını bir kez değerlendirir. Boş okuma da modele sorulur. Pencere kutusu yalnız bağlam verir. Tekrar için yok çıkışını Zamanlayıcı üzerinden Koşul’a bağla.',
   },
   loop: {
     title: 'Her Öğe İçin',
@@ -97,7 +97,7 @@ const PORT: Record<string, Tip> = {
   },
   yok: {
     title: 'Yok',
-    text: 'Aranan şey ekranda değilse akış bu çıkıştan gider. Süre tanındıysa ve bu çıkış boşsa, süre dolunca adım hata verir.',
+    text: 'Model koşulu doğrulamazsa akış bu çıkıştan gider. Tekrar kontrol için bu çıkışı Zamanlayıcı üzerinden Koşul’a bağla.',
   },
   bitti: {
     title: 'Bitti',
@@ -337,8 +337,7 @@ function fieldTip(el: Element): Tip | null {
     ['Süre (saniye)', { title: 'Süre', text: 'Zamanlayıcının bekleyeceği saniye. Ekrana bakılmaz.' }],
     ['Ekranda ne aradığını yaz', { title: 'Aranacak şey', text: 'Ne aradığını normal cümleyle yaz; kararı metin modeli verir. Tırnak, birebir eşleşme veya yerel arama yoktur. Her turda önce uygulama öğeleri, olmazsa Windows + ONNX OCR okunur ve tarif bu sekmelerdeki promptlarla değerlendirilir. Koşul tıklamaz, fareyi oynatmaz ve görsel modele dönmez.' }],
     ['Ekranda ne görünmeli?', { title: 'Ekranda ne görünmeli?', text: 'Görsel modele sorulacak tarif. Önce yazı ve seçilen öğe aranır; bulunamazsa bu tarif modele gider.' }],
-    ['Önce aranacak pencere', { title: 'Önce aranacak pencere', text: 'Pencere başlığı yazarsan koşul önce o pencerede arar; bulunamazsa tüm ekranda devam eder. Pencere öne alınmaz, tıklanmaz. Bulunan kanıtın o pencereye ait olup olmadığını da metin modeli değerlendirir.' }],
-    ['Görünene kadar bekle', { title: 'Görünene kadar bekle', text: '0 ise bir kez bakar. Süre verirsen o kadar saniye boyunca her turda yeniden okur ve her turda metin modeline yeniden sorar. Süre dolunca “yok” çıkışı kullanılır.' }],
+    ['Pencere / uygulama bağlamı', { title: 'Pencere / uygulama bağlamı', text: 'Bu bilgi yalnız modele verilir. Okuyucular tüm ekrana bakar; pencere başlığı eşleştirilmez ve pencere seçilmez. Kanıtın istenen uygulamaya ait olup olmadığını model değerlendirir.' }],
     ['Başlık', { title: 'Başlık', text: 'Node’un tuvalde görünen adı. Akışın çalışmasını değiştirmez; günlüğe bu ad yazılır.' }],
     ['OpenRouter API Key', { title: 'API anahtarı', text: 'OpenRouter anahtarın. Modelin ekranı okuması ve Yap için gerekir. Yanındaki Kaydet’e basınca kalır.' }],
     ['Görsel model adı', { title: 'Görsel model', text: 'Ekran görüntüsünden hedef bulma bu modeli kullanır. Yap için ayrı bir araç çağırabilen görsel model seçilebilir.' }],

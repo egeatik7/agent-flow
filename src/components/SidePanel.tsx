@@ -472,37 +472,16 @@ function NodeFields(p: Props & { n: AgentNode }) {
             <label>Ekranda ne aradığını yaz (değerlendirmeyi model yapar)</label>
             <TemplateField {...p} n={n} field="text" label="Ekranda ne aradığını yaz (değerlendirmeyi model yapar)" placeholder="Örn: kaydet düğmesi ekranda göründü mü" />
           </div>
-          {n.locator && !n.text?.trim() && (
+          {(n.locator || n.anchor) && (
             <div className="field">
-              <p className="field-hint">Bu koşulda eski bir ekran seçimi duruyor. Koşul artık seçim kullanmaz; kutuya ne aradığını normal cümleyle yaz, kararı model verir.</p>
+              <p className="field-hint">Uyumsuz eski koşul: kayıtlı ekran seçimiyle çalıştırılamaz. Eski seçimi temizle ve koşulu cümleyle yaz.</p>
               <button type="button" className="xp-btn" onClick={() => upd({ locator: undefined, anchor: undefined })}>
                 Eski seçimi temizle
               </button>
             </div>
           )}
-          <div className="field"><label>Önce aranacak pencere (boş = tüm ekran)</label><input className="xp-input" value={n.conditionWindow || ''} onChange={e => upd({ conditionWindow: e.target.value })} /></div>
-          {n.conditionWindow?.trim() && <>
-            <div className="field"><label>Pencere başlığı</label><select className="xp-input" value={n.conditionWindowMatch || 'exact'} onChange={e => upd({ conditionWindowMatch: e.target.value as 'exact' | 'contains' })}><option value="exact">Tam eşleşme</option><option value="contains">Başlığı içerir (tek pencere)</option></select></div>
-
-          </>}
-          <p className="field-hint">Bir turda önce UIA, sonra Windows + ONNX OCR okunur. Pencere bulunamazsa tüm ekranda devam eder. Kararı bu sekmelerdeki metin modeli promptları verir; tırnak, birebir eşleşme veya yerel arama yoktur. Koşul tıklama veya pencereyi öne getirme yapmaz.</p>
-          <div className="field">
-            <label>Görünene kadar bekle (saniye, 0 = bir kez bak)</label>
-            <input
-              className="xp-input"
-              type="number"
-              min={0}
-              value={Math.round((n.timeoutMs ?? 0) / 1000)}
-              onChange={(e) => upd({ timeoutMs: Math.max(0, Number(e.target.value) || 0) * 1000 })}
-            />
-            <div className="chips">
-              {[0, 10, 30, 60, 300, 600].map((sec) => (
-                <button type="button" key={sec} className="chip" onClick={() => upd({ timeoutMs: sec * 1000 })}>
-                  {sec === 0 ? 'bir kez' : sec >= 60 ? `${sec / 60} dk` : `${sec} sn`}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className="field"><label>Pencere / uygulama bağlamı (isteğe bağlı)</label><input className="xp-input" value={n.conditionWindow || ''} onChange={e => upd({ conditionWindow: e.target.value })} /></div>
+          <p className="field-hint">Tüm ekranda bir kez UIA, gerekirse bir kez Windows + ONNX OCR okunur. Pencere bilgisi yalnız modele bağlam olarak gider; pencere seçilmez. Boş okuma da modele sorulur. Tekrar bakmak için Zamanlayıcı ile döngü kur. Koşul tıklama veya pencereyi öne getirme yapmaz.</p>
         </>
       )}
 

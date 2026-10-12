@@ -80,8 +80,8 @@ describe('1) koşul panelinde hedef seçimi yok', () => {
     expect(placeholder).toContain('kaydet düğmesi ekranda göründü mü')
     expect(placeholder).not.toContain('"')
     // Pencere ve süre alanları korunur.
-    expect(field('Önce aranacak pencere')).toBeDefined()
-    expect(field('Görünene kadar bekle')).toBeDefined()
+    expect(field('Pencere / uygulama bağlamı')).toBeDefined()
+    expect(labels().some(s => s.includes('Görünene kadar bekle'))).toBe(false)
   })
 
   it('(b) eski locator’lı ve boş kutulu koşulda bilgi notu çıkar; basınca locator silinir', () => {
@@ -90,17 +90,17 @@ describe('1) koşul panelinde hedef seçimi yok', () => {
     mount(sideProps(n, { onUpdateNode }))
     const clear = mounted!.root.findAllByType('button').find((b) => text(b) === 'Eski seçimi temizle')
     expect(clear).toBeDefined()
-    expect(text(mounted!.root)).toContain('Koşul artık seçim kullanmaz')
+    expect(text(mounted!.root)).toContain('Uyumsuz eski koşul')
     act(() => clear!.props.onClick())
     expect(onUpdateNode).toHaveBeenCalledWith({ locator: undefined, anchor: undefined })
     // Temizleme dışında hiçbir seçim yazımı yapılmaz.
     expect(onUpdateNode).toHaveBeenCalledTimes(1)
   })
 
-  it('(b2) kutu doluysa eski seçim notu gösterilmez', () => {
+  it('(b2) kutu dolu olsa da eski seçim uyarısı gösterilir', () => {
     const n: AgentNode = { ...createNode('condition', 0, 0), text: 'kaydet düğmesi göründü mü', locator: legacyLocator() }
     mount(sideProps(n))
-    expect(mounted!.root.findAllByType('button').find((b) => text(b) === 'Eski seçimi temizle')).toBeUndefined()
+    expect(mounted!.root.findAllByType('button').find((b) => text(b) === 'Eski seçimi temizle')).toBeDefined()
   })
 
   it('(d) Tıkla ve Yazı Yaz node’unda seçim düğmeleri hâlâ var', () => {
@@ -118,10 +118,9 @@ describe('1) koşul panelinde hedef seçimi yok', () => {
     mount(sideProps(createNode('condition', 0, 0), { onUpdateNode }))
     act(() => mounted!.root.findAllByType('button').find((b) => text(b) === '{{sıra}}')!.props.onClick())
     expect(onUpdateNode).toHaveBeenCalledWith({ text: '{{sıra}}' })
-    act(() => field('Önce aranacak pencere').findAllByType('input')[0].props.onChange({ target: { value: 'Blender' } }))
+    act(() => field('Pencere / uygulama bağlamı').findAllByType('input')[0].props.onChange({ target: { value: 'Blender' } }))
     expect(onUpdateNode).toHaveBeenCalledWith({ conditionWindow: 'Blender' })
-    act(() => field('Görünene kadar bekle').findAllByType('input')[0].props.onChange({ target: { value: '30' } }))
-    expect(onUpdateNode).toHaveBeenCalledWith({ timeoutMs: 30000 })
+    expect(onUpdateNode.mock.calls.some(([patch]) => 'timeoutMs' in patch)).toBe(false)
   })
 })
 

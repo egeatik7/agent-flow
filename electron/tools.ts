@@ -887,7 +887,7 @@ const targetPreview: ToolDef = {
             : node.kind === 'end'
               ? 'akışı bitirir; hedef aramaz'
               : node.kind === 'condition'
-                ? 'ekranda bir yazı arar ama tıklamaz; aranan yazı prompt alanında olmalı'
+                ? 'koşulu bir kez modele sorar; koşul cümlesi text alanında, pencere bilgisi yalnız bağlamdır'
                 : 'hedef aramaz'
       const message = `“${node.title}” (${node.kind}) ${what}.${branchNote}`
       ctx.log('info', `Ajan · hedef önizleme · ${message}`)

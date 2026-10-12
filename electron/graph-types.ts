@@ -75,7 +75,7 @@ export type AgentNode = {
   ms?: number
   count?: number
   timeoutMs?: number
-  /** Condition: restrict evidence to one uniquely matching window. */
+  /** Condition: user-provided application/window context for the model; never selects a window. */
   conditionWindow?: string
   conditionSource?: 'uia' | 'ocr'
   conditionWindowMatch?: 'exact' | 'contains'
@@ -365,7 +365,7 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
       { key: 'true', label: 'var' },
       { key: 'false', label: 'yok' },
     ],
-    description: 'Ekranda ne aradığını normal cümleyle yaz; değerlendirmeyi metin modeli yapar. İstersen görünene kadar bekler.',
+    description: 'Koşulu normal cümleyle yaz; metin modeli UIA ve gerekirse OCR kanıtını bir kez değerlendirir.',
   },
   loop: {
     label: 'Her Öğe İçin',
@@ -490,7 +490,7 @@ export function createNode(kind: NodeKind, x: number, y: number, index = 1): Age
     case 'wait':
       return { ...base, ms: 2000 }
     case 'condition':
-      return { ...base, text: '', timeoutMs: 0 }
+      return { ...base, text: '' }
     case 'loop':
       return { ...base, count: 3, members: [] }
     case 'ai':
@@ -534,11 +534,8 @@ export function summarize(n: AgentNode): string {
       return `Tuş: ${n.keys || '—'}`
     case 'wait':
       return `${((n.ms ?? 0) / 1000).toLocaleString('tr-TR')} sn bekle`
-    case 'condition': {
-      const what = n.text?.trim() || (n.locator ? 'seçili öğe' : '—')
-      const wait = Math.round((n.timeoutMs ?? 0) / 1000)
-      return wait > 0 ? `${what} görünene kadar bekle (en çok ${wait} sn)` : `Ekranda ${what} var mı?`
-    }
+    case 'condition':
+      return conditionCompatibilityError(n) ? 'Uyumsuz eski koşul — güncelleme gerekli' : `Koşul: ${n.text?.trim() || '—'}`
     case 'loop': {
       const keys = loopKeys(n)
       return listItems(n).length ? `${keys.length} öğe, her çalıştırmada baştan` : `${keys.length} kez`
@@ -985,4 +982,12 @@ export function normalizeCanvasBook(raw: unknown, fallback?: AgentGraph): Canvas
       ...(draft.expected && typeof draft.expected.id === 'string' && typeof draft.expected.name === 'string' && Array.isArray(draft.expected.entries)
         ? { expected: structuredClone(draft.expected) } : {}) } : undefined
   return { activeId, tabs, library, ...(branches?.length ? { branches } : {}), ...(recovery.length ? { recovery } : {}), ...(automationDraft ? { automationDraft } : {}) }
+}
+
+
+/** Old screen selections cannot silently decide a condition under the model-only contract. */
+export function conditionCompatibilityError(n: AgentNode): string | undefined {
+  if (n.kind === 'condition' && (n.locator || n.anchor)) {
+    return `“${n.title}”: uyumsuz eski koşul; kayıtlı ekran seçimi artık desteklenmiyor. Eski seçimi temizle ve koşulu cümleyle yaz.`
+  }
 }
