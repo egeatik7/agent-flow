@@ -251,10 +251,11 @@ export async function listWindows(): Promise<{ title: string; handle: string }[]
 const PLACEHOLDER_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
-function readPreview(file: string, w: number, h: number, mime?: string): ScanResult['image'] {
+function readPreview(file: string, w: number, h: number, mime?: string, marked?: boolean): ScanResult['image'] {
   const data = fs.readFileSync(file).toString('base64')
   fs.unlink(file, () => {})
-  return { data, w, h, mime: mime || 'image/jpeg' }
+  // `marked`: görüntüye gerçekten ID rozetleri çizildi mi (yalnız ETİKET; görüntü alma davranışı değişmez).
+  return { data, w, h, mime: mime || 'image/jpeg', ...(marked ? { marked: true } : {}) } as ScanResult['image']
 }
 
 export async function scan(opts: {
@@ -360,7 +361,7 @@ export async function scan(opts: {
   const carried = rest as ScanResult & { image?: { path?: string; data?: string; w?: number; h?: number; mime?: string } | null }
   let image = carried.image ?? null
   if (image?.path && fs.existsSync(image.path)) {
-    image = readPreview(image.path, image.w ?? 0, image.h ?? 0, image.mime)
+    image = readPreview(image.path, image.w ?? 0, image.h ?? 0, image.mime, opts.image === 'marked')
   }
   return { ...rest, items, image, onnx, onnxAdded, sideCount, ocrEngine: engine, shot: holdShot ? shot : undefined }
 }

@@ -717,22 +717,31 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   const raw = parsed.id ?? parsed.i ?? parsed.index
   const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
   const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
+  // GÖRÜNTÜ ROZETİ ÇÖZÜMLEMESİ (1.9.116): model numarayı görüntüdeki rozetten okuyor; rozetler ASIL öğe
+  // kimlikleridir (küçük numaralar), liste ise kelime adayı kimliklerini taşır. Yalnız GERÇEKTEN gönderilen
+  // "marked" görüntünün AYNI karesindeki öğeler için çözülür; görüntüsüz/plain istekte ret aynen kalır.
+  // Çok kelimeli OCR satırı burada MERKEZE düşürülmez: kelime indeksi verilmez, seçimi ajanın mevcut kısa
+  // ikinci kelime isteği yapar ve tıklama gerçek kelime kutusuna gider.
+  const rozet = !selected && id !== null && Number.isInteger(id) && opts.kind !== 'condition' && (scan.image as { marked?: boolean } | null | undefined)?.marked === true
+    ? scan.items.find((i) => i.id === id && i.w > 0 && i.h > 0)
+    : undefined
   // Ölçülen kusur (1.9.110): reddin SEBEBİ kaydedilmiyordu, günlük yalnız "uygun öğe bulamadı" diyordu.
   // Artık: numara bu listede yok / var ama tıklanabilir değil / listeye alınmamış / numara yok.
   const aday = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id) : undefined
-  const rejected = id === null || selected ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
+  const rejected = id === null || selected || rozet ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
   // YANIT KANITI (1.9.113): ham cevap, dönen id, listede var mı, seçilebilir mi, red sebebi ve çözülen öğe.
   const gonderilenMi = id !== null && Number.isInteger(id) ? new RegExp(`^#${id}\\s`, 'm').test(listText) : false
+  if (rozet) chatLogger?.(`GORUNTU-ROZETI id=${istekId} | donen-id=${id} listede YOK ama marked goruntude #${rozet.id} “${rozet.text.slice(0, 60)}” | cok-kelimeli=${(rozet.words?.length ?? 0) > 1 ? 'evet (kisa ikinci kelime secimine gidiyor)' : 'hayir (kendi kutusuna)'}`)
   chatLogger?.(responseSummaryText({
-    id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!selected, rejected,
-    resolvedItem: selected ? `${selected.item.src}/${selected.item.type} "${selected.item.text.slice(0, 60)}"` : undefined,
+    id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!(selected || rozet), rejected,
+    resolvedItem: selected ? `${selected.item.src}/${selected.item.type} "${selected.item.text.slice(0, 60)}"` : rozet ? `${rozet.src}/${rozet.type} "${rozet.text.slice(0, 60)}" (görüntü rozeti #${rozet.id})` : undefined,
     resolvedWord: selected?.wordIndex !== undefined ? `#${selected.item.id} w${selected.wordIndex}` : undefined,
-    targetText: selected?.item.text.slice(0, 80),
+    targetText: (selected?.item ?? rozet)?.text.slice(0, 80),
   }))
   saveRequestEvidence(istekId, { response: content })
   return {
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
-    id: selected?.parentId ?? null,
+    id: selected?.parentId ?? rozet?.id ?? null,
     ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
     ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
     text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
