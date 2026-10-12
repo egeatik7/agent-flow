@@ -2188,3 +2188,18 @@ html.hud-root #root {
   padding-top: 3px;
   word-break: break-word;
 }
+
+/* 1.9.120: döngü konumu satırı — iç/dış döngü yolu tek satırda okunur kalsın. */
+.hud-line.hud-loop {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #333;
+  border-top: 1px dotted #b9b9b9;
+  padding-top: 3px;
+  white-space: normal;
+  word-break: break-word;
+}
+.hud-line.hud-loop.on {
+  color: #1f4e79;
+  font-weight: 600;
+}

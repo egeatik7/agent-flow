@@ -540,8 +540,10 @@ export async function runGraph(
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
         patch(loop.id, { loopIndex: idx, startIndex: idx })
-        loopNotes[loopNotes.length - 1] = isList ? `${loop.title} · ${idx + 1}/${keys.length} · ${label}` : `${loop.title} · ${idx + 1}/${keys.length}. tur`
-        ex.setLoop?.(loopNotes.join('   ·   '))
+        loopNotes[loopNotes.length - 1] = isList ? `${loop.title} ${idx + 1}/${keys.length} · ${label}` : `${loop.title} ${idx + 1}/${keys.length}. tur`
+        // Kart: iç/dış döngü konumu tek satırda ve OKUNUR (1.9.120). Uzun " · " ayırıcısı kartta taşıyordu;
+        // " › " iç içe geçişi gösterir: "Grup 3/12 · Image Folder › Öğe 7/20 · kedi.png".
+        ex.setLoop?.(loopNotes.join(' › '))
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 }, entry ? firstLapPath : undefined)
