@@ -17,3 +17,7 @@ resources/boot/splash.bmp
 *.exe
 
 resources/build.json
+
+# Yerel gelistirme araci (repoya ait degil)
+qwen-chat/
+
