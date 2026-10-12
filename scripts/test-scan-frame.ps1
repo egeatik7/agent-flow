@@ -82,11 +82,11 @@ function Tara($image) {
 }
 function Var($ad) { return @($script:olay | Where-Object { $_ -eq $ad }).Count }
 
-# ---- 1) the marked picture the model gets: one frame, OCR and ONNX from it, UIA from BEFORE it ----
+# ---- 1) the marked picture the model gets: ONE frame, captured before every reader ----
 $r = Tara 'marked'
 $o = [string[]]$script:olay
-Check ($o[0] -eq 'uia') "UIA must be read first (that is the drift window): got '$($o[0])'"
-Check ($o[1] -eq 'capture') "The frame capture must follow the UIA read: got '$($o[1])'"
+Check ($o[0] -eq 'capture') "The frame must be captured FIRST (1.9.106): got '$($o[0])'"
+Check ($o[1] -eq 'uia') "The UIA read must come after the frame now: got '$($o[1])'"
 Check ((Var 'capture') -eq 1) 'A marked scan must capture exactly ONE frame (no second capture between OCR and picture).'
 Check ($o -contains 'win-ocr/same-frame=True') 'Windows OCR must run on the captured frame itself.'
 Check ($o -contains 'onnx-shot/same-frame=True') 'The ONNX raw shot must be saved from the captured frame.'
@@ -97,9 +97,10 @@ Write-Host ("r-type=" + $r.GetType().Name + " uia=" + $r.uiaCount + " ocr=" + $r
 Check ($r.uiaCount -eq 1) "UIA count must be 1 in the same scan result, got '$($r.uiaCount)'"
 Check ($r.ocrCount -eq 1) "OCR count must be 1 in the same scan result, got '$($r.ocrCount)'"
 # The budget lives in top-level code, which the AST loader deliberately skips: read it from the source
-# text and say so. It is the bound on how old a UIA item can be when the picture is taken.
+# text and say so. It bounds how long the reader list may lag behind the frame (measured: 200-400 ms
+# whole desktop, ~70 ms per window - see scripts/measure-uia.ps1).
 $budget = [regex]::Match((Get-Content -LiteralPath (Resolve-Path $screen) -Raw), '\$script:UiaBudgetMs\s*=\s*(\d+)')
-Check ($budget.Success -and [int]$budget.Groups[1].Value -eq 6000) 'screen.ps1 must declare the 6000 ms UIA budget: that is the drift window this harness reports.'
+Check ($budget.Success -and [int]$budget.Groups[1].Value -eq 6000) 'screen.ps1 must declare the 6000 ms UIA budget: that is the worst-case lag this harness reports.'
 
 # ---- 2) a scan that asks for no picture must still capture once and produce no JPEG ----
 $r2 = Tara 'none'
@@ -109,5 +110,5 @@ Check (-not ($o2 -contains 'copy/same-frame=True')) 'Without a picture no copy i
 Check (@($o2 | Where-Object { $_ -like 'jpeg*' }).Count -eq 0) 'Without a picture no JPEG is produced.'
 Check ($null -eq $r2.image) 'A none scan returns no picture.'
 
-Write-Host 'PASS scan frame: UIA read happens BEFORE the capture (drift window <= 6000 ms);'
+Write-Host 'PASS scan frame: the frame is captured FIRST, then UIA is read (the list is fresher than the picture);'
 Write-Host 'Windows OCR, the ONNX raw shot and the marked picture all come from that one captured frame.'

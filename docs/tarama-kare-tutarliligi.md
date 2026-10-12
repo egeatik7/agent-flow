@@ -1,83 +1,70 @@
-# Tarama kare tutarlılığı — OCR kutuları ile modele giden görüntü aynı ana mı ait?
+# Tarama kare tutarlılığı — OCR kutuları, UIA listesi ve modele giden görüntü aynı ana mı ait?
 
-**Durum: 1.9.105.** Bu belge bir ölçüm raporudur; `scripts/test-scan-frame.ps1` harness'i ile **ölçülen**
-gerçekleri, kod kanıtlarını ve önerilen düzeltme seçeneklerini ayırır.
+**Durum: 1.9.106.** Bu belge ölçüm raporudur: neyin **ölçüldüğünü**, neyin kod okuması olduğunu ayırır.
 
 ## Kısa cevap
 
-- **Windows OCR, ONNX okuması, yan (90° döndürülmüş) ONNX okuması ve modele giden numaralı görüntü
-  TEK BİR KAREDEN gelir** — asenkron değiller. Tarama başına **tam olarak bir** ekran yakalama yapılır;
-  OCR o bitmap üzerinde çalışır, görüntü o bitmap'in kopyasıdır, ONNX ise **aynı karenin** ham dosyasını
-  okur.
-- **UIA öğeleri bu garantinin DIŞINDADIR:** UIA ağacı, ekran görüntüsü **alınmadan ÖNCE** okunur.
-  Aradaki süre `$script:UiaBudgetMs = 6000` ile sınırlıdır; yani bir UIA kutusu görüntüden **en çok
-  6 saniye eski** olabilir. Numaralı görüntüde UIA öğelerinin numaraları da çizildiği için, o kutu
-  görüntüde **kaymış bir yeri** gösterebilir.
+- **Windows OCR, ONNX okuması, yan (90°) ONNX okuması ve numaralı görüntü TEK BİR KAREDEN gelir.**
+  Tarama başına **tam olarak bir** ekran yakalaması yapılır; OCR o bitmap üzerinde çalışır, görüntü o
+  bitmap'in kopyasıdır, ONNX ise **aynı karenin** ham dosyasını okur. Bunlar arasında asenkronluk yoktur.
+- **UIA okuması ayrı bir andadır** (teknik olarak zorunlu: UIA ağacı yürüyüşü ile ekran yakalama atomik
+  yapılamaz). 1.9.106'dan **önce** UIA görüntüden **önce** okunuyordu, yani UIA listesi görüntüden
+  **eskiydi**. Artık **kare önce, UIA sonra** okunuyor: **liste kareden yeni**, kaymanın yönü değişti.
 
-## Ölçüm (yeni harness, canlı masaüstü gerektirmez)
+## Ölçüm (bu makinede, salt-okunur; girdi gönderilmez)
 
-`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-scan-frame.ps1`
-→ **exit 0**, çıktı: `PASS scan frame: UIA read happens BEFORE the capture (drift window <= 6000 ms);
-Windows OCR, the ONNX raw shot and the marked picture all come from that one captured frame.`
+`scripts/measure-uia.ps1` — uygulamanın kendi yükleme yolu (`worker.ps1` gibi `common.ps1` + `screen.ps1`
+dot-source) ile gerçek fonksiyonlar; geniş alan gerçek pencere dikdörtgenlerinin birleşimidir.
 
-Harness `a11y/screen.ps1`'in **yalnız fonksiyon tanımlarını** AST'ten yükler (üst düzey `Add-Type`
-kodu çalışmaz, ekran yakalanmaz, pencereye dokunulmaz), yakalama/OCR/JPEG çağrılarını stub'lar ve
-**çağrı sırasını + nesne kimliğini** kaydeder. Ölçtüğü iddialar:
+| İş | Ölçüm |
+| --- | --- |
+| Pencere numaralandırma (`Get-ScanRoots`) | **2–42 ms** (13 kullanılabilir pencere) |
+| **UIA yürüyüşü — tüm masaüstü** | **202–397 ms** (31–148 öğe) |
+| **UIA yürüyüşü — tek pencere** | **73 ms** (86 öğe); boş pencere 3 ms |
+| Kare yakalama (`Capture-Raw`, 1920×1080) | **15–60 ms** (ilk tur soğuk: 60 ms) |
 
-1. Sıra: `uia` → `capture` → (`win-ocr`, `onnx-shot`, `tilt`, `merge`) → `jpeg`.
-2. `marked` taramada **tek** yakalama vardır (OCR ile görüntü arasında ikinci yakalama yok).
-3. Windows OCR, **yakalanan nesnenin kendisini** okur (`same-frame=True`).
-4. ONNX ham kare dosyası **aynı** nesneden kaydedilir (`same-frame=True`).
-5. JPEG, o karenin **kopyasından** üretilir (`copy-of-frame=True`) ve görüntüye **iki** öğe de çizilir
-   (`marks=True/items=2`) — yani UIA öğesi de bu görüntüde numaralanır.
-6. `image='none'` taramasında: yine tek yakalama, **kopya yok**, **JPEG yok**.
-7. `screen.ps1` gerçekten `6000 ms` UIA bütçesi bildirir (kaynak metinden okunur; kayma penceresinin
-   üst sınırı budur).
+Sonuç: **UIA, yakalamadan ~10–20 kat pahalıdır** ve iki işlem arasındaki fark **UIA yürüyüşünün kendisi**
+(≈0,2–0,4 sn tüm masaüstü, ≈0,07 sn pencere başına). `$script:UiaBudgetMs = 6000` yalnız **en kötü durum**
+sınırıdır; ölçülen tipik değer bunun çok altındadır.
 
-## Kod kanıtı (satırlar)
+## 1.9.106'da ne değişti ve neden
 
-| Ne | Yer | Anlamı |
-| --- | --- | --- |
-| UIA okuması | `a11y/screen.ps1:798-800` | Görüntüden **önce**. |
-| Tek yakalama | `a11y/screen.ps1:802` (`Capture-Raw`) | Tarama başına bir kare. |
-| Görüntü kopyası | `a11y/screen.ps1:816` (`Copy-Bitmap32 $bmp`) | Pencereye giden resim bu karenin kopyası. |
-| Windows OCR | `a11y/screen.ps1:825` (`Get-OcrPhrases $bmp …`) | **Aynı** kare üzerinde. |
-| ONNX ham kare | `a11y/screen.ps1:827` (`Save-OnnxShot $bmp`) | ONNX bu dosyadan okur, yeniden yakalamaz. |
-| Döndürülmüş OCR | `a11y/screen.ps1:829-833` (`[XpTurn]::Ccw($bmp)`) | Aynı karenin döndürülmüş hâli; kutular `Convert-TiltRect` ile geri taşınır (`:446-455`). |
-| Numaraların çizimi | `a11y/screen.ps1:688,700-704` (`$marks`, `DrawRectangle`, `DrawString $it.id`) | Numaralar = öğe kimlikleri. |
-| JPEG üretimi | `a11y/screen.ps1:847` | Kopya + birleşik öğe listesi. |
-| ONNX ikinci yol (ertelenmiş) | `electron/a11y-bridge.ts:332-349` | Yine **kaydedilmiş aynı kare** dosyasını okur (`readRawShot`), yeniden yakalamaz. |
-| Görüntü + liste birlikte | `electron/openrouter.ts:664-681` | Tek `scan` nesnesinden hem liste hem `imagePart` üretilir; arada yeni tarama yok. |
-| Koşulda resim yok | `electron/agent.ts:1191` (`sendImage:false`), `electron/agent.ts` koşul okuyucuları (`image:'none'`) | Koşul kararı görüntüyle eşleştirilmez. |
+`a11y/screen.ps1` içinde sıra **`Capture-Raw` → UIA → OCR/ONNX → JPEG** oldu (eskiden UIA → capture → …).
 
-## Tehlikeler ve sonuçları
+- **Fark yok olmaz:** sıra değiştirmek iki işlem arasındaki süreyi değiştirmez; yalnız **hangisinin eski**
+  olduğunu seçer.
+- **Neden kare önce:** modelin seçtiği kimlikler ve tıklamanın izlediği koordinatlar **listeden** gelir;
+  görüntü ise promptta zaten "etiketler özgün kimlikleri gösterebilir, seçimi liste koordinatlarıyla yap"
+  diye **yardımcı** olarak tanımlıdır (`electron/openrouter.ts:671`). Karar girdisini taze yapmak, yardımcı
+  görseli taze yapmaktan daha değerlidir.
+- **Değişmeyen garanti:** Windows OCR, ONNX ve numaralı görüntü yine **tek kareden** gelir; onların
+  kutu-kare uyumu her iki sırada da tamdır. Değişen yalnız **UIA girdilerinin kareye göre yaşı**dır.
 
-1. **UIA kayması (asıl risk, ölçüldü):** UIA kutuları görüntüden eski olabilir. Kaydırma/animasyon/hızlı
-   pencere değişimi sırasında, numaralı görüntüdeki UIA numarası **yanlış yeri** gösterir; model bu
-   numarayı seçerse tıklama yanlış noktaya gidebilir. Kayma üst sınırı **6 sn**'dir (tipik değer
-   ölçülmedi; UIA yürüyüşü çoğu ekranda çok daha kısadır).
-2. **İki ayrı kare (tasarım):** Koşul node'u bir kez UIA, gerekirse bir kez OCR okur; bunlar **iki ayrı
-   taramadır** (iki ayrı an). Koşulda görüntü gönderilmediği için "görüntü ↔ kutu" uyuşmazlığı yoktur,
-   ama karar iki farklı andan gelen kanıta dayanır.
-3. **Taramadan tıklamaya kadar geçen süre (doğal):** Seçim bir kareden yapılır, tıklama sonradan gider;
-   bu yüzden giriş yolunda pencere/hedef yeniden doğrulanır (`assertInputTarget`, okunan değer kontrolü).
-   Bu bir "kare uyuşmazlığı" değil, zaman farkıdır.
-4. **Ölçek/kırpma:** Numaralar **küçültmeden önce** çizilir (`maxImageW` sonra uygulanır), yani
-   görüntüdeki numara ile kutu aynı hizada kalır; liste koordinatları da aynı karedeki piksellerden
-   yüzde olarak hesaplanır.
+## Kanıt
 
-## Önerilen düzeltme seçenekleri (karar senin)
+**Ölçen harness** — `scripts/test-scan-frame.ps1` (exit 0):
+`screen.ps1`'in yalnız fonksiyon tanımlarını AST'ten yükler (üst düzey `Add-Type` çalışmaz, ekran
+yakalanmaz, pencereye dokunulmaz), yakalama/OCR/JPEG çağrılarını stub'lar ve **çağrı sırası + nesne
+kimliği** kaydeder. Ölçtüğü iddialar: sıra `capture → uia → (win-ocr, onnx-shot, tilt, merge) → jpeg` ·
+`marked` taramada **tek** yakalama · Windows OCR/ONNX ham karesi/JPEG hepsi **aynı** yakalanan nesneden
+(`same-frame=True`, `copy-of-frame=True`) · görüntüye **iki** öğe de çizilir (`marks=True/items=2`) ·
+`image='none'` taramasında kopya ve JPEG yok · 6000 ms bütçesi kaynakta bildirilmiş.
 
-- **A. Yalnız aynı kareden gelen kanıtı numaralandır:** görüntüye **OCR/ONNX** öğelerinin numaralarını çiz;
-  UIA öğelerini listede tut ama görüntüde numaralamayıp promptta bunu açıkça söyle. Ucuz, kaymayı görünmez
-  kılar; UIA numaralarının görsel karşılığı kaybolur.
-- **B. Önce yakala, sonra UIA oku:** kaymanın yönü değişir (UIA bu kez görüntüden **yeni** olur) ve
-  kutu yine görüntüdeki yeri tam göstermez; tek başına sorunu çözmez.
-- **C. UIA'yı kareyle doğrula:** yakalamadan sonra, UIA kutusunun aynı karedeki OCR kanıtıyla örtüşmesini
-  şart koş (örtüşmeyen UIA öğesini numaralamadan listele ya da düşür). En doğrusu, en pahalısı; motor
-  davranışını değiştirir.
-- **D. Hiç değiştirme, yalnız belgele:** bugünkü davranış promptta zaten "etiketler özgün kimlikleri
-  gösterebilir, seçimi liste koordinatlarıyla yap" diyerek törpüleniyor (`electron/openrouter.ts:671`).
+**Kod kanıtı:** tek yakalama ve sıra `a11y/screen.ps1:798-811` · görüntü kopyası `:820` · Windows OCR
+`:829` · ONNX ham kare `:831` (köprü aynı dosyayı okur: `electron/a11y-bridge.ts:332-349`) · döndürülmüş
+OCR aynı karenin döndürülmüşü `:833-837` + kutu geri taşıma `:446-455` · numaralar `:688,700-704` ·
+JPEG `:851` · görüntü + liste tek `scan` nesnesinden (`electron/openrouter.ts:664-681`) · koşulda resim yok
+(`electron/agent.ts` koşul okuyucuları `image:'none'`).
 
-Bu rapor **hiçbir çalışan davranışı değiştirmez**; yalnız harness (`scripts/test-scan-frame.ps1`) ve bu
-belge eklenmiştir. Seçenek A/B/C'den biri seçilirse ayrı bir sürümde uygulanır.
+## Kalan riskler (dürüst)
+
+1. **UIA artık kareden yeni:** çok hızlı değişen bir arayüzde, görüntüye çizilen UIA numarası öğenin
+   *şimdiki* yerini gösterirken kare *eski* hâli gösterir. Ölçülen fark küçüktür (≈0,07–0,4 sn) ve prompt
+   seçimi liste koordinatlarına bağladığı için kabul edildi.
+2. **Koşul node'u iki ayrı taramadır** (bir kez UIA, gerekirse bir kez OCR) — tasarım gereği; koşulda
+   görüntü gönderilmediği için "görüntü ↔ kutu" uyuşmazlığı yoktur.
+3. **Taramadan tıklamaya kadar geçen süre** doğaldır; giriş yolunda pencere/hedef yeniden doğrulanır.
+4. Bu ölçümler **bu makinede** alındı; çok büyük öğe ağaçlarında UIA süresi artar (bütçe 6 sn'de keser) ve
+   ölçüm oturumunda görüntü yüzeyi olmadığı için yakalama WinForms birincil ekran dikdörtgeniyle ölçüldü.
+5. Tam kare-kimliği isteniyorsa kalan adım **C**'dir: UIA kutusunu aynı karenin OCR kanıtıyla doğrulayıp
+   örtüşmeyeni numaralamadan listelemek. Bu, motor davranışını değiştiren ayrı bir iştir ve **yapılmadı**.

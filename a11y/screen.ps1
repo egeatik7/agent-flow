@@ -795,15 +795,20 @@ function Invoke-Scan($P) {
   $own = 0
   if ($P.ownPid) { $own = [int]$P.ownPid }
 
+  # THE FRAME FIRST, THE UIA READ SECOND (1.9.106, measured). The UIA walk costs ~200-400 ms on a whole
+  # desktop and ~70 ms per window, while the frame capture costs ~15-60 ms; the gap between the two
+  # operations IS the UIA walk, so no ordering removes it - ordering only decides which of the two is
+  # the older one. The list is what the model picks an id from and what the click follows, so the list
+  # must be the fresh one; the picture is an aid whose labels the prompt already calls advisory.
+  # Windows OCR and the ONNX pass still read THIS captured frame, so their boxes stay frame-exact.
   $uia = New-Object System.Collections.ArrayList
   $script:UiaSkipped = 0
-  if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
-
   $bmp = Capture-Raw $rect
   # Every bitmap below is released even when a step throws; a worker lives for hours.
   $shotBmp = $null
   try {
     Set-BitmapOpaque $bmp
+    if ($P.uia -ne $false) { $uia = Get-UiaItems (Get-ScanRoots $win $own $fresh) $rect }
     $ocr = New-Object System.Collections.ArrayList
     $ocrOk = $false
     $shot = ''
