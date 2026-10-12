@@ -373,14 +373,21 @@ export function createAgent(ctx: AgentContext) {
     let shotFile = ''
     let seenItems: ScreenItem[] = []
 
+    /**
+     * "Metin modeline numaralı ekran görüntüsü gönder" ayarı (ölçülen kusur: bu ayar etkisizdi).
+     * Tarama `marked` istemezse görüntü hiç doğmaz (`scan.image` boş kalır) ve `pickFrom` içindeki
+     * `sendImage` daima false olur; yani kullanıcı kutuyu işaretlese de modele resim gitmezdi.
+     * Görüntü yalnız gerçekten metin modeline sorulacaksa istenir: koşulda (kanıt kuralı gereği resim
+     * kullanılamaz), metinsiz düğümde ve model yokken istenmez.
+     */
+    const wantImage = !!s.sendScreenshot && !ocrOnly && !!prompt && (!!s.apiKey.trim() || localConfigured())
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(false, wide, false, readOnly, !ocrOnly, ocrOnly)
+        winScan = await scanFor(wantImage, wide, false, readOnly, !ocrOnly, ocrOnly)
         const { shot: _temporary, ...snapshot } = winScan
         trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
-        // A diagnostic screenshot must not become a new model input. This path
-        // normally scans with image:none; keep the live resolver's inputs identical.
-        winScan = { ...winScan, image: null, ...(ocrOnly ? { items: winScan.items.filter(item => item.src === 'ocr') } : {}) }
+        // Tanılama görüntüsü kendiliğinden model girdisi olmaz: resim yalnız ayar istediğinde kalır.
+        winScan = { ...winScan, image: wantImage ? winScan.image : null, ...(ocrOnly ? { items: winScan.items.filter(item => item.src === 'ocr') } : {}) }
         shotFile = winScan.shot || ''
         seenItems = winScan.items
       }
