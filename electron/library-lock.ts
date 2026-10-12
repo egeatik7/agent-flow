@@ -1,0 +1,169 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+
+type Owner = { format: 'nubbo-lock'; pid: number; nonce: string }
+type Snapshot = { raw: Buffer; stat: fs.Stats }
+type Held = { owner: Owner; refs: number }
+export type LibraryLock = { assertOwned(): void; release(): void }
+const held = new Map<string, Held>()
+// Legacy versions can leave an empty file while writing. Do not repair a fresh
+// malformed lock, or a malformed record that still identifies a live process.
+const CORRUPT_GRACE_MS = 60_000
+const busy = () => Error('Kütüphane şu anda başka bir Nubbo tarafından kullanılıyor. Tekrar dene.')
+const lost = () => Error('Kütüphane kilidi değişti; kayıt sahipliği kayboldu. Mevcut dosyalar korunuyor.')
+const code = (e: unknown) => (e as NodeJS.ErrnoException).code
+
+function lockFile(directory: string): string {
+  fs.mkdirSync(directory, { recursive: true })
+  const canonical = path.join(fs.realpathSync(directory), '.nubbo-library.lock')
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical
+}
+function snapshot(file: string): Snapshot | undefined {
+  let fd: number
+  try { fd = fs.openSync(file, 'r') } catch (e) { if (code(e) === 'ENOENT') return; throw e }
+  try { return { raw: fs.readFileSync(fd), stat: fs.fstatSync(fd) } } finally { fs.closeSync(fd) }
+}
+function parsed(s: Snapshot): Partial<Owner> | undefined {
+  try { const value: unknown = JSON.parse(s.raw.toString('utf8')); return value && typeof value === 'object' ? value as Partial<Owner> : undefined } catch { return }
+}
+function ownerOf(s: Snapshot): Owner | undefined {
+  const o = parsed(s)
+  return o?.format === 'nubbo-lock' && Number.isInteger(o.pid) && o.pid! > 0 && typeof o.nonce === 'string' && !!o.nonce ? o as Owner : undefined
+}
+function live(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch (e) { return code(e) !== 'ESRCH' }
+}
+function mayRecover(s: Snapshot): void {
+  const o = parsed(s)
+  if (Number.isInteger(o?.pid) && o!.pid! > 0 && live(o!.pid!)) throw busy()
+  if (!ownerOf(s) && Date.now() - s.stat.mtimeMs < CORRUPT_GRACE_MS) {
+    throw Error('Kütüphane kilidi henüz yazılıyor olabilir. Bir dakika sonra tekrar dene; mevcut dosyalar korunuyor.')
+  }
+}
+function same(a: Snapshot, b: Snapshot): boolean {
+  return a.raw.equals(b.raw) && a.stat.dev === b.stat.dev && a.stat.ino === b.stat.ino && a.stat.mtimeMs === b.stat.mtimeMs
+}
+
+/** Publish a complete, fsynced record exclusively. rename would overwrite an owner. */
+function publish(file: string, owner: Owner): void {
+  const temp = path.join(path.dirname(file), `.nubbo-lock-${process.pid}-${randomUUID()}.tmp`)
+  let fd: number | undefined
+  let published = false
+  try {
+    fd = fs.openSync(temp, 'wx')
+    fs.writeFileSync(fd, JSON.stringify(owner))
+    fs.fsyncSync(fd)
+    fs.closeSync(fd); fd = undefined
+    // NTFS and local Unix filesystems publish this name atomically, with EEXIST
+    // if another process won. Unsupported filesystems fail without unsafe fallback.
+    try { fs.linkSync(temp, file) } catch (e) {
+      if (['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'].includes(code(e) ?? '')) {
+        throw Error('Bu klasör güvenli kütüphane kilidini desteklemiyor. Yerel diskte başka bir klasör seç; mevcut dosyalar korunuyor.')
+      }
+      throw e
+    }
+    published = true
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd)
+    // Once ownership is visible, a cleanup error must not orphan our live lock
+    // by telling the caller acquisition failed. A remaining temp name is harmless.
+    try { fs.unlinkSync(temp) } catch (e) { if (code(e) !== 'ENOENT' && !published) throw e }
+  }
+}
+function removeOwned(file: string, owner: Owner): void {
+  const current = snapshot(file)
+  if (current && ownerOf(current)?.nonce === owner.nonce && ownerOf(current)?.pid === owner.pid) fs.unlinkSync(file)
+}
+
+/**
+ * Only one process may reclaim a particular stale generation. Recovery tickets
+ * are complete exclusive files too. Never unlink another process's stale ticket:
+ * elect one successor at a deterministic new name instead. This avoids moving
+ * the original unlink/recreate race into a second "recovery lock".
+ */
+function recovering<T>(file: string, stale: Snapshot, fn: () => T): T {
+  const root = `${file}.recover-${createHash('sha256').update(stale.raw).digest('hex')}`
+  let ticket = root
+  let parents: { file: string; snapshot: Snapshot }[] = []
+  const owner: Owner = { format: 'nubbo-lock', pid: process.pid, nonce: randomUUID() }
+  for (let depth = 0; depth < 32; depth++) {
+    try {
+      publish(ticket, owner)
+    } catch (e) {
+      if (code(e) !== 'EEXIST') throw e
+      const previous = snapshot(ticket)
+      if (!previous) continue
+      mayRecover(previous)
+      parents.push({ file: ticket, snapshot: previous })
+      ticket = `${file}.recover-${createHash('sha256').update(ticket).update(previous.raw).digest('hex')}`
+      continue
+    }
+    const ownedTicket = ticket
+    try {
+      // A parent may have cleaned up just before its process exited. Its missing
+      // name would allow a new root contender; a descendant must then rejoin the
+      // root election instead of claiming an independent recovery lane.
+      const valid = parents.every(parent => {
+        const current = snapshot(parent.file)
+        if (!current || !same(parent.snapshot, current)) return false
+        mayRecover(current)
+        return true
+      })
+      if (!valid) { ticket = root; parents = []; continue }
+      return fn()
+    } finally { removeOwned(ownedTicket, owner) }
+  }
+  throw Error('Kütüphane kilidi kurtarma sınırına ulaştı; mevcut dosyalar korunuyor.')
+}
+
+function acquire(file: string): Owner {
+  const owner: Owner = { format: 'nubbo-lock', pid: process.pid, nonce: randomUUID() }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try { publish(file, owner); return owner } catch (e) { if (code(e) !== 'EEXIST') throw e }
+    const stale = snapshot(file)
+    if (!stale) continue
+    mayRecover(stale)
+    const acquired = recovering(file, stale, () => {
+      const current = snapshot(file)
+      if (!current || !same(stale, current)) return false
+      mayRecover(current)
+      fs.unlinkSync(file)
+      try { publish(file, owner); return true } catch (e) { if (code(e) === 'EEXIST') return false; throw e }
+    })
+    if (acquired) return owner
+  }
+  throw busy()
+}
+function assertOwned(file: string, owner: Owner): void {
+  const current = snapshot(file)
+  const o = current && ownerOf(current)
+  if (!o || o.pid !== process.pid || o.nonce !== owner.nonce) throw lost()
+}
+
+/** A directory owns its own nonce; one instance cannot release another's claim. */
+export function claimLibraryLock(directory: string): LibraryLock {
+  const file = lockFile(directory)
+  let record = held.get(file)
+  if (record) assertOwned(file, record.owner)
+  else { record = { owner: acquire(file), refs: 0 }; held.set(file, record) }
+  record.refs++
+  const owned = record
+  let released = false
+  return {
+    assertOwned: () => { if (released) throw lost(); assertOwned(file, owned.owner) },
+    release: () => {
+      if (released) return
+      released = true
+      if (--owned.refs > 0) return
+      held.delete(file)
+      removeOwned(file, owned.owner)
+    },
+  }
+}
+export function withLibraryLock<T>(directory: string, fn: () => T): T {
+  const file = lockFile(directory), record = held.get(file)
+  if (record) { assertOwned(file, record.owner); return fn() }
+  const lock = claimLibraryLock(directory)
+  try { return fn() } finally { lock.release() }
+}

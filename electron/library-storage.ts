@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { CanvasBook, CanvasLibrary } from './graph-types'
 import { validateLibrary, ensureSections } from './library-tree'
 import { encodeLibrary, decodeLibrary } from './library-database'
+import { claimLibraryLock, withLibraryLock as locked, type LibraryLock } from './library-lock'
 
 type File = { format: 'nubbo-library'; version: 1; revision: string; library: CanvasLibrary }
 /** Disk ile bellek ayrıştığında fırlatılır; çağıran bunu ayrı bir DURUM olarak yönetir, yazmayı zorlamaz. */
@@ -25,29 +26,11 @@ function atomic(file: string, data: string|Uint8Array) {
  try { const fd=fs.openSync(temp,'wx');try{fs.writeFileSync(fd,data,'utf8');fs.fsyncSync(fd)}finally{fs.closeSync(fd)};fs.renameSync(temp,file) }
  finally { if (fs.existsSync(temp)) fs.unlinkSync(temp) }
 }
-let aktifTalepNonce = ''  // bu sÜrecin oturum kilidinin nonce u (yalniz KENDI kilidimizi atlariz)
-function locked<T>(directory:string, fn:()=>T):T {
- fs.mkdirSync(directory,{recursive:true});const file=path.join(directory,'.nubbo-library.lock'),nonce=randomUUID()
- let fd:number
- try{fd=fs.openSync(file,'wx')}catch(e){
-  if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e
-  const owner=JSON.parse(fs.readFileSync(file,'utf8')) as {format?:string;pid?:number}
-  // Oturum kilidi bu sürecin kendisine aitse yeniden kilit alınmaz: kendi kaydımızı kendimiz bloklamayalım.
-  // Yalniz KENDI oturum kilidimizde yeniden kilit almayiz: ayni pid li YABANCI kilit yine bloklar.
-  if(aktifTalepNonce && (owner as {nonce?:string}).nonce===aktifTalepNonce)return fn()
-  if(owner.format!=='nubbo-lock'||!Number.isInteger(owner.pid)||(owner.pid ?? 0)<=0)throw Error('Kütüphane kilidi okunamadı; mevcut dosyalar korunuyor.')
-  let gone=false;try{process.kill(owner.pid!,0)}catch(err){gone=(err as NodeJS.ErrnoException).code==='ESRCH'}
-  if(!gone)throw Error('Kütüphane şu anda başka bir Nubbo tarafından kaydediliyor. Tekrar dene.')
-  fs.unlinkSync(file);fd=fs.openSync(file,'wx')
- }
- try{fs.writeFileSync(fd,JSON.stringify({format:'nubbo-lock',pid:process.pid,nonce}));return fn()}
- finally{fs.closeSync(fd);try{if(JSON.parse(fs.readFileSync(file,'utf8')).nonce===nonce)fs.unlinkSync(file)}catch{/* Another owner must keep its lock. */}}
-}
 /** Portable catalog only: API keys and session tabs stay in the local profile. */
 export class LibraryStorage {
  private raw:Buffer=Buffer.alloc(0)
  private catalogJSON=''
- private claimNonce=''
+ private claimLock?: LibraryLock
  constructor(public directory: string) { this.directory = path.resolve(directory) }
  get file() { return path.join(this.directory, FILE) }
  get legacyFile(){return path.join(this.directory,'nubbo-library.json')}
@@ -90,26 +73,13 @@ export class LibraryStorage {
  }
  /** Kütüphane bazında yazıcı sahipliği: oturum boyu tutulur, ölü sahipten devralınır. */
  claim(): void {
-  if (this.claimNonce) return
-  fs.mkdirSync(this.directory, { recursive: true })
-  const file = path.join(this.directory, '.nubbo-library.lock'), nonce = randomUUID()
-  const write = () => { const fd = fs.openSync(file, 'wx'); try { fs.writeFileSync(fd, JSON.stringify({ format: 'nubbo-lock', pid: process.pid, nonce })) } finally { fs.closeSync(fd) } this.claimNonce = nonce; aktifTalepNonce = nonce }
-  try { write(); return } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e }
-  let owner: { format?: string; pid?: number } = {}
-  try { owner = JSON.parse(fs.readFileSync(file, 'utf8')) as { format?: string; pid?: number } } catch { owner = {} }
-  if (owner.format !== 'nubbo-lock' || !Number.isInteger(owner.pid) || (owner.pid ?? 0) <= 0) throw Error('Kütüphane kilidi okunamadı; mevcut dosyalar korunuyor.')
-  if (owner.pid !== process.pid) {
-   let gone = false; try { process.kill(owner.pid!, 0) } catch (err) { gone = (err as NodeJS.ErrnoException).code === 'ESRCH' }
-   if (!gone) throw Error(`Kütüphane şu anda başka bir Nubbo (pid ${owner.pid}) tarafından kullanılıyor. O programı kapatıp tekrar dene.`)
-   fs.unlinkSync(file)
-  }
-  write()
+  if (this.claimLock) { this.claimLock.assertOwned(); return }
+  this.claimLock = claimLibraryLock(this.directory)
  }
  release(): void {
-  if (!this.claimNonce) return
-  const file = path.join(this.directory, '.nubbo-library.lock')
-  try { if ((JSON.parse(fs.readFileSync(file, 'utf8')) as { nonce?: string }).nonce === this.claimNonce) fs.unlinkSync(file) } catch { /* Yabancı kilit yerinde kalmalı. */ }
-  this.claimNonce = ''; aktifTalepNonce = ''
+  const lock = this.claimLock
+  this.claimLock = undefined
+  lock?.release()
  }
  backup(): string {
   const current = fs.readFileSync(this.file); decodeLibrary(current)

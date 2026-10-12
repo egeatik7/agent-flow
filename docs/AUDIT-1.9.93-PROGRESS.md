@@ -1,7 +1,7 @@
 # 1.9.93 bug düzeltmeleri — devam defteri
 
 Başlangıç commit'i: `5f1f81df29afa15622dbd9f61c64a176095a852a`.
-Çalışma dalı: `fix/audit-1.9.93-session-1` (yerel).
+Çalışma dalı: `fix/audit-1.9.93-session-2` (yerel; Tur 1 commit'i `77c03aa` üzerine).
 Tarih: 12 Ekim 2026. Bu belge kısa turların sonunda güncellenir.
 
 ## Tur 1 — tamamlandı
@@ -17,7 +17,7 @@ Test kaynakları: `tests/workspace-main.test.ts`, `tests/workspace-save.test.ts`
 Akış JSON şeması, node türleri ve paket/döngü çalıştırma motoru bu turda değiştirilmedi.
 Uygulama sürümü bu kısmi kaynak yamasında 1.9.93 olarak kaldı.
 
-## Doğrulama
+## Tur 1 doğrulaması
 
 - Orijinal commit, aynı Linux/Node ortamında: 102 Vitest dosyası; 745 geçti, 6 atlandı, 0 hata.
 - Beş yeni regresyon testi orijinal üretim koduna karşı: 5 başarısız. Hatalar beklenen veri kaybı/kimlik değişimi iddialarını yeniden üretti.
@@ -39,11 +39,38 @@ Branch oluşturma çağrısı 403 `Resource not accessible by integration` ile r
 Uzak branch/commit/PR oluşturulmadı; main değiştirilmedi.
 Teslim, yerel commit ve başlangıç commit'ine uygulanabilir kaynak patch paketidir.
 
-## Sonraki tur: kilit sağlamlığı
+## Tur 2 — tamamlandı
 
-Önce §2.8 ve §2.9 birlikte incelenecek: bozuk/boş kilit, yarım yazım, ölü kilidi devralma yarışı.
-Kilit sahibinin korunması, iki süreç yarışının gerçekçi testi ve birden fazla LibraryStorage nesnesinin sahipliği birlikte ele alınmalı.
-Yalnız parse hatasını yutup kilidi silmek yeterli ve güvenli bir çözüm sayılmayacak.
+| Bulgu | Durum | Yapılan düzeltme ve kanıt |
+| --- | --- | --- |
+| §2.8: yarım yazım ve bozuk/boş kilitte kalıcı tıkanma | Düzeltildi | Sahiplik kaydı önce ayrı dosyada tam yazılıp fsync edilir; hard link ile üstüne yazmadan atomik yayımlanır. Write/fsync/link hataları görünür sahiplik bırakmaz. Bir dakikadan eski bozuk kayıt, canlı PID içermiyorsa kurtarılır. Yeni/henüz yazılıyor olabilecek kayıt ve canlı PID korunur. |
+| §2.9: iki sürecin aynı ölü kilidi devralırken yeni sahibi silmesi | Düzeltildi | Her bayat kilit nesli için tek kurtarıcı seçilir. Kurtarma sırasında kilit kimliği tekrar okunur. Ölü kurtarıcıya ait bilet silinmez; tek ardıl seçilir ve üst biletlerin kimliği doğrulanır. Bu, yarışın ikinci bir kurtarma kilidine taşınmasını önler. |
+| §4 kütüphane: tek global nonce / birden fazla katalog | Düzeltildi | Sahiplik canonical katalog yolu başına tutulur. İkinci kataloğu açıp bırakmak birincinin sahipliğini bozmaz. Aynı katalogdaki nesneler referans sayar; son nesne bırakana kadar kilit korunur. |
+| Sahiplik kaybı ve hata sonrası retry | Düzeltildi | Kaybettiği kilitle kayıt yapamaz; release başka sahibin kilidini silmez. Yayın sonrası temp silme hatası başarılı sahipliği sahipsiz bırakmaz. Desteklenmeyen dosya sistemi açık hata verir; güvencesiz bir yazım yoluna dönmez. |
+
+Üretim kaynakları: `electron/library-lock.ts` (yeni), `electron/library-storage.ts`.
+Testler: `tests/library-lock.test.ts` (23 durum), `scripts/test-library-lock-process.cjs` (6 gerçek süreç yarışı).
+Akış JSON şeması, node türleri, runner, PC eylem motoru, SQLite içerik şeması ve ayarlar değişmedi.
+
+### Tur 2 doğrulaması ve sınırları
+
+- Tam Vitest: 104 dosya; 773 geçti, 6 atlandı, 0 hata. Tur 1'deki atlanan testler aynı kaldı.
+- Yeni LibraryStorage regresyonları Tur 1'in değiştirilmemiş üretim koduyla ayrıca çalıştırıldı; eski hatalar yeniden üretildi. Kesin sayılar Test-Kanitlari/tur2-red-regressions.log içindedir.
+- Sekiz mevcut Node regresyon dosyası + yeni gerçek süreç testi: 98 geçti, 21 eski test atlandı, 0 hata.
+- Gerçek süreç testi Linux'ta 6 kez çalışır: eski sahibi öldürür, aynı katalog verisini okuyan iki yeni süreci eşzamanlı yarıştırır, tek kazananın kaydını SQLite'tan yeniden okuyarak doğrular.
+- Ayrıca stale-owner kontrolü sırasında yeni sahibi getiren deterministik yarış, ölen/değişen kurtarma bileti, EPERM, sahiplik kaybı, iki katalog, referans sayımı, bozuk kayıt ve dosya hataları sınandı.
+- `npm run typecheck`, `npm run build:electron`, `git diff --check`: başarılı.
+- Windows PowerShell 5.1/pwsh bu ortamda yok. Gerçek Windows/NTFS ve tablet testi, Windows EXE paketleme yapılmadı.
+- Bu atomik yayın yöntemi hard link desteği ister. Desteklemeyen klasörde veri korunur ve başka klasör seçilmesi istenir; o dosya sisteminde yazım desteği tamamlandı sayılmaz.
+- Hard link ile tam yayınlanan yeni kilitler boş/yarım görünmez. Eski sürümün yarım yazımına hemen müdahale edilmez: bozuk, PID'siz kilidin son değişiminden sonra 60 saniye beklenir. Çok uzun süre takılmış eski bir yazıcı ile yeni sürümün birlikte çalışması canlı Windows'ta doğrulanmadı; iki sürüm aynı kataloğa eşzamanlı yazdırılmamalı.
+- PID yeniden kullanımı ve ağ paylaşımında başka makinenin PID'sini yorumlama bu turda çözülmedi; korumacı ret veya yanlış yerel canlılık değerlendirmesi hâlâ bir sınırdır.
+- Kurtarıcı tam bilet yayımladıktan sonra ölürse o bilet kanıt olarak kalır; ardıl kurtarıcı onu silmeden ilerler. Nadir çökme artıklarının otomatik temizliği eklenmedi. Temp silme izni reddedilirse kalan temp adları da sahipliği bloke etmez.
+- GitHub branch oluşturma tekrar denendi; 403 `Resource not accessible by integration` sürdü. Uzak repo değiştirilmedi.
+
+## Sonraki tur: tıklama sonrası hata ve hedef hafızası
+
+§2.3 ve §2.4: `ensureActed` içindeki tanılama çağrısının başarılı eylemi hata sayması ve Tıkla→Koşul yolunun doğrulanmamış hedefi hafızaya yazması.
+Mevcut eylem davranışı ve §19 kullanıcı kararları korunarak incelenecek; her eyleme yeni ön kontrol eklenmeyecek.
 
 ## Açık defter
 
@@ -55,7 +82,7 @@ Bu tablodaki maddeler bu turda doğrulanmadı veya değiştirilmedi. Orijinal ra
 | §2.3–2.4 | Tıklama sonrası tanılama hatası; Koşul öncesi doğrulanmamış hedef hafızası. |
 | §2.5 | Koşul beklemesinde tarama/model çağrısı sıklığı ve bütçesi. |
 | §2.6 | TEMP süpürmesinde çalışan başka portable örneği koruma. |
-| §2.8–2.9 | Kilit yazımı/kurtarma/devralma; PID yeniden kullanımının sınırları. |
+| Kilit sınırları | §2.8–2.9 kapatıldı. Gerçek Windows/NTFS testi, ağ paylaşımında sahip host ve PID yeniden kullanımı açık. |
 | §2.10 | `applyPlan` loop üyeliği kapanışının dış node'ları kutuya alması. |
 | Runner/döngü/paket | Kimlikle sayısal devam, incomplete/blocked aktarımı, tekrarlayan hatalar, bölge sınırı, sayaçlar, boş klasör ve yol adı. |
 | Hedef/girdi/eylem | Koşul odağı/UIA kapsamı, simge hafızası ve çoklu monitör, ölü yollar. |
@@ -63,7 +90,7 @@ Bu tablodaki maddeler bu turda doğrulanmadı veya değiştirilmedi. Orijinal ra
 | Model/yerel yönlendirme | ImageUnsupported sınıfı ve fallback, reasoning_effort, yanıt ID/koordinat doğrulama, prompt kaybı, ONNX geçici hata ve json retry. |
 | IPC/ayarlar/kalıcılık | Log adı çakışması, hotkey kaydı, viewer aç/kapat yarışı, çakışma banner'ı. |
 | Köprü/harness/script | Test sürecini durdurmadan token/profil yazma, UTF-8 chunk çözümü, worker send yarışı, HTTP büyük gövde hata yolu. |
-| Kütüphane/SQLite/bölümler | Çakışma-dışı hatada oturum kaydı, bölümsüz klasörler, open/restore branch koruma, nonce sahipliği, bölüm/isim uyumu ve yedek maliyeti. |
+| Kütüphane/SQLite/bölümler | Çakışma-dışı hatada oturum kaydı, bölümsüz klasörler, open/restore branch koruma, bölüm/isim uyumu ve yedek maliyeti. Dizin başına nonce sahipliği Tur 2'de düzeltildi. |
 | Yap/araç katmanı | Paket içi graphStamp, bayat merge yolu, geçersiz packagePath, timeout sınırı, task_complete kapısı ve HTTP endpoint yarışı. |
 | Tablet/Android | İz/çerçeve sıfırlama, clone maliyeti, WS slot sınırı, close kodu, ERR_ABORTED, Tailscale boş yanıt, üç sekme ve arşiv, canvasId, QR yönleri, tam kitap yayını. |
 | Performans/uzun koşu | Worker geçici dosyaları, sürüm logları, HUD listener'ı, senkron config yazımları. |
@@ -71,7 +98,7 @@ Bu tablodaki maddeler bu turda doğrulanmadı veya değiştirilmedi. Orijinal ra
 
 ## Devam eden ajana
 
-1. Tur 1 patch'ini tekrar uygulama. Önce mevcut HEAD/diff ve bu belgenin tamamlanan kısmını kontrol et.
+1. Tur 1/Tur 2 patch'lerini tekrar uygulama. Önce mevcut HEAD/diff ve bu belgenin tamamlanan kısmını kontrol et.
 2. Bir turu tek tamamlanabilir konuya sınırla; 30 dakika dolmadan test kanıtı ve uygulanabilir paketi teslim et.
 3. Testi yapılmamış iddiaları tamamlandı sayma. Somut yeni bulguyu ayrı kayıtla taşı.
 4. Akış şemasını ve kullanıcı davranışlarını koru. Sonraki patch'in hangi başlangıç commit'ine uygulandığını açıkça belirt.
