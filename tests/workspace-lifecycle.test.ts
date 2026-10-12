@@ -170,6 +170,54 @@ it.skip('recovers a modified canvas separately and updates the original only aft
     expect(renderer!.root.findByType(CanvasLibrary).props.disabled).toBe(false)
     expect(renderer!.root.findByType(CanvasLibrary).props.library.canvases[0].id).toBe('saved')
   })
+  it('reload adopts the external catalog for the next autosave while retaining open canvas and automation drafts', async () => {
+    await mount()
+    await act(async () => renderer!.root.findByType(CanvasLibrary).props.onOpenCanvas(seed.library!.canvases[0]))
+    const graph = renderer!.root.findByType(NodeCanvas).props.graph
+    await act(async () => renderer!.root.findByType(NodeCanvas).props.onMoveNodes({ [graph.nodes[0].id]: { x: 77, y: 0 } }))
+    await draft(); await tick()
+    const localDraft = structuredClone(disk!.automationDraft)
+    const openTabs = structuredClone(disk!.tabs)
+    const fresh = structuredClone(seed.library!)
+    fresh.canvases[0].graph.nodes[0].title = 'Changed externally'
+    fresh.canvases.push({ id: 'external', name: 'External canvas', graph: { nodes: [], edges: [] }, updatedAt: 2 })
+    api.manageLibrary.mockResolvedValue({ directory: 'D:\\Library', book: { ...seed, library: fresh } })
+    await act(async () => renderer!.root.findByType(CanvasLibrary).props.onManageLibrary('reload'))
+    expect(renderer!.root.findByType(CanvasLibrary).props.library).toEqual(fresh)
+    expect(renderer!.root.findByType(NodeCanvas).props.graph.nodes[0].x).toBe(77)
+    expect(renderer!.root.findByType(CanvasLibrary).props.draft).toEqual(localDraft)
+    await tick()
+    expect(disk!.library).toEqual(fresh)
+    expect(disk!.tabs).toEqual(openTabs)
+    expect(disk!.automationDraft).toEqual(localDraft)
+    // Reload must not replace the baseline: saving an old draft over the newer record is rejected.
+    await act(async () => renderer!.root.findByType(CanvasLibrary).props.onSaveAll())
+    expect(disk!.library).toEqual(fresh)
+    expect(renderer!.root.findByType(CanvasTabs).props.tabs[0].dirty).toBe(true)
+  })
+  it('reload waits for pending writes and blocks additional stale autosaves until the fresh catalog is adopted', async () => {
+    await mount(); await draft()
+    let release!: (result: boolean) => void
+    saveOverride = () => new Promise(resolve => { release = resolve })
+    await tick()
+    const pendingWrites = writes.length
+    const fresh = structuredClone(seed.library!)
+    fresh.canvases[0].name = 'External rename'
+    api.manageLibrary.mockResolvedValue({ directory: 'D:\\Library', book: { ...seed, library: fresh } })
+    let reload!: Promise<void>
+    await act(async () => { reload = renderer!.root.findByType(CanvasLibrary).props.onManageLibrary('reload') })
+    expect(api.manageLibrary).not.toHaveBeenCalled()
+    // Changing a draft while the previous write is draining cannot enqueue another old catalog.
+    await act(async () => renderer!.root.findByType(CanvasLibrary).props.onDraftChange({ ...disk!.automationDraft, key: 'draft', name: 'Latest draft', entries: [] }))
+    await tick()
+    expect(writes).toHaveLength(pendingWrites)
+    saveOverride = undefined
+    await act(async () => { release(true); await reload })
+    expect(api.manageLibrary).toHaveBeenCalledExactlyOnceWith('reload')
+    await tick()
+    expect(disk!.library).toEqual(fresh)
+    expect(disk!.automationDraft?.name).toBe('Latest draft')
+  })
   it('an older pending autosave finishes before explicit Save and cannot later undo it', async () => {
     await mount(); await draft()
     let release!: (result: boolean) => void

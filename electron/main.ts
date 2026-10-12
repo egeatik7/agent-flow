@@ -50,8 +50,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
-import { toolLayerSave } from './tool-branch'
-import { readWorkspace, writeWorkspace } from './workspace-store'
+import { readWorkspace, writeWorkspace, type WorkspaceWriter } from './workspace-store'
 import { LibraryStorage, librarySession, isLibraryConflict } from './library-storage'
 import { initializeLibraryDatabase } from './library-database'
 import type { CanvasLibrary } from './graph-types'
@@ -948,7 +947,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     // Branch records are the only thing the tool layer writes here. The active flow is left
     // exactly as it was, which is why an agent can never reach the user's canvas this way.
     saveCanvases: (book: CanvasBook) => {
-      storeWorkspace(toolLayerSave(loadCanvases(), book.branches ?? []))
+      storeWorkspace(book, 'tools')
     },
     // Suggestions are no longer displayed or merged through the user window.
     // Keep explicit failure replies so legacy test callers do not hang or report success.
@@ -1037,7 +1036,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   void syncEndpoint()
   /** An explicitly empty session must not fall back to the old graph and resurrect a tab. */
   function loadCanvases(): CanvasBook {
-    const session = readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')))
+    const session = readWorkspace(store.get('canvases'), normalizeGraph(store.get('graph')),
+      store.get('libraryMigrated') ? savedLibrary ?? { schemaVersion: 2, canvases: [], automations: [] } : undefined)
     if (!libraryStorage || !savedLibrary) {
       libraryStorage = new LibraryStorage(store.get('libraryPath') || path.join(app.getPath('userData'), 'Library'))
       savedLibrary = libraryStorage.load(store.get('libraryMigrated') ? undefined : session.library)
@@ -1053,7 +1053,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
    * Oturum kaydı ile kütüphane kaydı ayrıdır: kütüphane diskte başka bir programda değiştiyse
    * YALNIZCA kütüphane yazımı atlanır, sekmeler/işaret her zaman yazılır ve çakışma çağırana bildirilir.
    */
-  function storeWorkspace(book: CanvasBook): { conflict: boolean } {
+  function storeWorkspace(book: CanvasBook, writer: WorkspaceWriter = 'window'): { conflict: boolean } {
     const current = loadCanvases()
     let conflict = false
     writeWorkspace({ set: ({ canvases, graph }) => {
@@ -1061,7 +1061,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       catch (e) { if (!isLibraryConflict(e)) throw e; conflict = true }
       store.set({ canvases: librarySession(canvases), graph })
       viewerState.setBook(canvases)
-    } }, book, current)
+    } }, book, current, writer)
     return { conflict }
   }
   ipcMain.handle('library:info', () => {

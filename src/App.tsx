@@ -792,15 +792,21 @@ export default function App() {
         if(automationCloseReview.current && !await automationCloseReview.current())return
         if(!await settleChanges())return
       }
-      await writeQueue.current
       libraryBusyRef.current=true;setLibraryBusy(true)
+      await writeQueue.current
       // Yeniden yükleme: kütüphane diskten tazelenir; AÇIK SEKMELER VE TASLAKLAR KORUNUR.
-if (mode === 'reload') {
-  const r = await api.manageLibrary('reload')
-  if (r?.book) { setLibrary(libraryOf(r.book)); libraryConflictRef.current = false; pushLog('info', 'Kütüphane diskten yeniden yüklendi; açık sekmeler ve taslaklar korundu.') }
-  return
-}
-const result=await api.manageLibrary(mode)
+      if (mode === 'reload') {
+        const result = await api.manageLibrary('reload')
+        if (result?.book) {
+          // Keep the current editor and original save baselines; only the catalog is
+          // refreshed. Future autosaves must read this same catalog from bookRef.
+          adoptBook({ ...commitActive(), library: libraryOf(result.book) })
+          libraryConflictRef.current = false
+          pushLog('info', 'Kütüphane diskten yeniden yüklendi; açık sekmeler ve taslaklar korundu.')
+        }
+        return
+      }
+      const result=await api.manageLibrary(mode)
       if(result){setLibraryDirectory(result.directory);if(result.book){showCanvas(normalizeCanvasBook(result.book),result.book.activeId,false);setLoadError('');setLoaded(true)};pushLog('success',mode==='backup'?'Kütüphane yedeklendi.':'Kütüphane işlemi tamamlandı.')}
     } catch(e){pushLog('error',errText(e))}
     finally{libraryBusyRef.current=false;setLibraryBusy(false)}

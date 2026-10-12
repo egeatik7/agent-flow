@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { addCanvasTab, libraryOf, openSavedCanvas, saveCanvas, saveCanvasAs, saveAutomation } from '../electron/canvas-library'
 import { canvasDirty, discardCanvasDraft, restoreCanvasDraft, startCanvasSession } from '../electron/canvas-session'
-import { createNode, normalizeCanvasBook, type CanvasBook } from '../electron/graph-types'
+import { createNode, normalizeCanvasBook, type AgentGraph, type CanvasBook } from '../electron/graph-types'
 import { saveOpenSequence, saveWorkspace } from '../electron/workspace-save'
 import { readWorkspace, writeWorkspace } from '../electron/workspace-store'
+import { librarySession } from '../electron/library-storage'
 
 const empty = (): CanvasBook => normalizeCanvasBook({ activeId: '', tabs: [], library: { canvases: [], automations: [] }, branches: [{ id: 'tool' }] })
 const add = (book = empty(), name = 'A') => addCanvasTab(book, name, { nodes: [createNode('start', 0, 0)], edges: [] })
@@ -140,6 +141,18 @@ describe('atomic Electron workspace boundary', () => {
     for (const bad of [null, 'broken', { library: saved().library }, { tabs: 'broken' }]) expect(() => readWorkspace(bad, legacy)).toThrow(/korunuyor/)
     expect(readWorkspace(empty(), legacy).tabs).toEqual([])
   })
+  it('reads a separately stored catalog without remigrating saved identities or publishing unsaved tabs', () => {
+    const book = edit(saved())
+    const newBook = add(book, 'Unsaved')
+    const loaded = readWorkspace(librarySession(newBook), newBook.tabs[0].graph, book.library)
+    expect(loaded.tabs).toEqual(newBook.tabs)
+    expect(loaded.tabs[0].savedId).toBe(book.tabs[0].savedId)
+    expect(loaded.tabs[1].savedId).toBeUndefined()
+    expect(loaded.library).toEqual(book.library)
+    expect(loaded.library!.canvases).toHaveLength(1)
+    // Old profile books without a separate catalog still take the original migration route.
+    expect(readWorkspace({ activeId: 'old', tabs: [{ id: 'old', name: 'Legacy', graph: newBook.tabs[0].graph }] }, { nodes: [], edges: [] }).tabs[0].savedId).toBe('old')
+  })
   it('writes catalog, drafts and the legacy graph in one store operation while preserving tool branches', () => {
     const book = edit(saved()), set = vi.fn(), latest = { ...book, branches: [{ id: 'new tool branch' }] }
     writeWorkspace({ set }, book, latest)
@@ -155,5 +168,25 @@ describe('atomic Electron workspace boundary', () => {
     const set = vi.fn(() => { throw new Error('disk full') })
     expect(() => writeWorkspace({ set }, saved(), empty())).toThrow('disk full')
     expect(set).toHaveBeenCalledTimes(1)
+  })
+  it('persists branch creation, editing and deletion between tool calls without replacing window work', () => {
+    let disk = edit(saved())
+    disk.automationDraft = { key: 'draft', name: 'Unsaved automation', entries: [] }
+    const original = structuredClone(disk)
+    const set = vi.fn(({ canvases }: { canvases: CanvasBook; graph: AgentGraph }) => { disk = structuredClone(canvases) })
+    const staleToolBook = add(empty(), 'Stale tool canvas')
+    for (const branches of [[{ id: 'new branch', groups: [] }], [{ id: 'new branch', groups: [{ id: 'edit' }] }], []]) {
+      writeWorkspace({ set }, { ...staleToolBook, branches }, structuredClone(disk), 'tools')
+      expect(disk.branches ?? []).toEqual(branches)
+      expect(disk.tabs).toEqual(original.tabs)
+      expect(disk.activeId).toBe(original.activeId)
+      expect(disk.library).toEqual(original.library)
+      expect(disk.automationDraft).toEqual(original.automationDraft)
+    }
+    expect(set).toHaveBeenCalledTimes(3)
+    // A later renderer autosave still carries old branches and must not resurrect them.
+    writeWorkspace({ set }, original, disk)
+    expect(disk.branches).toEqual([])
+    expect(set.mock.calls.at(-1)![0].graph).toEqual(original.tabs[0].graph)
   })
 })
