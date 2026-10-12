@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, nextRequestId, countSentCandidates } from './send-log'
+import { sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
@@ -666,15 +666,18 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   const withImage = opts.sendImage && !!scan.image
   // KANIT (1.9.113): gövdeden ÖNCE tek satırlık KESİLMEYEN özet + aynı istek kimliğiyle diske kanıt.
   const istekId = nextRequestId()
-  const resim = withImage ? imageBytes(scan.image?.data) : null
   const gonderimOzeti = (goruntusuzDonus: boolean) => {
+    // KANIT gerçek istek GÖVDESİNDEN üretilir: image_url parçası varsa görüntü oradan alınır (ham base64
+    // dahil); yoksa görüntü nesnesine düşülür. Böylece istekte duran görüntü "YOK" diye yazılmaz.
+    const gonderilenResim = goruntusuzDonus ? false : withImage
+    const resim = imageFromMessages(build(gonderilenResim), scan.image?.mime) ?? (gonderilenResim ? imageBytes(scan.image?.data, scan.image?.mime) : null)
     const ilk = Array.isArray(opts.model) ? opts.model[0] : opts.model
     const ozet = sendSummaryText({
       id: istekId, node: opts.stepTitle, stage: String(opts.kind), model: Array.isArray(opts.model) ? opts.model.join(',') : opts.model,
       target: isLocalName(ilk) ? 'local' : 'api',
       image: resim
         ? { sent: true, w: scan.image?.w, h: scan.image?.h, bytes: resim.buffer.length, mime: resim.mime }
-        : { sent: false, reason: opts.sendImage ? 'tarama görüntüsü boş (kare alınamadı)' : 'ayar kapalı: numaralı ekran görüntüsü gönder' },
+        : { sent: false, reason: !opts.sendImage ? 'ayar kapalı: numaralı ekran görüntüsü gönder' : scan.image ? 'görüntü nesnesi var ama istek gövdesine image_url eklenmedi' : 'tarama görüntüsü boş (kare alınamadı)' },
       fallbackNoImage: goruntusuzDonus,
       candidates: { built: candidates.length, sent: countSentCandidates(listText) },
       promptChars: listText.length,
@@ -682,7 +685,6 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     chatLogger?.(ozet)
     saveRequestEvidence(istekId, { summary: ozet, system, instruction: opts.prompt, candidates: listText, image: resim ?? undefined })
   }
-  gonderimOzeti(false)
   const build = (img: boolean): Message[] => [
     { role: 'system', content: system },
     {
@@ -698,6 +700,8 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
 
   let content: string
   let usedImage = withImage
+  // Özet gövdeden ÖNCE yazılır; `build` artık tanımlı olduğu için görüntü GERÇEK istekten okunur (1.9.115).
+  gonderimOzeti(false)
   try {
     content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined }, withImage ? build(false) : undefined)
   } catch (e) {

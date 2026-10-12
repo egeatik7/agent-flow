@@ -107,12 +107,43 @@ let root = ''
 export function setDiagnosticsRoot(directory: string): void { root = directory }
 export function diagnosticsRoot(): string { return root }
 
-/** Görüntü verisini (data URL) ham baytlara çevirir; gizli bilgi içermez. */
-export function imageBytes(data: string | undefined): { buffer: Buffer; mime: string } | null {
-  const raw = String(data ?? '')
-  const m = raw.match(/^data:([^;,]+);base64,(.*)$/s)
-  if (!m) return null
-  try { return { buffer: Buffer.from(m[2], 'base64'), mime: m[1] } } catch { return null }
+/**
+ * Görüntü verisini baytlara çevirir. İKİ biçim desteklenir (1.9.115): `data:<mime>;base64,<veri>` VE
+ * **ham base64**. MIME önce verilen görüntü nesnesinden (çağıranın bildirdiği), yoksa data URL'den,
+ * yoksa `image/jpeg` varsayılanından alınır. Böylece istekte ham base64 olarak duran bir görüntü
+ * yanlışlıkla "YOK" diye raporlanmaz.
+ */
+export function imageBytes(data: string | undefined, mimeFromObject?: string): { buffer: Buffer; mime: string } | null {
+  const raw = String(data ?? '').trim()
+  if (!raw) return null
+  const dataUrl = raw.match(/^data:([^;,]+);base64,(.*)$/s)
+  if (dataUrl) {
+    try { return { buffer: Buffer.from(dataUrl[2], 'base64'), mime: mimeFromObject || dataUrl[1] || 'image/jpeg' } } catch { return null }
+  }
+  // Ham base64: yalnız base64 alfabesi + isteğe bağlı dolgu.
+  if (/^[A-Za-z0-9+/=\s]+$/.test(raw)) {
+    try {
+      const buffer = Buffer.from(raw.replace(/\s+/g, ''), 'base64')
+      if (buffer.length) return { buffer, mime: mimeFromObject || 'image/jpeg' }
+    } catch { /* aşağıda null */ }
+  }
+  return null
+}
+
+/**
+ * Gönderilen HTTP gövdesindeki (messages) gerçek `image_url` parçasından görüntüyü çıkarır. Kanıt,
+ * "niyet"ten değil **istekte duran veriden** üretilir; ham base64 de kabul edilir.
+ */
+export function imageFromMessages(messages: { content?: unknown }[], mimeFromObject?: string): { buffer: Buffer; mime: string } | null {
+  for (const message of messages) {
+    const parts = Array.isArray(message?.content) ? message.content as { type?: string; image_url?: { url?: string } }[] : []
+    for (const part of parts) {
+      if (part?.type !== 'image_url') continue
+      const bytes = imageBytes(part.image_url?.url, mimeFromObject)
+      if (bytes) return bytes
+    }
+  }
+  return null
 }
 
 /**
