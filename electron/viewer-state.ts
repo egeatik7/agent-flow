@@ -3,6 +3,7 @@ import type { AgentGraph, CanvasBook, StepStatus } from './graph-types'
 import type { ViewerMessage, ViewerSnapshot, ViewerBook, ViewerRun } from './viewer-types'
 import type { RecoveryReport } from './recovery'
 import { viewerNodePath } from './viewer-progress'
+import { emptyViewerHud, updateViewerHud } from './viewer-hud'
 export function viewerBook(book:CanvasBook):ViewerBook {
  return structuredClone({zipLibrary:book.zipLibrary??{directory:'',groups:[]},tabs:book.tabs.map(({id,savedId,name,graph})=>({id,savedId,name,graph}))})
 }
@@ -13,7 +14,7 @@ export class ViewerState {
  private listeners=new Set<(message:ViewerMessage)=>void>()
  private bookJSON=''
  state:ViewerSnapshot
- constructor(version:string){this.state={protocol:1,version,session:randomUUID(),seq:0,at:Date.now(),book:{zipLibrary:{directory:'',groups:[]},tabs:[]},run:null,logs:[],reports:[]}}
+ constructor(version:string){this.state={protocol:1,version,session:randomUUID(),seq:0,at:Date.now(),book:{zipLibrary:{directory:'',groups:[]},tabs:[]},run:null,hud:emptyViewerHud(),logs:[],reports:[]}}
  snapshot():ViewerSnapshot{return structuredClone(this.state)}
  subscribe(fn:(message:ViewerMessage)=>void){this.listeners.add(fn);return()=>this.listeners.delete(fn)}
  private emit(channel:string,payload:unknown){this.state.seq++;this.state.at=Date.now();const message:ViewerMessage={type:'event',session:this.state.session,seq:this.state.seq,at:this.state.at,channel,payload};for(const fn of this.listeners){try{fn(message)}catch{/* Viewing never interrupts a run. */}}}
@@ -23,6 +24,8 @@ export class ViewerState {
  finish(outcome:{ok?:boolean;stopped?:boolean}|undefined){if(!this.state.run)return;this.state.run.phase=outcome?.stopped?'stopped':outcome?.ok?'completed':'failed';this.emit('run:finish',{phase:this.state.run.phase})}
  event(channel:string,payload:unknown){
   const run=this.state.run
+  const hud=updateViewerHud(this.state.hud,channel,payload)
+  if(hud)this.state.hud=hud
   if(channel==='agent:log'){const p=payload as {level:string;message:string};this.state.logs.push({...p,at:Date.now()});this.state.logs=this.state.logs.slice(-300)}
   else if(channel==='agent:step'&&run){const p=payload as {id:string;status:StepStatus};run.status[p.id]=p.status;if(p.status==='running'||p.status==='error'){if(p.status!=='error'||!run.nodeId||!isAncestor(run.graph,p.id,run.nodeId))run.nodeId=p.id}}
   else if(channel==='agent:patch'&&run){const p=payload as {id:string;patch:Record<string,unknown>};patchViewerGraph(run.graph,p.id,p.patch)}
@@ -32,7 +35,7 @@ export class ViewerState {
   else if(channel==='recovery:status'&&run)run.recovery=payload as ViewerRun['recovery']
   else if(channel==='recovery:report'){const report=structuredClone(payload as RecoveryReport);this.state.reports=[...this.state.reports.filter(r=>r.id!==report.id),report].slice(-100)}
   else if(channel==='recovery:removed'){const ids=payload as string[];this.state.reports=this.state.reports.filter(r=>!ids.includes(r.id))}
-  else return
+  else if(!hud)return
   this.emit(channel,payload)
  }
 }

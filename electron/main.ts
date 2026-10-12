@@ -718,6 +718,7 @@ function pushHud(level: LogLevel, message: string) {
     hudHideTimer = null
   }
   const payload = { level, text: text.length > 220 ? `${text.slice(0, 217)}…` : text }
+  viewerState.event('hud:status', payload)
   deliverHud('hud:status', payload, true)
 }
 
@@ -725,6 +726,9 @@ function hideHudSoon() {
   if (hudHideTimer) clearTimeout(hudHideTimer)
   hudHideTimer = setTimeout(() => {
     hudHideTimer = null
+    viewerState.event('hud:loop', { text: '' })
+    viewerState.event('hud:method', { text: '' })
+    viewerState.event('hud:countdown', { text: '' })
     if (hudWindow && !hudWindow.isDestroyed()) {
       hudWindow.hide()
       hudWindow.webContents.send('hud:loop', { text: '' })

@@ -3,6 +3,7 @@ package com.nubbo.viewer;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
@@ -31,6 +32,8 @@ public final class MainActivity extends Activity {
  private WebView web;
  private Camera camera;
  private boolean scanning;
+ private boolean viewing;
+ private boolean viewerTablet;
  private String currentUrl;
  private long lastScan;
  private final ExecutorService decoder=Executors.newSingleThreadExecutor();
@@ -47,19 +50,21 @@ public final class MainActivity extends Activity {
  private String image(String name){try(java.io.InputStream in=getAssets().open(name);java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){byte[] buffer=new byte[4096];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);return "data:image/png;base64,"+android.util.Base64.encodeToString(out.toByteArray(),android.util.Base64.NO_WRAP);}catch(java.io.IOException e){throw new IllegalStateException("Arayüz görseli açılamadı",e);}}
  private static String html(String s){return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&#39;");}
  private void localPage(String content){
+  viewing=false;setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
   if(web!=null){web.destroy();web=null;}web=new WebView(this);web.setBackgroundColor(Color.rgb(236,233,216));web.getSettings().setJavaScriptEnabled(true);web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);web.getSettings().setJavaScriptCanOpenWindowsAutomatically(false);web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);
   web.setWebViewClient(new WebViewClient(){@Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest req){Uri u=req.getUrl();if(!req.isForMainFrame()||!"nubbo".equals(u.getScheme()))return true;String command=u.getHost();if("connect".equals(command)){String url=u.getQueryParameter("url");if(url!=null)open(url);}else if("scan".equals(command)){if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.CAMERA},7);else showScanner();}else if("retry".equals(command)&&currentUrl!=null)showViewer(currentUrl);else if("computers".equals(command))showConnections();return true;}});
   String page=asset("connections.html").replace("{{STYLE}}",asset("xp.css")+"\n"+asset("xp-luna.css")).replace("{{CONTENT}}",content).replace("{{ICON}}",image("icon.png")).replace("{{MASCOT}}",image("nubbo-still.png")).replace("{{LOGO}}",image("nubbo-logo.png"));
   LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);l.setBackgroundColor(Color.rgb(236,233,216));l.addView(web,new LinearLayout.LayoutParams(-1,-1));setContentView(l);insets(l);web.loadDataWithBaseURL("https://nubbo.local/",page,"text/html","UTF-8",null);
  }
  private void showConnections(){releaseCamera();scanning=false;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-  StringBuilder content=new StringBuilder("<h2>Bilgisayara bağlan</h2><p>PC ve tablette Tailscale açık olmalı. PC’de Nubbo → Tablet İzleme → İzlemeyi Aç.</p>");List<String> computers=saved();
+  StringBuilder content=new StringBuilder("<h2>Bilgisayara bağlan</h2><p>PC ve cihazda Tailscale açık olmalı. PC’de Nubbo → Tablet İzleme → İzlemeyi Aç.</p>");List<String> computers=saved();
   if(!computers.isEmpty()){content.append("<section class='connection-section'><h3>Kayıtlı bilgisayarlar</h3>");for(String u:computers)content.append("<a class='xp-btn connection-pc' href='nubbo://connect?url=").append(html(Uri.encode(u))).append("'>").append(html(Uri.parse(u).getHost())).append(" · Bağlan</a>");content.append("</section>");}
   content.append("<a class='xp-btn primary' href='nubbo://scan'>PC’deki QR Kodunu Okut</a><section class='connection-section'><h3>Eşleştirme bağlantısı</h3><form onsubmit=\"event.preventDefault();location.href='nubbo://connect?url='+encodeURIComponent(document.getElementById('address').value.trim())\"><textarea id='address' aria-label='Eşleştirme bağlantısı' placeholder='PC’den kopyaladığın bağlantıyı buraya yapıştır' autocomplete='off' autocapitalize='off' spellcheck='false'></textarea><button class='xp-btn' type='submit'>Bağlan</button></form></section><p class='connection-hint'>Tuvali kaydır, paketlere gir, çalışan adımı ve günlükleri incele.</p>");localPage(content.toString());
  }
  static boolean valid(String value){try{Uri u=Uri.parse(value);return "https".equals(u.getScheme())&&u.getHost()!=null&&u.getHost().matches("[a-zA-Z0-9.-]+\\.ts\\.net")&&(u.getPort()==8443||u.getPort()==443||u.getPort()==-1)&&"/viewer".equals(u.getPath())&&u.getUserInfo()==null&&u.getQuery()==null&&u.getFragment()!=null&&u.getFragment().matches("token=[a-f0-9]{64}");}catch(Exception e){return false;}}
  private void open(String url){if(!valid(url)){Toast.makeText(this,"Nubbo’nun verdiği HTTPS eşleştirme bağlantısını kullan.",Toast.LENGTH_LONG).show();return;}releaseCamera();scanning=false;List<String> computers=saved();computers.removeIf(v->Uri.parse(v).getAuthority().equals(Uri.parse(url).getAuthority()));computers.add(0,url);getPreferences(0).edit().putString("computers",new JSONArray(computers.subList(0,Math.min(10,computers.size()))).toString()).apply();currentUrl=url;showViewer(url);}
- private void showViewer(String url){if(web!=null)web.destroy();web=new WebView(this);web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);web.getSettings().setSafeBrowsingEnabled(true);web.getSettings().setJavaScriptCanOpenWindowsAutomatically(false);web.setWebViewClient(new WebViewClient(){
+ private boolean tabletDevice(){Configuration c=getResources().getConfiguration();return c.smallestScreenWidthDp>=600||(c.smallestScreenWidthDp<=0&&(c.screenLayout&Configuration.SCREENLAYOUT_SIZE_MASK)>=Configuration.SCREENLAYOUT_SIZE_LARGE);}
+ private void showViewer(String url){viewing=true;viewerTablet=tabletDevice();setRequestedOrientation(viewerTablet?ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED:ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);if(web!=null)web.destroy();web=new WebView(this);web.getSettings().setUserAgentString(web.getSettings().getUserAgentString()+" NubboDevice/"+(viewerTablet?"tablet":"phone"));web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);web.getSettings().setSafeBrowsingEnabled(true);web.getSettings().setJavaScriptCanOpenWindowsAutomatically(false);web.setWebViewClient(new WebViewClient(){
   @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){Uri u=request.getUrl(),peer=Uri.parse(currentUrl);return !"https".equals(u.getScheme())||!Objects.equals(u.getAuthority(),peer.getAuthority());}
   @Override public void onReceivedError(WebView view,WebResourceRequest req,WebResourceError error){if(req.isForMainFrame())runOnUiThread(()->localPage("<h2>PC’ye ulaşılamadı</h2><p>Tailscale bağlantısını ve PC’de Nubbo’nun açık olduğunu kontrol et.</p><a class='xp-btn primary' href='nubbo://retry'>Yeniden Dene</a><a class='xp-btn' href='nubbo://computers'>Bilgisayarlar</a>"));}
 
@@ -71,6 +76,6 @@ public final class MainActivity extends Activity {
  @Override public void onBackPressed(){showConnections();}
  @Override protected void onPause(){super.onPause();releaseCamera();if(web!=null)web.onPause();}
  @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();else if(scanning)showScanner();}
- @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);if(scanning)showScanner();}
+ @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);if(scanning)showScanner();else if(viewing&&currentUrl!=null&&viewerTablet!=tabletDevice())showViewer(currentUrl);}
  @Override protected void onDestroy(){releaseCamera();decoder.shutdown();if(web!=null)web.destroy();super.onDestroy();}
 }

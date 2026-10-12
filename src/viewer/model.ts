@@ -2,6 +2,7 @@ import type { ViewerMessage, ViewerSnapshot, ViewerRun, ViewerBook } from '../..
 import type { AgentGraph, StepStatus } from '../types'
 import type { RecoveryReport } from '../../electron/recovery'
 import { viewerNodePath as runNodePath } from '../../electron/viewer-progress'
+import { updateViewerHud } from '../../electron/viewer-hud'
 function patch(graph:AgentGraph,id:string,value:Record<string,unknown>){for(const n of graph.nodes){if(n.id===id)Object.assign(n,value);if(n.inner)patch(n.inner,id,value)}}
 export function applyViewerMessage(current:ViewerSnapshot|null,message:ViewerMessage):ViewerSnapshot{
  if(message.type==='snapshot'){if(message.state.protocol!==1)throw Error('İzleme protokolü uyumsuz.');return message.state}
@@ -9,6 +10,9 @@ export function applyViewerMessage(current:ViewerSnapshot|null,message:ViewerMes
  if(message.type==='heartbeat'){if(message.seq!==current.seq)throw Error('Eksik durum mesajı.');return current}
  if(message.seq!==current.seq+1)throw Error('Eksik durum mesajı.')
  const next={...current,seq:message.seq,at:message.at}
+ const hud=updateViewerHud(current.hud,message.channel,message.payload)
+ if(hud)next.hud=hud
+ if(message.channel==='hud:status'||message.channel==='hud:countdown')return next
  const run=next.run?structuredClone(next.run):null,p=message.payload
  if(message.channel==='book')next.book=p as ViewerBook
  else if(message.channel==='run')next.run=p as ViewerRun

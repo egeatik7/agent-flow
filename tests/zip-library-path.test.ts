@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+// These fixtures describe Windows paths; keep the same rules on Linux CI.
+vi.mock('node:path', async () => {
+  const actual = await vi.importActual<typeof import('node:path')>('node:path')
+  return { default: actual.win32 }
+})
 import { chooseLibraryDirectory, isProtectedPath } from '../electron/library-path'
 
 /**

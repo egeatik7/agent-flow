@@ -27,3 +27,37 @@
 @media(max-width:780px){.viewer-workspace{grid-template-columns:minmax(0,1fr) 235px}.viewer-sidebar .tab{padding:5px}.viewer-toolbar>span{width:100%;margin:0}.viewer-log{flex-basis:100px}.viewer-log .log-body{height:70px}}
 
 .viewer-sidebar .library-row { min-height:39px; }
+
+.viewer-toolbar .xp-btn[aria-pressed=true] { background:#d4e4ff; border-color:#17498b; box-shadow:inset 1px 1px #7f9db9; font-weight:bold; }
+.viewer-hud-screen { position:fixed; inset:0; z-index:3000; display:flex; flex-direction:column; min-width:0; min-height:0; background:#ece9d8; color:#172b48; font-family:Tahoma,sans-serif; }
+.viewer-hud-screen > header { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px max(10px,env(safe-area-inset-right)) 8px max(10px,env(safe-area-inset-left)); background:linear-gradient(#0969ed,#0052c8); color:white; flex-shrink:0; }
+.viewer-hud-screen > header strong { flex:1; }
+.viewer-hud-screen > header span { font-size:11px; }
+.viewer-hud-screen > header .xp-btn { min-height:40px; }
+.viewer-hud-content { flex:1; min-height:0; overflow:auto; padding:clamp(10px,3vw,28px); display:flex; flex-direction:column; align-items:center; justify-content:safe center; gap:15px; padding-bottom:max(15px,env(safe-area-inset-bottom)); }
+.viewer-hud-mascot { flex-shrink:0; width:clamp(100px,25vw,200px); max-height:28dvh; object-fit:contain; image-rendering:pixelated; }
+.viewer-hud-card { width:100%; max-width:1000px; box-sizing:border-box; padding:clamp(14px,3vw,32px); border:2px solid #7f9db9; border-radius:5px; background:#fffef5; box-shadow:2px 3px 0 #aca899; overflow-wrap:anywhere; }
+.viewer-hud-card h1 { margin:0 0 12px; font-size:clamp(18px,3vw,28px); color:#17498b; }
+.viewer-hud-text { margin:0; font-size:clamp(19px,4vw,38px); line-height:1.4; white-space:pre-wrap; }
+.viewer-hud-card.warn { border-color:#bb8c21; background:#fff4cf; }
+.viewer-hud-card.error { border-color:#b53429; background:#fff0eb; }
+.viewer-hud-card.success { border-color:#4f852e; background:#eff9e8; }
+.viewer-hud-countdown { margin:16px 0 0; font-size:clamp(18px,3.5vw,30px); font-weight:bold; font-variant-numeric:tabular-nums; color:#17498b; }
+.viewer-hud-details { width:100%; max-width:1000px; text-align:center; font-size:clamp(15px,2.5vw,23px); line-height:1.4; overflow-wrap:anywhere; }
+.viewer-hud-details p { margin:4px 0; }
+@media(orientation:landscape) { .viewer-hud-content { display:grid; grid-template-columns:minmax(80px,22%) minmax(0,1fr); align-content:center; align-items:center; } .viewer-hud-mascot { grid-column:1; grid-row:1 / span 2; width:100%; max-height:65dvh; } .viewer-hud-card { grid-column:2; grid-row:1; } .viewer-hud-details { grid-column:2; grid-row:2; } }
+@media(max-height:360px) { .viewer-hud-content { align-content:start; gap:8px; } .viewer-hud-mascot { max-height:45dvh; } }
+
+/* Phone is a permanent portrait card, including before the PC starts a run. */
+.viewer-phone-card { height:100dvh; }
+.viewer-phone-card > header { min-height:36px; gap:6px; }
+.viewer-phone-card > header strong { font-size:13px; }
+.viewer-phone-card > header span { font-size:10px; }
+.viewer-phone-card .viewer-hud-content { display:flex; flex-direction:column; justify-content:flex-start; align-items:center; gap:12px; padding:18px 14px max(18px,env(safe-area-inset-bottom)); overflow-y:auto; }
+.viewer-phone-card .viewer-hud-mascot { width:min(42vw,190px); max-height:26dvh; flex-shrink:0; }
+.viewer-phone-card .viewer-hud-card { width:100%; padding:18px 16px; border-radius:5px; }
+.viewer-phone-card .viewer-hud-card h1 { font-size:19px; margin-bottom:12px; }
+.viewer-phone-card .viewer-hud-text { font-size:clamp(19px,5.5vw,27px); line-height:1.45; }
+.viewer-phone-card .viewer-hud-countdown { font-size:clamp(18px,5vw,25px); margin-top:15px; }
+.viewer-phone-card .viewer-hud-details { font-size:clamp(15px,4.5vw,21px); line-height:1.5; }
+@media(orientation:landscape) { .viewer-phone-card .viewer-hud-content { display:flex; } .viewer-phone-card .viewer-hud-mascot { max-height:23dvh; } }
