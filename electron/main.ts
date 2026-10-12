@@ -53,6 +53,7 @@ import {
 } from './graph-types'
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
+import { chooseLibraryDirectory } from './library-path'
 import { zipDocumentFor } from './zip-workspace'
 import { copyZipCanvas } from './zip-canvas-document'
 import { sameCanvasContent } from './canvas-content'
@@ -1218,11 +1219,39 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return info ? info.file : null
   })
   void syncEndpoint()
+  /**
+   * Kütüphane klasörü: korumalı bir klasörü ASLA oluşturmaya çalışmaz (ölçüldü: Denetimli klasör
+   * erişimi açıkken `mkdirSync` Belgeler altında süresiz bekliyor ve arayüz "yükleniyor"da donuyordu).
+   */
+  function libraryDirectory(): string {
+    const preferred = path.join(app.getPath('documents'), 'Nubbo', 'Kütüphane')
+    const choice = chooseLibraryDirectory({
+      configured: String(store.get('zipLibraryPath') ?? ''),
+      documents: app.getPath('documents'),
+      home: app.getPath('home'),
+      exists: (candidate) => { try { return fs.existsSync(candidate) } catch { return false } },
+      protectedRoots: (['documents', 'desktop', 'pictures', 'videos', 'music'] as const)
+        .map((key) => app.getPath(key))
+        .concat(path.join(app.getPath('home'), 'Favorites')),
+    })
+    if (choice.fallback) {
+      log('warn', `Varsayılan kütüphane klasörü “${preferred}” Windows Denetimli klasör erişimi kapsamında ve henüz yok; orada klasör açmak uygulamayı kilitleyebilir. Kütüphane “${choice.directory}” altına alındı. Kalıcı çözüm: Ayarlar > Kütüphane’den bir klasör seç ya da Windows Güvenliği > Fidye yazılımı koruması > Denetimli klasör erişimi altında bu uygulamaya izin ver.`)
+      try { store.set('zipLibraryPath', choice.directory) } catch { /* seçim bu koşu için yine geçerli */ }
+    }
+    return choice.directory
+  }
   function loadCanvases(refresh = true): CanvasBook {
-    zipStorage ??= new ZipLibraryStorage(store.get('zipLibraryPath') || path.join(app.getPath('documents'), 'Nubbo', 'Kütüphane'))
+    zipStorage ??= new ZipLibraryStorage(libraryDirectory())
     const raw = store.get('zipCanvases')
     const session = normalizeCanvasBook(raw ?? { workspaceVersion: 3, activeId: '', tabs: [] })
-    if (refresh || !zipSnapshot) zipSnapshot = zipStorage.load()
+    if (refresh || !zipSnapshot) {
+      try { zipSnapshot = zipStorage.load() }
+      catch (error) {
+        // Okunamayan bir kütüphane arayüzün açılmasını ASLA engellemez: boş kütüphaneyle devam edilir.
+        log('error', `Kütüphane okunamadı (${(error as Error).message}); boş kütüphaneyle devam ediliyor.`)
+        zipSnapshot = { directory: zipStorage.directory, groups: [] }
+      }
+    }
     const book = { ...session, workspaceVersion: 3 as const, zipLibrary: zipSnapshot }
     viewerState.setBook(book)
     return book
