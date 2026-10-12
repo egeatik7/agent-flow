@@ -2178,28 +2178,27 @@ html.hud-root #root {
 .llm-fixed summary { cursor: pointer; color: #003c74; }
 .llm-fixed pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #bbb; background: #f3f3f0; padding: 6px; font: 11px/1.4 var(--font-mono); max-height: 220px; overflow-y: auto; }
 
-/* 1.9.119: kart şeridi — son üç aşama ve süreleri (XP kimliği korunur). */
+/* 1.9.119/1.9.121: kart şeridi — son üç aşama ve süreleri.
+   Ölçülen kusur (1.9.120): şerit ve döngü satırı metni KAYDIRIYORDU; HUD sabit yükseklikte ve CSS grid
+   olduğu için taşan metin kartın üstüne biniyordu. Artık tek satır + kırpma (ellipsis). */
 .hud-stages {
-  margin: 4px 0 0;
-  font-size: 11px;
-  line-height: 1.35;
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.3;
   color: #4a4a4a;
-  border-top: 1px dotted #b9b9b9;
-  padding-top: 3px;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 1.9.120: döngü konumu satırı — iç/dış döngü yolu tek satırda okunur kalsın. */
+/* 1.9.121: döngü konumu tek satır kalır (sarma YOK); uzun iç/dış yol kırpılır. */
 .hud-line.hud-loop {
   font-size: 11px;
-  line-height: 1.35;
   color: #333;
-  border-top: 1px dotted #b9b9b9;
-  padding-top: 3px;
-  white-space: normal;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hud-line.hud-loop.on {
   color: #1f4e79;
-  font-weight: 600;
 }

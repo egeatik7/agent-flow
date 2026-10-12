@@ -522,7 +522,10 @@ function destroyHud() {
 }
 
 const HUD_W = 456
-const HUD_H = 164
+// 1.9.121: karta iki satır eklendi (model kronometresi + aşama şeridi); yükseklik sabit kaldığı için
+// içerik taşıyor ve satırlar üst üste biniyordu ("kart üst üste açılıyor"). Pencere içeriğe yer açacak
+// kadar büyütüldü.
+const HUD_H = 196
 const HUD_GAP = 4
 
 function placeHud() {
