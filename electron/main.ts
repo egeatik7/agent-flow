@@ -54,7 +54,7 @@ import {
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
 import { chooseLibraryDirectory, isProtectedPath } from './library-path'
-import { setDiagnosticsRoot } from './send-log'
+import { sendMarkerInfo, setDiagnosticsRoot, shortModelName, stopwatchText } from './send-log'
 // Kanıt dosyaları kullanıcı veri klasörü altına yazılır; API anahtarı/başlık asla kaydedilmez.
 setDiagnosticsRoot(path.join(app.getPath('userData'), 'diagnostics'))
 import { zipDocumentFor } from './zip-workspace'
@@ -354,7 +354,18 @@ function log(level: LogLevel, message: string, forceHud = false) {
   }
 }
 
-setChatLogger((line) => log('chat', line))
+setChatLogger((line) => {
+  // Kart kronometresi: model isteği başlarken sayaç, cevap gelince süre raporu (1.9.118).
+  const isaret = sendMarkerInfo(line)
+  if (isaret?.kind === 'gonderim') {
+    hudSonModel = shortModelName(isaret.model)
+    const kelimeSecimi = (isaret.stage ?? '') === 'ocr-word-choice'
+    startHudStopwatch(kelimeSecimi ? 'Kelime seçimi' : 'Model cevabı bekleniyor', hudSonModel)
+  } else if (isaret?.kind === 'yanit') {
+    finishHudStopwatch('Model cevabı', hudSonModel)
+  }
+  log('chat', line)
+})
 setVoiceLogger((line) => {
   voiceHoldUntil = Date.now() + 1800
   log('info', line, true)
@@ -670,8 +681,49 @@ function startHudCountdown(title: string, totalMs: number) {
   hudCountdown = setInterval(yaz, HUD_COUNTDOWN_MS)
 }
 
-/** Node kinds whose step already logs its own opening line (see runner's execStep). */
-const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 'ai'])
+/**
+ * MODEL AŞAMASI KRONOMETRESİ (1.9.118). Ölçülen şikâyet: OCR bulunuyor ama model cevap verirken
+ * kart hiçbir şey göstermiyordu ("kart her güncellemeyi geçmiyor"). Artık her model isteğinde sayaç
+ * başlar (hangi model, hangi aşama), cevap geldiğinde geçen süre kartta KALICI olarak yazılır:
+ *   "Model cevabı bekleniyor · qwen3.5-64k:latest · 1,4 sn"  →  "Model cevabı · qwen3.5-64k:latest · 3,1 sn"
+ * Sayaç aynı satırı kullandığı için geri sayımla çakışmaz; 180 sn'de kendini bırakır (asılı model).
+ */
+let hudStopwatch: ReturnType<typeof setInterval> | null = null
+let hudStopwatchBasi = 0
+/** Süregelen model isteğinin kısa adı: cevap satırında hangi modelin kaç sn sürdüğü yazılsın. */
+let hudSonModel = ''
+
+function durdurHudStopwatch() {
+  if (hudStopwatch) {
+    clearInterval(hudStopwatch)
+    hudStopwatch = null
+  }
+}
+
+function startHudStopwatch(label: string, extra = '') {
+  stopHudCountdown(false)
+  durdurHudStopwatch()
+  hudStopwatchBasi = Date.now()
+  if (!running || !hudWindow || hudWindow.isDestroyed()) return
+  const yaz = () => {
+    const gecen = Date.now() - hudStopwatchBasi
+    pushCountdown(stopwatchText(label, extra, gecen))
+    if (gecen > 180_000) durdurHudStopwatch()
+  }
+  yaz()
+  hudStopwatch = setInterval(yaz, HUD_COUNTDOWN_MS)
+}
+
+/** Kronometreyi bitirir ve süreyi kartta bırakır (kullanıcının istediği "kaç sn'de oluştu" raporu). */
+function finishHudStopwatch(label: string, extra = ''): string {
+  const sure = hudStopwatchBasi ? Date.now() - hudStopwatchBasi : 0
+  durdurHudStopwatch()
+  const metin = stopwatchText(label, extra, sure)
+  pushCountdown(metin)
+  return metin
+}
+
+/** Node kinds whose step already logs its own opening line (see runner's execStep). */const LOGGED_STEP_KINDS = new Set(['click', 'type', 'key', 'wait', 'condition', 'ai'])
 
 /**
  * The card must name the node that is running NOW.

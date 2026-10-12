@@ -97,6 +97,31 @@ export function nextRequestId(): string {
   return `${Date.now().toString(36)}-${sayac.toString(36)}`
 }
 
+/**
+ * Günlük satırından model İSTEĞİ/CEVABI işaretini çıkarır (1.9.118). Kart kronometresi bunlarla
+ * sürülür: istek yazıldığında sayaç başlar, cevap yazıldığında geçen süre raporlanır. Böylece OCR
+ * listesi hazır olduktan sonraki "model düşünüyor" boşluğu kartta görünür olur.
+ */
+export function sendMarkerInfo(line: string): { kind: 'gonderim' | 'yanit'; id: string; model?: string; stage?: string } | null {
+  const satir = String(line ?? '')
+  const alan = (k: string) => (satir.match(new RegExp(`${k}=([^|]*)`))?.[1] ?? '').trim()
+  if (/GONDERIM id=/.test(satir)) return { kind: 'gonderim', id: alan('id'), model: alan('model'), stage: alan('asama') }
+  if (/YANIT id=/.test(satir)) return { kind: 'yanit', id: alan('id') }
+  return null
+}
+
+/** Model adını kart için kısaltır: "local:qwen3.5-64k:latest,~openai/…" → "qwen3.5-64k:latest". */
+export function shortModelName(model: string | undefined): string {
+  const ilk = String(model ?? '').split(',')[0].trim()
+  return ilk.replace(/^local:/, '')
+}
+
+/** Kart satırı: "Model cevabı · qwen3.5-64k:latest · 2,8 sn" (Türkçe ondalık virgül). */
+export function stopwatchText(label: string, extra: string, ms: number): string {
+  const s = (Math.max(0, ms) / 1000).toFixed(1).replace('.', ',')
+  return `${label}${extra ? ` · ${extra}` : ''} · ${s} sn`
+}
+
 /** Gerçekten GÖNDERİLEN aday sayısı: liste metnindeki "#numara " satırları sayılır (kesilmemiş kanıt). */
 export function countSentCandidates(listText: string): number {
   return (listText.match(/^#\d+\s/gm) ?? []).length
