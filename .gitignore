@@ -21,3 +21,7 @@ resources/build.json
 # Yerel gelistirme araci (repoya ait degil)
 qwen-chat/
 
+
+# Teslim artefaktlari (repoya girmez)
+.delivery/
+
