@@ -11,6 +11,11 @@ import type { ScreenItem } from './matcher'
 export const CLICKABLE_CONTROLS = [
   'Button',
   'MenuItem',
+  // O13 (yönerge): gerçek üreticiler bağlantı türünü **Hyperlink** olarak verir (UIA `ControlType.X` → 'X'
+  // ve DOM tarayıcı üreticisi). Listede yalnız 'Link' vardı (hiçbir üretici kullanmıyordu) → bağlantılar
+  // "control" sayılmıyor, aynı yazılı metin etiketiyle eşitleniyor ve `pool.length > 1 && !near` kuralı
+  // yüzünden hiç aday üretilemiyordu. 'Link' eski kayıtlar için alias olarak KORUNUR.
+  'Hyperlink',
   'Link',
   'CheckBox',
   'RadioButton',
@@ -26,8 +31,12 @@ export const CLICKABLE_CONTROLS = [
 export const WRITABLE_TYPES = ['Edit', 'Document', 'ComboBox']
 
 export function normName(s: string): string {
+  // O14 (yönerge): `toLocaleLowerCase('tr')` ASCII 'I'yı noktasız 'ı' yapıyordu → öğe 'Import' ile komut
+  // 'import' HİÇ eşleşmiyordu. Artık matcher.norm ile aynı dar eşleme kullanılır ([İIı] → i); diğer
+  // Unicode harfler (ör. aksanlı etiketler) KORUNUR, görünen metin değiştirilmez.
   return String(s || '')
-    .toLocaleLowerCase('tr')
+    .replace(/[İIı]/g, 'i')
+    .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim()
 }

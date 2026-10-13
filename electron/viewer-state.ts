@@ -27,9 +27,19 @@ export class ViewerState {
   const hud=updateViewerHud(this.state.hud,channel,payload)
   if(hud)this.state.hud=hud
   if(channel==='agent:log'){const p=payload as {level:string;message:string};this.state.logs.push({...p,at:Date.now()});this.state.logs=this.state.logs.slice(-300)}
-  else if(channel==='agent:step'&&run){const p=payload as {id:string;status:StepStatus};run.status[p.id]=p.status;if(p.status==='running'||p.status==='error'){if(p.status!=='error'||!run.nodeId||!isAncestor(run.graph,p.id,run.nodeId))run.nodeId=p.id}}
+  else if(channel==='agent:step'&&run){const p=payload as {id:string;status:StepStatus};run.status[p.id]=p.status;if(p.status==='running'||p.status==='error'){if(p.status!=='error'||!run.nodeId||!isAncestor(run.graph,p.id,run.nodeId))run.nodeId=p.id}
+    // O18 (yönerge): masaüstü kuralıyla AYNI (src/lib/run-progress.ts progressStep). Bir düğüme/kutuya
+    // YENİDEN girmek yeni tur başlatır; önceki turun yürünmüş kenarları artık "gelecek" olduğu için
+    // kuyruk atılır. Az önce bizi buraya getiren kenar (incoming) SİLİNMEZ.
+    if(p.status==='running'&&run.edges.length){const incoming=run.edges[run.edges.length-1]?.to===p.id;const cut=incoming?-1:run.edges.findIndex(e=>viewerNodePath(run.graph,e.from).includes(p.id));if(cut>=0)run.edges=run.edges.slice(0,cut)}}
   else if(channel==='agent:patch'&&run){const p=payload as {id:string;patch:Record<string,unknown>};patchViewerGraph(run.graph,p.id,p.patch)}
-  else if(channel==='agent:edge'&&run){const p=payload as {id:string;from:string;to:string};const cut=run.edges.findIndex(e=>e.from===p.to);if(cut>=0)run.edges=run.edges.slice(0,cut);if(!run.edges.some(e=>e.id===p.id))run.edges.push(p)}
+  else if(channel==='agent:edge'&&run){const p=payload as {id:string;from:string;to:string}
+    // O18 (yönerge): önce ÖNCEKİ TURUN kenarı kesilir, SONRA yeni bağlantı eklenir (masaüstü
+    // progressEdge). Önceden ham `e.from===p.to` karşılaştırılıyordu: döngü/paket çerçevesine yeniden
+    // girişte önceki turun kenarları "yürünmüş" kalıyor ve tablette tüm eski yol akan çizgi olarak
+    // görünüyordu.
+    const cut=run.edges.findIndex(e=>viewerNodePath(run.graph,e.from).includes(p.to));if(cut>=0)run.edges=run.edges.slice(0,cut)
+    if(!run.edges.some(e=>e.id===p.id))run.edges.push(p)}
   else if(channel==='hud:loop'&&run)run.loop=(payload as {text:string}).text
   else if(channel==='hud:method'&&run)run.method=(payload as {text:string}).text
   else if(channel==='recovery:status'&&run)run.recovery=payload as ViewerRun['recovery']

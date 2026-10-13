@@ -32,8 +32,15 @@ export function runPowerShell(code: string, cwd: string | undefined, shouldStop:
       if (shouldStop()) cancel(new StoppedError())
       else if (Date.now() - started >= 60000) cancel(new Error('PowerShell 60 saniye sınırını aştı.'))
     }, 100)
-    child.stdout.on('data', b => { stdout = (stdout + b.toString('utf8')).slice(-24000) })
-    child.stderr.on('data', b => { stderr = (stderr + b.toString('utf8')).slice(-6000) })
+    // O19 (yönerge): akış UTF-8 olarak ÇÖZÜLÜR (Node'un StringDecoder'ı). Önceden her Buffer parçası
+    // ayrı ayrı `b.toString('utf8')` ile çevriliyordu; parça sınırına düşen çok baytlı karakter (Türkçe
+    // harf, emoji) U+FFFD'ye bozuluyordu ve bu metin hem araç sonucuna hem modele/günlüğe gidiyordu.
+    // Köprüde doğru kalıp zaten var (a11y-bridge: proc.stdout/stderr.setEncoding('utf8')). setEncoding
+    // kapanışta kalan yarım diziyi de boşaltır; stdout/stderr AYRI çözücü kullanır.
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (b: string) => { stdout = (stdout + b).slice(-24000) })
+    child.stderr.on('data', (b: string) => { stderr = (stderr + b).slice(-6000) })
     child.on('error', error => { if (!ended) { ended = true; clearInterval(timer); reject(error) } })
     child.on('close', exitCode => {
       if (ended) return

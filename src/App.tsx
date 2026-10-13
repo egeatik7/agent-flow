@@ -5,7 +5,7 @@ import TabletDialog from './components/TabletDialog'
 import Toolbar from './components/Toolbar'
 import CanvasTabs from './components/CanvasTabs'
 import ZipCanvasLibrary, { ZipWorkspacePicker } from './components/ZipCanvasLibrary'
-import { zipLibraryOf, openZipCanvas, openZipGroup, adoptZipLibrary, savedZipTab } from '../electron/zip-workspace'
+import { zipLibraryOf, openZipCanvas, openZipGroup, adoptZipLibrary, adoptZipCanvasRename, savedZipTab } from '../electron/zip-workspace'
 import type { ZipCanvasGroup } from '../electron/zip-library-storage'
 import type { ZipLibraryAction } from '../electron/zip-library-api'
 import { addCanvasTab, closeCanvasTab, activateCanvasSnapshot, reorderCanvasTab } from '../electron/canvas-library'
@@ -704,7 +704,7 @@ export default function App() {
   const runZipAction = async (action: ZipLibraryAction) => {
     if (!api?.zipLibraryAction || runningRef.current || libraryBusyRef.current) return false
     libraryBusyRef.current = true; setLibraryBusy(true)
-    try { await writeQueue.current; const result = await api.zipLibraryAction(action); if (!result) return false; const next = adoptZipLibrary(commitActive(), result.library); adoptBook(next); if (!await persistBook(next)) { pushLog('warn', 'ZIP işlemi uygulandı; açık oturum kaydı başarısız.'); return false }; return true }
+    try { await writeQueue.current; const result = await api.zipLibraryAction(action); if (!result) return false; const working = commitActive(); const next = action.action === 'renameCanvas' ? adoptZipCanvasRename(working, result.library, action.canvasId) : adoptZipLibrary(working, result.library); adoptBook(next); if (!await persistBook(next)) { pushLog('warn', 'ZIP işlemi uygulandı; açık oturum kaydı başarısız.'); return false }; return true }
     catch (error) {
       pushLog('error', errText(error))
       try { const refreshed = await api.manageLibrary?.('reload'); if (refreshed?.book) adoptBook(adoptZipLibrary(commitActive(), zipLibraryOf(refreshed.book))) } catch { /* The original error remains visible; working tabs are retained. */ }

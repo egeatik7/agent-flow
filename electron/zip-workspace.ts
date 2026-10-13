@@ -45,3 +45,16 @@ export function savedZipTab(book: CanvasBook, tabId: string, canvas: ZipCanvasDo
   const adopted = adoptZipLibrary(book, library)
   return { ...adopted, tabs: adopted.tabs.map(t => t.id === tabId ? { ...t, name: canvas.name, savedId: canvas.canvasId, canvasId: canvas.canvasId, baseline: { name: canvas.name, graph: zipCanvasGraph(canvas) } } : t) }
 }
+
+/** Only a successful explicit rename may advance the name baseline, never a reload. */
+export function adoptZipCanvasRename(book: CanvasBook, library: ZipLibrarySnapshot, canvasId: string): CanvasBook {
+  const before = zipCanvasOf(book, canvasId)
+  const adopted = adoptZipLibrary(book, library)
+  const after = zipCanvasOf(adopted, canvasId)
+  if (!before || !after || !sameCanvasContent(zipCanvasGraph(before), zipCanvasGraph(after))) return adopted
+  return { ...adopted, tabs: adopted.tabs.map(tab => {
+    if (tab.savedId !== canvasId || !tab.baseline || tab.baseline.name !== before.name || !sameCanvasContent(tab.baseline.graph, zipCanvasGraph(before))) return tab
+    // Preserve a local unsaved name and every graph edit.
+    return { ...tab, name: tab.name === before.name ? after.name : tab.name, baseline: { ...tab.baseline, name: after.name } }
+  }) }
+}

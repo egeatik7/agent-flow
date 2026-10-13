@@ -39,3 +39,19 @@ describe('PowerShell execution boundary', () => {
     expect(spawned.calls).toHaveLength(2)
   })
 })
+
+it('O19: parça sınırına düşen çok baytlı karakter bozulmaz (Türkçe + emoji)', async () => {
+  win()
+  const p = child()
+  const bekleyen = runPowerShell("Write-Output 'x'", undefined, () => false)
+  // 'ğ' = 0xC4 0x9F (iki bayt). İlk parça karakterin ORTASINDA bitiyor; ayrıca emoji (4 bayt) var.
+  const tam = 'Ağaç 🙂 bitti'
+  const tampon = Buffer.from(tam, 'utf8')
+  p.stdout.write(tampon.subarray(0, 2)) // 'A' + 'ğ' nin İLK baytı (çok baytlı dizi ikiye bölünür)
+  p.stdout.write(tampon.subarray(2))
+  p.emit('close', 0)
+  const sonuc = await bekleyen
+  expect(sonuc.ok).toBe(true)
+  expect(sonuc.data?.stdout).toBe(tam) // ESKİ HATA: burada 'A\uFFFD...' olurdu
+  expect(String(sonuc.data?.stdout)).not.toContain('\uFFFD')
+})

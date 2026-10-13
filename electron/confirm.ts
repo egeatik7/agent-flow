@@ -80,8 +80,13 @@ export function judgeScreen(before: string[], after: string[], expected: string)
   // sonsuza kadar hiç oluşmazdı (hafızaya doğrulanmış hedef yazılmaz, "on" modunda gereksiz model
   // çağrısı). Bu yüzden yalnız (1) bu karede YENİ çıkan yüklenme yazısı ya da (2) beklenen iğneyi
   // kendisi İÇEREN üst-küme yazı (ör. beklenen "Tamam", ekranda "Tamamlanıyor") sinyal sayılır.
+  // D06 (yönerge): `norm(expected)` BOŞ olabilir (noktalama-only iğne, ör. "×" → norm ""). O durumda
+  // `norm(t).includes('')` HER ZAMAN doğru olurdu ve ilgisiz bir "işleniyor/yükleniyor" yazısı adımı
+  // 'loading' yapardı (matcher'daki boşluk korumasının bu satırda karşılığı yoktu). Boş iğnede üst-küme
+  // kontrolü UYGULANMAZ; "bu karede YENİ çıkan yüklenme yazısı" kuralı aynen çalışmaya devam eder.
+  const beklenenNorm = norm(expected)
   const loading = fresh.some((t) => LOADING.test(norm(t)))
-    || (!!expected && after.some((t) => LOADING.test(norm(t)) && norm(t).includes(norm(expected))))
+    || (!!expected && beklenenNorm !== '' && after.some((t) => LOADING.test(norm(t)) && norm(t).includes(beklenenNorm)))
 
   if (loading) {
     return { kind: 'loading', reason: 'ekranda yüklenme/tamamlanma yazısı var; hedef doğrulanmış sayılmaz', expected, fresh, changed }

@@ -294,7 +294,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   valueLo: 0.15,
   valueHi: 0.8,
   findOrder: ['chrome', 'uia', 'icon', 'windows', 'list', 'tars', 'offset'],
-  findOff: ['list'],
+  // U04 (yönerge): varsayılan "hiçbir aşama kapalı değil"dir (tek doğru kaynak: llm-flow.ts
+  // DEFAULT_FIND_OFF = []). Önceden burada ['list'] yazıyordu; bu yüzden YENİ kurulumda "Kelime
+  // listesi → yazı modeli" aşaması fiilen kapalı başlıyordu ve main.ts'teki DEFAULT_FIND_OFF dalı
+  // ölü kalıyordu (panel "varsayılana dön" de [] yazıyordu — yani iki varsayılan çelişiyordu).
+  // Kullanıcının KAYITLI tercihleri korunur: main.ts ayarları {...DEFAULT_SETTINGS, ...store} ile
+  // birleştirdiği için kayıtlı findOff aynen geçerli kalır; yalnız alan hiç yoksa bu varsayılan gelir.
+  findOff: [],
   llmPrompts: {},
   agentPermission: 'ask',
   agentEndpoint: false,
