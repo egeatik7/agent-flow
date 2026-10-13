@@ -25,6 +25,20 @@ export default function ViewerHudScreen(p: { hud?: ViewerHud; connected: boolean
       <div className={`viewer-hud-card ${hud.level}`}><h1>Nubbo</h1><p className="viewer-hud-text">{hud.text}</p>{hud.countdown && <p className="viewer-hud-countdown" role="timer">{hud.countdown}</p>}{hud.stages && <p className="viewer-hud-stages">{hud.stages}</p>}</div>
       <div className="viewer-hud-details">{(hud.method || hud.recovering) && <p>{hud.recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : hud.method}</p>}{hud.loop && <p>{hud.loop}</p>}</div>
       {/*
+        CANLI BELLEK GÖSTERGESİ (1.9.130): masaüstü kartıyla AYNI nesne. Kısa bölüm iki satırdır;
+        GPU/süreç ayrıntıları ve kullanıcı açıklamaları bloğun içinde kaydırılır. Kart hiçbir şeyi
+        temizlemez; ölçüm yoksa "bilinmiyor", eskiyse "eski ölçüm" yazar.
+      */}
+      {hud.bellek && <div className={`viewer-hud-bellek${hud.bellek.daraliyor ? ' daraliyor' : ''}${hud.bellek.eski ? ' eski' : ''}`} role="status" aria-label="Canlı bellek ölçümü">
+        <p className="viewer-hud-bellek-ana">{hud.bellek.ramVram}</p>
+        <p className="viewer-hud-bellek-ana">{hud.bellek.butce}</p>
+        {hud.bellek.gpuSatirlari.map((satir) => <p key={satir} className="viewer-hud-bellek-satir">{satir}</p>)}
+        {hud.bellek.surecSatirlari.map((satir) => <p key={satir} className="viewer-hud-bellek-satir">{satir}</p>)}
+        {hud.bellek.aciklamalar.map((satir) => <p key={satir} className="viewer-hud-bellek-aciklama">{satir}</p>)}
+        {hud.bellek.uyari && <p className="viewer-hud-bellek-uyari">{hud.bellek.uyari}</p>}
+        <p className="viewer-hud-bellek-rozet">{hud.bellek.olcumVar ? hud.bellek.yas : 'Ölçüm: bilinmiyor'}</p>
+      </div>}
+      {/*
         BAĞLAM ÖLÇÜMÜ (1.9.129): masaüstü kartıyla AYNI nesne. Ölçüm yoksa "bilinmiyor", yaşlıysa
         "eski ölçüm"; yapılandırılmış pencere "yüklü" diye gösterilmez ve kırpma iddiası üretilmez.
       */}

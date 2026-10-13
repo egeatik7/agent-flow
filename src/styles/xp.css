@@ -1980,13 +1980,20 @@ html.hud-root #root {
 .hud {
   height: 100%;
   padding: 6px;
+  /* 1.9.130: ÖLÇÜLEN KUSUR. Kutu modeli içerik kutusuydu: yüzde yükseklik + 6px iç boşluk kutuyu
+     pencereden 12px DAHA UZUN yapıyordu. Gerçek tarayıcıda ölçüldü (456×254 pencere): kenarlık
+     kutusu ile `.hud` tam pencere yüksekliğindedir ve beş satır da pencereye sığar; içerik
+     kutusuyla en alttaki (döngü) satır pencerenin dışında kalıyordu ve `html.hud-root` üzerindeki
+     taşma gizleme onu kesiyordu — yani satır gerçekten GÖRÜNMEZ olurdu. */
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  /* 1.9.129: bağlam ölçümü satırı eklendi. Satır yükseklikleri AÇIKÇA verilir; kart satırı
-     minmax(0,1fr) olduğu için pencere yüksekliği DEĞİŞMEZ ve metin taşmaz (taşma kart üstüne binerdi).
-     Ölçüldü (headless Chrome, 456x196): 6+140+4+26+4+42+4+26+6 = 258 → 196 - (6+4+26+4+42+4+26+6) = 78px
-     kart satırı. Bağlam bloğu 42px = üç satır içeriği; ölçüm satırları kırpılmaz. */
-  grid-template-rows: minmax(0, 1fr) 26px 42px 26px;
+  /* 1.9.129: bağlam ölçümü satırı eklendi. 1.9.130: canlı bellek göstergesi kendi satırına girdi.
+     Satır yükseklikleri AÇIKÇA verilir; kart satırı minmax(0,1fr) olduğu için TAŞMA OLMAZ ve metin
+     komşu satırın üstüne binmez. GERÇEK TARAYICIDA ÖLÇÜLDÜ (456×254 = main'deki HUD_W/HUD_H):
+     6+26+4+46+4+42+4+26+6 = 164 → durum kartı satırı 84px, durum metnine ~31px kalır; iki ölçüm
+     bloğu kendi içinde kaydırılır, bu yüzden hiçbir satır pencerenin dışında kalmaz. */
+  grid-template-rows: minmax(0, 1fr) 26px 46px 42px 26px;
   column-gap: 6px;
   row-gap: 4px;
   overflow: hidden;
@@ -2078,7 +2085,7 @@ html.hud-root #root {
 }
 
 .hud-loop {
-  grid-row: 4;
+  grid-row: 5;
 }
 
 .hud-line.on {
@@ -2207,12 +2214,88 @@ html.hud-root #root {
   color: #1f4e79;
 }
 
-/* 1.9.129: BAĞLAM ÖLÇÜM KARTI. Kendi grid satırında durur (satır 3); kart satırı 1fr kaldığı için
+/* 1.9.130: CANLI BELLEK GÖSTERGESİ. Kısa bölüm iki satırdır ("RAM … · VRAM …" ve "Bellek bütçesi … ·
+   kalan …"); GPU ve süreç ayrıntıları bu bloğun İÇİNDE kaydırılır. Kendi grid satırındadır (satır 3),
+   yüksekliği sabittir: komşu satırların üstüne binmez ve bilgi kaybolmaz. */
+.hud-bellek {
+  grid-column: 2;
+  grid-row: 3;
+  min-width: 0;
+  height: 46px;
+  max-height: 46px;
+  padding: 2px 7px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #ece9d8;
+  border: 2px solid #fff;
+  border-right-color: #404040;
+  border-bottom-color: #404040;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35);
+  font: 10px/1.25 Tahoma, sans-serif;
+  color: #3a3226;
+}
+
+/* "Bellek bütçesi daralıyor" (%90+) ve "eski ölçüm" görsel olarak ayrılır: taze ölçüm gibi okunmasın. */
+.hud-bellek.daraliyor {
+  background: #ffe9c9;
+  border-color: #bb6a21;
+}
+
+.hud-bellek.eski {
+  background: #fff4cf;
+  border-color: #bb8c21;
+}
+
+.hud-bellek-ana,
+.hud-bellek-satir,
+.hud-bellek-aciklama,
+.hud-bellek-uyari {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Kısa bölüm: RAM/VRAM ve bellek bütçesi. Kalın ve koyu — kartın ana okunur bilgisi. */
+.hud-bellek-ana {
+  font-weight: bold;
+  color: #17498b;
+}
+
+.hud-bellek.daraliyor .hud-bellek-ana {
+  color: #8a4b14;
+}
+
+.hud-bellek.eski .hud-bellek-ana {
+  color: #8a6414;
+}
+
+/* Ayrıntı: GPU başına VRAM ve süreç toplamları (commit / working set). */
+.hud-bellek-satir {
+  font-size: 9px;
+  color: #3a3226;
+}
+
+/* Kullanıcı açıklamaları: "RAM: fiziksel bellek." ve süreç commit'inin ne OLMADIĞI. */
+.hud-bellek-aciklama {
+  font-size: 9px;
+  color: #5b5346;
+  white-space: normal;
+}
+
+.hud-bellek-uyari {
+  font-weight: bold;
+  font-size: 9px;
+  color: #8a4b14;
+}
+
+/* 1.9.129: BAĞLAM ÖLÇÜM KARTI. Kendi grid satırında durur (satır 4); kart satırı 1fr kaldığı için
    pencere yüksekliği değişmez. Yükseklik ÜÇ ölçüm satırına göre ölçülerek verildi (42px); "bilinmiyor"
    durumunda ek satır olursa blok kaydırılır — komşu satırların üstüne BİNMEZ ve bilgi erişilebilir kalır. */
 .hud-baglam {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
   min-width: 0;
   height: 42px;
   max-height: 42px;

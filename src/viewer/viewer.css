@@ -57,7 +57,20 @@
 .viewer-hud-baglam.eski .viewer-hud-baglam-ana { color:#8a6414; }
 .viewer-hud-baglam-satir { margin:2px 0; font-size:clamp(12px,2.2vw,17px); line-height:1.4; color:#3a3226; }
 .viewer-hud-baglam.bilinmiyor .viewer-hud-baglam-ana { color:#6b6152; }
-@media(orientation:landscape) { .viewer-hud-content { display:grid; grid-template-columns:minmax(80px,22%) minmax(0,1fr); align-content:center; align-items:center; } .viewer-hud-mascot { grid-column:1; grid-row:1 / span 2; width:100%; max-height:65dvh; } .viewer-hud-card { grid-column:2; grid-row:1; } .viewer-hud-details { grid-column:2; grid-row:2; } .viewer-hud-baglam { grid-column:2; grid-row:3; } }
+/* 1.9.130: CANLI BELLEK GÖSTERGESİ. Telefonda kartın altında kendi bloğudur; masaüstü kartıyla AYNI
+   nesneyi gösterir. Yüksekliği SINIRLIDIR (max-height) ve içeriği kaydırılır: uzun ayrıntı listesi
+   telefon ekranını kaplamaz, kısa bölüm (RAM/VRAM + bütçe) her zaman en üstte okunur. */
+.viewer-hud-bellek { width:100%; max-width:1000px; box-sizing:border-box; padding:10px 12px; border:2px solid #7f9db9; border-radius:5px; background:#f6f5ec; box-shadow:2px 3px 0 #aca899; text-align:center; overflow-wrap:anywhere; max-height:38dvh; overflow-y:auto; }
+.viewer-hud-bellek.daraliyor { background:#ffe9c9; border-color:#bb6a21; }
+.viewer-hud-bellek.eski { background:#fff4cf; border-color:#bb8c21; }
+.viewer-hud-bellek-ana { margin:0 0 4px; font-size:clamp(15px,2.8vw,22px); font-weight:bold; color:#17498b; }
+.viewer-hud-bellek.daraliyor .viewer-hud-bellek-ana { color:#8a4b14; }
+.viewer-hud-bellek.eski .viewer-hud-bellek-ana { color:#8a6414; }
+.viewer-hud-bellek-satir { margin:2px 0; font-size:clamp(12px,2.2vw,17px); line-height:1.4; color:#3a3226; }
+.viewer-hud-bellek-aciklama { margin:2px 0; font-size:clamp(11px,2vw,15px); line-height:1.4; color:#5b5346; }
+.viewer-hud-bellek-uyari { margin:6px 0 0; font-size:clamp(13px,2.4vw,18px); font-weight:bold; color:#8a4b14; }
+.viewer-hud-bellek-rozet { margin:6px 0 0; font-size:clamp(11px,2vw,15px); color:#5b5346; }
+@media(orientation:landscape) { .viewer-hud-content { display:grid; grid-template-columns:minmax(80px,22%) minmax(0,1fr); align-content:center; align-items:center; } .viewer-hud-mascot { grid-column:1; grid-row:1 / span 2; width:100%; max-height:65dvh; } .viewer-hud-card { grid-column:2; grid-row:1; } .viewer-hud-details { grid-column:2; grid-row:2; } .viewer-hud-bellek { grid-column:2; grid-row:3; max-height:30dvh; } .viewer-hud-baglam { grid-column:2; grid-row:4; } }
 @media(max-height:360px) { .viewer-hud-content { align-content:start; gap:8px; } .viewer-hud-mascot { max-height:45dvh; } }
 
 /* Phone is a permanent portrait card, including before the PC starts a run. */
@@ -74,6 +87,11 @@
 .viewer-phone-card .viewer-hud-details { font-size:clamp(15px,4.5vw,21px); line-height:1.5; }
 .viewer-phone-card .viewer-hud-stages { font-size:clamp(13px,3.5vw,18px); }
 .viewer-phone-card .viewer-hud-baglam { padding:12px 14px; }
+.viewer-phone-card .viewer-hud-bellek { padding:12px 14px; max-height:34dvh; }
+.viewer-phone-card .viewer-hud-bellek-ana { font-size:clamp(16px,4.4vw,22px); }
+.viewer-phone-card .viewer-hud-bellek-satir { font-size:clamp(13px,3.6vw,18px); }
+.viewer-phone-card .viewer-hud-bellek-aciklama { font-size:clamp(12px,3.2vw,16px); }
+.viewer-phone-card .viewer-hud-bellek-uyari { font-size:clamp(14px,4vw,20px); }
 .viewer-phone-card .viewer-hud-baglam-ana { font-size:clamp(17px,4.8vw,24px); }
 .viewer-phone-card .viewer-hud-baglam-satir { font-size:clamp(13px,3.6vw,18px); }
 @media(orientation:landscape) { .viewer-phone-card .viewer-hud-content { display:flex; } .viewer-phone-card .viewer-hud-mascot { max-height:23dvh; } }

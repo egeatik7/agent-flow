@@ -68,6 +68,10 @@ import { startViewerServer } from './viewer-server'
 import { configureViewerTailscale } from './viewer-tailscale'
 import type { ViewerInfo } from './viewer-types'
 import { baglamKartiDurumuYap, type BaglamKarti } from './hud-context'
+import {
+  BELLEK_OLCUM_MS, bellekKartiYap, bellekOlcumDongusu, olcumGunlukSatiri, gunlukKarari,
+  type BellekKarti, type BellekOlcumu, type OlcumHatasi,
+} from './memory-meter'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts, promptOf } from './llm-flow'
 
@@ -528,7 +532,13 @@ const HUD_W = 456
 // 1.9.121: karta iki satır eklendi (model kronometresi + aşama şeridi); yükseklik sabit kaldığı için
 // içerik taşıyor ve satırlar üst üste biniyordu ("kart üst üste açılıyor"). Pencere içeriğe yer açacak
 // kadar büyütüldü.
-const HUD_H = 196
+// 1.9.130: canlı bellek göstergesi kendi satırını aldı. Yükseklik ARTIRILDI çünkü aksi hâlde durum
+// kartı satırı 36px'e düşüyor ve okunur metin kalmıyordu. GERÇEK tarayıcıda ÖLÇÜLDÜ (456×254):
+// durum kartı satırı 84px, durum metnine ~31px kalır (1.9.129'da 27px'ti) ve iki ölçüm bloğu kendi
+// içinde kaydırılır: hiçbir satır pencerenin dışında kalmaz, hiçbiri komşusunun üstüne binmez.
+// Kart hâlâ EKRANIN ALT SAĞINA sabittir (placeHud) ve sınırlı yüksekliktedir; ölçüm
+// `tests/render-overflow-audit.test.ts` içindedir.
+const HUD_H = 254
 const HUD_GAP = 4
 
 function placeHud() {
@@ -682,6 +692,72 @@ function baglamKartiniTemizle() {
   if (!baglamDurumu.temizle()) return
   viewerState.event('hud:context', { kart: null })
   if (hudWindow && !hudWindow.isDestroyed()) hudWindow.webContents.send('hud:context', { kart: null })
+}
+
+/**
+ * CANLI BELLEK GÖSTERGESİ (1.9.130). Yalnız ÖLÇÜM ve RAPORLAMA: bu blok hiçbir şeyi temizlemez,
+ * süreç kapatmaz, model boşaltmaz, ayar değiştirmez ve LLM çağırmaz. Ölçüm NESNE olarak taşınır
+ * (main → HUD → izleyici); günlük METNİ AYRIŞTIRILMAZ.
+ *
+ * Ölçüm arka planda ~3 saniyede bir yenilenir; ÖNCEKİ ÖLÇÜM BİTMEDEN YENİSİ BAŞLATILMAZ (kural
+ * `memory-meter` içindedir) ve sorgular asenkron çalışır: ana süreç ile otomasyon beklemez.
+ */
+const bellekGunlukDurumu = { esikte: false, baslangicYazildi: false }
+const bellekDurumu = bellekOlcumDongusu({
+  aralikMs: BELLEK_OLCUM_MS,
+  dinleyici: (olcum) => {
+    // Eşik GEÇİŞİ günlüğe yazılır (her örnek değil): bunun için ölçüm değil, GEÇİŞ sayılır.
+    bellekGunlugu(gunlukKarari(bellekGunlukDurumu, { tur: 'olcum', olcum }))
+    bellekKartiniYayinla(olcum)
+  },
+  hataDinleyici: (hata, sonGecerli) => {
+    // Başarısız ölçüm uygulamayı ETKİLEMEZ. Son geçerli değer varsa kart onu "eski ölçüm" diye,
+    // ölçüm zamanıyla birlikte gösterir; hata kaydında örneğin YAŞI yazılır.
+    bellekGunlugu(gunlukKarari(bellekGunlukDurumu, { tur: 'hata', hata, sonGecerli }))
+    bellekKartiniYayinla(sonGecerli)
+  },
+})
+/** Son yayınlanan kart metni: aynı kart her 3 saniyede yeniden gönderilmez. */
+let bellekSonKart = ''
+
+/** Günlük kararını uygular: yalnız başlangıç, eşik GEÇİŞİ ve hata anı diske yazılır. */
+function bellekGunlugu(karar: ReturnType<typeof gunlukKarari>) {
+  if (karar.yaz) log(karar.neden === 'esik' ? 'warn' : 'info', karar.satir)
+}
+
+/** Koşu başlangıcında son örneği günlüğe ekler (her ölçüm DEĞİL, istenen üç an). */
+function bellekGunlukBaslangic() {
+  bellekGunlugu(gunlukKarari(bellekGunlukDurumu, { tur: 'baslangic' }))
+  const son = bellekDurumu.olcum()
+  if (son) log('info', olcumGunlukSatiri(son, 'Koşu başlangıcı bellek ölçümü'))
+}
+
+/** Koşu hatasında son örneği YAŞIYLA birlikte günlüğe ekler. */
+function bellekGunlukHatasi(mesaj: string) {
+  const son = bellekDurumu.olcum()
+  const hata = bellekDurumu.sonHata()
+  const yas = son ? `${Math.max(0, Date.now() - son.olcumAt)} ms önce alındı` : 'geçerli örnek yok'
+  log('warn', `Bellek ölçümü (hata anı): son örnek ${yas}${hata ? ` · son ölçüm hatası: ${hata.mesaj}` : ''} · ${mesaj}`)
+}
+
+/**
+ * Kart nesnesini ölçüm anında bir kez yayar (masaüstü + telefon AYNI nesne). İmza karşılaştırması
+ * `yas` ve hata damgasını içerir: yaş metni değişmedikçe ve yeni bir hata doğmadıkça mesaj
+ * yinelenmez, ama "eski ölçüm" bilgisi karta zamanında ulaşır.
+ */
+function bellekKartiniYayinla(olcum: BellekOlcumu | null) {
+  const hata = olcum ? bellekDurumu.sonHata() : bellekDurumu.sonHata()
+  const kart = bellekKartiYap({ olcum, hata, simdi: Date.now() })
+  const imza = JSON.stringify({ ramVram: kart.ramVram, butce: kart.butce, eski: kart.eski, yas: kart.yas, hata: kart.hata, daraliyor: kart.daraliyor, surecSatirlari: kart.surecSatirlari, gpuSatirlari: kart.gpuSatirlari })
+  if (imza === bellekSonKart) return
+  bellekSonKart = imza
+  bellekKartiniGonder(kart)
+}
+
+function bellekKartiniGonder(kart: BellekKarti) {
+  if (!running) return
+  viewerState.event('hud:memory', { kart })
+  if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart }, false)
 }
 
 /**
@@ -963,6 +1039,8 @@ async function runFlow(
     })
     awake = powerSaveBlocker.start('prevent-display-sleep')
     if (runLog) log('info', `Günlük dosyası: ${runLog}`)
+    // Koşu başlangıcı: bellek ölçümünün son örneği (ve ölçüm başladıysa ilk kayıt) günlüğe girer.
+    bellekGunlukBaslangic()
     if (isTestProfile(process.env.NUBBO_PROFILE)) {
       // Say it before anything else: this window is not the person's own, and its flows, key and
       // models are its own empty ones. Being unable to tell them apart looked like lost data.
@@ -1096,6 +1174,8 @@ async function runFlow(
     // error. A debug run keeps it too, and a user's Stop never reaches this branch.
     noteRunFailed((e as Error).message)
     log('error', (e as Error).message)
+    // Hata anında son bellek örneği YAŞIYLA birlikte günlüğe eklenir (her örnek diske yazılmaz).
+    bellekGunlukHatasi(`koşu hatası: ${(e as Error).message}`)
     // Sayaç yine de doğruyu söyler: döngü dışında hata ile biten adımlar da sayılır. Yoksa
     // "hata: …" ile "hatalı öğe yok" aynı cümlede çelişiyordu.
     const hatali = tally.failed + tally.stepFailures
@@ -1142,6 +1222,10 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     /* the run path creates it again before writing a log or an error shot */
   }
   sweepStaleTempShots()
+  // CANLI BELLEK GÖSTERGESİ (1.9.130): ölçüm oturum boyunca arka planda döner (3 sn). Kart yalnız
+  // koşu sürerken yayınlanır; kapanışta `will-quit` timer'ı ve bekleyen işi bırakır.
+  bellekDurumu.basla()
+  bellekGunlugu(gunlukKarari(bellekGunlukDurumu, { tur: 'baslangic' }))
   report(68, 'Erişilebilirlik köprüsü…')
   await Promise.race([bridge.warmUp(), sleep(8000)])
 
@@ -1663,6 +1747,8 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  // Bellek ölçümü kapanışta bırakılır: timer temizlenir, bekleyen ölçüm karta yazmaz.
+  bellekDurumu.dur()
   void viewerServer?.close()
   globalShortcut.unregisterAll()
   bridge.shutdown()

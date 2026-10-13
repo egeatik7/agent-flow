@@ -110,6 +110,8 @@ export type XpAgentApi = {
   onHudStages?: (cb: (payload: unknown) => void) => () => void
   /** Bağlam ölçüm kartı: ölçüm NESNE olarak gelir (1.9.129); günlük metni ayrıştırılmaz. */
   onHudContext?: (cb: (payload: unknown) => void) => () => void
+  /** Canlı bellek göstergesi: ölçüm NESNE olarak gelir (1.9.130); günlük metni ayrıştırılmaz. */
+  onHudMemory?: (cb: (payload: unknown) => void) => () => void
   pickFolder: (extensions: string[]) => Promise<{ folder: string; files: string[] } | null>
   listDir: (dir: string) => Promise<string[] | null>
   pickDir: () => Promise<string | null>

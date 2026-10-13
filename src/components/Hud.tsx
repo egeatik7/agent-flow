@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
 import type { BaglamKarti } from '../../electron/hud-context'
+import type { BellekKarti } from '../../electron/memory-meter'
 import type { LogLevel } from '../types'
 
 type Status = { level: LogLevel; text: string }
@@ -20,6 +21,8 @@ export default function Hud() {
   const [stages, setStages] = useState('')
   /** Bağlam ölçümü (1.9.129): main'den NESNE olarak gelir; günlük metni ayrıştırılmaz. */
   const [baglam, setBaglam] = useState<BaglamKarti | undefined>(undefined)
+  /** Canlı bellek göstergesi (1.9.130): main'den NESNE olarak gelir; günlük metni ayrıştırılmaz. */
+  const [bellek, setBellek] = useState<BellekKarti | undefined>(undefined)
   const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
@@ -63,6 +66,10 @@ export default function Hud() {
       const kart = (payload as { kart?: BaglamKarti | null } | null)?.kart
       setBaglam(kart && typeof kart === 'object' ? kart : undefined)
     })
+    const offBellek = window.xpAgent?.onHudMemory?.((payload) => {
+      const kart = (payload as { kart?: BellekKarti | null } | null)?.kart
+      setBellek(kart && typeof kart === 'object' ? kart : undefined)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
@@ -72,6 +79,7 @@ export default function Hud() {
       offCountdown?.()
       offStages?.()
       offBaglam?.()
+      offBellek?.()
     }
   }, [])
 
@@ -91,6 +99,23 @@ export default function Hud() {
       {stages && <p className="hud-stages">{stages}</p>}
       </div>
       <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
+      {/*
+        CANLI BELLEK GÖSTERGESİ (1.9.130). Yalnız ölçüm ve raporlama: kart hiçbir şeyi temizlemez,
+        süreç kapatmaz veya ayar değiştirmez. Kısa bölüm İKİ satırdır; GPU ve süreç ayrıntıları
+        kaydırılabilir ayrıntıda durur (kart taşmaz, satırlar üst üste binmez).
+      */}
+      {bellek && (
+        <div className={`hud-bellek${bellek.daraliyor ? ' daraliyor' : ''}${bellek.eski ? ' eski' : ''}`} role="status" aria-label="Canlı bellek ölçümü">
+          <p className="hud-bellek-ana">{bellek.ramVram}</p>
+          <p className="hud-bellek-ana">{bellek.butce}</p>
+          {bellek.gpuSatirlari.length > 0 && <p className="hud-bellek-satir">{bellek.gpuSatirlari.join(' · ')}</p>}
+          {bellek.surecSatirlari.map((satir) => <p key={satir} className="hud-bellek-satir">{satir}</p>)}
+          {bellek.aciklamalar.map((satir) => <p key={satir} className="hud-bellek-aciklama">{satir}</p>)}
+          {bellek.uyari && <p className="hud-bellek-uyari">{bellek.uyari}</p>}
+          {bellek.hata && <p className="hud-bellek-uyari">{`Ölçüm hatası: ${bellek.hata}`}</p>}
+          <p className="hud-bellek-satir">{bellek.olcumVar ? bellek.yas : 'Ölçüm: bilinmiyor'}{bellek.eski && bellek.olcumVar ? ' · eski ölçüm' : ''}</p>
+        </div>
+      )}
       {/*
         BAĞLAM ÖLÇÜMÜ (1.9.129): ölçüm NESNESİNDEN yazılır (günlük metni ayrıştırılmaz). İlk satır
         kullanıcının istediği cümledir: "Yüklü bağlam: 32.768 token". Ölçüm yoksa "bilinmiyor",

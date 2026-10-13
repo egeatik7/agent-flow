@@ -12,7 +12,7 @@ export function applyViewerMessage(current:ViewerSnapshot|null,message:ViewerMes
  const next={...current,seq:message.seq,at:message.at}
  const hud=updateViewerHud(current.hud,message.channel,message.payload)
  if(hud)next.hud=hud
- if(message.channel==='hud:status'||message.channel==='hud:countdown'||message.channel==='hud:stages'||message.channel==='hud:context')return next
+ if(message.channel==='hud:status'||message.channel==='hud:countdown'||message.channel==='hud:stages'||message.channel==='hud:context'||message.channel==='hud:memory')return next
  const run=next.run?structuredClone(next.run):null,p=message.payload
  if(message.channel==='book')next.book=p as ViewerBook
  else if(message.channel==='run')next.run=p as ViewerRun

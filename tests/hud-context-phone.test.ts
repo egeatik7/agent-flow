@@ -6,6 +6,7 @@ import { ViewerState } from '../electron/viewer-state'
 import { applyViewerMessage } from '../src/viewer/model'
 import type { BaglamKarti } from '../electron/hud-context'
 import type { BaglamOlcumu } from '../electron/local-context'
+import type { BellekKarti } from '../electron/memory-meter'
 
 /**
  * 1.9.129 — ANDROID İZLEYİCİ. Masaüstü kartındaki AYNI yapılandırılmış veri (bağlam ölçümü NESNESİ,
@@ -109,5 +110,85 @@ describe('izleyici indirgeyicisi bağlam nesnesini AYNEN taşır', () => {
     seq += 1
     const temiz = applyViewerMessage(son, { type: 'event', session: son.session, seq, at: Date.now(), channel: 'hud:context', payload: { kart: null } })
     expect(temiz.hud?.baglam).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 1.9.130 — CANLI BELLEK GÖSTERGESİ (Android/telefon kartı)
+// ---------------------------------------------------------------------------
+
+const bellekFixture = (over: Partial<BellekKarti> = {}): BellekKarti => ({
+  ramVram: 'RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB',
+  butce: 'Bellek bütçesi 43,0 / 50,0 GB · kalan 7,0 GB',
+  gpuSatirlari: ['NVIDIA GeForce RTX 3060 (GPU 0) VRAM 9,2 / 12,0 GB', 'NVIDIA GeForce GTX 1050 (GPU 1) VRAM 1,2 / 4,0 GB'],
+  surecSatirlari: ['Blender · 3 süreç · commit 4,2 GB · working set 5,1 GB', 'Yerel model çalıştırıcıları · 2 süreç · commit 6,0 GB · working set 7,0 GB'],
+  aciklamalar: ['RAM: fiziksel bellek.', 'Bellek bütçesi: Windows’un RAM ve sayfa dosyasıyla karşılayabildiği bellek.'],
+  daraliyor: false, uyari: '', olcumVar: true, eski: false, yas: 'az önce ölçüldü', hata: '',
+  satirlar: ['RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB', 'Bellek bütçesi 43,0 / 50,0 GB · kalan 7,0 GB'],
+  ...over,
+})
+
+describe('telefon kartı canlı bellek göstergesini gösterir', () => {
+  it('masaüstünün yaydığı NESNE telefondan okunur: kısa bölüm + GPU/süreç ayrıntıları', () => {
+    const state = new ViewerState('test')
+    state.event('hud:status', { level: 'info', text: 'PC bilgi kartı' })
+    state.event('hud:memory', { kart: bellekFixture() })
+    mountPhone(state)
+    const shown = text(mounted!.root)
+    expect(shown).toContain('RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB')
+    expect(shown).toContain('Bellek bütçesi 43,0 / 50,0 GB · kalan 7,0 GB')
+    // Çoklu GPU ayrı satırlarda: iki kart birleştirilip tek toplam gibi gösterilmez.
+    expect(shown).toContain('GPU 0')
+    expect(shown).toContain('GPU 1')
+    expect(shown).toContain('Blender · 3 süreç')
+    expect(shown).toContain('Yerel model çalıştırıcıları · 2 süreç')
+    expect(mounted!.root.findAllByProps({ 'aria-label': 'Canlı bellek ölçümü' })).toHaveLength(1)
+  })
+
+  it('daralma uyarısı ve eski ölçüm telefonda da ayrılır', () => {
+    const state = new ViewerState('test')
+    state.event('hud:memory', { kart: bellekFixture({ daraliyor: true, uyari: 'Bellek bütçesi daralıyor', eski: true, yas: '31 sn önce ölçüldü' }) })
+    mountPhone(state)
+    const shown = text(mounted!.root)
+    expect(shown).toContain('Bellek bütçesi daralıyor')
+    expect(shown).toContain('31 sn önce ölçüldü')
+    expect(mounted!.root.findByProps({ 'aria-label': 'Canlı bellek ölçümü' }).props.className).toContain('daraliyor')
+    expect(mounted!.root.findByProps({ 'aria-label': 'Canlı bellek ölçümü' }).props.className).toContain('eski')
+  })
+
+  it('ölçüm temizlenince telefon kartından da kaybolur', () => {
+    const state = new ViewerState('test')
+    state.event('hud:memory', { kart: bellekFixture() })
+    mountPhone(state)
+    expect(text(mounted!.root)).toContain('RAM 12,1')
+    state.event('hud:memory', { kart: null }); h.state = state.snapshot()
+    act(() => mounted!.update(createElement(ViewerApp)))
+    expect(text(mounted!.root)).not.toContain('RAM 12,1')
+  })
+
+  it('bellek bloğu telefonun kart-only kuralını bozmaz (düğme yok)', () => {
+    const state = new ViewerState('test')
+    state.event('hud:memory', { kart: bellekFixture() })
+    mountPhone(state)
+    expect(mounted!.root.findAllByType('button')).toHaveLength(0)
+  })
+})
+
+describe('izleyici indirgeyicisi bellek nesnesini AYNEN taşır', () => {
+  it('masaüstü nesnesi telefona aktarılır; bozuk yük kartı bozmaz, null temizler', () => {
+    const state = applyViewerMessage(null, { type: 'snapshot', state: new ViewerState('test').snapshot() })
+    let seq = state.seq
+    let son = applyViewerMessage(state, { type: 'event', session: state.session, seq: ++seq, at: Date.now(), channel: 'hud:memory', payload: { kart: bellekFixture() } })
+    expect(son.hud?.bellek?.butce).toBe('Bellek bütçesi 43,0 / 50,0 GB · kalan 7,0 GB')
+    expect(son.hud?.bellek?.gpuSatirlari).toHaveLength(2)
+    // Bozuk yük ATLANIR.
+    son = applyViewerMessage(son, { type: 'event', session: son.session, seq: ++seq, at: Date.now(), channel: 'hud:memory', payload: { kart: 'bozuk' } })
+    expect(son.hud?.bellek?.ramVram).toBe('RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB')
+    // Günlük METNİ ayrıştırılmaz: metin kanalı karta karışmaz.
+    son = applyViewerMessage(son, { type: 'event', session: son.session, seq: ++seq, at: Date.now(), channel: 'agent:log', payload: { level: 'info', message: 'RAM 99,9 / 99,9 GB' } })
+    expect(son.hud?.bellek?.ramVram).toBe('RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB')
+    // null temizler.
+    son = applyViewerMessage(son, { type: 'event', session: son.session, seq: ++seq, at: Date.now(), channel: 'hud:memory', payload: { kart: null } })
+    expect(son.hud?.bellek).toBeUndefined()
   })
 })

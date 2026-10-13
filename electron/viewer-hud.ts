@@ -1,5 +1,6 @@
 import type { ViewerHud } from './viewer-types'
 import type { BaglamKarti } from './hud-context'
+import type { BellekKarti } from './memory-meter'
 
 export function emptyViewerHud(): ViewerHud {
   return { level: 'info', text: 'Ne yaptığı burada yazacak.', loop: '', method: '', countdown: '', recovering: false, stages: '' }
@@ -22,6 +23,12 @@ export function updateViewerHud(current: ViewerHud | undefined, channel: string,
     const kart = value.kart
     if (kart === null || kart === undefined) delete next.baglam
     else if (typeof kart === 'object') next.baglam = kart as BaglamKarti
+    else return
+  } else if (channel === 'hud:memory') {
+    // Canlı bellek göstergesi de NESNE olarak taşınır: günlük metni AYRIŞTIRILMAZ (1.9.130).
+    const kart = value.kart
+    if (kart === null || kart === undefined) delete next.bellek
+    else if (typeof kart === 'object') next.bellek = kart as BellekKarti
     else return
   } else if (channel === 'recovery:status') {
     next.recovering = value.active === true
