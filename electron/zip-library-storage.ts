@@ -74,10 +74,11 @@ export class ZipLibraryStorage {
     for (const archived of [false, true]) {
       // An empty library does not need an archive directory until something is archived.
       if (archived && !fs.existsSync(path.join(this.directory, ARCHIVE))) continue
-      const directory = this.sectionDirectory(archived), names = new Set<string>()
-      for (const filename of fs.readdirSync(directory).filter(n => /\.zip$/i.test(n)).sort(collator.compare)) {
-        if (names.has(fileKey(filename))) throw new Error('Kütüphanede Windows’ta çakışan ZIP adları var.')
-        names.add(fileKey(filename))
+      const directory = this.sectionDirectory(archived)
+      const filenames = fs.readdirSync(directory).filter(n => /\.zip$/i.test(n)).sort(collator.compare)
+      const names = new Map<string, string[]>()
+      for (const filename of filenames) names.set(fileKey(filename), [...(names.get(fileKey(filename)) ?? []), filename])
+      for (const filename of filenames) {
         const id = archived ? `${ARCHIVE}/${filename}` : filename
         const group: ZipCanvasGroup = { id, name: filename.slice(0, -4), archived, revision: '', canvases: [] }
         try {
@@ -95,10 +96,15 @@ export class ZipLibraryStorage {
               const message = `“${canvas.name}” kimliği hem “${owner}” hem “${id}” içinde var; kopya ayrı kimlikle kaydedilmeli.`
               group.problem = message
               const prior = groups.find(g => g.id === owner)
-              if (prior) prior.problem = message
+              if (prior) prior.problem = prior.problem ? `${prior.problem} ${message}` : message
             } else identities.set(canvas.canvasId, id)
           }
         } catch (error) { group.problem = (error as Error).message }
+        const collisions = names.get(fileKey(filename)) ?? []
+        if (collisions.length > 1) {
+          const message = `Windows’ta aynı sayılan ZIP adları var: ${collisions.join(', ')}. Bu dosyalarda işlem yapılmaz; adları elle düzelt.`
+          group.problem = group.problem ? `${group.problem} ${message}` : message
+        }
         groups.push(group)
       }
     }
@@ -108,6 +114,10 @@ export class ZipLibraryStorage {
   private freshGroup(snapshot: ZipLibrarySnapshot, id: string, revision: string, allowProblem = false): ZipCanvasGroup {
     const group = snapshot.groups.find(g => g.id === id)
     if (!group || group.revision !== revision) throw new ZipLibraryConflictError()
+    // Even delete must not select one member of an ambiguous filename set.
+    if (snapshot.groups.some(g => g.id !== group.id && g.archived === group.archived && fileKey(path.basename(g.id)) === fileKey(path.basename(group.id)))) {
+      throw new ZipLibraryConflictError('Çakışan ZIP adında silme/yazma işlemi yapılmaz; adları elle düzelt.')
+    }
     if (group.problem && !allowProblem) throw new ZipLibraryConflictError(group.problem)
     return group
   }

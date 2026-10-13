@@ -40,3 +40,33 @@ describe('ZIP order becomes the working sequence without automation records',()=
   const opened=openZipCanvas(book(),'01');opened.tabs[0].name='Uzun '.repeat(20);expect(normalizeCanvasBook(opened).tabs[0].name).toBe(opened.tabs[0].name.trim())
  })
 })
+
+describe('explicit rename baseline safety', () => {
+ it('reload preserves local name and baseline; explicit rename preserves dirty graph', async () => {
+  const { adoptZipCanvasRename } = await import('../electron/zip-workspace')
+  const opened = openZipCanvas(book(), '01')
+  opened.tabs[0].graph.nodes[0].title = 'Unsaved edit'
+  const renamed = { ...doc('01'), name: 'New name', nodes: opened.zipLibrary!.groups[0].canvases.find(c => c.canvasId === '01')!.nodes }
+  const library = { directory:'library', groups:[{...group(), canvases:[renamed]}] }
+  expect(adoptZipLibrary(opened, library).tabs[0].baseline!.name).toBe('01')
+  const next = adoptZipCanvasRename(opened, library, '01')
+  expect(next.tabs[0].name).toBe('New name')
+  expect(next.tabs[0].baseline!.name).toBe('New name')
+  expect(next.tabs[0].graph.nodes[0].title).toBe('Unsaved edit')
+  expect(zipCanvasDirty(next, next.tabs[0])).toBe(true)
+  expect(opened.tabs[0].baseline!.name).toBe('01')
+ })
+ it('explicit rename cannot erase an unsaved local name or legitimise a stale baseline', async () => {
+  const { adoptZipCanvasRename } = await import('../electron/zip-workspace')
+  const opened = openZipCanvas(book(), '01')
+  opened.tabs[0].name = 'Local name'
+  const old = opened.zipLibrary!.groups[0].canvases.find(c => c.canvasId === '01')!
+  const library = {directory:'library',groups:[{...group(),canvases:[{...old,name:'Remote name'}]}]}
+  expect(adoptZipCanvasRename(opened,library,'01').tabs[0].name).toBe('Local name')
+  opened.tabs[0].baseline!.name = 'Stale name'
+  expect(adoptZipCanvasRename(opened,library,'01').tabs[0].baseline!.name).toBe('Stale name')
+  opened.tabs[0].baseline!.name = '01'
+  const changed = structuredClone(library); changed.groups[0].canvases[0].nodes[0].title='External edit'
+  expect(adoptZipCanvasRename(opened,changed,'01').tabs[0].baseline!.name).toBe('01')
+ })
+})

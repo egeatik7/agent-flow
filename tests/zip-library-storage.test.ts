@@ -117,3 +117,24 @@ describe('actual ZIP files are the only library records', () => {
   expect(()=>readJsonZip(zip)).toThrow('CRC')
  })
 })
+
+it('filename collisions isolate all conflicting files and forbid deletion while healthy ZIPs remain usable', () => {
+ const s=store()
+ s.importDocuments('Café',[canvas('A','A')])
+ s.importDocuments('Healthy',[canvas('B','B')])
+ fs.copyFileSync(path.join(s.directory,'Café.zip'),path.join(s.directory,'Cafe\u0301.zip'))
+ const snapshot=s.load()
+ const collisions=snapshot.groups.filter(g=>g.name.normalize('NFC')==='Café')
+ expect(collisions).toHaveLength(2)
+ expect(collisions.every(g=>g.problem?.includes('aynı sayılan'))).toBe(true)
+ for(const g of collisions){
+  expect(()=>s.deleteGroup(g.id,g.revision)).toThrow('Çakışan')
+  expect(()=>s.saveGroup(g.id,g.canvases,g.revision)).toThrow()
+ }
+ const healthy=snapshot.groups.find(g=>g.name==='Healthy')!
+ expect(healthy.problem).toBeUndefined()
+ s.saveGroup(healthy.id,[canvas('Updated','B')],healthy.revision)
+ expect(s.load().groups.find(g=>g.name==='Healthy')!.canvases[0].name).toBe('Updated')
+ expect(fs.existsSync(path.join(s.directory,'Café.zip'))).toBe(true)
+ expect(fs.existsSync(path.join(s.directory,'Cafe\u0301.zip'))).toBe(true)
+})
