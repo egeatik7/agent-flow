@@ -1397,8 +1397,18 @@ function Invoke-Op([string]$op, $P) {
     }
     'keys' {
       if ($P.direct) {
+        # U01 (yönerge): hedef pencere ADI verildiyse aktivasyon başarısızlığı YUTULMAZ. Önceden
+        # `try { Enter-Window ... } catch {}` vardı ve tuş, beklenen pencere önde DEĞİLKEN de
+        # gönderiliyordu (köprü her çağrıda direct:true yollar). Artık direct olmayan dalla AYNI
+        # koruma kullanılır: Enter-Window + Assert-KeyWindowActive. Meşru sistem kısayolları muaf
+        # tutulur (hedef uygulamadan çıkmak için tasarlanmışlardır); pencere adı verilmediyse
+        # karşılaştırılacak bir beklenti olmadığından davranış eskisi gibi kalır.
         if ($P.target) { Assert-KnownWindowIdentity $P.target }
-        if ($P.windowTitle) { try { Enter-Window (Find-Window ([string]$P.windowTitle)) } catch {} }
+        if ($P.windowTitle) {
+          $win = Find-Window ([string]$P.windowTitle)
+          Enter-Window $win
+          if (-not (Test-SystemShortcut ([string]$P.keys))) { Assert-KeyWindowActive $win }
+        }
         if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine tus gondermez.' }
         Send-KeyString ([string]$P.keys)
         return $true

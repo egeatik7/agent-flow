@@ -27,6 +27,7 @@ type Deps = {
 export async function runYap(node: AgentNode, context: unknown, deps: Deps): Promise<boolean> {
   const budget = Math.min(60, Math.max(1, Math.floor(node.maxActions ?? 25)))
   const deadline = Date.now() + Math.min(900_000, Math.max(10_000, node.timeoutMs || 300_000))
+  // Deadline cancels in-flight model/tool work too; check() classifies it separately from user stop.
   const stopped = () => deps.shouldStop() || Date.now() >= deadline
   const check = () => {
     if (deps.shouldStop()) throw new StoppedError()
@@ -38,7 +39,13 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
   const messages: ToolMessage[] = [{ role: 'system', content: deps.system?.trim() || YAP_PROMPT }, { role: 'user', content: JSON.stringify({ task: node.prompt, context }, (key, value) => ['icon', 'patch', 'sig', 'path', 'trace'].includes(key) ? undefined : value) }]
   for (let used = 0, turns = 0; used < budget && turns < budget + 3; turns++) {
     check()
-    const answer = await deps.turn({ messages, tools, shouldStop: stopped, timeoutMs: deadline - Date.now() })
+    let answer: ToolMessage
+    try {
+      answer = await deps.turn({ messages, tools, shouldStop: stopped, timeoutMs: Math.max(1, deadline - Date.now()) })
+    } catch (error) {
+      check()
+      throw error
+    }
     check()
     messages.push(answer)
     if (typeof answer.content === 'string' && answer.content.trim()) deps.log('info', `Yap: ${answer.content.slice(0, 1200)}`)
@@ -63,7 +70,12 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
         }
         if (call.function.name === 'task_complete') {
           if (!args.summary.trim()) throw new Error('Tamamlandı açıklaması boş olamaz.')
-          if (!observed) throw new Error('Tamamlandı demeden önce güncel ekranı veya doğrudan işlem sonucunu incele.')
+          // O20 (yönerge): mesaj ile GERÇEK kural aynı olmalı. Kapıyı yalnız BAŞARILI bir `screen_read`
+          // açıyor (aşağıda `observed = result.ok && result.outcome === 'tamam'`). Önceki mesaj
+          // "güncel ekranı VEYA doğrudan işlem sonucunu incele" diyordu; oysa pencere/komut sonuçlarını
+          // kanıt sayan bir kod yolu YOK. Sıradan `ok:true` (ör. bir komut çalıştı) hedefin
+          // tamamlandığını kanıtlamaz — bu ürün kararı KORUNDU; yalnız yanıltıcı vaat kaldırıldı.
+          if (!observed) throw new Error('Tamamlandı demeden önce güncel ekranı OKU (screen_read) ve okuma başarılı olsun. Pencere/komut sonucu tek başına tamamlanma kanıtı sayılmaz.')
           deps.log('success', `Yap tamamlandı: ${args.summary.slice(0, 2000)}`)
           return true
         }

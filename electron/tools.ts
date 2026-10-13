@@ -23,7 +23,7 @@ import {
   type LogLevel,
 } from './graph-types'
 import type { TargetTrace } from './target-trace'
-import { ADDABLE_KINDS, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps, type EditOp } from './tool-edit'
+import { ADDABLE_KINDS, CLICK_MODES, EDITABLE_FIELDS, applyPlan, describePlan, diffGraphs, planOps, type EditOp } from './tool-edit'
 import {
   MAX_BRANCHES,
   MAX_GROUPS,
@@ -1441,9 +1441,16 @@ const actClick: ToolDef = {
     if (denied) return failed(actClick.name, denied)
     const target = text(args.target)?.trim()
     if (!target) return failed(actClick.name, 'Ne tıklanacağını söyle: { target: "Kaydet" }.')
+    // O17 (yönerge): geçersiz `mode` SESSİZCE tek sol tıka inmemeli. Alan yoksa (undefined/null) mevcut
+    // varsayılan korunur; alan VARSA ve desteklenen kümede değilse araç AÇIK argüman hatası döner ve eylem
+    // HİÇ yapılmaz (motora ulaşmaz). Mod kümesi tool-edit ile AYNI tek kaynaktan gelir.
+    const mod = args.mode === undefined || args.mode === null ? undefined : text(args.mode)
+    if (mod !== undefined && !CLICK_MODES.includes(mod as (typeof CLICK_MODES)[number])) {
+      return failed(actClick.name, `Geçersiz mode: “${mod}”. Şunlardan biri olmalı: ${CLICK_MODES.join(', ')}.`)
+    }
     return runOneAction(
       actClick.name,
-      { kind: 'click', title: `Tıkla: “${target}”`, fields: { prompt: target, ...(args.mode ? { clickMode: text(args.mode) } : {}) } },
+      { kind: 'click', title: `Tıkla: “${target}”`, fields: { prompt: target, ...(mod ? { clickMode: mod } : {}) } },
       args,
       ctx
     )

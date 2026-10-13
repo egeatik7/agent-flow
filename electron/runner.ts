@@ -121,8 +121,15 @@ export function findEntry(graph: AgentGraph, startId?: string): AgentNode | unde
   return graph.nodes.find((n) => n.kind === 'start') ?? graph.nodes.find((n) => !graph.edges.some((e) => e.to === n.id))
 }
 
-function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
-  const templated = [node.prompt, node.text, node.keys, node.url, node.pattern, node.source].some((f) => !!f && /\{\{[^{}]+\}\}/.test(f))
+export function renderNode(node: AgentNode, vars: Record<string, string>): AgentNode {
+  // O11 (yönerge): `templated` bir KÖKEN bilgisidir (hedefinde şablon var mıydı) ve bir kez doğruysa
+  // render sonrası KAYBOLMAMALIDIR. Önceden her çağrıda yeniden hesaplanıp mevcut değer EZİLİYORDU;
+  // kurtarma `step.run` yolunda alanlar ZATEN render edilmiş geldiği için (runner.ts:382 → ex.recover →
+  // recovery-runtime) bayrak false'a düşüyordu. Sonuç: `agent.ts` `mem = node.templated ? undefined :
+  // memoFor(node)` hafızayı AÇIYOR ve `{{öğe}}` hedefli düğüm SON TURUN öğesine yönelebiliyordu
+  // ("{{öğe}} içeren hedef değişir, son turun yeri yanlış öğeyi gösterir" kuralı devre dışı kalıyordu).
+  // Artık var olan `true` korunur; hiçbir düğüm şablonlu SAYILMAZ (bayrak yalnız true'ya yükselir).
+  const templated = node.templated === true || [node.prompt, node.text, node.keys, node.url, node.pattern, node.source].some((f) => !!f && /\{\{[^{}]+\}\}/.test(f))
   return {
     ...node,
     templated,

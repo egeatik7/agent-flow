@@ -98,10 +98,15 @@ export function chainOf(graph: AgentGraph, id: string): LoopContext[] {
     // Klasör tabanlı kutu listesini ancak koşarken doldurur; burada "#1" gibi bir öğe göstermek
     // yanıltıcıdır. Klasör varsa ve liste boşsa öğe bilinmiyor denir (uydurulmaz).
     const klasorVar = typeof box.folder === 'string' && box.folder.trim() !== ''
-    // Sayısal (liste/klasör değil) kutuda motor {{öğe}} için "1" kullanır — kare işareti yok.
-    // Araç katmanı da aynı değeri göstermeli, yoksa ajanın gördüğü ile çalışan farklı olur.
-    const sayisal = !klasorVar && listItems(box).length === 0
-    const item = klasorVar && listItems(box).length === 0 ? undefined : sayisal ? String(index + 1) : keys[index]
+    // O16 (yönerge): araç katmanı, motorun GERÇEK anahtar uzayını göstermelidir. Ölçülen kusur: burada
+    // sayısal (liste/klasör değil) kutu için `String(index + 1)` = "3" veriliyordu; oysa motorun kendisi
+    // `loopKeys` ile sayaç kutusunda "#1".."#N" üretir (graph-types.ts:588). İki sonuç doğuyordu:
+    //  (1) ajanın gördüğü {{öğe}} ile koşan değer farklıydı,
+    //  (2) hatadan devamda `resumeItem = "3"` motorun anahtar listesinde bulunamıyor (`indexOf("3") = -1`)
+    //      ve devam koşusu hata ile bitiyordu.
+    // Artık tek kaynak `keys` (loopKeys): sayaçta "#3", gerçek listede dosya adı — liste öğesi gerçekten
+    // "3" ise "#3"e ÇEVRİLMEZ. Klasör varsa ve liste henüz boşsa öğe bilinmiyor denir (uydurulmaz).
+    const item = klasorVar && listItems(box).length === 0 ? undefined : keys[index]
     vars = { ...vars, ...itemVars(item ?? '', index, keys.length) }
     return {
       id: box.id,

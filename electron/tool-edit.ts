@@ -53,7 +53,8 @@ export const ADDABLE_KINDS: NodeKind[] = ['click', 'type', 'key', 'wait', 'condi
 
 export const MAX_OPS = 50
 
-const CLICK_MODES: ClickMode[] = ['left', 'double', 'right']
+/** Desteklenen tıklama modları — TEK kaynak. `act.click` aracı da doğrulama için bunu kullanır (O17). */
+export const CLICK_MODES: ClickMode[] = ['left', 'double', 'right']
 const NUMBER_FIELDS = ['ms', 'count', 'timeoutMs', 'maxActions', 'x', 'y']
 const BOOL_FIELDS = ['pressEnter', 'clearFirst']
 const TEXT_FIELDS = ['title', 'prompt', 'text', 'keys', 'folder', 'url', 'pattern', 'engine']

@@ -584,7 +584,13 @@ export function createAgent(ctx: AgentContext) {
             log('info', 'Görsel model ekran görüntüsüne bakıyor.')
             return await locateWithTars(node, wide, readOnly)
           } catch (e) {
-            if (e instanceof StoppedError || e instanceof VisualTargetRecoveryError) throw e
+            // O04 (yönerge): KALICI API hatası (401/402, kota) burada YUTULMAMALI. Önceden yalnız
+            // StoppedError ve VisualTargetRecoveryError yeniden fırlatılıyordu; FatalApiError
+            // `serviceFailure=true` taşımasına rağmen "Görsel hedefleme atlandı" diye loglanıp akış
+            // NotFoundError ile devam ediyordu → bozuk anahtarla listenin TAMAMI öğe öğe deneniyordu
+            // (runner'ın serviceFailure durdurma kuralı devreye girmiyordu). Aynı dosyada 243/372 ve
+            // koşul dalı 586 FatalApiError'ı zaten fırlatır; bu dal artık tutarlı.
+            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError) throw e
             if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
             if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
@@ -709,9 +715,15 @@ export function createAgent(ctx: AgentContext) {
         if (anchor) {
           const zoomW = 420
           const zoomH = 240
+          // O05 (yönerge): kırpma dikdörtgeni 0'a SABİTLENMEZ. Önceden `Math.max(0, …)` vardı; ana
+          // monitörün SOLUNDA/ÜSTÜNDE bir ekran varsa sanal masaüstü koordinatları negatiftir ve bu
+          // kırpma istenen bölgeyi birincil ekranın kenarına kaydırıyordu (model yanlış bölgeye bakıyor,
+          // cevap gerçek kırpma alanına göre ekrana taşındığı için tıklama da kayabiliyordu).
+          // Sınırlama işini worker'ın `crop` dalı yapar: x/y'yi sanal ekranın sınırlarına kırpar ve
+          // negatif koordinatı destekler; haritalama da dönen `crop.area` ile yapılır.
           const rect = {
-            x: Math.max(0, Math.round(anchor.x - zoomW / 2)),
-            y: Math.max(0, Math.round(anchor.y - zoomH / 2)),
+            x: Math.round(anchor.x - zoomW / 2),
+            y: Math.round(anchor.y - zoomH / 2),
             w: zoomW,
             h: zoomH,
           }
