@@ -107,8 +107,8 @@ describe('6) boş /api/ps, kaldırılma ve pencere değişimi eski değeri GÜNC
     expect(baglamYenilenmeli(olcum, 'm', { durum: 'ok', calisanlar: [{ model: 'm', pencere: 8192 }] }, 2_000)).toBe(true)
   })
   it('statik bilgi daha uzun ömürlü: 5 dk sonra statik YENİLENMEZ, 30 dk sonra yenilenir', () => {
-    const s = { yapilandirilmisPencere: 65536, statikAt: 0, olcumAt: 0 }
-    expect(statikYenilenmeli(s, 6 * 60_000)).toBe(false)
+    const s = { yapilandirilmisPencere: 65536, statikAt: 1, olcumAt: 1 }
+    expect(statikYenilenmeli(s, 6 * 60_000 + 1)).toBe(false)
     expect(statikYenilenmeli(s, 31 * 60_000)).toBe(true)
   })
 })
