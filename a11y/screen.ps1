@@ -146,8 +146,10 @@ function Add-CursorMarker($bmp, $rect) {
         }
         $golge.Dispose(); $kalem.Dispose()
       } finally { $gg.Dispose() }
+      return [pscustomobject]@{ x = $cx; y = $cy }
     }
   } catch { }
+  return $null
 }
 
 function Capture-Raw($rect) {
@@ -843,12 +845,13 @@ function Invoke-Scan($P) {
     $items = Merge-Items $uia $ocr
 
     $img = $null
+    $markedCursor = $null
     if ($null -ne $shotBmp) {
       $maxW = 1400
       if ($P.maxImageW) { $maxW = [int]$P.maxImageW }
       $snap = 0
       if ($P.snap) { $snap = [int]$P.snap }
-      if ($P.cursorMarker -eq $true) { Add-CursorMarker $shotBmp $rect }
+      if ($P.cursorMarker -eq $true) { $markedCursor = Add-CursorMarker $shotBmp $rect }
       $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
       $shotBmp.Dispose()
     }
@@ -862,6 +865,7 @@ function Invoke-Scan($P) {
       uiaCount = $uia.Count
       ocrCount = $ocr.Count
       image  = $img
+      cursor = $markedCursor
       window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
       missingWindow = $missing
       sig    = $sig
@@ -946,17 +950,31 @@ function Get-TextNear([int]$px, [int]$py) {
   return $best
 }
 
-function Invoke-MouseAt([int]$x, [int]$y, [string]$button) {
-  [void][XpNative]::SetCursorPos($x, $y)
-  Start-Sleep -Milliseconds 50
+function Invoke-MouseAt([int]$x, [int]$y, [string]$button, [bool]$currentOnly = $false, [long]$expectedHwnd = 0) {
+  if (-not $currentOnly) {
+    [void][XpNative]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 50
+  }
+  $checkCurrent = {
+    if (-not $currentOnly) { return }
+    $cp = Get-CursorPoint
+    if ([Math]::Sqrt([Math]::Pow([double]$cp.X - $x, 2) + [Math]::Pow([double]$cp.Y - $y, 2)) -gt 3) {
+      throw 'INPUT_CLICK_STALE: Pointer moved before button press; click not sent'
+    }
+    if ($expectedHwnd -le 0 -or [XpWin]::RootAt([int]$cp.X, [int]$cp.Y) -ne [IntPtr]$expectedHwnd) {
+      throw 'INPUT_CLICK_STALE: Pointer window changed before button press; click not sent'
+    }
+  }
   switch ($button) {
     'right' {
+      & $checkCurrent
       [XpNative]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero)
       Start-Sleep -Milliseconds 30
       [XpNative]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)
     }
     'double' {
       for ($i = 0; $i -lt 2; $i++) {
+        & $checkCurrent
         [XpNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 40
         [XpNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
@@ -964,6 +982,7 @@ function Invoke-MouseAt([int]$x, [int]$y, [string]$button) {
       }
     }
     default {
+      & $checkCurrent
       [XpNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       Start-Sleep -Milliseconds 30
       [XpNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)

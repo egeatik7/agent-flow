@@ -21,6 +21,17 @@ function edit(label: string, value: string) {
   act(() => mounted!.root.findByProps({ 'aria-label': label }).props.onChange({ target: { value } }))
 }
 describe('node methods and editable runtime prompts', () => {
+  it('saves and resets the click-only visual pointer prompt without changing other prompts', () => {
+    const { onSave, root } = mount()
+    edit('Görsel konum doğrulama — önce fareyi taşı', 'MY_POINTER')
+    select('condition'); expect(root.findAllByProps({ 'aria-label': 'Görsel konum doğrulama — önce fareyi taşı' })).toHaveLength(0)
+    select('click'); expect(root.findByProps({ 'aria-label': 'Görsel konum doğrulama — önce fareyi taşı' }).props.value).toBe('MY_POINTER')
+    act(() => root.findAllByType('button').find(b => b.children.includes('Kaydet'))!.props.onClick())
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ llmPrompts: { visualPointer: 'MY_POINTER' } }))
+    const textarea = root.findByProps({ 'aria-label': 'Görsel konum doğrulama — önce fareyi taşı' })
+    act(() => textarea.parent!.findByType('button').props.onClick())
+    expect(root.findByProps({ 'aria-label': 'Görsel konum doğrulama — önce fareyi taşı' }).props.value).toBe(DEFAULT_PROMPTS.visualPointer)
+  })
   it('preserves condition drafts across node tabs and saves distinct stage keys', () => {
     const { onSave, root } = mount()
     select('condition')

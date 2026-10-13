@@ -7,6 +7,8 @@ import type { NodeKind } from './graph-types'
 import { fillGoal, INITIATIVE_PROMPT, INITIATIVE_RULES, INITIATIVE_SCOPE_RULES, INITIATIVE_TARS_TEMPLATE, INITIATIVE_SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, WORD_CHOICE_PROMPT, LIST_PROMPT, REACTION_PROMPT, SCREEN_PROMPT, STALL_PROMPT, TARS_TEMPLATE, listPromptFor, initiativeTurnInstruction } from './llm-flow'
 import { describeItems, type ScanResult } from './matcher'
 import { StoppedError } from './runner'
+import type { VisualPointerDecision } from './visual-hover'
+import { VISUAL_POINTER_PROMPT, VISUAL_POINTER_JSON_CONTRACT, VISUAL_POINTER_TARS_CONTRACT } from './llm-flow'
 
 /** A model request that has not answered by then is abandoned (and retried once). */
 const REQUEST_TIMEOUT_MS = 90000
@@ -1312,6 +1314,70 @@ export async function chooseVisualTarget(opts: {
     const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native })
     return validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
   })
+}
+
+export function validateVisualPointerReply(content: string, model: string, screen: Img): VisualPointerDecision {
+  let decision: unknown, reason = '', point: [number, number] | undefined
+  let maxX = 1000, maxY = 1000
+  if (!Number.isFinite(screen.w) || !Number.isFinite(screen.h) || screen.w <= 0 || screen.h <= 0) throw new ModelRejected('Görsel konum görüntüsü boyutları geçersiz')
+  if (isTarsModel(model)) {
+    const tags = [...content.matchAll(/^\s*Decision:\s*(\w+)\s*$/gim)]
+    const actions = [...content.matchAll(/^\s*Action:\s*(.+)$/gim)]
+    if (tags.length !== 1 || actions.length !== 1) throw new ModelRejected('Görsel konum yanıtında tek Decision ve Action gerekli')
+    decision = tags[0][1].toLowerCase()
+    reason = (content.match(/Thought:\s*([\s\S]*?)(?:\n\s*Decision:|\n\s*Action:|$)/i)?.[1] ?? '').trim()
+    const raw = actions[0][1].trim()
+    if (decision === 'confirm' && !/^click_current\(\s*\)$/.test(raw) || decision === 'uncertain' && !/^call_user\(\s*\)$/.test(raw)) throw new ModelRejected('Görsel konum kararı ile Action uyuşmuyor')
+    if (decision === 'adjust') {
+      const match = raw.match(/^move\(\s*start_box\s*=\s*(['"])([^'"\r\n]+)\1\s*\)$/)
+      const box = match?.[2].replace(/<\|box_start\|>|<\|box_end\|>/g, '').trim()
+      if (!box || !/^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$/.test(box)) throw new ModelRejected('Görsel konum düzeltmesi yalnız tek move noktası kabul eder')
+      point = pointOf(box) ?? undefined
+    }
+    if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
+  } else {
+    const p = parseJson(content)
+    decision = p.decision; reason = String(p.reason ?? '').trim()
+    if (Object.prototype.hasOwnProperty.call(p, 'action') || Object.prototype.hasOwnProperty.call(p, 'mode')) throw new ModelRejected('Görsel konum yanıtı eylem veya tıklama modu seçemez')
+    if (decision !== 'adjust' && (p.x !== undefined || p.y !== undefined)) throw new ModelRejected('Konum onayı yeni koordinat taşıyamaz')
+    if (decision === 'adjust' && typeof p.x === 'number' && typeof p.y === 'number') point = [p.x, p.y]
+  }
+  if (decision === 'confirm' || decision === 'uncertain') return { decision, reason }
+  if (decision !== 'adjust' || !point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) throw new ModelRejected('Görsel konum kararı veya düzeltme noktası geçersiz')
+  return { decision, x: point[0] / maxX, y: point[1] / maxY, reason }
+}
+
+/** Always image-bearing; a text-only fallback can never authorize a visual pointer. */
+export async function verifyVisualPointer(opts: {
+  apiKey: string; model: string | string[]; goal: string; screen: Img
+  area: ScanResult['area']; pointer: { x: number; y: number }; system?: string; nodeId?: string
+}): Promise<VisualPointerDecision> {
+  if (!opts.screen.data) throw new ModelRejected('Görsel konum doğrulaması için yeni görüntü yok')
+  return runModelChain(asModelChain(opts.model), async model => {
+    const native = isTarsModel(model), absolute = native && tarsAbsolute(model)
+    const px = (opts.pointer.x - opts.area.x) / opts.area.w, py = (opts.pointer.y - opts.area.y) / opts.area.h
+    const cursor = `Actual red-crosshair center: (${(px * (absolute ? opts.screen.w : 1000)).toFixed(2)}, ${(py * (absolute ? opts.screen.h : 1000)).toFixed(2)}), ${absolute ? 'image pixels' : '0-1000 screenshot grid'}.`
+    const system = `${opts.system?.trim() || VISUAL_POINTER_PROMPT}\n\n${native ? VISUAL_POINTER_TARS_CONTRACT : VISUAL_POINTER_JSON_CONTRACT}`
+    const instruction = `Requested target: ${opts.goal}\n${cursor}\nOnly the pointer was moved. NO target click has been sent. Judge the current image independently.`
+    const messages: Message[] = [
+      { role: native ? 'user' : 'system', content: system },
+      { role: 'user', content: [{ type: 'text', text: instruction }, imagePart(opts.screen)] },
+    ]
+    const id = nextRequestId(), image = imageFromMessages(messages, opts.screen.mime)
+    if (!image) throw new ModelRejected('Görsel konum isteğinin görüntü baytları okunamadı')
+    const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'visual-pointer-check', model, target: isLocalName(model) ? 'local' : 'api', image: { sent: true, w: opts.screen.w, h: opts.screen.h, bytes: image.buffer.length, mime: image.mime, marked: false }, candidates: { built: 0, sent: 0 }, promptChars: system.length + instruction.length })
+    chatLogger?.(summary); saveRequestEvidence(id, { summary, system, instruction, image })
+    try {
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native })
+      saveRequestEvidence(id, { response: content })
+      const result = validateVisualPointerReply(content, model, opts.screen)
+      chatLogger?.(`YANIT id=${id} | karar=${result.decision} | imlec=${opts.pointer.x},${opts.pointer.y} | neden=${result.reason.replace(/\s+/g, ' ').slice(0, 180)}`)
+      return result
+    } catch (e) {
+      chatLogger?.(`YANIT id=${id} | karar=reddedildi | neden=${brief(e)}`)
+      throw e
+    }
+  }, 0, { maxCycles: 1, maxWaitMs: 90_000 })
 }
 
 export type StallPlan = {

@@ -17,6 +17,8 @@ export type ScreenItem = {
 }
 
 export type ScanResult = {
+  /** Actual pointer used to draw the marker on this returned image; absent if drawing failed. */
+  cursor?: { x: number; y: number } | null
   regions?: { kind: 'taskbar'; x: number; y: number; w: number; h: number }[]
   area: { x: number; y: number; w: number; h: number }
   items: ScreenItem[]

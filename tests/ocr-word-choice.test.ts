@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScanResult, ScreenItem } from '../electron/matcher'
 
-const state = vi.hoisted(() => ({ scan: null as unknown, clicks: [] as [number, number][], requests: [] as any[], logs: [] as string[] }))
+const state = vi.hoisted(() => ({ scan: null as unknown, point: { x: 0, y: 0 }, clicks: [] as [number, number][], requests: [] as any[], logs: [] as string[] }))
 vi.mock('electron', () => ({ screen: { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 700 }, scaleFactor: 1 }) } }))
 vi.mock('../electron/a11y-bridge', () => ({
-  isLocked: async () => false, scan: async () => state.scan, discardShot: () => {},
+  isLocked: async () => false, scan: async (opts: any) => opts?.cursorMarker ? { ...state.scan as object, cursor: { ...state.point } } : state.scan, discardShot: () => {},
   locate: async () => null, findImage: async () => null,
   clickAt: async (x: number, y: number) => { state.clicks.push([x, y]) },
-  moveMouse: async () => ({ hwnd: 1 }), sendKeys: async () => {},
-  cursorPos: async () => ({ x: 0, y: 0 }), inputTarget: async () => ({ hwnd: '1', pid: 10, title: 'Fixture', rect: { x: 0, y: 0, w: 1000, h: 700 } }),
+  moveMouse: async (x: number, y: number) => { state.point = { x, y }; return { hwnd: 1 } }, sendKeys: async () => {},
+  clickCurrentAt: async (x: number, y: number) => { state.clicks.push([x, y]) },
+  cursorPos: async () => ({ ...state.point }), inputTarget: async () => ({ hwnd: '1', pid: 10, title: 'Fixture', rect: { x: 0, y: 0, w: 1000, h: 700 } }),
   assertInputTarget: async () => {}, focusedValue: async () => null,
   inputState: async () => ({ type: 'Edit', window: 'Fixture' }),
   foreground: async () => ({ title: 'Fixture', pid: 10, hwnd: '1', proc: 'fixture' }), windowRect: async () => ({ x: 0, y: 0, w: 1000, h: 700 }),
@@ -24,13 +25,14 @@ import { wordCandidates } from '../electron/word-targets'
 
 const row: ScreenItem = { id: 7, text: '04_Hunyuanm Blender 5.2', src: 'ocr', type: 'Text', x: 100, y: 80, w: 400, h: 20,
   words: [{ t: '04_Hunyuanm', x: 100, y: 80, w: 100, h: 20 }, { t: 'Blender', x: 300, y: 80, w: 80, h: 20 }, { t: '5.2', x: 450, y: 80, w: 40, h: 20 }] }
-const scan: ScanResult = { area: { x: 0, y: 0, w: 1000, h: 700 }, items: [row], image: { data: 'FAKE_IMAGE', w: 1000, h: 700 }, ocr: true, uiaCount: 0, ocrCount: 1, window: 'Fixture' }
+const scan: ScanResult = { area: { x: 0, y: 0, w: 1000, h: 700 }, items: [row], image: { data: Buffer.from('FAKE_IMAGE').toString('base64'), w: 1000, h: 700 }, ocr: true, uiaCount: 0, ocrCount: 1, window: 'Fixture' }
 const ids = () => wordCandidates(state.scan as ScanResult).filter(c => c.wordIndex !== undefined)
 function respond(first: number, second: unknown, fallback = false) {
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const request = JSON.parse(init.body); state.requests.push(request)
     const short = typeof request.messages[1].content === 'string' && request.messages[1].content.startsWith('Instruction:')
-    const reply = short ? second : fallback && state.requests.length > 2 ? { intent: 'target', x: 900, y: 800, reason: 'fallback' } : { id: first, text: 'fixture', reason: 'fixture' }
+    const pointerCheck = JSON.stringify(request.messages).includes('confirm|adjust|uncertain')
+    const reply = pointerCheck ? { decision: 'confirm', reason: 'pointer on visual target' } : short ? second : fallback && state.requests.length > 2 ? { intent: 'target', x: 900, y: 800, reason: 'fallback' } : { id: first, text: 'fixture', reason: 'fixture' }
     return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
 }

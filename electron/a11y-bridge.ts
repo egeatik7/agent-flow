@@ -445,9 +445,9 @@ export async function cursorPos(): Promise<{ x: number; y: number } | undefined>
  * Fare konumundan tıklama. `hwnd`, TAŞIMA anındaki penceredir; worker arada pencere
  * değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAZ (açık hata verir).
  */
-export async function clickCurrentAt(x: number, y: number, hwnd?: number, target?: InputWindow): Promise<void> {
+export async function clickCurrentAt(x: number, y: number, hwnd?: number, target?: InputWindow, button: 'left' | 'double' | 'right' = 'left'): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('clickCurrentAt', { x: Math.round(x), y: Math.round(y), hwnd, target })
+  await worker.call('clickCurrentAt', { x: Math.round(x), y: Math.round(y), hwnd, target, button, ownPid: process.pid })
 }
 
 export async function locate(

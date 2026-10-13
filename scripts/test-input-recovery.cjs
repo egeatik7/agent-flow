@@ -21,7 +21,7 @@ function fixture(settings = {}) {
   let cursor = {x:0,y:0};
   const scan = { area: { ...win.rect }, items: [{ id: 1, text: 'Kaynak klasör', type: 'Text', src: 'ocr', x: 200, y: 500, w: 200, h: 30 }], image: { data: 'mock', w: 1000, h: 700 }, sig: Buffer.alloc(576).toString('base64'), window: 'Renamer', uiaCount: 0, ocrCount: 1 };
   const bridge = {
-    isLocked: async () => false, scan: async () => scan, discardShot: () => {},
+    isLocked: async () => false, scan: async opts => opts?.cursorMarker ? {...scan,cursor:{...cursor}} : scan, discardShot: () => {},
     inputTarget: async opts => { calls.push(['target', structuredClone(opts)]); return structuredClone(current); },
     assertInputTarget: async (...args) => calls.push(['assert', ...args]),
     inputState: async () => ({ type: 'Pane', writable: false, window: 'Renamer' }),
@@ -29,7 +29,7 @@ function fixture(settings = {}) {
     clickAt: async (...args) => calls.push(['click', ...args]),
     moveMouse: async (x,y) => {cursor={x,y};calls.push(['move',x,y]);return {hwnd:100};},
     cursorPos: async () => cursor,
-    clickCurrentAt: async (x,y,hwnd) => {calls.push(['click',x,y,'left']);calls.push(['currentClick',x,y,hwnd]);},
+    clickCurrentAt: async (x,y,hwnd,_target,mode='left') => {calls.push(['click',x,y,mode]);calls.push(['currentClick',x,y,hwnd]);},
     typeText: async (...args) => { calls.push(['write', ...args]); return queue.length ? queue.shift() : { value: 'hello', writeSent: true, focusHwnd: '110' }; },
     focusedValue: async () => null,
     sendKeys: async (...args) => calls.push(['keys', ...args]),
@@ -37,7 +37,7 @@ function fixture(settings = {}) {
     patchAt: async () => null,
     crop: async (rect, ...opts) => { calls.push(['crop', rect, ...opts]); return { area: rect, image: scan.image }; },
   };
-  const models = { isTarsModel: () => false, guiStep: async q => { queries.push(structuredClone(q)); return action('click', { x: 0.65, y: 0.72 }); }, chooseVisualTarget: async q => { queries.push(structuredClone(q)); return {intent:'target',x:.65,y:.72,reason:'input'}; }, chooseTypeField: async () => ({ id: 99, reason: 'no such field' }) };
+  const models = { FatalApiError: realModels.FatalApiError, isTarsModel: () => false, guiStep: async q => { queries.push(structuredClone(q)); return action('click', { x: 0.65, y: 0.72 }); }, chooseVisualTarget: async q => { queries.push(structuredClone(q)); return {intent:'target',x:.65,y:.72,reason:'input'}; }, chooseTypeField: async () => ({ id: 99, reason: 'no such field' }) };
   stub('a11y-bridge', bridge); stub('browser', { userChromeItems: async () => null });
   stub('shots', { rememberShot: () => {} }); stub('openrouter', models);
   require.cache[runnerFile] = { ...require.cache[runnerFile], exports: { ...realRunner, interruptibleSleep: async (ms, stopped) => { if (stopped()) throw new realRunner.StoppedError(); } } };
@@ -190,8 +190,13 @@ test('empty text plus Enter sends only the requested Enter',async()=>{
 // Popup recovery belongs only to the visual target finder, not the initiative loop.
 function visualFixture(extra={}) {
  const f=fixture({findOrder:['tars'],screenCheck:'off',...extra});
- const frames=[];
- f.bridge.scan=async opts=>{frames.push(structuredClone(opts));return {...f.scan,image:{...f.scan.image,data:'FRAME_'+frames.length}};};
+ const frames=[],markerFrames=[],pointerQueries=[];
+ f.bridge.scan=async opts=>{
+   const list=opts.cursorMarker?markerFrames:frames;list.push(structuredClone(opts));
+   return {...f.scan,cursor:opts.cursorMarker?{...await f.bridge.cursorPos()}:null,image:{...f.scan.image,data:Buffer.from((opts.cursorMarker?'MARKER_':'FRAME_')+list.length).toString('base64')}};
+ };
+ f.models.verifyVisualPointer=async q=>{pointerQueries.push(structuredClone(q));return {decision:'confirm',reason:'current crosshair inside target'};};
+ f.markerFrames=markerFrames;f.pointerQueries=pointerQueries;
  f.frames=frames;
  return f;
 }
@@ -210,10 +215,11 @@ test('popup dismissal stays in the same node; a new frame resolves the original 
  const targets=f.traces.filter(t=>t.kind==='resolved');assert.equal(targets.length,1);assert.equal(targets[0].target.x,200);
  assert.equal(f.traces.filter(t=>t.kind==='input'&&t.mode==='popup-dismiss').length,1);
 });
-test('unobstructed visual targeting remains one request and preserves single/double/right click modes',async()=>{
+test('unobstructed visual targeting has one target request plus one fresh pointer check and preserves modes',async()=>{
  for(const mode of ['left','double','right']) {
   const f=visualFixture();await f.ex.click(visualClick({clickMode:mode}),1);
   assert.equal(f.queries.length,1);assert.equal(f.frames.length,1);assert.equal(callsOf(f,'click').length,1);assert.equal(callsOf(f,'click')[0][3],mode);
+  assert.equal(f.pointerQueries.length,1);assert.equal(f.markerFrames.length,1);
  }
 });
 test('popup closes with a single left click while the real target retains its double/right mode',async()=>{
@@ -257,7 +263,7 @@ test('model failure after dismissal never retries the partially completed target
  await assert.rejects(f.ex.click(visualClick(),1),/Popup girdisinden sonra/);assert.equal(n,2);assert.equal(callsOf(f,'click').length,1);
 });
 test('failed or partially dispatched popup input is never resent',async()=>{
- const f=visualFixture();f.models.chooseVisualTarget=async()=>visualReply('dismiss');let n=0;f.bridge.clickAt=async()=>{n++;throw new Error('native send failed');};
+ const f=visualFixture();f.models.chooseVisualTarget=async()=>visualReply('dismiss');let n=0;f.bridge.clickCurrentAt=async()=>{n++;throw new Error('native send failed');};
  await assert.rejects(f.ex.click(visualClick(),1),/tekrar gönderilmeyecek/);assert.equal(n,1);assert.equal(f.frames.length,1);
 });
 test('Stop after popup decision prevents its input dispatch',async()=>{
@@ -265,7 +271,7 @@ test('Stop after popup decision prevents its input dispatch',async()=>{
  await assert.rejects(f.ex.click(visualClick(),1),realRunner.StoppedError);assert.equal(callsOf(f,'click').length,0);
 });
 test('Stop after popup input prevents rescan and final target click',async()=>{
- const f=visualFixture();f.models.chooseVisualTarget=async()=>visualReply('dismiss');f.bridge.clickAt=async(...args)=>{f.calls.push(['click',...args]);f.stop();};
+ const f=visualFixture();f.models.chooseVisualTarget=async()=>visualReply('dismiss');f.bridge.clickCurrentAt=async(x,y,_hwnd,_target,mode)=>{f.calls.push(['click',x,y,mode]);f.stop();};
  await assert.rejects(f.ex.click(visualClick(),1),realRunner.StoppedError);assert.equal(f.frames.length,1);assert.equal(callsOf(f,'click').length,1);
 });
 test('Stop during the refreshed target response prevents the final click',async()=>{
@@ -273,7 +279,7 @@ test('Stop during the refreshed target response prevents the final click',async(
  await assert.rejects(f.ex.click(visualClick(),1),realRunner.StoppedError);assert.equal(callsOf(f,'click').length,1);
 });
 test('target mapping uses the refreshed window bounds, including a negative initial desktop origin',async()=>{
- const f=visualFixture();let scans=0;f.bridge.scan=async()=>({...f.scan,area:++scans===1?{x:-1000,y:50,w:1000,h:700}:{x:300,y:200,w:600,h:400}});
+ const f=visualFixture();let scans=0;f.bridge.scan=async opts=>({...f.scan,cursor:opts.cursorMarker?{...await f.bridge.cursorPos()}:null,area:opts.cursorMarker?{x:-1000,y:0,w:2000,h:900}:++scans===1?{x:-1000,y:50,w:1000,h:700}:{x:300,y:200,w:600,h:400}});
  const replies=[visualReply('dismiss'),visualReply('target',.25,.5)];f.models.chooseVisualTarget=async()=>replies.shift();
  await f.ex.click(visualClick(),1);assert.deepEqual(callsOf(f,'click').map(c=>c.slice(1)),[[-200,260,'left'],[450,400,'left']]);
 });
@@ -285,14 +291,20 @@ test('crop target mapping still works and a crop can never dismiss a popup',asyn
 });
 
 test('real HTTP reply parser + executor + runner keep dismissal before the requested field and type',async()=>{
- const f=visualFixture();f.models.chooseVisualTarget=realModels.chooseVisualTarget;
+ const f=visualFixture();f.models.chooseVisualTarget=realModels.chooseVisualTarget;f.models.verifyVisualPointer=realModels.verifyVisualPointer;
  const originalFetch=global.fetch;let requests=0;
- global.fetch=async()=>({ok:true,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify(++requests===1?{intent:'dismiss',x:800,y:300,reason:'Close popup'}:{intent:'target',x:200,y:600,reason:'Requested field'})},finish_reason:'stop'}]})});
+ let pointerRequests=0;
+ global.fetch=async(_url,init)=>{
+  const checking=JSON.stringify(JSON.parse(init.body).messages).includes('confirm|adjust|uncertain');
+  const reply=checking?(pointerRequests++,{decision:'confirm',reason:'visible current target'}):++requests===1?{intent:'dismiss',x:800,y:300,reason:'Close popup'}:{intent:'target',x:200,y:600,reason:'Requested field'};
+  return {ok:true,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify(reply)},finish_reason:'stop'}]})};
+ };
  try {
   const click=visualClick(),write=writing(),start=node('start'),end=node('end');
   const graph={nodes:[start,click,write,end],edges:[{id:'s',from:start.id,fromPort:'next',to:click.id},{id:'c',from:click.id,fromPort:'next',to:write.id},{id:'w',from:write.id,fromPort:'next',to:end.id}]};
   await realRunner.runGraph(graph,f.ex,{maxSteps:10,stepDelayMs:0});
   assert.equal(requests,2);assert.deepEqual(callsOf(f,'click').map(c=>c.slice(1)),[[800,210,'left'],[200,420,'left']]);
+  assert.equal(pointerRequests,2);
   assert.deepEqual(f.calls.filter(c=>['click','write'].includes(c[0])).map(c=>c[0]),['click','click','write']);
  } finally {global.fetch=originalFetch;}
 });

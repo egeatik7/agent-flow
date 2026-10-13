@@ -1062,6 +1062,9 @@ function Invoke-Op([string]$op, $P) {
       return [pscustomobject]@{ x = [int]$p.X; y = [int]$p.Y }
     }
     'clickCurrentAt' {
+      $button = 'left'
+      if ($null -ne $P.button) { $button = [string]$P.button }
+      if ($button -notin @('left', 'double', 'right')) { throw 'INPUT_CLICK_MODE: Invalid current-pointer click mode; click not sent' }
       if (-not $P.hwnd -or [long]$P.hwnd -le 0) { throw 'INPUT_CLICK_STALE: No hover window identity; click not sent' }
       # Fare konumundan tıklama. $P.hwnd, TAŞIMA anındaki penceredir; arada pencere
       # değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAYIZ.
@@ -1071,6 +1074,7 @@ function Invoke-Op([string]$op, $P) {
       if ([Math]::Sqrt($dx * $dx + $dy * $dy) -gt 3) { throw 'INPUT_CLICK_STALE: Cursor moved before input; click not sent' }
       $x = [int]$cursor.X; $y = [int]$cursor.Y
       $kok = [XpWin]::RootAt($x, $y)
+      if ($P.ownPid -and [XpWin]::ProcessOf($kok) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine tiklamaz.' }
       if ($P.hwnd -and [IntPtr]([long]$P.hwnd) -ne [IntPtr]::Zero -and $kok -ne [IntPtr]([long]$P.hwnd)) {
         throw 'INPUT_CLICK_STALE: Fare noktası artık aynı pencerede değil; tıklama gönderilmedi'
       }
@@ -1078,7 +1082,7 @@ function Invoke-Op([string]$op, $P) {
         [void](Get-BoundWindow $P.target $false)
         if ($kok -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Target point is covered by another window' }
       }
-      Invoke-MouseAt $x $y 'left'
+      Invoke-MouseAt $x $y $button $true ([long]$P.hwnd)
       return $true
     }
     'moveAt' {

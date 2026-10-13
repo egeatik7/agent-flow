@@ -1,5 +1,5 @@
 import { METHOD_TABS } from '../../electron/node-methods'
-import { listPromptFor, TARS_TEMPLATE, SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT } from '../../electron/llm-flow'
+import { listPromptFor, TARS_TEMPLATE, SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUAL_TARGET_TARS_PROMPT, VISUAL_TARGET_JSON_PROMPT, VISUAL_POINTER_JSON_CONTRACT, VISUAL_POINTER_TARS_CONTRACT } from '../../electron/llm-flow'
 import { WORD_TARGET_RULES, CONDITION_TARGET_RULES, OCR_READER_RULES } from '../../electron/word-targets'
 import { useEffect, useState, type SetStateAction } from 'react'
 import { DEFAULT_FIND_OFF, normalizeFind } from '../../electron/llm-flow'
@@ -149,6 +149,8 @@ export default function LlmPanel(p: Props) {
                 {promptBox('screen', 'Diğer görsel modeller — ek talimat', 'Bu kutu ortak görsel hedefleme ek talimatıdır; boşsa yerleşik JSON hedef promptu kullanılır.', prompts.screen === SCREEN_PROMPT ? '' : prompts.screen ?? '')}
                 {fixedRules('JSON yerleşik hedef promptu', VISUAL_TARGET_JSON_PROMPT)}
                 {fixedRules('Her görsel isteğe eklenen hedef kuralları', VISUAL_TARGET_RULES)}
+                {nodeTab === 'click' && promptBox('visualPointer', 'Görsel konum doğrulama — önce fareyi taşı', 'Yalnız görsel modelle bulunan tıklama hedefinde: fare taşınır, gerçek imleç işaretli yeni kare modele gönderilir. Onaylanan konumdan seçili modla tıklanır. En fazla iki konum düzeltmesi; belirsizlikte tıklama yok. UIA/OCR ve Fareyi Oynat modunda bu çağrı yapılmaz.')}
+                {nodeTab === 'click' && fixedRules('Konum doğrulaması — sabit JSON ve UI-TARS yanıt sözleşmeleri', VISUAL_POINTER_JSON_CONTRACT + '\n\n' + VISUAL_POINTER_TARS_CONTRACT)}
               </>}
             </li>
           )

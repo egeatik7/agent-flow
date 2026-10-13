@@ -27,12 +27,14 @@ import {
 import { activeFindOrder, promptOf, DEFAULT_PROMPTS } from './llm-flow'
 import { conflict, describeMemory, likeness, memoOf, remember } from './memory'
 import { clearHover, recordHover } from './hover'
+import { alignVisualPointer, VisualPointerError } from './visual-hover'
 import {
   chooseScreenTarget,
   chooseOcrWord,
   FatalApiError,
   type ScreenChoice,
   chooseVisualTarget,
+  verifyVisualPointer,
   type VisualTargetResult,
   isTarsModel,
   judgeReaction,
@@ -65,7 +67,7 @@ export type AgentContext = {
   captureTargetImages?: boolean
 }
 
-type Resolved = { x: number; y: number; label: string; memo?: TargetMemo }
+type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string }
 
 class NotFoundError extends Error {}
 /** A popup input was attempted: never replay it through the generic target retry. */
@@ -668,7 +670,7 @@ export function createAgent(ctx: AgentContext) {
         if (action.intent !== 'dismiss') break
         if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
         if (!validVisualPoint(action)) throw new VisualTargetRecoveryError('Popup kapatma yanıtında geçerli nokta yok; tıklama gönderilmedi.')
-        const x = res.area.x + action.x! * res.area.w, y = res.area.y + action.y! * res.area.h
+        let x = res.area.x + action.x! * res.area.w, y = res.area.y + action.y! * res.area.h
         await waitUnlocked()
         checkStopped()
         clearHover()
@@ -676,8 +678,14 @@ export function createAgent(ctx: AgentContext) {
         guiReplace = false
         // Flag before dispatch: a thrown native call can have partially sent input.
         didDismiss = true
-        try { await sendClick(x, y, 'left') }
-        catch (e) { throw new VisualTargetRecoveryError(`Popup kapatma girdisi başarısız; tekrar gönderilmeyecek: ${(e as Error).message}`) }
+        try {
+          const approved = await dispatchVisualClick(node, { x, y }, `Current target is ONLY the unambiguous Close/X or Cancel control of the unrelated obstructing popup. Do not close the main application or click the underlying original target. Original node context (not this click): ${prompt}. Earlier reason (not proof): ${action.reason}`, 'left')
+          x = approved.x; y = approved.y
+        }
+        catch (e) {
+          if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+          throw new VisualTargetRecoveryError(`Popup kapatma girdisi başarısız; tekrar gönderilmeyecek: ${(e as Error).message}`)
+        }
         checkStopped()
         trace(node, { kind: 'input', point: { x: Math.round(x), y: Math.round(y) }, mode: 'popup-dismiss', phase: 'sent' })
         log('info', `Popup kapatma tıklaması gönderildi @${Math.round(x)},${Math.round(y)}; node tamamlanmadı, asıl hedef yeni görüntüde aranacak.`)
@@ -751,6 +759,7 @@ export function createAgent(ctx: AgentContext) {
         x,
         y,
         label: '[Görsel model] ekran görüntüsü',
+        visualGoal: prompt,
         memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
       }
     } catch (e) {
@@ -1060,6 +1069,39 @@ export function createAgent(ctx: AgentContext) {
     return result
   }
 
+  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right') {
+    const settings = getSettings()
+    clearHover()
+    const approved = await alignVisualPointer(point, {
+      move: async point => {
+        await waitUnlocked(); checkStopped()
+        const result = await bridge.moveMouse(point.x, point.y)
+        if (result.warning) log('warn', result.warning)
+        log('info', `[Görsel hizalama] Fare taşındı @${Math.round(point.x)},${Math.round(point.y)}; tıklama yok.`)
+        trace(node, { kind: 'input', point, mode: 'move', phase: 'sent' })
+        return result
+      },
+      capture: () => bridge.scan({ image: 'plain', cursorMarker: true, fresh: true, readOnly: true, uia: false, ocr: false, maxImageW: isTarsModel(agentModels(settings)[0] || '') ? 1288 : 1400, fit: true, snap: isTarsModel(agentModels(settings)[0] || '') ? 28 : 0 }),
+      position: () => bridge.cursorPos(), checkStopped, settle: () => pause(FOCUS_MS),
+      stage: text => ctx.setMethod?.(text),
+      decide: async (scan, pointer) => {
+        trace(node, { kind: 'observation', source: 'tars', scan })
+        const result = await verifyVisualPointer({ apiKey: settings.apiKey, model: agentModels(settings), goal, screen: scan.image!, area: scan.area, pointer, system: promptOf(settings.llmPrompts, 'visualPointer'), nodeId: node.id })
+        trace(node, { kind: 'model', source: 'tars', value: result })
+        log('info', `[Görsel hizalama] ${result.decision}${result.reason ? `: ${result.reason}` : ''}`)
+        return result
+      },
+    })
+    checkStopped()
+    if (await bridge.isLocked()) throw new VisualPointerError('Ekran konum onayından sonra kilitlendi; tıklama gönderilmedi.')
+    checkStopped()
+    // The worker re-checks the REAL pointer and its window immediately before dispatch.
+    // No click type is chosen by the model, and no old proposed point is restored.
+    await bridge.clickCurrentAt(approved.x, approved.y, approved.hwnd, undefined, mode)
+    checkStopped()
+    return approved
+  }
+
   async function clickInput(point: Point, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
     clearHover()
     checkStopped()
@@ -1149,10 +1191,19 @@ export function createAgent(ctx: AgentContext) {
       // a menu that should have opened does not. Written commands have no saved element to fall back
       // on, so they get the same window activation the typing path already does.
       if (ahead?.next?.kind === 'type' || !node.locator) await activateInputWindow(node)
-      const t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+      let t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
       const mode = node.clickMode ?? 'left'
       const confirmed = await ensureActed(node, ahead, async () => {
         checkStopped()
+        if (t.visualGoal && mode !== 'move') {
+          const approved = await dispatchVisualClick(node, t, t.visualGoal, mode)
+          t = { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }
+          lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
+          trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode, phase: 'sent' })
+          ctx.setMethod?.('Görsel konum onaylandı — tıklama gönderildi')
+          log('info', `${mode === 'double' ? 'Çift tıklama' : mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi: görsel modelin onayladığı imleç @${t.x},${t.y}.`)
+          return
+        }
         if (mode === 'left' && ahead?.next?.kind === 'type') await clickInput(t, node)
         else {
           // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
