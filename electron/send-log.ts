@@ -210,36 +210,65 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
   } catch { return '' }
 }
 
-/** Ölçüldü (ollama show): yerel model Modelfile'ında num_ctx 65536; uygulama num_ctx GÖNDERMEZ. */
-export const YEREL_BAGLAM_TOKEN = 65536
+/**
+ * ETKİN BAĞLAM KAPASİTESİ (num_ctx) — bu bir ÖLÇÜMDÜR, tahmin değildir.
+ * Kural: (1) istek açıkça num_ctx gönderiyorsa o kullanılır; (2) göndermiyorsa yerel sunucunun MODEL
+ * yapılandırmasındaki etkin num_ctx alınır (`ollama show <model>` → Parameters → num_ctx);
+ * (3) modelin desteklediği AZAMİ "context length" (ör. 262144) ile etkin num_ctx KARIŞTIRILMAZ;
+ * (4) doğrulanamıyorsa null → "pencere=bilinmiyor" ve YÜZDE/AŞIM İDDİASI ÜRETİLMEZ.
+ * Ölçüm model+SUNUCU bazında önbelleklenir; her çağrıda ek ağ isteği YAPILMAZ.
+ */
+const baglamOnbellek = new Map<string, number | null>()
+const baglamAnahtar = (model: string, sunucu: string) => `${sunucu}|${model}`
+export function setBaglamKapasitesi(model: string, sunucu: string, token: number | null): void { baglamOnbellek.set(baglamAnahtar(model, sunucu), token) }
+export function baglamKapasitesi(model: string, sunucu: string): number | null | undefined { return baglamOnbellek.get(baglamAnahtar(model, sunucu)) }
+export function baglamOnbellekBoyu(): number { return baglamOnbellek.size }
+
+/** `ollama show <model>` çıktısından ETKİN num_ctx'yi çıkarır. Azami "context length" satırı KULLANILMAZ. */
+export function parseOllamaNumCtx(cikti: string): number | null {
+  const m = String(cikti ?? '').match(/^\s*num_ctx\s+(\d+)\s*$/m)
+  const n = m ? Number(m[1]) : 0
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 
 /**
- * BAĞLAM PENCERESİ BASKISI — yalnız SAYI/BOYUT yazar. Görev/prompt metni, OCR/UIA içeriği, ekran
- * görüntüsü ve API anahtarı YAZILMAZ. Tahmin Türkçe için ~3,2 karakter/token varsayar; kesin sayı
- * sunucunun usage/eval_count alanlarıdır (bkz. responseUsageText).
+ * BAĞLAM PENCERESİ BASKISI — yalnız SAYI/BOYUT yazar (görev metni, OCR/UIA içeriği, ekran görüntüsü ve
+ * anahtar YAZILMAZ). Token sayısı TAHMİNDİR ve hiçbir karar (engelleme, kırpma, model değiştirme) bu
+ * tahmine dayanmaz.
  */
-export function contextPressureText(f: { model: string; metinKarakter: number; goruntuAdet: number; goruntuBayt: number; pencereToken?: number }): string {
+export function contextPressureText(f: { model: string; metinKarakter: number; goruntuAdet: number; goruntuBayt: number; pencereToken?: number | null }): string {
   const token = Math.round(f.metinKarakter / 3.2 + f.goruntuAdet * 1400)
-  const yuzde = f.pencereToken ? Math.round((token / f.pencereToken) * 100) : null
-  const satirlar = [`BAGLAM-SIGMA | model=${f.model} | tahmini≈${token} token · pencere=${f.pencereToken ?? '?'}${yuzde === null ? '' : ` (%${yuzde})`} | metin-karakter=${f.metinKarakter} görüntü=${f.goruntuAdet} (~${Math.round(f.goruntuBayt / 1024)} KB)`]
-  if (yuzde !== null && yuzde > 100) satirlar.push(`BAGLAM-ASIM | tahmini ${token} > pencere ${f.pencereToken} — istek SUNUCUYA SIĞMIYOR`)
-  else if (yuzde !== null && yuzde >= 80) satirlar.push(`BAGLAM-UYARI | tahmini %${yuzde} ≥ eşik %80 — pencere yaklaşıyor`)
+  const pencere = typeof f.pencereToken === 'number' && f.pencereToken > 0 ? f.pencereToken : null
+  const yuzde = pencere ? Math.round((token / pencere) * 100) : null
+  const satirlar = [`BAGLAM-SIGMA | model=${f.model} | tahmini≈${token} token (TAHMİN) · pencere=${pencere ?? 'bilinmiyor'}${yuzde === null ? '' : ` (%${yuzde})`} | metin-karakter=${f.metinKarakter} görüntü=${f.goruntuAdet} (~${Math.round(f.goruntuBayt / 1024)} KB)`]
+  if (yuzde !== null && yuzde > 100) satirlar.push('BAGLAM-ASIM | Tahmini kapasite aşımı; gerçek token ölçümü gerekli (istek DEĞİŞTİRİLMEDİ)')
+  else if (yuzde !== null && yuzde >= 80) satirlar.push(`BAGLAM-UYARI | tahmini doluluk %${yuzde} ≥ eşik %80 (TAHMİN; engelleme/kırpma yapılmaz)`)
   return satirlar.join('\n')
 }
 
-/** Sunucunun KESİN sayıları + kesilme kararı. Veri yoksa null döner (boş satır yazılmaz). */
-export function responseUsageText(f: { model: string; finishReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }): string | null {
-  const u = f.usage
-  if (!f.finishReason && !u) return null
-  const parca = [u?.prompt_tokens !== undefined ? `prompt ${u.prompt_tokens}` : '', u?.completion_tokens !== undefined ? `completion ${u.completion_tokens}` : '', u?.total_tokens !== undefined ? `total ${u.total_tokens}` : ''].filter(Boolean).join(' · ')
-  const bas = `BAGLAM-SONUC | model=${f.model}${f.finishReason ? ` | finish_reason=${f.finishReason}` : ''}${parca ? ` | usage=${parca}` : ''}`
-  return f.finishReason === 'length' ? `${bas}\nBAGLAM-KESIK | yanıt ÇIKTI/BAĞLAM sınırında kesildi (finish_reason=length)` : bas
+/** Sunucunun verdiği sayılar OLDUĞU GİBİ yazılır; alan yoksa "bilinmiyor" (tahmin üretilmez). */
+export function responseUsageText(f: { model: string; finishReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }; native?: { prompt_eval_count?: number; eval_count?: number; done_reason?: string }; maxTokens?: number }): string | null {
+  const u = f.usage, n = f.native
+  if (!u && !n && !f.finishReason) return null
+  const b = (v: unknown) => (v === undefined || v === null ? 'bilinmiyor' : String(v))
+  const parca = [
+    `prompt_tokens=${b(u?.prompt_tokens)}`,
+    `completion_tokens=${b(u?.completion_tokens)}`,
+    `total_tokens=${b(u?.total_tokens)}`,
+    `finish_reason=${b(f.finishReason)}`,
+    `max_tokens=${f.maxTokens === undefined ? 'yok' : f.maxTokens}`,
+  ]
+  if (n) parca.push(`prompt_eval_count=${b(n.prompt_eval_count)}`, `eval_count=${b(n.eval_count)}`, `done_reason=${b(n.done_reason)}`)
+  const bas = `BAGLAM-SONUC | model=${f.model} | ${parca.join(' · ')}`
+  return f.finishReason === 'length'
+    ? `${bas}\nBAGLAM-KESIK | Yanıt uzunluk sınırında kesildi; çıktı bütçesi VEYA bağlam sınırı olabilir (bağlam taşması KANITLANMADI)`
+    : bas
 }
 
-/** Sunucu hatasını sınıflandırır: bağlam taşması | token tekrarı | diğer (içerik yazılmaz). */
+/** Hata sınıfları AYRI: açık bağlam-uzunluğu aşımı | token repeat limit | diğer (geniş eşleşme YOK). */
 export function contextErrorKind(message: string): 'baglam' | 'tekrar' | 'diger' {
   const m = String(message ?? '')
-  if (/repeat limit|repeated token|token repeat/i.test(m)) return 'tekrar'
-  if (/context|too (?:long|large)|truncat|maximum context|exceeds/i.test(m)) return 'baglam'
+  if (/token repeat limit|repeat limit reached/i.test(m)) return 'tekrar'
+  if (/context length (?:exceeded|is exceeded)|maximum context length|exceeds the (?:maximum )?context|too many tokens|prompt is too long|context_length_exceeded/i.test(m)) return 'baglam'
   return 'diger'
 }
