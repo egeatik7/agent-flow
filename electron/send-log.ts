@@ -209,3 +209,37 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
     return dir
   } catch { return '' }
 }
+
+/** Ölçüldü (ollama show): yerel model Modelfile'ında num_ctx 65536; uygulama num_ctx GÖNDERMEZ. */
+export const YEREL_BAGLAM_TOKEN = 65536
+
+/**
+ * BAĞLAM PENCERESİ BASKISI — yalnız SAYI/BOYUT yazar. Görev/prompt metni, OCR/UIA içeriği, ekran
+ * görüntüsü ve API anahtarı YAZILMAZ. Tahmin Türkçe için ~3,2 karakter/token varsayar; kesin sayı
+ * sunucunun usage/eval_count alanlarıdır (bkz. responseUsageText).
+ */
+export function contextPressureText(f: { model: string; metinKarakter: number; goruntuAdet: number; goruntuBayt: number; pencereToken?: number }): string {
+  const token = Math.round(f.metinKarakter / 3.2 + f.goruntuAdet * 1400)
+  const yuzde = f.pencereToken ? Math.round((token / f.pencereToken) * 100) : null
+  const satirlar = [`BAGLAM-SIGMA | model=${f.model} | tahmini≈${token} token · pencere=${f.pencereToken ?? '?'}${yuzde === null ? '' : ` (%${yuzde})`} | metin-karakter=${f.metinKarakter} görüntü=${f.goruntuAdet} (~${Math.round(f.goruntuBayt / 1024)} KB)`]
+  if (yuzde !== null && yuzde > 100) satirlar.push(`BAGLAM-ASIM | tahmini ${token} > pencere ${f.pencereToken} — istek SUNUCUYA SIĞMIYOR`)
+  else if (yuzde !== null && yuzde >= 80) satirlar.push(`BAGLAM-UYARI | tahmini %${yuzde} ≥ eşik %80 — pencere yaklaşıyor`)
+  return satirlar.join('\n')
+}
+
+/** Sunucunun KESİN sayıları + kesilme kararı. Veri yoksa null döner (boş satır yazılmaz). */
+export function responseUsageText(f: { model: string; finishReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }): string | null {
+  const u = f.usage
+  if (!f.finishReason && !u) return null
+  const parca = [u?.prompt_tokens !== undefined ? `prompt ${u.prompt_tokens}` : '', u?.completion_tokens !== undefined ? `completion ${u.completion_tokens}` : '', u?.total_tokens !== undefined ? `total ${u.total_tokens}` : ''].filter(Boolean).join(' · ')
+  const bas = `BAGLAM-SONUC | model=${f.model}${f.finishReason ? ` | finish_reason=${f.finishReason}` : ''}${parca ? ` | usage=${parca}` : ''}`
+  return f.finishReason === 'length' ? `${bas}\nBAGLAM-KESIK | yanıt ÇIKTI/BAĞLAM sınırında kesildi (finish_reason=length)` : bas
+}
+
+/** Sunucu hatasını sınıflandırır: bağlam taşması | token tekrarı | diğer (içerik yazılmaz). */
+export function contextErrorKind(message: string): 'baglam' | 'tekrar' | 'diger' {
+  const m = String(message ?? '')
+  if (/repeat limit|repeated token|token repeat/i.test(m)) return 'tekrar'
+  if (/context|too (?:long|large)|truncat|maximum context|exceeds/i.test(m)) return 'baglam'
+  return 'diger'
+}

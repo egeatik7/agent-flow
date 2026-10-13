@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
+import { contextErrorKind, contextPressureText, responseUsageText, YEREL_BAGLAM_TOKEN, sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
@@ -487,6 +487,13 @@ async function chatOnce(
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
     const effort = target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
     reportOut(target.model, target.local, messages)
+    if (target.local) {
+      // Bağlam baskısı: yalnız sayaç/boyut (içerik yazılmaz).
+      const metinKarakter = messages.reduce((t, m) => t + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]).reduce((s, p) => s + (p.type === 'image_url' ? 0 : String(p.text ?? '').length), 0) : 0), 0)
+      const resimler = messages.flatMap((m) => Array.isArray(m.content) ? (m.content as { type?: string; image_url?: { url?: string } }[]).filter((p) => p.type === 'image_url') : [])
+      const bayt = resimler.reduce((t, p) => t + Math.round(((p.image_url?.url?.length ?? 0) * 3) / 4), 0)
+      chatLogger?.(contextPressureText({ model: target.model, metinKarakter, goruntuAdet: resimler.length, goruntuBayt: bayt, pencereToken: YEREL_BAGLAM_TOKEN }))
+    }
     const res = await guardedFetch(target.url, {
       method: 'POST',
       headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
@@ -505,6 +512,8 @@ async function chatOnce(
     checkObservation(opts.signal)
     if (!res.ok) {
       reportIn(target.local, `hata ${res.status}: ${res.text.slice(0, 2000)}`)
+      const tur = contextErrorKind(res.text)
+      if (tur !== 'diger') chatLogger?.(tur === 'tekrar' ? `TOKEN-TEKrar | model=${target.model} | sunucu: token repeat limit (${res.status})` : `BAGLAM-HATA | model=${target.model} | sunucu: baglam/kesme hatasi (${res.status})`)
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
       if (!target.local && res.status === 401) throw new FatalApiError('OpenRouter API anahtarı geçersiz (401).')
       if (!target.local && res.status === 402) throw new FatalApiError('OpenRouter bakiyesi yetersiz (402).')
@@ -519,6 +528,8 @@ async function chatOnce(
     } catch {
       throw new ModelRejected(`${where} yanıtı okunamadı.`)
     }
+    const kullanim = responseUsageText({ model: target.model, finishReason: data.choices?.[0]?.finish_reason, usage: (data as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage })
+    if (kullanim) chatLogger?.(kullanim)
     if (data.error) {
       const msg = providerError(data.error)
       reportIn(target.local, `hata: ${msg}`)

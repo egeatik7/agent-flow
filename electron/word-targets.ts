@@ -104,7 +104,7 @@ export function describeWordCandidates(scan: ScanResult, candidates: WordCandida
   const parentText = new Map(scan.items.map((item) => [item.id, item.text.replace(/"/g, "'").slice(0, 60)]))
   if (kept.length < candidates.length) {
     // §9: aday listesi sınırsız büyümesin. Tek satır bilgi, aday başına değil.
-    const say = `Aday listesi sınırlandı: ${candidates.length} adaydan ${kept.length} tanesi modele gönderiliyor (üst sınır ${WORD_CANDIDATE_LIMIT}).`
+    const say = `AKIS-KIRPMA | Aday listesi sınırlandı: ${candidates.length} adaydan ${kept.length} tanesi modele gönderiliyor (üst sınır ${WORD_CANDIDATE_LIMIT}).`
     if (note) note(say)
     else console.warn(`[hedef] ${say}`)
   }
