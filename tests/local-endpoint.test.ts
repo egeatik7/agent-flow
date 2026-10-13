@@ -38,7 +38,7 @@ describe('local OpenAI-compatible integration', () => {
     })
     vi.stubGlobal('fetch', fetch)
     expect(await visionDescribe({ apiKey: 'cloud-key', model: ['local:vision', 'cloud/vision'], image })).toBe('cloud')
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(1) // ÜRETİM isteği tek; tanılama sorguları (/api/ps, /api/show) ayrı sayılır
   })
   it('does not wait forever when only a disabled local row or a missing cloud key is configured', async () => {
     vi.useFakeTimers()
@@ -46,7 +46,7 @@ describe('local OpenAI-compatible integration', () => {
     const result = visionDescribe({ apiKey: '', model: ['local:vision', 'cloud/vision'], image }).catch(e => e.message)
     await vi.advanceTimersByTimeAsync(40_000)
     expect(await result).toContain('Hiçbir model cevap vermedi')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(0) // hiç ÜRETİM isteği yok (tanılama sorguları olabilir)
   })
   it('reports a malformed models response instead of treating it as an empty success', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, text: async () => '{"error":"wrong route"}' })))
@@ -55,7 +55,7 @@ describe('local OpenAI-compatible integration', () => {
   it('rejects a malformed address before making a network request', async () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
     await expect(listLocalModels('127.0.0.1:8080')).rejects.toThrow('adres')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(0) // hiç ÜRETİM isteği yok (tanılama sorguları olabilir)
   })
   it('Ollama adresinde düşünmeyi kapatır, başka yerel sunucuda gövdeyi değiştirmez', async () => {
     const bodies: any[] = []

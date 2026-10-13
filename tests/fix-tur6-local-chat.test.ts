@@ -42,7 +42,7 @@ describe('directChat', () => {
     expect(r.model).toBe('qwen2.5:7b')
     expect(r.text).toBe('Merhaba, buradayım.')
     expect(Number.isFinite(r.ms)).toBe(true)
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(1) // ÜRETİM isteği tek; tanılama sorguları (/api/ps, /api/show) ayrı sayılır
   })
 
   it('allowLocal:false iken local: modeli reddedilir ve hiç istek atılmaz', async () => {
@@ -50,7 +50,7 @@ describe('directChat', () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
     await expect(directChat({ apiKey: 'k', model: 'local:qwen2.5:7b', prompt: 'selam', allowLocal: false })).rejects.toThrow(/Yerel model kapalı/)
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(0) // hiç ÜRETİM isteği yok (tanılama sorguları olabilir)
   })
 
   it('boş mesajı ve boş yanıtı açıkça bildirir', async () => {

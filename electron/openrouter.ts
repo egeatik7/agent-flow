@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { baglamKapasitesi, setBaglamKapasitesi, parseOllamaNumCtx, contextErrorKind, contextPressureText, responseUsageText, sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
+import { olcumuTazele, pencereTokenFor } from './local-context-probe'
+import { contextErrorKind, contextPressureText, responseUsageText, sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
@@ -492,7 +493,9 @@ async function chatOnce(
       const metinKarakter = messages.reduce((t, m) => t + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]).reduce((s, p) => s + (p.type === 'image_url' ? 0 : String(p.text ?? '').length), 0) : 0), 0)
       const resimler = messages.flatMap((m) => Array.isArray(m.content) ? (m.content as { type?: string; image_url?: { url?: string } }[]).filter((p) => p.type === 'image_url') : [])
       const bayt = resimler.reduce((t, p) => t + Math.round(((p.image_url?.url?.length ?? 0) * 3) / 4), 0)
-      chatLogger?.(contextPressureText({ model: target.model, metinKarakter, goruntuAdet: resimler.length, goruntuBayt: bayt, pencereToken: (() => { const bilinen = baglamKapasitesi(target.model, target.url); if (bilinen !== undefined) return bilinen; let olculen: number | null = null; try { const c = spawnSync('ollama', ['show', target.model], { encoding: 'utf8' }); olculen = parseOllamaNumCtx(String(c.stdout ?? '')) } catch { olculen = null } setBaglamKapasitesi(target.model, target.url, olculen); return olculen })() }))
+      chatLogger?.(contextPressureText({ model: target.model, metinKarakter, goruntuAdet: resimler.length, goruntuBayt: bayt, pencereToken: pencereTokenFor(target.model, target.url) }))
+      // Ölçüm ÇAĞRI SINIRINDA, isteği BEKLETMEDEN tazelenir (cevap sonrası için de aynı yol kullanılır).
+      void olcumuTazele(target.model, target.url).catch(() => {})
     }
     const res = await guardedFetch(target.url, {
       method: 'POST',
