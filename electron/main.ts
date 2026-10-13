@@ -51,6 +51,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
+import { nextModelRevision, resolveStage } from './model-chain'
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
 import { chooseLibraryDirectory, isProtectedPath } from './library-path'
@@ -361,6 +362,8 @@ function log(level: LogLevel, message: string, forceHud = false) {
 
 setChatLogger((line) => {
   // Kart kronometresi: model isteği başlarken sayaç, cevap gelince süre raporu (1.9.118).
+  const denenen = line.match(/^\[(?:yerel|API)\] → (\S+)/)
+  if (denenen) hudSonModel = shortModelName(denenen[1])
   const isaret = sendMarkerInfo(line)
   if (isaret?.kind === 'gonderim') {
     hudSonModel = shortModelName(isaret.model)
@@ -1069,7 +1072,9 @@ async function runFlow(
               return recoveryExecutor(request, recoveryToolContext, shouldStop, agent.executor, true)
             },
             turn: args => {
-              return recoveryToolTurn({ ...args, allowLocal: true, apiKey: settings.apiKey, models: modelChain(settings.agentModel && !/ui-tars/i.test(settings.agentModel) ? settings.agentModel : settings.model, settings.agentBackups).filter(m => !/ui-tars/i.test(m)) })
+              const live = getSettings()
+              const yap = resolveStage(live, 'yap')
+              return recoveryToolTurn({ ...args, allowLocal: true, apiKey: live.apiKey, models: yap.chain, stage: 'yap', revision: live.modelRevision ?? 0, chainSource: yap.source })
             },
           })
         } catch (error) {
@@ -1116,9 +1121,11 @@ async function runFlow(
               return recoveryExecutor(request, recoveryToolContext, shouldStop, agent.executor)
             },
             turn: (args) => {
-              if (!settings.apiKey) throw new Error('Kurtarma sekmesinden ayrı OpenRouter API anahtarını kaydet.')
-              if (!settings.model) throw new Error('Kurtarma sekmesinden bir model seç.')
-              return recoveryToolTurn({ ...args, apiKey: settings.apiKey, models: modelChain(settings.model, settings.backups) })
+              const live = recoverySettings(getSettings().recovery)
+              const rev = getSettings().modelRevision ?? 0
+              if (!live.apiKey) throw new Error('Kurtarma sekmesinden ayrı OpenRouter API anahtarını kaydet.')
+              if (!live.model) throw new Error('Kurtarma sekmesinden bir model seç.')
+              return recoveryToolTurn({ ...args, apiKey: live.apiKey, models: modelChain(live.model, live.backups), stage: 'recovery', revision: rev, chainSource: 'Kurtarma ajanı' })
             },
           })
           if (result.report) pendingReports.set(request.node.id, result.report)
@@ -1252,7 +1259,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
 
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
-    const next = { ...getSettings(), ...partial }
+    const onceki = getSettings()
+    const next = { ...onceki, ...partial }
     next.apiKey = validateApiKey(next.apiKey)
     if (next.recovery?.apiKey) next.recovery = { ...next.recovery, apiKey: validateApiKey(next.recovery.apiKey) }
     next.ocrEngine = 'combined'
@@ -1271,6 +1279,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.agentBackups = cleanBackups(next.agentBackups).filter((name) => name !== next.agentModel.trim())
     next.conditionBackups = cleanBackups(next.conditionBackups).filter((name) => name !== next.conditionModel.trim())
     next.recovery = recoverySettings(next.recovery)
+    next.modelRevision = nextModelRevision(onceki, next)
     store.set('settings', next)
     bridge.setOcrEngine(next.ocrEngine)
     void syncEndpoint()

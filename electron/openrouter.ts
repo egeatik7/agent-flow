@@ -84,10 +84,15 @@ export async function recoveryToolTurn(args: {
   tools: ModelTool[]
   shouldStop: () => boolean
   timeoutMs: number
+  stage?: string
+  revision?: number
+  chainSource?: string
 }): Promise<ToolMessage> {
   const deadline = Date.now() + args.timeoutMs
+  const chain = asModelChain(args.models)
+  if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
   let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
-  for (const model of asModelChain(args.models)) {
+  for (const model of chain) {
     if (args.shouldStop() || stopCheck()) throw new StoppedError()
     if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
     try {
@@ -101,7 +106,8 @@ export async function recoveryToolTurn(args: {
       }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (!res.ok) {
-        if (res.status === 401 || res.status === 402) throw new FatalApiError(`OpenRouter kurtarma çağrısı (${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}.`)
+        chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
+        if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`OpenRouter kurtarma çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
         throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
       }
       const data = JSON.parse(res.text)
@@ -116,6 +122,7 @@ export async function recoveryToolTurn(args: {
       reportIn(target.local, JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
       const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
       const answered = typeof data.model === 'string' && data.model ? data.model : model
+      chatLogger?.(`CEVAPLAYAN asama=${args.stage ?? 'recovery'} model=${answered}`)
       chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
       return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
         ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
@@ -125,6 +132,7 @@ export async function recoveryToolTurn(args: {
     } catch (error) {
       if (error instanceof StoppedError || error instanceof FatalApiError) throw error
       last = error
+      chatLogger?.(`ATLANDI asama=${args.stage ?? 'recovery'} model=${model} neden=${brief(error)}`)
       chatLogger?.(`Kurtarma modeli ${model} yanıtlayamadı: ${brief(error)}`)
     }
   }
@@ -517,9 +525,11 @@ function brief(err: unknown): string {
  * Stops when the user stops, the key / balance is rejected, or every model was rejected for good
  * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits retry within the total cycle/time bound.
  */
-export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number; signal?: AbortSignal } = {}): Promise<T> {
+export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number; signal?: AbortSignal; stage?: string; revision?: number; source?: string } = {}): Promise<T> {
   const chain = asModelChain(models)
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
+  // Sıra, çağrı başında kopyalanır. Kayıt bu istek bitmeden değişse de bu dizi durur.
+  if (limits.stage) chatLogger?.(`ZINCIR asama=${limits.stage} revizyon=${limits.revision ?? 0} kaynak=${limits.source ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0]}`)
   let rejectedCycles = 0
   const maxCycles = Math.max(1, limits.maxCycles ?? 256)
   const deadline = Date.now() + Math.max(1, limits.maxWaitMs ?? 15 * 60_000)
@@ -541,7 +551,9 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         lastError = brief(e)
         const last = i === chain.length - 1
         const next = chain[(i + 1) % chain.length]
-        chatLogger?.(last ? `${targetTag(isLocalName(model))} ${model} olmadı (${brief(e)}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${targetTag(isLocalName(model))} ${model} olmadı (${brief(e)}). ${next} deneniyor.`)
+        const neden = brief(e)
+        chatLogger?.(`ATLANDI asama=${limits.stage ?? '-'} model=${model} neden=${neden} sonraki=${last ? (cycles + 1 >= maxCycles ? 'yok' : chain[0]) : next}`)
+        chatLogger?.(last ? `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${next} deneniyor.`)
       }
     }
     rejectedCycles = allRejected ? rejectedCycles + 1 : 0
@@ -572,14 +584,27 @@ function permanentFailure(status: number, text: string): boolean {
   return [400, 403, 404, 405, 413, 415, 422, 431].includes(status) || /invalid[_ ]request|invalid parameter|out of memory|not enough (?:gpu |vram |system )?memory|failed to allocate|context (?:length|window).*(?:exceed|limit)|invalid base64/i.test(text)
 }
 
+/** Bakiye hatası reasoning hatası değildir. Aynı gövde yeniden gönderilmez. */
+export function isCreditError(status: number, text: string): boolean {
+  if (status === 402) return true
+  return /insufficient credits|payment required|requires more credits|out of credits|credit balance|insufficient_quota/i.test(text)
+}
+
+/** Sağlayıcı düşünmeyi kapatmayı reddetti. Yalnız bu alan kalkar; başka modellere düşünme açılmaz. */
+export function isReasoningMandatory(text: string): boolean {
+  return /reasoning is mandatory/i.test(text) && /cannot be disabled/i.test(text)
+}
+
 /** One request to one model. No second try here; the chain does that. */
 async function chatOnce(
   apiKey: string,
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean; requestId?: string } = {}
+  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean; requestId?: string; stage?: string } = {}
 ): Promise<string> {
+  // Zorunlu düşünme hatası görülünce yalnız bu çağrıda alan kalkar. Sonraki model kendi gövdesini kurar.
+  let dropReasoning = false
   const once = async (json: boolean) => {
     checkObservation(opts.signal)
     const target = targetFor(model)
@@ -591,7 +616,8 @@ async function chatOnce(
     if (target.local && hasImage && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
-    const effort = target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
+    const effort = dropReasoning ? null : target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
+    const reasoningDisabled = !dropReasoning && !target.local && !!opts.reasoningOff
     reportOut(target.model, target.local, messages)
     // Bağlam baskısı: yalnız sayaç/boyut (içerik yazılmaz).
     const metinKarakter = messages.reduce((t, m) => t + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]).reduce((s, p) => s + (p.type === 'image_url' ? 0 : String(p.text ?? '').length), 0) : 0), 0)
@@ -606,7 +632,7 @@ async function chatOnce(
       // Ollama'da düşünme varsayılan açık; kapatılmazsa model cevabı beklerken tokenı
       // düşünmeye harcıyor (ölçüldü: 1,4-10 sn ve boş cevap; kapalıyken 0,1 sn).
       ...(effort ? { reasoning_effort: effort } : {}),
-      ...(!target.local && opts.reasoningOff ? { reasoning: { enabled: false } } : {}),
+      ...(reasoningDisabled ? { reasoning: { enabled: false } } : {}),
       // Leave output/reasoning token limits to the provider's model defaults.
       messages,
       ...(json ? { response_format: { type: 'json_object' } } : {}),
@@ -633,6 +659,15 @@ async function chatOnce(
     checkObservation(opts.signal)
     if (!res.ok) {
       reportIn(target.local, `hata ${res.status}: ${res.text.slice(0, 2000)}`)
+      chatLogger?.(`HTTP asama=${opts.stage ?? '-'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
+      if (!target.local && isCreditError(res.status, res.text)) {
+        throw new FatalApiError(`OpenRouter bakiye hatası (HTTP ${res.status}). Aynı istek tekrar gönderilmedi. Gövde: ${res.text.slice(0, 180)}`)
+      }
+      if (isReasoningMandatory(res.text) && !dropReasoning && (reasoningDisabled || effort === 'none')) {
+        dropReasoning = true
+        chatLogger?.(`UYUM asama=${opts.stage ?? '-'} model=${target.model} alan=reasoning kaldirildi neden=endpoint zorunlu dusunme`)
+        return once(json)
+      }
       const tur = contextErrorKind(res.text)
       if (tur !== 'diger') chatLogger?.(tur === 'tekrar' ? `TOKEN-TEKrar | model=${target.model} | sunucu: token repeat limit (${res.status})` : `BAGLAM-HATA | model=${target.model} | sunucu: baglam/kesme hatasi (${res.status})`)
       // Anahtar/bakiye hatalari yalniz OpenRouter icin ölümcüldür; yerel sunucu 401 dönebilir.
@@ -655,7 +690,7 @@ async function chatOnce(
       const msg = providerError(data.error)
       reportIn(target.local, `hata: ${msg}`)
       if (!target.local && /invalid api key|unauthorized/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
-      if (!target.local && /insufficient credits|payment required|402/i.test(msg)) throw new FatalApiError(`OpenRouter: ${msg}`)
+      if (!target.local && isCreditError(0, msg)) throw new FatalApiError(`OpenRouter bakiye hatası. Aynı istek tekrar gönderilmedi. ${msg.slice(0, 180)}`)
       throw permanentFailure(0, msg) ? new ModelRejected(`${where}: ${msg.slice(0, 200)}`) : new ModelFailed(`${where}: ${msg.slice(0, 200)}`)
     }
     const content = responseText(data.choices?.[0]?.message?.content)
@@ -686,7 +721,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean; requestId?: string } = {},
+  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean; requestId?: string; stage?: string; revision?: number; source?: string } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -696,6 +731,7 @@ async function chat(
       const text = await chatOnce(apiKey, name, messages, hasImage, opts)
       if (!text.trim()) throw new ModelRejected('boş yanıt')
       opts.validate?.(text)
+      chatLogger?.(`CEVAPLAYAN asama=${opts.stage ?? '-'} model=${name}`)
       return text
     } catch (e) {
       if (!(e instanceof ImageUnsupportedError)) throw e
@@ -704,9 +740,10 @@ async function chat(
       const text = await chatOnce(apiKey, name, withoutImage, false, opts)
       if (!text.trim()) throw new ModelRejected('boş yanıt')
       opts.validate?.(text)
+      chatLogger?.(`CEVAPLAYAN asama=${opts.stage ?? '-'} model=${name}`)
       return text
     }
-  }, CYCLE_PAUSE_MS, { signal: opts.signal, maxCycles: opts.maxCycles })
+  }, CYCLE_PAUSE_MS, { signal: opts.signal, maxCycles: opts.maxCycles, stage: opts.stage, revision: opts.revision, source: opts.source })
 }
 
 export type DirectChatResult = { text: string; model: string; local: boolean; ms: number }
@@ -767,7 +804,7 @@ export function validateConditionReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
+export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -784,6 +821,9 @@ export async function chooseScreenTarget(opts: {
   hint?: string
   /** Replaces the built-in system prompt when set in the LLM panel. */
   system?: string
+  /** Kayıt revizyonu ve bu aşamanın listesi. Çağrı anındaki ayardan gelir. */
+  revision?: number
+  chainSource?: string
 }): Promise<ScreenChoice> {
   const { scan } = opts
   const candidates = wordCandidates(scan)
@@ -814,7 +854,8 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     const resim = imageFromMessages(build(gonderilenResim), scan.image?.mime) ?? (gonderilenResim ? imageBytes(scan.image?.data, scan.image?.mime) : null)
     const ilk = Array.isArray(opts.model) ? opts.model[0] : opts.model
     const ozet = sendSummaryText({
-      id: istekId, node: opts.stepTitle, stage: String(opts.kind), model: Array.isArray(opts.model) ? opts.model.join(',') : opts.model,
+      id: istekId, node: opts.stepTitle, stage: String(opts.kind), model: asModelChain(opts.model)[0] ?? '',
+      revision: opts.revision, source: opts.chainSource, chain: asModelChain(opts.model).join(' > '),
       target: isLocalName(ilk) ? 'local' : 'api',
       image: resim
         ? { sent: true, w: scan.image?.w, h: scan.image?.h, bytes: resim.buffer.length, mime: resim.mime, marked: (scan.image as { marked?: boolean } | null | undefined)?.marked === true }
@@ -844,20 +885,20 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   // Özet gövdeden ÖNCE yazılır; `build` artık tanımlı olduğu için görüntü GERÇEK istekten okunur (1.9.115).
   gonderimOzeti(false)
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
     gonderimOzeti(true)
-    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId })
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource })
   }
 
   const decoded = parseJson(content)
   const parsed = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
-  const raw = parsed.id ?? parsed.i ?? parsed.index
-  const id = (typeof raw !== 'number' && typeof raw !== 'string') || raw === '' ? null : Number(String(raw).replace(/^#/, ''))
-  const selected = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
+  const parsedId = Object.prototype.hasOwnProperty.call(parsed, 'id') ? parseListedId(parsed.id) : parseListedId(parsed.i ?? parsed.index)
+  const id = typeof parsedId === 'number' ? parsedId : null
+  const selected = id !== null ? candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition')) : undefined
   // GÖRÜNTÜ ROZETİ ÇÖZÜMLEMESİ (1.9.116): model numarayı görüntüdeki rozetten okuyor; rozetler ASIL öğe
   // kimlikleridir (küçük numaralar), liste ise kelime adayı kimliklerini taşır. Yalnız GERÇEKTEN gönderilen
   // "marked" görüntünün AYNI karesindeki öğeler için çözülür; görüntüsüz/plain istekte ret aynen kalır.
@@ -868,28 +909,57 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     : undefined
   // Ölçülen kusur (1.9.110): reddin SEBEBİ kaydedilmiyordu, günlük yalnız "uygun öğe bulamadı" diyordu.
   // Artık: numara bu listede yok / var ama tıklanabilir değil / listeye alınmamış / numara yok.
-  const aday = id !== null && Number.isInteger(id) ? candidates.find(c => c.item.id === id) : undefined
-  const rejected = id === null || selected || rozet ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
+  const aday = id !== null ? candidates.find(c => c.item.id === id) : undefined
+  const actualText = selected?.item.text ?? rozet?.text ?? ''
+  const clash = !!(selected || rozet) && !listedTextAgrees(parsed.text, actualText)
+  const chosen = clash ? undefined : selected
+  const badge = clash ? undefined : rozet
+  const rejected = clash ? 'contradicts' as const : id === null || selected || rozet ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
   // YANIT KANITI (1.9.113): ham cevap, dönen id, listede var mı, seçilebilir mi, red sebebi ve çözülen öğe.
   const gonderilenMi = id !== null && Number.isInteger(id) ? new RegExp(`^#${id}\\s`, 'm').test(listText) : false
-  if (rozet) chatLogger?.(`GORUNTU-ROZETI id=${istekId} | donen-id=${id} listede YOK ama marked goruntude #${rozet.id} “${rozet.text.slice(0, 60)}” | cok-kelimeli=${(rozet.words?.length ?? 0) > 1 ? (opts.kind === 'click' ? 'evet (kisa ikinci kelime secimine gidiyor)' : 'evet (tikla disi tur: kelime secimi yok)') : 'hayir (kendi kutusuna)'}`)
+  if (badge) chatLogger?.(`GORUNTU-ROZETI id=${istekId} | donen-id=${id} listede YOK ama marked goruntude #${badge.id} “${badge.text.slice(0, 60)}” | cok-kelimeli=${(badge.words?.length ?? 0) > 1 ? (opts.kind === 'click' ? 'evet (kisa ikinci kelime secimine gidiyor)' : 'evet (tikla disi tur: kelime secimi yok)') : 'hayir (kendi kutusuna)'}`)
+  if (clash) chatLogger?.(`CELISKI id=${istekId} | donen-id=${id} | model-metni=${String(parsed.text ?? '').slice(0, 80)} | cozulen=${actualText.slice(0, 80)} | tiklama yok`)
   chatLogger?.(responseSummaryText({
-    id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!(selected || rozet), rejected,
-    resolvedItem: selected ? `${selected.item.src}/${selected.item.type} "${selected.item.text.slice(0, 60)}"` : rozet ? `${rozet.src}/${rozet.type} "${rozet.text.slice(0, 60)}" (görüntü rozeti #${rozet.id})` : undefined,
-    resolvedWord: selected?.wordIndex !== undefined ? `#${selected.item.id} w${selected.wordIndex}` : undefined,
-    targetText: (selected?.item ?? rozet)?.text.slice(0, 80),
+    id: istekId, raw: content, returnedId: id ?? null, inSentList: gonderilenMi, selectable: !!(chosen || badge), rejected,
+    resolvedItem: chosen ? `${chosen.item.src}/${chosen.item.type} "${chosen.item.text.slice(0, 60)}"` : badge ? `${badge.src}/${badge.type} "${badge.text.slice(0, 60)}" (görüntü rozeti #${badge.id})` : undefined,
+    resolvedWord: chosen?.wordIndex !== undefined ? `#${chosen.item.id} w${chosen.wordIndex}` : undefined,
+    targetText: (chosen?.item ?? badge)?.text.slice(0, 80),
   }))
   saveRequestEvidence(istekId, { response: content })
   return {
-    ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!selected) } : {}),
-    id: selected?.parentId ?? rozet?.id ?? null,
+    ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!chosen) } : {}),
+    id: chosen?.parentId ?? badge?.id ?? null,
     ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
-    ...(rozet ? { badgeResolved: true } : {}),
-    ...(selected?.wordIndex !== undefined ? { wordIndex: selected.wordIndex, candidateId: selected.item.id } : {}),
-    text: selected?.wordIndex !== undefined ? selected.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
+    ...(badge ? { badgeResolved: true } : {}),
+    ...(chosen?.wordIndex !== undefined ? { wordIndex: chosen.wordIndex, candidateId: chosen.item.id } : {}),
+    text: chosen?.wordIndex !== undefined ? chosen.item.text : typeof parsed.text === 'string' ? parsed.text : undefined,
     reason: String(parsed.reason ?? ''),
     usedImage,
   }
+}
+
+/**
+ * Bu isteğin aday numarası: tam sayı, yalnız rakamlardan oluşan yazı, ya da başında tek #.
+ * Başka metinden sayı çekilmez. Koordinat, gerekçe veya başka isteğin numarası bu kapıdan geçmez.
+ * Üyelik kontrolü çağırandadır: dönen sayı bu isteğin listesinde yoksa kabul edilmez.
+ */
+export function parseListedId(raw: unknown): number | null | undefined {
+  if (raw === null) return null
+  if (typeof raw === 'number') return Number.isInteger(raw) ? raw : undefined
+  if (typeof raw !== 'string') return undefined
+  const text = raw.trim()
+  if (/^\d+$/.test(text)) return Number(text)
+  if (/^#\d+$/.test(text)) return Number(text.slice(1))
+  return undefined
+}
+
+/** Modelin yazdığı metin, çözülen adayın metniyle çelişiyorsa seçim tıklama hakkı doğurmaz. */
+export function listedTextAgrees(stated: unknown, actual: string): boolean {
+  if (typeof stated !== 'string' || !stated.trim()) return true
+  const a = stated.trim().toLocaleLowerCase('tr')
+  const b = actual.trim().toLocaleLowerCase('tr')
+  if (!a || !b) return true
+  return a === b || b.includes(a) || a.includes(b)
 }
 
 /** A small independent decision: only this OCR line, no screenshot/history or first-answer bias. */
@@ -901,6 +971,8 @@ export async function chooseOcrWord(opts: {
   prompt: string
   nodeId?: string
   system?: string
+  revision?: number
+  chainSource?: string
 }): Promise<{ wordIndex: number; candidateId: number; text: string } | null> {
   const candidates = wordCandidates(opts.scan).filter(c => c.parentId === opts.parentId && c.wordIndex !== undefined)
   if (candidates.length < 2) throw new Error('Kelime seçimi için en az iki gerçek kelime kutusu gerekli.')
@@ -910,21 +982,24 @@ export async function chooseOcrWord(opts: {
   const id = nextRequestId()
   const validate = (content: string) => {
     const parsed = parseJson(content)
-    if (!Object.prototype.hasOwnProperty.call(parsed, 'id') || !(parsed.id === null || typeof parsed.id === 'number' && Number.isInteger(parsed.id) && candidates.some(c => c.item.id === parsed.id))) {
+    const id = parseListedId(parsed.id)
+    const allowed = id === null || (typeof id === 'number' && candidates.some(c => c.item.id === id))
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'id') || id === undefined || !allowed) {
       throw new ModelRejected('WORD_CHOICE_INVALID: Bu kısa istekteki bir kelime ID’si veya null gerekli.')
     }
   }
   const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'ocr-word-choice',
-    model: asModelChain(opts.model).join(' → '), target: isLocalName(asModelChain(opts.model)[0]) ? 'local' : 'api',
+    model: asModelChain(opts.model)[0] ?? '', revision: opts.revision, source: opts.chainSource, chain: asModelChain(opts.model).join(' > '), target: isLocalName(asModelChain(opts.model)[0]) ? 'local' : 'api',
     image: { sent: false, reason: 'kısa kelime seçimi: yalnız talimat ve kelimeler' },
     candidates: { built: candidates.length, sent: candidates.length }, promptChars: user.length })
   chatLogger?.(summary)
   saveRequestEvidence(id, { summary, system, instruction: opts.prompt, candidates: list })
   const content = await chat(opts.apiKey, opts.model, [{ role: 'system', content: system }, { role: 'user', content: user }], false,
-    { validate, maxCycles: 1, reasoningOff: true })
+    { validate, maxCycles: 1, reasoningOff: true, stage: 'ocr-word-choice', revision: opts.revision, source: opts.chainSource })
   const parsed = parseJson(content)
-  const picked = candidates.find(c => c.item.id === parsed.id)
-  chatLogger?.(responseSummaryText({ id, raw: content, returnedId: parsed.id as number | null,
+  const pickedId = parseListedId(parsed.id)
+  const picked = typeof pickedId === 'number' ? candidates.find(c => c.item.id === pickedId) : undefined
+  chatLogger?.(responseSummaryText({ id, raw: content, returnedId: pickedId ?? null,
     inSentList: !!picked, selectable: !!picked, rejected: picked ? undefined : 'model belirsiz: null',
     resolvedWord: picked ? `#${picked.item.id} w${picked.wordIndex}` : undefined, targetText: picked?.item.text }))
   saveRequestEvidence(id, { response: content })
@@ -937,7 +1012,7 @@ function imagePart(img: Img) {
   return { type: 'image_url', image_url: { url: `data:${img.mime ?? 'image/jpeg'};base64,${img.data}` } }
 }
 
-async function visionChat(apiKey: string, model: string | string[], system: string, text: string, images: Img[]): Promise<Record<string, unknown>> {
+async function visionChat(apiKey: string, model: string | string[], system: string, text: string, images: Img[], meta?: { stage?: string; revision?: number; source?: string }): Promise<Record<string, unknown>> {
   try {
     const content = await chat(
       apiKey,
@@ -946,7 +1021,8 @@ async function visionChat(apiKey: string, model: string | string[], system: stri
         { role: 'system', content: system },
         { role: 'user', content: [{ type: 'text', text }, ...images.map(imagePart)] },
       ],
-      true
+      true,
+      meta
     )
     return parseJson(content)
   } catch (e) {
@@ -1056,6 +1132,8 @@ export async function judgeReaction(opts: {
   before: Img
   after: Img
   system?: string
+  revision?: number
+  chainSource?: string
 }): Promise<{ verdict: ReactionVerdict; reason: string }> {
   const system = opts.system?.trim() || REACTION_PROMPT
   const text = `Yapılan adım: ${opts.step}
@@ -1063,7 +1141,7 @@ Sıradaki adımlar: ${opts.ahead || '(yok)'}
 Beklenen yazı veya hedef: ${opts.expected || '(yok)'}
 Sonra ekrana yeni gelen yazılar: ${opts.fresh.length ? opts.fresh.join(' | ') : '(yok)'}
 İlk görüntü adımdan önce, ikinci görüntü adımdan sonradır.`
-  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.before, opts.after])
+  const p = await visionChat(opts.apiKey, opts.model, system, text, [opts.before, opts.after], { stage: 'reaction', revision: opts.revision, source: opts.chainSource })
   const raw = String(p.verdict ?? p.status ?? '').toLowerCase()
   const verdict: ReactionVerdict =
     raw === 'ready' || raw === 'missed' || raw === 'loading' || raw === 'blocked' || raw === 'unknown' ? raw : 'unknown'
@@ -1439,6 +1517,7 @@ export function validateVisualTargetReply(content: string, model: string, screen
 export async function chooseVisualTarget(opts: {
   apiKey: string; model: string | string[]; goal: string; screen: Img; allowDismiss: boolean
   dismissalRecord?: string; tarsPrompt?: string; jsonPrompt?: string
+  revision?: number; chainSource?: string
 }): Promise<VisualTargetResult> {
   const context = `${VISUAL_TARGET_RULES}\nDismissals enabled: ${opts.allowDismiss ? 'YES (one unrelated popup only)' : 'NO'}.\n${opts.dismissalRecord ? `Executor record: ${opts.dismissalRecord}\n` : ''}Original requested target: ${opts.goal}`
   return runModelChain(asModelChain(opts.model), async model => {
@@ -1450,9 +1529,11 @@ export async function chooseVisualTarget(opts: {
     const messages: Message[] = native
       ? [{ role: 'user', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
       : [{ role: 'system', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
-    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native })
-    return validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
-  })
+    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-target' })
+    const result = validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
+    chatLogger?.(`CEVAPLAYAN asama=visual-target model=${model}`)
+    return result
+  }, CYCLE_PAUSE_MS, { stage: 'visual-target', revision: opts.revision, source: opts.chainSource })
 }
 
 export function validateVisualPointerReply(content: string, model: string, screen: Img): VisualPointerDecision {
@@ -1490,6 +1571,7 @@ export function validateVisualPointerReply(content: string, model: string, scree
 export async function verifyVisualPointer(opts: {
   apiKey: string; model: string | string[]; goal: string; screen: Img
   area: ScanResult['area']; pointer: { x: number; y: number }; system?: string; nodeId?: string
+  revision?: number; chainSource?: string
 }): Promise<VisualPointerDecision> {
   if (!opts.screen.data) throw new ModelRejected('Görsel konum doğrulaması için yeni görüntü yok')
   return runModelChain(asModelChain(opts.model), async model => {
@@ -1504,19 +1586,20 @@ export async function verifyVisualPointer(opts: {
     ]
     const id = nextRequestId(), image = imageFromMessages(messages, opts.screen.mime)
     if (!image) throw new ModelRejected('Görsel konum isteğinin görüntü baytları okunamadı')
-    const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'visual-pointer-check', model, target: isLocalName(model) ? 'local' : 'api', image: { sent: true, w: opts.screen.w, h: opts.screen.h, bytes: image.buffer.length, mime: image.mime, marked: false }, candidates: { built: 0, sent: 0 }, promptChars: system.length + instruction.length })
+    const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'visual-pointer-check', model, revision: opts.revision, source: opts.chainSource, chain: asModelChain(opts.model).join(' > '), target: isLocalName(model) ? 'local' : 'api', image: { sent: true, w: opts.screen.w, h: opts.screen.h, bytes: image.buffer.length, mime: image.mime, marked: false }, candidates: { built: 0, sent: 0 }, promptChars: system.length + instruction.length })
     chatLogger?.(summary); saveRequestEvidence(id, { summary, system, instruction, image })
     try {
-      const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native })
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-pointer-check' })
       saveRequestEvidence(id, { response: content })
       const result = validateVisualPointerReply(content, model, opts.screen)
+      chatLogger?.(`CEVAPLAYAN asama=visual-pointer-check model=${model}`)
       chatLogger?.(`YANIT id=${id} | karar=${result.decision} | imlec=${opts.pointer.x},${opts.pointer.y} | neden=${result.reason.replace(/\s+/g, ' ').slice(0, 180)}`)
       return result
     } catch (e) {
       chatLogger?.(`YANIT id=${id} | karar=reddedildi | neden=${brief(e)}`)
       throw e
     }
-  }, 0, { maxCycles: 1, maxWaitMs: 90_000 })
+  }, 0, { maxCycles: 1, maxWaitMs: 90_000, stage: 'visual-pointer-check', revision: opts.revision, source: opts.chainSource })
 }
 
 export type StallPlan = {
@@ -1536,6 +1619,8 @@ export async function planStall(opts: {
   expected: string
   image?: Img | null
   system?: string
+  revision?: number
+  chainSource?: string
 }): Promise<StallPlan> {
   const system = opts.system?.trim() || STALL_PROMPT
   const text = `Adım: ${opts.step}
@@ -1549,7 +1634,7 @@ Beklenen: ${opts.expected || '(yok)'}`
       content: opts.image?.data ? [{ type: 'text', text }, imagePart(opts.image)] : text,
     },
   ]
-  const content = await chat(opts.apiKey, opts.model, messages, !!opts.image?.data)
+  const content = await chat(opts.apiKey, opts.model, messages, !!opts.image?.data, { stage: 'stall', revision: opts.revision, source: opts.chainSource })
   const p = parseJson(content)
   const action = p.action === 'wait' || p.action === 'stop' || p.action === 'continue' ? p.action : 'wait'
   const sec = Math.min(8, Math.max(1, Math.round(Number(p.waitSec) || 3)))

@@ -8,6 +8,7 @@ import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, conditionCompatibilityError, modelChain, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type TargetMemo } from './graph-types'
+import { resolveStage, type ChainStage } from './model-chain'
 import { clickableBy, writableBy } from './target-match'
 import {
   containsText,
@@ -121,16 +122,16 @@ function agentModels(s: AppSettings): string[] {
   return agent.length ? agent : visionModels(s)
 }
 
-/** Koşul checks ask their own model first; an empty field keeps the Metin Modeli chain. */
-function conditionModels(s: AppSettings): string[] {
-  const c = modelChain(s.conditionModel, s.conditionBackups)
-  return c.length ? c : textModels(s)
-}
-
 export function createAgent(ctx: AgentContext) {
   const { log, send } = ctx
   const getSettings = ctx.settings
   const stopped = ctx.shouldStop
+  /** Her yeni LLM çağrısının hemen öncesi. Süren isteğe verilen dizi burada kopyalanmaz; çağrı kendi kopyasını alır. */
+  function fresh(stage: ChainStage) {
+    const s = getSettings()
+    const resolved = resolveStage(s, stage)
+    return { s, chain: resolved.chain, revision: s.modelRevision ?? 0, source: resolved.source }
+  }
   const pause = (ms: number) => interruptibleSleep(ms, stopped)
 
   function trace(node: AgentNode, data: TargetTraceData) {
@@ -222,11 +223,11 @@ export function createAgent(ctx: AgentContext) {
     if (choice.wordIndex !== undefined && !refineWordTarget(item, choice.wordIndex)) return false
     const words = wordCandidates(scan).filter(c => c.parentId === item.id && c.wordIndex !== undefined)
     if (words.length < 2) return true
-    const s = getSettings()
-    const dedicated = modelChain(s.wordChoiceModel, s.wordChoiceBackups)
-    log('info', `OCR kelime seçimi: ${words.length} kelime kısa ikinci isteğe gidiyor; görüntü ve geçmiş yok.${choice.badgeResolved ? ' (görüntü rozetinden çözülen satır)' : ''}`)
+    const live = fresh('word')
+    const s = live.s
+    log('info', `OCR kelime seçimi: ${words.length} kelime kısa ikinci isteğe gidiyor; görüntü ve geçmiş yok.${choice.badgeResolved ? ' (görüntü rozetinden çözülen satır)' : ''} Kaynak: ${live.source}.`)
     try {
-      const selected = await chooseOcrWord({ apiKey: s.apiKey, model: dedicated.length ? dedicated : textModels(s),
+      const selected = await chooseOcrWord({ apiKey: s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source,
         scan, parentId: item.id, prompt: node.prompt?.trim() || item.text, nodeId: node.id,
         system: promptOf(s.llmPrompts, 'wordChoice') })
       trace(node, { kind: 'model', source: 'list', value: selected ? { stage: 'wordChoice', ...selected } : { stage: 'wordChoice', result: null } })
@@ -286,9 +287,12 @@ export function createAgent(ctx: AgentContext) {
     }
     let byLlm = false
     if (!hit && useLlm) {
+      const live = fresh('list')
       const choice = await chooseScreenTarget({
-        apiKey: s.apiKey,
-        model: textModels(s),
+        apiKey: live.s.apiKey,
+        model: live.chain,
+        revision: live.revision,
+        chainSource: live.source,
         prompt,
         kind: node.kind,
         scan: scopedScan,
@@ -314,8 +318,9 @@ export function createAgent(ctx: AgentContext) {
         // için 179/143/141 gibi listede olmayan numaralar döndürüyor, elindeki doğru metin atılıyordu.
         const neden = choice.rejected === 'absent' ? 'bu listede yok'
           : choice.rejected === 'not-selectable' ? 'listede var ama tıklanabilir değil (OCR-context-only)'
-            : choice.rejected === 'not-listed' ? 'listeye alınmamış (aday sınırı)' : 'numara döndürmedi'
-        const stated = choice.text?.trim() ?? ''
+            : choice.rejected === 'not-listed' ? 'listeye alınmamış (aday sınırı)'
+              : choice.rejected === 'contradicts' ? 'yazdığı metin çözülen adayla çelişiyor' : 'numara döndürmedi'
+        const stated = choice.rejected === 'contradicts' ? '' : choice.text?.trim() ?? ''
         const kurtarma = stated.length >= 2
           ? matchText(items, stated, { anchor, prefer, tie, note: tieNote }) ?? matchFuzzy(items, stated, { anchor, prefer, tie, note: tieNote })
           : null
@@ -346,9 +351,12 @@ export function createAgent(ctx: AgentContext) {
       log('warn', `Bu tur farklı: ${why}. Tıklamadan önce bir kez daha bakılıyor.`)
       if ((s.apiKey || localConfigured()) && prompt && !byLlm) {
         try {
+          const live = fresh('list')
           const second = await chooseScreenTarget({
-            apiKey: s.apiKey,
-            model: textModels(s),
+            apiKey: live.s.apiKey,
+            model: live.chain,
+            revision: live.revision,
+            chainSource: live.source,
             prompt,
             kind: node.kind,
             scan: scopedScan,
@@ -666,10 +674,11 @@ export function createAgent(ctx: AgentContext) {
         trace(node, { kind: 'observation', source: 'tars', scan: res })
         warnMissingWindow(res)
         if (!res.image) throw new NotFoundError('Görsel hedefleme için ekran görüntüsü alınamadı.')
+        const live = fresh('visual')
         action = await chooseVisualTarget({
-          apiKey: s.apiKey, model, goal: prompt, screen: res.image,
+          apiKey: live.s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, goal: prompt, screen: res.image,
           allowDismiss: canDismiss && !didDismiss, dismissalRecord,
-          tarsPrompt: promptOf(s.llmPrompts, 'tars'), jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+          tarsPrompt: promptOf(live.s.llmPrompts, 'tars'), jsonPrompt: promptOf(live.s.llmPrompts, 'screen'),
         })
         checkStopped()
         trace(node, { kind: 'model', source: 'tars', value: action })
@@ -731,14 +740,17 @@ export function createAgent(ctx: AgentContext) {
             const crop = await bridge.crop(rect, 1080, true, isTarsModel(model[0] || '') ? 28 : 0)
             trace(node, { kind: 'observation', source: 'tars', scan: { ...crop, zoomed: rect } as unknown as ScanResult })
             if (crop.image) {
+              const live = fresh('visual')
               const again = await chooseVisualTarget({
-                apiKey: s.apiKey,
-                model,
+                apiKey: live.s.apiKey,
+                model: live.chain,
+                revision: live.revision,
+                chainSource: live.source,
                 goal: `This is a ZOOMED-IN crop of one part of the screen, ${crop.area.w}x${crop.area.h} pixels of it. Find the requested target inside the crop: ${prompt}.`,
                 allowDismiss: false, dismissalRecord,
                 screen: crop.image,
-                tarsPrompt: promptOf(s.llmPrompts, 'tars'),
-                jsonPrompt: promptOf(s.llmPrompts, 'screen'),
+                tarsPrompt: promptOf(live.s.llmPrompts, 'tars'),
+                jsonPrompt: promptOf(live.s.llmPrompts, 'screen'),
               })
               trace(node, { kind: 'model', source: 'tars', value: again })
               const ok2 = again.intent === 'target' && validVisualPoint(again)
@@ -800,14 +812,17 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function lookCloser(v: Verdict, before: Snap, after: Snap, node: AgentNode, ahead?: StepAhead): Promise<Verdict> {
-    const s = getSettings()
-    const model = visionModels(s)
+    const live = fresh('stall')
+    const s = live.s
+    const model = live.chain
     if ((!s.apiKey && !localConfigured()) || !model.length || !before.image || !after.image) return v
     if (v.kind !== 'blocked' && v.kind !== 'unknown' && v.kind !== 'missed') return v
     try {
       const r = await judgeReaction({
         apiKey: s.apiKey,
         model,
+        revision: live.revision,
+        chainSource: live.source,
         system: promptOf(s.llmPrompts, 'reaction'),
         step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
         expected: v.expected,
@@ -854,8 +869,9 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function askPlan(node: AgentNode, ahead: StepAhead | undefined, problem: string) {
-    const s = getSettings()
-    const model = visionModels(s)
+    const live = fresh('stall')
+    const s = live.s
+    const model = live.chain
     if ((!s.apiKey && !localConfigured()) || !model.length) return null
     let image: { data: string; w: number; h: number } | null = null
     try {
@@ -869,6 +885,8 @@ export function createAgent(ctx: AgentContext) {
         apiKey: s.apiKey,
         system: promptOf(s.llmPrompts, 'stall'),
         model,
+        revision: live.revision,
+        chainSource: live.source,
         step: `${NODE_SPECS[node.kind].label}${node.prompt?.trim() ? `: ${node.prompt.trim()}` : node.text?.trim() ? `: ${node.text.trim()}` : ''}`,
         problem,
         ahead: describeAhead(ahead),
@@ -1098,7 +1116,8 @@ export function createAgent(ctx: AgentContext) {
       stage: text => ctx.setMethod?.(text),
       decide: async (scan, pointer) => {
         trace(node, { kind: 'observation', source: 'tars', scan })
-        const result = await verifyVisualPointer({ apiKey: settings.apiKey, model: agentModels(settings), goal, screen: scan.image!, area: scan.area, pointer, system: promptOf(settings.llmPrompts, 'visualPointer'), nodeId: node.id })
+        const live = fresh('pointer')
+        const result = await verifyVisualPointer({ apiKey: live.s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, goal, screen: scan.image!, area: scan.area, pointer, system: promptOf(live.s.llmPrompts, 'visualPointer'), nodeId: node.id })
         trace(node, { kind: 'model', source: 'tars', value: result })
         log('info', `[Görsel hizalama] ${result.decision}${result.reason ? `: ${result.reason}` : ''}`)
         return result
@@ -1314,9 +1333,10 @@ export function createAgent(ctx: AgentContext) {
         const res = await scanCondition(source)
         if (source === 'ocr') noteCjk(res, node.id)
         const items = res.items.filter(item => item.src === source)
-        const s = getSettings()
+        const live = fresh('condition')
+        const s = live.s
         const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
-        const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: conditionModels(s), signal,
+        const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, signal,
           context: preferredWindow ? `Requested application/window context: ${preferredWindow}. The observation covers the whole screen; no window was selected or matched. Determine whether the evidence belongs to the intended application/task. A status from an unrelated application or historical log is not proof. If the intended context cannot be established, answer satisfied:false. A changed title alone does not disqualify the same application.` : undefined,
           kind: 'condition', prompt: instruction, scan: { ...res, items, image: null },
           stepTitle: 'Koşul', sendImage: false,

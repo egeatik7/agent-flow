@@ -3,6 +3,7 @@ import { listPromptFor, TARS_TEMPLATE, SCREEN_PROMPT, VISUAL_TARGET_RULES, VISUA
 import { WORD_TARGET_RULES, CONDITION_TARGET_RULES, OCR_READER_RULES } from '../../electron/word-targets'
 import { useEffect, useState, type SetStateAction } from 'react'
 import { DEFAULT_FIND_OFF, normalizeFind } from '../../electron/llm-flow'
+import { stageHint } from '../../electron/model-chain'
 import {
   DEFAULT_PROMPTS,
   FIND_STAGES,
@@ -121,7 +122,8 @@ export default function LlmPanel(p: Props) {
       <section id="method-panel" role="tabpanel" aria-labelledby={`method-tab-${nodeTab}`}>
       <p className="llm-note">{selectedTab.note}</p>
       {sharedFind && <>
-      <p className="llm-note">Metin seçimi: {p.settings.model || 'model seçilmedi'}. Görsel hedef: {p.settings.agentModel || p.settings.visionModel || p.settings.model || 'model seçilmedi'}. Model yedekleri Ayarlar bölümünden gelir.</p>
+      <p className="llm-note">{stageHint(p.settings, 'list')}</p>
+      <p className="llm-note">{stageHint(p.settings, 'visual')} {stageHint(p.settings, 'pointer')}</p>
       <ol className="llm-stages">
         {order.map((id, index) => {
           const spec = FIND_STAGES.find((s) => s.id === id)
@@ -159,21 +161,21 @@ export default function LlmPanel(p: Props) {
       <div className="llm-stage"><b>Girdi gönderme — LLM yok</b><p className="llm-note">{nodeTab === 'click' ? 'Bulunan hedefe seçilen tıklama veya fareyi oynatma eylemi gönderilir.' : 'Hedef varsa alan seçilir; Ctrl+A / Delete, yazı ve istenirse Enter gönderilir. Alan seçimi için ayrı LLM çağrısı yapılmaz.'}</p></div>
       <div className="llm-stage"><b>Hedef bulunamazsa</b><p className="llm-note">3 saniye bekleyip tüm ekranda bir kez daha arar. Yine bulunamazsa Takılma modelinden plan istenebilir.</p></div>
       {nodeTab === 'click' && <>
-        <p className="llm-note">Çok kelimeli OCR satırında ikinci seçim: {p.settings.wordChoiceModel?.trim() || p.settings.model || 'model seçilmedi'}. Model Ayarlar → Genel → OCR kelime seçimi bölümünden seçilir.</p>
+        <p className="llm-note">{stageHint(p.settings, 'word')} Ayarlar → Genel → OCR kelime seçimi.</p>
         {promptBox('wordChoice', 'OCR kelime seçimi — kısa ikinci istek', 'Liste modelinin seçtiği çok kelimeli OCR satırındaki kelimeler ve tam node talimatı gönderilir. Screenshot ve sohbet geçmişi yoktur. Cevap yalnız id veya null; seçimi program değiştirmez. Düşünme kapalı istenir. Tek kelime ve UIA/DOM hedeflerinde çağrılmaz.')}
       </>}
       {nodeTab === 'click' && promptBox('reaction', 'Tıklama sonrası tepki', 'Ekran kontrolü Açık olduğunda ve yerel değerlendirme belirsizse önce/sonra kareleri görsel modeline gönderilir. Kapalı ve Yalnız günlük modunda bu model çağrılmaz.')}
       {promptBox('stall', 'Takılma planı', 'Hedef bulma veya tıklama değerlendirmesi toparlanamazsa bekleme/devam/durma kararı. Ortak Tıkla/Yazı Yaz promptu; görsel model zinciri kullanılır.')}
       </>}
       {nodeTab === 'condition' && <>
-        <p className="llm-note">Koşul kutusuna ne aradığını normal cümleyle yaz. Bir kez tüm ekranda UIA öğeleri, karar doğrulanmazsa bir kez Windows + ONNX OCR okunur ve kararı bu sekmelerdeki metin modeli promptları verir. Tırnak, birebir eşleşme veya yerel arama yoktur. Pencere / uygulama bağlamı yalnız modele bilgi verir; pencere seçilmez. Koşul beklemez veya kendi içinde tekrar denemez; tekrar için Zamanlayıcı ile döngü kur. Eski ekran seçimi taşıyan koşullar uyumluluk hatası verir. Koşul modeli: {p.settings.conditionModel?.trim() || p.settings.model || 'model seçilmedi'}{p.settings.conditionModel?.trim() ? '' : ' (boş → Metin Modeli)'}.</p>
+        <p className="llm-note">Koşul kutusuna ne aradığını normal cümleyle yaz. Bir kez tüm ekranda UIA öğeleri, karar doğrulanmazsa bir kez Windows + ONNX OCR okunur ve kararı bu sekmelerdeki metin modeli promptları verir. Tırnak, birebir eşleşme veya yerel arama yoktur. Pencere / uygulama bağlamı yalnız modele bilgi verir; pencere seçilmez. Koşul beklemez veya kendi içinde tekrar denemez; tekrar için Zamanlayıcı ile döngü kur. Eski ekran seçimi taşıyan koşullar uyumluluk hatası verir. {stageHint(p.settings, 'condition')}</p>
         {promptBox('conditionUia', '1. UIA — koşul değerlendirmesi', 'Güncel uygulama öğeleri okunur. Metin, düğme ve diğer kontrol türleri kanıt olabilir. Normal tarif bu promptla metin modeline gider; boş liste de modele gönderilir. Model koşulun sağlanıp sağlanmadığını doğrudan değerlendirir.')}
         {promptBox('conditionOcr', '2. Windows + ONNX OCR — koşul değerlendirmesi', 'UIA’da açık kanıt yoksa düz ve 90° OCR okuması kullanılır. Bu aşamanın ayrı promptu vardır. Bu aşama da tek okumadır; boş sonuç modele gönderilir.')}
         {fixedRules('Her koşul listesine eklenen sabit kanıt/OCR kuralları', CONDITION_TARGET_RULES + '\n\n' + OCR_READER_RULES)}
         <div className="llm-stage"><b>Ekran görüntüsünden karar — kapalı</b><p className="llm-note">Koşul şu an görsel modele görüntü göndermez.</p></div>
       </>}
       {nodeTab === 'ai' && <>
-        <p className="llm-note">Araç modeli: {p.settings.agentModel && !/ui-tars/i.test(p.settings.agentModel) ? p.settings.agentModel : p.settings.model || 'model seçilmedi'}. UI-TARS modelleri bu araç döngüsünde kullanılmaz.</p>
+        <p className="llm-note">{stageHint(p.settings, 'yap')}</p>
         {promptBox('yap', 'Yap — araç kullanan ajan', 'Node’daki görev, döngü öğesi, tuval bağlamı ve sonraki adımlar ayrı görev mesajında gönderilir. Ekran okuma ve Windows araçları modelin seçtiği sırayla çalışır.')}
         <div className="llm-stage"><b>Araç yürütme — LLM yok</b><p className="llm-note">Seçilen araç sırayla çalıştırılır; sonucu modele döner. Güncel ekranlar varsa son iki görüntü tutulur. Araç/adım ve süre sınırları node ayarlarından gelir.</p></div>
         <div className="llm-stage"><b>Tamamlanma — araç kararı</b><p className="llm-note">Model task_complete çağırınca motor mevcut gözlem ve araç sınırlarını değerlendirir. Eski kayıtlı İnisiyatif yolları oynatılmaz.</p></div>

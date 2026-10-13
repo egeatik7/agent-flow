@@ -33,6 +33,12 @@ export type SendSummaryInput = {
   fallbackNoImage?: boolean
   candidates: { built: number; sent: number }
   promptChars: number
+  /** Kayıtlı model sırasının revizyonu. Yapılandırılmış zincir `model` alanına yazılmaz. */
+  revision?: number
+  /** Bu aşamanın sırayı hangi listeden aldığı. */
+  source?: string
+  /** Denenecek sıra, `>` ile. `model` yalnız bu isteğin modeli. */
+  chain?: string
 }
 
 const tekSatir = (s: string) => String(s ?? '').replace(/\s+/g, ' ').trim()
@@ -53,6 +59,9 @@ export function sendSummaryText(input: SendSummaryInput): string {
     `goruntusuz-geri-donus=${input.fallbackNoImage ? 'VAR' : 'yok'}`,
     `aday=uretilen:${input.candidates.built} gonderilen:${input.candidates.sent}`,
     `istem-uzunlugu=${input.promptChars}`,
+    ...(input.revision !== undefined ? [`revizyon=${input.revision}`] : []),
+    ...(input.source ? [`kaynak=${tekSatir(input.source)}`] : []),
+    ...(input.chain ? [`zincir=${tekSatir(input.chain)}`, `ilk=${tekSatir(input.chain.split(' > ')[0] ?? '')}`] : []),
   ].join(' | ')
 }
 

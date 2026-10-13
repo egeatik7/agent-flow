@@ -3,6 +3,7 @@ import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '.
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
 import ModelChain from './ModelChain'
+import { stageHint } from '../../electron/model-chain'
 import NumberDraft from './NumberDraft'
 import type { RecoveryReport } from '../../electron/recovery'
 
@@ -73,6 +74,8 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       </div>
       <p className="hint">Genel sekmeden bağımsızdır. Kurtarma ajanı yalnız burada kaydettiğin anahtarı kullanır.</p>
     </div>
+    </fieldset>
+    <fieldset className="recovery-edit">
     <div className="field"><label htmlFor="recovery-model">Kurtarma modelleri (OpenRouter)</label>
       <ModelChain primary={settings.recovery?.model ?? s.model} backups={settings.recovery?.backups ?? []}
         inputId="recovery-model" listId="recovery-models" placeholder="Sağlayıcı/model kimliği"
@@ -82,9 +85,14 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       {modelError && <p className="hint warn" role="status">{modelError}</p>}
       {[s.model, ...s.backups].some(name => name.startsWith('local:')) && <p className="hint warn">Kurtarma ajanı OpenRouter kullanır. Buraya bir OpenRouter model kimliği yaz.</p>}
       <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
+      <p className="hint">{stageHint(settings, 'recovery')}</p>
+      <p className="hint">Akış sürerken de kaydedilir. Sonraki yeni kurtarma çağrısı bu sırayla başlar; süren çağrı değişmez.</p>
+      <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Model sırasını kaydet</button>
+    </div>
+    </fieldset>
+    <fieldset className="recovery-edit" disabled={disabled}>
       {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
       {info && <p className="hint">{info.vision ? 'Görsel giriş: destekli.' : 'Görsel giriş: desteklenmiyor.'}{info.pricing ? ` Girdi ≈ $${info.pricing.promptPerM.toFixed(2)}/M · çıktı ≈ $${info.pricing.completionPerM.toFixed(2)}/M (OpenRouter listesi; sağlayıcıya göre değişir).` : ' Fiyat bilgisi listede yok.'} Destek işareti doğru kararı garanti etmez; gerçek ölçüm kendi hatalı akışında yapılır.</p>}
-    </div>
     <div className="field"><label htmlFor="recovery-task">Akışın amacı ve çalışma bilgileri</label>
       <textarea id="recovery-task" className="xp-input" rows={6} value={s.task} placeholder="Ne yapılmalı? Hangi uygulamalar, klasörler ve sonuçlar önemli? Tamamlanan hangi işlemler tekrarlanmamalı?" onChange={e => update({ task: e.target.value })} />
     </div>

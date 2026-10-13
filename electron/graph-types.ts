@@ -211,6 +211,11 @@ export type AppSettings = {
   agentModel: string
   /** Tried, in order, when `agentModel` cannot be reached. */
   agentBackups: string[]
+  /**
+   * Artar yalnız model sırası kaydı değişince. Her yeni LLM çağrısı bu sayıyı günlüğe yazar.
+   * Süren isteğin zinciri değişmez; sonraki çağrı kayıttaki yeni sırayı okur.
+   */
+  modelRevision?: number
   /** Which reader supplies on-screen text. UI Automation names are used either way. */
   ocrEngine: 'windows' | 'onnx' | 'combined'
   /** Output value for an input of 0. The preview and the readers share this. */
@@ -290,6 +295,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hideWhileRunning: true,
   agentModel: '',
   agentBackups: [],
+  modelRevision: 0,
   ocrEngine: 'combined',
   valueLo: 0.15,
   valueHi: 0.8,
