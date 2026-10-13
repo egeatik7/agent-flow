@@ -65,6 +65,9 @@ function harness(overrides = {}) {
     log: () => {}, hideSelf: async () => false, revealHud: () => {}, hideHudSoon: () => {},
     // 1.9.104: runFlow kosu sonunda zamanlayici geri sayimini da birakir; yuzeyin aynisi burada da var.
     stopHudCountdown: () => events.push('countdown-stop'),
+    // 1.9.129: kosu bitince baglam olcum karti da birakilir (bir sonraki kosuya eski olcum tasinmaz).
+    // runFlow un kullandigi yuzeyin aynisi: main.ts bunu gercek durum nesnesiyle yapar.
+    baglamKartiniTemizle: () => events.push('context-cleared'),
     showSelf: () => {}, runGraph: async () => ({ failed: 0 }),
     ...overrides,
   };

@@ -1982,7 +1982,11 @@ html.hud-root #root {
   padding: 6px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 26px 26px;
+  /* 1.9.129: bağlam ölçümü satırı eklendi. Satır yükseklikleri AÇIKÇA verilir; kart satırı
+     minmax(0,1fr) olduğu için pencere yüksekliği DEĞİŞMEZ ve metin taşmaz (taşma kart üstüne binerdi).
+     Ölçüldü (headless Chrome, 456x196): 6+140+4+26+4+42+4+26+6 = 258 → 196 - (6+4+26+4+42+4+26+6) = 78px
+     kart satırı. Bağlam bloğu 42px = üç satır içeriği; ölçüm satırları kırpılmaz. */
+  grid-template-rows: minmax(0, 1fr) 26px 42px 26px;
   column-gap: 6px;
   row-gap: 4px;
   overflow: hidden;
@@ -2074,7 +2078,7 @@ html.hud-root #root {
 }
 
 .hud-loop {
-  grid-row: 3;
+  grid-row: 4;
 }
 
 .hud-line.on {
@@ -2086,11 +2090,11 @@ html.hud-root #root {
   margin: 0;
   padding: 5px 7px 6px;
   line-height: 1.35;
-  max-height: 4.2em;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  /* 1.9.129: kart satırı bağlam ölçümüne yer açtığı için metin alanı kısaldı. Kırpmak yerine
+     kaydırılır: uzun durum metni erişilebilir kalır ve HİÇBİR satırın üstüne binmez. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 
 /* Zamanlayıcı adımının canlı geri sayımı: kartın içinde, metnin altında. */
@@ -2201,4 +2205,60 @@ html.hud-root #root {
 }
 .hud-line.hud-loop.on {
   color: #1f4e79;
+}
+
+/* 1.9.129: BAĞLAM ÖLÇÜM KARTI. Kendi grid satırında durur (satır 3); kart satırı 1fr kaldığı için
+   pencere yüksekliği değişmez. Yükseklik ÜÇ ölçüm satırına göre ölçülerek verildi (42px); "bilinmiyor"
+   durumunda ek satır olursa blok kaydırılır — komşu satırların üstüne BİNMEZ ve bilgi erişilebilir kalır. */
+.hud-baglam {
+  grid-column: 2;
+  grid-row: 3;
+  min-width: 0;
+  height: 42px;
+  max-height: 42px;
+  padding: 2px 7px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #ece9d8;
+  border: 2px solid #fff;
+  border-right-color: #404040;
+  border-bottom-color: #404040;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35);
+  font: 10px/1.25 Tahoma, sans-serif;
+  color: #3a3226;
+}
+
+/* "eski ölçüm" ve "bilinmiyor" görsel olarak ayrılır: taze ölçüm gibi okunmasın. */
+.hud-baglam.eski {
+  background: #fff4cf;
+  border-color: #bb8c21;
+}
+
+.hud-baglam.bilinmiyor {
+  color: #6b6152;
+}
+
+.hud-baglam-ana,
+.hud-baglam-ayrinti {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-baglam-ana {
+  font-weight: bold;
+  color: #17498b;
+}
+
+/* Rozet: "eski ölçüm" / "ölçülemedi · kırpma iddiası yok" — ölçümün durumunu tek bakışta söyler. */
+.hud-baglam-rozet {
+  font-weight: normal;
+  font-size: 9px;
+  color: #5b5346;
+}
+
+.hud-baglam.eski .hud-baglam-ana {
+  color: #8a6414;
 }

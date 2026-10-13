@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { baglamOnbelleginiTemizle, etkinPencere } from '../electron/local-context'
+import { baglamOnbelleginiTemizle, etkinPencere, olcumEskiMi } from '../electron/local-context'
 import { bekleyenSorguVar, olcumuTazele, ollamaKoku, olcumFor, pencereTokenFor } from '../electron/local-context-probe'
 
 /**
@@ -96,6 +96,10 @@ describe('sonda: başarısızlık LLM çağrısını BOZMAZ', () => {
     expect(o.calisanPencere).toBeUndefined() // eski yüklü değer GÜNCEL sayılmaz
     expect(o.yapilandirilmisPencere).toBe(65536) // statik bilgi durur
     expect(o.statikAt).toBe(1_000) // ve "güncel" damgası ilerlemez
+    // 1.9.129: hiçbir sonda cevap vermediği için "şimdi ölçüldü" damgası VURULMAZ; ölçüm eskidir ve
+    // sonraki çağrı sınırında yeniden denenir (kanıtsız tazelik yok).
+    expect(o.olcumAt).toBe(1_000)
+    expect(olcumEskiMi(o, 2_000 + 6 * 60_000)).toBe(true)
   })
 })
 

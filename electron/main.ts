@@ -36,7 +36,7 @@ import {
   setErrorStopHook,
   setStopAtHook,
 } from './tool-state'
-import { listModels, listLocalModels, directChat, gpuInfo, recoveryToolTurn, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe } from './openrouter'
+import { listModels, listLocalModels, directChat, gpuInfo, recoveryToolTurn, setBaglamLogger, setChatLogger, setLocalEndpoint, localConfigured, setStopCheck, setVoiceLogger, testKey, visionDescribe, type BaglamOlayi } from './openrouter'
 import { newTally, runGraph, StoppedError } from './runner'
 import {
   clampRamp,
@@ -67,6 +67,7 @@ import { ViewerState } from './viewer-state'
 import { startViewerServer } from './viewer-server'
 import { configureViewerTailscale } from './viewer-tailscale'
 import type { ViewerInfo } from './viewer-types'
+import { baglamKartiDurumuYap, type BaglamKarti } from './hud-context'
 import { listDirEntries } from './list-dir'
 import { DEFAULT_FIND_OFF, normalizeFind, normalizePrompts, promptOf } from './llm-flow'
 
@@ -374,6 +375,8 @@ setVoiceLogger((line) => {
   voiceHoldUntil = Date.now() + 1800
   log('info', line, true)
 })
+// Bağlam ölçümü NESNE olarak gelir; kart günlük metninden ayrıştırılmaz (1.9.129).
+setBaglamLogger((olay) => baglamOlayiniIsle(olay))
 setStopCheck(() => running && (stopRequested || recoveryAbort()))
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -652,6 +655,33 @@ function pushCountdown(text: string) {
   viewerState.event('hud:countdown', { text })
   if (!running || !hudWindow || hudWindow.isDestroyed()) return
   deliverHud('hud:countdown', { text }, false)
+}
+
+/**
+ * BAĞLAM ÖLÇÜM KARTI (1.9.129). Ölçüm NESNE olarak taşınır: günlük metni AYRIŞTIRILMAZ. Kaynak,
+ * ölçüm modülünün önbelleğidir (`olcumuTazele` çağrı sınırında oraya yazar). Karttaki ana satır
+ * "Yüklü bağlam: … token"; ölçüm yoksa "bilinmiyor", yaşlıysa "eski ölçüm".
+ */
+const baglamDurumu = baglamKartiDurumuYap()
+
+function baglamKartiYayinla(kart: BaglamKarti) {
+  viewerState.event('hud:context', { kart })
+  if (!running || !hudWindow || hudWindow.isDestroyed()) return
+  deliverHud('hud:context', { kart }, false)
+}
+
+/** Ölçüm olayını karta çevirir ve yayar. Sıra koruması `hud-context` içinde (saf, test edilir). */
+function baglamOlayiniIsle(olay: BaglamOlayi) {
+  if (!running) return
+  const sonuç = baglamDurumu.isle({ ...olay, simdi: Date.now() })
+  if (sonuç) baglamKartiYayinla(sonuç.kart)
+}
+
+/** Koşu bittiğinde kart ölçümü de temizlenir: bir sonraki koşuya eski ölçüm taşınmaz. */
+function baglamKartiniTemizle() {
+  if (!baglamDurumu.temizle()) return
+  viewerState.event('hud:context', { kart: null })
+  if (hudWindow && !hudWindow.isDestroyed()) hudWindow.webContents.send('hud:context', { kart: null })
 }
 
 /**
@@ -1079,6 +1109,8 @@ async function runFlow(
     if(runId)viewerState.finish(outcome)
     hudRunGraph = null
     stopHudCountdown()
+    // Koşu bitti: bağlam kartı da temizlenir, eski ölçüm bir sonraki koşuya taşınmaz.
+    baglamKartiniTemizle()
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
     recoveryActive = false
     running = false

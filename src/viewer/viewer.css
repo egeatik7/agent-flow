@@ -43,9 +43,21 @@
 .viewer-hud-card.error { border-color:#b53429; background:#fff0eb; }
 .viewer-hud-card.success { border-color:#4f852e; background:#eff9e8; }
 .viewer-hud-countdown { margin:16px 0 0; font-size:clamp(18px,3.5vw,30px); font-weight:bold; font-variant-numeric:tabular-nums; color:#17498b; }
+/* Aşama şeridi (son üç aşama + süreleri): masaüstü kartındaki satırın aynısı (1.9.129). */
+.viewer-hud-stages { margin:12px 0 0; font-size:clamp(13px,2vw,18px); line-height:1.35; color:#4a4a4a; overflow-wrap:anywhere; }
 .viewer-hud-details { width:100%; max-width:1000px; text-align:center; font-size:clamp(15px,2.5vw,23px); line-height:1.4; overflow-wrap:anywhere; }
 .viewer-hud-details p { margin:4px 0; }
-@media(orientation:landscape) { .viewer-hud-content { display:grid; grid-template-columns:minmax(80px,22%) minmax(0,1fr); align-content:center; align-items:center; } .viewer-hud-mascot { grid-column:1; grid-row:1 / span 2; width:100%; max-height:65dvh; } .viewer-hud-card { grid-column:2; grid-row:1; } .viewer-hud-details { grid-column:2; grid-row:2; } }
+/* 1.9.129: BAĞLAM ÖLÇÜMÜ. Telefonda kartın altında kendi bloğudur; masaüstü kartıyla AYNI nesne
+   besler ("Yüklü bağlam: 32.768 token" + azami/yapılandırılmış/num_ctx/ölçüm zamanı). */
+.viewer-hud-baglam { width:100%; max-width:1000px; box-sizing:border-box; padding:10px 12px; border:2px solid #7f9db9; border-radius:5px; background:#f6f5ec; box-shadow:2px 3px 0 #aca899; text-align:center; overflow-wrap:anywhere; }
+.viewer-hud-baglam.eski { background:#fff4cf; border-color:#bb8c21; }
+.viewer-hud-baglam-ana { margin:0 0 6px; font-size:clamp(16px,3vw,24px); font-weight:bold; color:#17498b; }
+/* Rozet telefonda ayrı satırdır: ana cümlenin ortasında kırılıp okunmayı bozmasın. */
+.viewer-hud-baglam-rozet { display:block; margin-top:4px; font-weight:normal; font-size:clamp(12px,2.4vw,16px); color:#5b5346; }
+.viewer-hud-baglam.eski .viewer-hud-baglam-ana { color:#8a6414; }
+.viewer-hud-baglam-satir { margin:2px 0; font-size:clamp(12px,2.2vw,17px); line-height:1.4; color:#3a3226; }
+.viewer-hud-baglam.bilinmiyor .viewer-hud-baglam-ana { color:#6b6152; }
+@media(orientation:landscape) { .viewer-hud-content { display:grid; grid-template-columns:minmax(80px,22%) minmax(0,1fr); align-content:center; align-items:center; } .viewer-hud-mascot { grid-column:1; grid-row:1 / span 2; width:100%; max-height:65dvh; } .viewer-hud-card { grid-column:2; grid-row:1; } .viewer-hud-details { grid-column:2; grid-row:2; } .viewer-hud-baglam { grid-column:2; grid-row:3; } }
 @media(max-height:360px) { .viewer-hud-content { align-content:start; gap:8px; } .viewer-hud-mascot { max-height:45dvh; } }
 
 /* Phone is a permanent portrait card, including before the PC starts a run. */
@@ -60,4 +72,8 @@
 .viewer-phone-card .viewer-hud-text { font-size:clamp(19px,5.5vw,27px); line-height:1.45; }
 .viewer-phone-card .viewer-hud-countdown { font-size:clamp(18px,5vw,25px); margin-top:15px; }
 .viewer-phone-card .viewer-hud-details { font-size:clamp(15px,4.5vw,21px); line-height:1.5; }
+.viewer-phone-card .viewer-hud-stages { font-size:clamp(13px,3.5vw,18px); }
+.viewer-phone-card .viewer-hud-baglam { padding:12px 14px; }
+.viewer-phone-card .viewer-hud-baglam-ana { font-size:clamp(17px,4.8vw,24px); }
+.viewer-phone-card .viewer-hud-baglam-satir { font-size:clamp(13px,3.6vw,18px); }
 @media(orientation:landscape) { .viewer-phone-card .viewer-hud-content { display:flex; } .viewer-phone-card .viewer-hud-mascot { max-height:23dvh; } }

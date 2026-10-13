@@ -24,6 +24,14 @@ export type BaglamOlcumu = {
   olcumAt: number
   /** STATİK (/api/show) bilginin alındığı an: yüklü durumdan daha uzun önbelleklenir. */
   statikAt?: number
+  /**
+   * Cevap SONRASI tazelemenin anı. Bu damga, kaydın "önceki isteğin kesin pencere kanıtı" diye
+   * sunulmasını engeller: `cevapAt > olcumAt` ise ölçüm cevaptan SONRA alınmıştır ve o isteğin
+   * penceresini kanıtlamaz, yalnız o anki yüklü durumu söyler.
+   */
+  cevapAt?: number
+  /** Son cevapta sunucunun GERÇEKTEN bildirdiği giriş token sayısı (ölçüm; tahmin değil). */
+  girisToken?: number
 }
 
 const sayi = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined)
@@ -114,6 +122,28 @@ export function baglamYenilenmeli(
 export const BAGLAM_STATIK_TAZELIK_MS = 30 * 60_000
 export function statikYenilenmeli(o: BaglamOlcumu | undefined, simdi: number): boolean {
   return !o || !o.statikAt || simdi - o.statikAt > BAGLAM_STATIK_TAZELIK_MS
+}
+
+/** Ölçüm "eski" sayılma sınırı (kart "eski ölçüm" yazar). */
+export const BAGLAM_ESKI_MS = 5 * 60_000
+
+/**
+ * Ölçüm eski mi. Kural: kanıt zamanı `olcumAt` ve varsa `cevapAt` içinden EN YENİSİ alınır; ikisi de
+ * yoksa (0) ölçüm yaşlı sayılır. Böylece iki damgadan biri ilerlemişse kart yanlışlıkla "eski" demez.
+ */
+export function olcumEskiMi(o: BaglamOlcumu | undefined, simdi: number, sinirMs = BAGLAM_ESKI_MS): boolean {
+  if (!o) return true
+  const kanit = Math.max(Number(o.olcumAt) || 0, Number(o.cevapAt) || 0)
+  if (kanit <= 0) return true
+  return simdi - kanit > sinirMs
+}
+
+/**
+ * Ölçüm ÖNCEKİ isteğin cevabından SONRA mı tazelendi. Böyle bir kayıt, o isteğin penceresi için
+ * "kesin kanıt" sayılmaz; yalnız o anki yüklü durumu bildirir.
+ */
+export function cevapSonrasiTazeleme(o: BaglamOlcumu | undefined): boolean {
+  return !!o && (Number(o.cevapAt) || 0) > (Number(o.olcumAt) || 0)
 }
 
 /** Pencerenin KAYNAĞI: istenen/yapılandırılan değer "gerçek yüklü pencere" diye sunulmaz. */

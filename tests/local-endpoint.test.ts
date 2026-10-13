@@ -1,9 +1,36 @@
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listLocalModels, setLocalEndpoint, setStopCheck, visionDescribe } from '../electron/openrouter'
+import { bekleyenOlcumleriBekle, bekleyenOlcumVar } from '../electron/local-context-probe'
 
 let server: Server | undefined
+
+/**
+ * Sahte sunucu YALNIZ üretim sohbet ucunu taklit eder; bağlam ölçüm sondası (`/api/ps`, `/api/show`)
+ * AYRI yanıtlanır. Kural: sonda istekleri üretim isteğinin bekçisine (`expect(req.url)…`) ve gövde
+ * ayrıştırıcısına UĞRAMAZ — sonda GET `/api/ps` gövdesiz geldiğinde `JSON.parse('')` "Unexpected end
+ * of JSON input" fırlatıyordu ve bu, test sonrası yakalanmayan bir ret olarak görünüyordu. Eşleşmeyen
+ * yol 404 alır; ölçüm böylece gerçek Ollama'da olmayan bir uçta olduğu gibi "bilinmiyor" kalır.
+ */
+function sahteSunucu(uretim: (body: string, req: IncomingMessage, res: ServerResponse) => void): Server {
+  return createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    const yol = String(req.url ?? '')
+    if (yol === '/v1/models') return void res.end(JSON.stringify({ data: [{ id: 'local-vision' }] }))
+    if (yol === '/api/ps') return void res.end(JSON.stringify({ models: [] }))
+    if (yol === '/api/show') return void res.end(JSON.stringify({ parameters: '', model_info: {} }))
+    // ÜRETİM ucu: taban adres "/ollama/v1" gibi bir yol taşıyabildiği için SONA göre eşleşir.
+    if (!yol.endsWith('/chat/completions')) { res.statusCode = 404; return void res.end('{}') }
+    let body = ''
+    for await (const chunk of req) body += chunk
+    uretim(body, req, res)
+  })
+}
+
 afterEach(async () => {
+  // Bekleyen ölçüm sorguları önce kapanır; kapanmış sokete yazma girişimi unhandled hata üretmesin.
+  await bekleyenOlcumleriBekle()
+  expect(bekleyenOlcumVar()).toBe(false)
   setLocalEndpoint(''); setStopCheck(() => false); vi.unstubAllGlobals(); vi.useRealTimers()
   if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())); server = undefined }
 })
@@ -11,11 +38,7 @@ const image = { data: 'fixture', w: 100, h: 100, mime: 'image/png' }
 describe('local OpenAI-compatible integration', () => {
   it('lists models and sends a real HTTP visual request locally without leaking the cloud key', async () => {
     let received: any, headers: any
-    server = createServer(async (req, res) => {
-      res.setHeader('Content-Type', 'application/json')
-      if (req.url === '/v1/models') return void res.end(JSON.stringify({ data: [{ id: 'local-vision' }] }))
-      expect(req.url).toBe('/v1/chat/completions')
-      let body = ''; for await (const chunk of req) body += chunk
+    server = sahteSunucu((body, req, res) => {
       received = JSON.parse(body); headers = req.headers
       res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"text":"Blender açık"}' } }] }))
     })
@@ -59,9 +82,7 @@ describe('local OpenAI-compatible integration', () => {
   })
   it('Ollama adresinde düşünmeyi kapatır, başka yerel sunucuda gövdeyi değiştirmez', async () => {
     const bodies: any[] = []
-    server = createServer(async (req, res) => {
-      res.setHeader('Content-Type', 'application/json')
-      let body = ''; for await (const chunk of req) body += chunk
+    server = sahteSunucu((body, _req, res) => {
       bodies.push(JSON.parse(body))
       res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"text":"tamam"}' } }] }))
     })

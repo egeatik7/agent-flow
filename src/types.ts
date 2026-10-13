@@ -108,6 +108,8 @@ export type XpAgentApi = {
   onHudCountdown?: (cb: (payload: unknown) => void) => () => void
   /** Kart şeridi: son üç aşama ve süreleri (1.9.119). */
   onHudStages?: (cb: (payload: unknown) => void) => () => void
+  /** Bağlam ölçüm kartı: ölçüm NESNE olarak gelir (1.9.129); günlük metni ayrıştırılmaz. */
+  onHudContext?: (cb: (payload: unknown) => void) => () => void
   pickFolder: (extensions: string[]) => Promise<{ folder: string; files: string[] } | null>
   listDir: (dir: string) => Promise<string[] | null>
   pickDir: () => Promise<string | null>

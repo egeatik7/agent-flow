@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
+import type { BaglamKarti } from '../../electron/hud-context'
 import type { LogLevel } from '../types'
 
 type Status = { level: LogLevel; text: string }
@@ -17,6 +18,8 @@ export default function Hud() {
   const [countdown, setCountdown] = useState('')
   /** Son üç aşama ve süreleri (1.9.119): OCR + liste → Model → Kelime seçimi. */
   const [stages, setStages] = useState('')
+  /** Bağlam ölçümü (1.9.129): main'den NESNE olarak gelir; günlük metni ayrıştırılmaz. */
+  const [baglam, setBaglam] = useState<BaglamKarti | undefined>(undefined)
   const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
@@ -56,6 +59,10 @@ export default function Hud() {
       const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
       setStages(text)
     })
+    const offBaglam = window.xpAgent?.onHudContext?.((payload) => {
+      const kart = (payload as { kart?: BaglamKarti | null } | null)?.kart
+      setBaglam(kart && typeof kart === 'object' ? kart : undefined)
+    })
     return () => {
       document.documentElement.classList.remove('hud-root')
       off?.()
@@ -64,6 +71,7 @@ export default function Hud() {
       offRecovery?.()
       offCountdown?.()
       offStages?.()
+      offBaglam?.()
     }
   }, [])
 
@@ -83,6 +91,22 @@ export default function Hud() {
       {stages && <p className="hud-stages">{stages}</p>}
       </div>
       <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
+      {/*
+        BAĞLAM ÖLÇÜMÜ (1.9.129): ölçüm NESNESİNDEN yazılır (günlük metni ayrıştırılmaz). İlk satır
+        kullanıcının istediği cümledir: "Yüklü bağlam: 32.768 token". Ölçüm yoksa "bilinmiyor",
+        yaşlıysa "eski ölçüm" yazar; yapılandırılmış pencere "yüklü" diye GÖSTERİLMEZ.
+      */}
+      {baglam && (
+        <div className={`hud-baglam${baglam.eski ? ' eski' : ''}${baglam.bilinmiyor ? ' bilinmiyor' : ''}`} role="status" aria-label="Yüklü bağlam ölçümü">
+          <p className="hud-baglam-ana">{baglam.yukluMetin}<span className="hud-baglam-rozet">{` · ${baglam.rozet}`}</span></p>
+          <p className="hud-baglam-ayrinti">
+            {`Azami ${baglam.azamiToken === null ? 'bilinmiyor' : baglam.azamiToken.toLocaleString('tr-TR')} · Yapılandırılmış ${baglam.yapilandirilmisToken === null ? 'bilinmiyor' : baglam.yapilandirilmisToken.toLocaleString('tr-TR')} · Gönderilen num_ctx ${baglam.istekNumCtx === null ? 'yok' : baglam.istekNumCtx.toLocaleString('tr-TR')}`}
+          </p>
+          <p className="hud-baglam-ayrinti">
+            {`Giriş ${baglam.girisToken === null ? 'bilinmiyor' : `${baglam.girisToken.toLocaleString('tr-TR')} (ölçüm)`} · tahmini ${baglam.tahminiToken === null ? 'bilinmiyor' : `${baglam.tahminiToken.toLocaleString('tr-TR')} (TAHMİN)`}`}
+          </p>
+        </div>
+      )}
       <p className={`hud-line hud-loop${loop ? ' on' : ''}`}>{loop}</p>
     </div>
   )

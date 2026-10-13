@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { olcumuTazele, pencereTokenFor } from './local-context-probe'
+import { olcumFor, olcumuTazele, olcumGoreviEkle, pencereTokenFor } from './local-context-probe'
+import { olcumEskiMi, pencereKaynagi, type BaglamOlcumu } from './local-context'
+import { baglamKartiOzet, baglamKartiYap, sunucuEtiketi } from './hud-context'
 import { contextErrorKind, contextPressureText, responseUsageText, sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
 import { spatialContext } from './spatial-context'
@@ -313,6 +315,107 @@ type Message = { role: 'system' | 'user' | 'assistant'; content: string | object
 let chatLogger: ((line: string) => void) | null = null
 let voiceLogger: ((line: string) => void) | null = null
 
+/**
+ * BAĞLAM ÖLÇÜMÜ BAĞLANTISI (1.9.129). Kart, günlük METNİNDEN ayrıştırılmaz: ölçüm buradan NESNE
+ * olarak dışarı verilir ve main → HUD → masaüstü/Android boyunca aynı nesne taşınır. Bu geri çağırma
+ * isteği BEKLETMEZ, hata fırlatmaz ve istek gövdesini DEĞİŞTİRMEZ (çağıran taraf `void` ile çağırır).
+ */
+export type BaglamOlayi = {
+  model: string
+  sunucu: string
+  requestId?: string
+  /** 'istek': istek gövdesi yazıldı; ölçüm o an mevcut olan (veya hemen başlatılan) bilgidir. */
+  asama: 'istek' | 'cevap'
+  olcum?: BaglamOlcumu
+  /** İstek gövdesinde GERÇEKTEN gönderilen num_ctx (yoksa undefined). */
+  istekNumCtx?: number
+  girisToken?: number
+  tahminiToken?: number
+}
+let baglamLogger: ((olay: BaglamOlayi) => void) | null = null
+export function setBaglamLogger(fn: ((olay: BaglamOlayi) => void) | null) { baglamLogger = fn }
+
+/**
+ * İstek gövdesinde GERÇEKTEN gönderilen num_ctx. Gövde `ollama.options.num_ctx` ya da OpenAI uyumlu
+ * düz `num_ctx` biçiminde taşıyabilir; ikisi de okunur, GÖNDERİLMİYORSA undefined döner. Uygulama
+ * şu an num_ctx göndermiyor: bu yüzden kart "gönderilmiyor" yazar, uydurma değer yazmaz.
+ */
+export function istekNumCtxAl(govde: unknown): number | undefined {
+  const g = (govde ?? {}) as { num_ctx?: unknown; options?: { num_ctx?: unknown } }
+  const aday = g.num_ctx ?? g.options?.num_ctx
+  const n = typeof aday === 'number' ? aday : Number(aday)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/**
+ * Sunucunun GERÇEKTEN bildirdiği giriş token sayısı: OpenAI uyumlu `usage.prompt_tokens` ya da
+ * Ollama'nın yerel alanı. Hiçbiri yoksa undefined — TAHMİN ÜRETİLMEZ (kart "bilinmiyor" yazar).
+ */
+export function gercekGirisTokeni(yanit: unknown): number | undefined {
+  const y = (yanit ?? {}) as { usage?: { prompt_tokens?: unknown }; prompt_eval_count?: unknown }
+  const aday = y.usage?.prompt_tokens ?? y.prompt_eval_count
+  const n = typeof aday === 'number' ? aday : Number(aday)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+/** Ölçüm olayını kart/teşhis katmanına NESNE olarak verir; hata ASLA isteği bozmaz. */
+function baglamOlayiYaz(olay: BaglamOlayi): void {
+  try {
+    baglamLogger?.(olay)
+  } catch {
+    /* kart/teşhis katmanı hata verirse istek etkilenmez */
+  }
+}
+
+/**
+ * Ölçüm nesnesini tek satırlık GÜNLÜK satırına çevirir. Dört kavram AYRI alanlarda yazılır; anahtar
+ * veya tam URL YAZILMAZ (yalnız host). İstek num_ctx gerçekten gönderilmediyse "gonderilmiyor".
+ */
+export function baglamOlcumLogSatiri(o: BaglamOlayi): string {
+  const p = pencereKaynagi(o.olcum)
+  const s = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? String(Math.round(v)) : 'bilinmiyor')
+  const zaman = Math.max(Number(o.olcum?.olcumAt) || 0, Number(o.olcum?.cevapAt) || 0)
+  const saat = zaman > 0 ? new Date(zaman).toISOString().slice(11, 19) : 'bilinmiyor'
+  const parca = [
+    `BAGLAM-OLCUM | asama=${o.asama}`,
+    `id=${o.requestId ?? '-'}`,
+    `model=${o.model}`,
+    `sunucu=${sunucuEtiketi(o.sunucu) || 'bilinmiyor'}`,
+  ]
+  if (o.asama === 'cevap') {
+    parca.push(`yuklu=${s(o.olcum?.calisanPencere)}`, `azami=${s(o.olcum?.azamiKapasite)}`, `yapilandirilmis=${s(o.olcum?.yapilandirilmisPencere)}`)
+    parca.push(`istek-num_ctx=${o.istekNumCtx === undefined ? 'gonderilmiyor' : s(o.istekNumCtx)}`)
+    parca.push(`giris=${o.girisToken === undefined ? 'bilinmiyor' : `${Math.round(o.girisToken)} (olcum)`}`, `tahmini=${o.tahminiToken === undefined ? 'bilinmiyor' : `${o.tahminiToken} (TAHMIN)`}`)
+    parca.push(`pencere-kaynagi=${p.kaynak}`, `olcum-zamani=${saat}`, `eski=${olcumEskiMi(o.olcum, Date.now()) ? 'evet' : 'hayir'}`)
+    return parca.join(' | ')
+  }
+  return `${parca.join(' | ')} | pencere=${s(p.token)} | pencere-kaynagi=${p.kaynak} | olcum-zamani=${saat} | eski=${olcumEskiMi(o.olcum, Date.now()) ? 'evet' : 'hayir'} | kart="${baglamKartiOzet(baglamKartiYap({ model: o.model, sunucu: o.sunucu, olcum: o.olcum, istekNumCtx: o.istekNumCtx, girisToken: o.girisToken, tahminiToken: o.tahminiToken, simdi: Date.now() }))}"`
+}
+
+/**
+ * CEVAP SONRASI tazeleme. İlk istek modeli yüklediyse yüklü pencere değişmiştir; bu yüzden cevaptan
+ * sonra ölçüm YENİDEN alınır ve `cevapAt` damgasıyla kaydedilir. Sorgu isteği BEKLETMEZ (çağıran
+ * `void` ile başlatır), Durdur sinyalinde çalışmaz ve eski model/sunucu damgası taşımaz — kart
+ * yalnız bu olayın kendi model+sunucu anahtarıyla güncellenir.
+ */
+async function cevapSonrasiOlcumYaz(model: string, ucNokta: string, requestId: string | undefined, girisToken: number | undefined, tahminiToken: number, signal?: AbortSignal): Promise<void> {
+  try {
+    if (signal?.aborted) return // Durdur: iptal edilmiş isteğin ardından yeni sorgu başlatılmaz.
+    const cevapAt = Date.now()
+    await olcumuTazele(model, ucNokta, cevapAt, { cevapAt, girisToken })
+    const olcum = olcumFor(model, ucNokta)
+    baglamOlayiYaz({ model, sunucu: ucNokta, requestId, asama: 'cevap', olcum, girisToken, tahminiToken })
+    chatLogger?.(baglamOlcumLogSatiri({ model, sunucu: ucNokta, requestId, asama: 'cevap', olcum, girisToken, tahminiToken }))
+  } catch {
+    /* ölçüm başarısızlığı isteği/cevabı ETKİLEMEZ */
+  }
+}
+
+/** Ölçüm görevini başlatır ve takibe alır: istek BEKLETİLMEZ, ama test/teşhis bekleyebilir. */
+function cevapSonrasiOlcumBaslat(model: string, ucNokta: string, requestId: string | undefined, girisToken: number | undefined, tahminiToken: number, signal?: AbortSignal): void {
+  olcumGoreviEkle(cevapSonrasiOlcumYaz(model, ucNokta, requestId, girisToken, tahminiToken, signal))
+}
+
 /** The agent log receives every completion request and response. Images are noted, not pasted. */
 export function setChatLogger(fn: ((line: string) => void) | null) {
   chatLogger = fn ? line => fn(redact(line)) : null
@@ -475,11 +578,13 @@ async function chatOnce(
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean } = {}
+  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean; requestId?: string } = {}
 ): Promise<string> {
   const once = async (json: boolean) => {
     checkObservation(opts.signal)
     const target = targetFor(model)
+    // Her deneme KENDİ istek kimliğini alır: zincirdeki ikinci model/eski deneme, yeni ölçümü ezmesin.
+    const istekId = nextRequestId()
     if (!target.local) validateApiKey(apiKey)
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
     if (!target.local && !String(apiKey ?? '').trim()) throw new ModelRejected('OpenRouter anahtarı yok; satır atlandı.')
@@ -488,29 +593,42 @@ async function chatOnce(
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
     const effort = target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
     reportOut(target.model, target.local, messages)
+    // Bağlam baskısı: yalnız sayaç/boyut (içerik yazılmaz).
+    const metinKarakter = messages.reduce((t, m) => t + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]).reduce((s, p) => s + (p.type === 'image_url' ? 0 : String(p.text ?? '').length), 0) : 0), 0)
+    const resimler = messages.flatMap((m) => Array.isArray(m.content) ? (m.content as { type?: string; image_url?: { url?: string } }[]).filter((p) => p.type === 'image_url') : [])
+    const bayt = resimler.reduce((t, p) => t + Math.round(((p.image_url?.url?.length ?? 0) * 3) / 4), 0)
+    /** Tahmini giriş tokenı — TAHMİNDİR ve hiçbir karar buna dayanmaz (log ve kart bunu "TAHMİN" der). */
+    const tahminiToken = Math.round(metinKarakter / 3.2 + resimler.length * 1400)
+    // İstek gövdesi TEK yerde kurulur: ölçüm ve log aynı gövdeyi okur, üretim ayarları değişmez.
+    const istekGovdesi = {
+      model: target.model,
+      temperature: 0,
+      // Ollama'da düşünme varsayılan açık; kapatılmazsa model cevabı beklerken tokenı
+      // düşünmeye harcıyor (ölçüldü: 1,4-10 sn ve boş cevap; kapalıyken 0,1 sn).
+      ...(effort ? { reasoning_effort: effort } : {}),
+      ...(!target.local && opts.reasoningOff ? { reasoning: { enabled: false } } : {}),
+      // Leave output/reasoning token limits to the provider's model defaults.
+      messages,
+      ...(json ? { response_format: { type: 'json_object' } } : {}),
+    }
+    /** İstek gövdesinde GERÇEKTEN gönderilen num_ctx (uygulama şu an göndermiyor → undefined). */
+    const istekNumCtx = istekNumCtxAl(istekGovdesi)
     if (target.local) {
-      // Bağlam baskısı: yalnız sayaç/boyut (içerik yazılmaz).
-      const metinKarakter = messages.reduce((t, m) => t + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]).reduce((s, p) => s + (p.type === 'image_url' ? 0 : String(p.text ?? '').length), 0) : 0), 0)
-      const resimler = messages.flatMap((m) => Array.isArray(m.content) ? (m.content as { type?: string; image_url?: { url?: string } }[]).filter((p) => p.type === 'image_url') : [])
-      const bayt = resimler.reduce((t, p) => t + Math.round(((p.image_url?.url?.length ?? 0) * 3) / 4), 0)
       chatLogger?.(contextPressureText({ model: target.model, metinKarakter, goruntuAdet: resimler.length, goruntuBayt: bayt, pencereToken: pencereTokenFor(target.model, target.url) }))
-      // Ölçüm ÇAĞRI SINIRINDA, isteği BEKLETMEDEN tazelenir (cevap sonrası için de aynı yol kullanılır).
+      // Ölçüm ÇAĞRI SINIRINDA, isteği BEKLETMEDEN tazelenir. Kart için ölçüm NESNE olarak verilir.
       void olcumuTazele(target.model, target.url).catch(() => {})
+      const olay: BaglamOlayi = {
+        model: target.model, sunucu: target.url, requestId: istekId, asama: 'istek',
+        olcum: olcumFor(target.model, target.url), istekNumCtx, tahminiToken,
+      }
+      baglamOlayiYaz(olay)
+      // Ayrı GÜNLÜK satırı: yüklü/yapılandırılmış/azami pencere, istek num_ctx ve ölçüm zamanı AYRI.
+      chatLogger?.(baglamOlcumLogSatiri(olay))
     }
     const res = await guardedFetch(target.url, {
       method: 'POST',
       headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
-      body: JSON.stringify({
-        model: target.model,
-        temperature: 0,
-        // Ollama'da düşünme varsayılan açık; kapatılmazsa model cevabı beklerken tokenı
-        // düşünmeye harcıyor (ölçüldü: 1,4-10 sn ve boş cevap; kapalıyken 0,1 sn).
-        ...(effort ? { reasoning_effort: effort } : {}),
-        ...(!target.local && opts.reasoningOff ? { reasoning: { enabled: false } } : {}),
-        // Leave output/reasoning token limits to the provider's model defaults.
-        messages,
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
-      }),
+      body: JSON.stringify(istekGovdesi),
     }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, () => false, opts.signal)
     checkObservation(opts.signal)
     if (!res.ok) {
@@ -542,6 +660,13 @@ async function chatOnce(
     }
     const content = responseText(data.choices?.[0]?.message?.content)
     reportIn(target.local, content)
+    // CEVAP SONRASI ÖLÇÜM (1.9.129): ilk istek modeli YÜKLEMİŞ olabilir; yüklü pencere artık farklıdır.
+    // Ölçüm NESNE olarak yenilenir ve `cevapAt` damgasıyla verilir; böylece bu kayıt "önceki isteğin
+    // kesin pencere kanıtı" diye sunulmaz (card `cevapSonrasi` alanını ayrıca yazar).
+    if (target.local) {
+      const gercekGiris = gercekGirisTokeni(data)
+      cevapSonrasiOlcumBaslat(target.model, target.url, istekId, gercekGiris, tahminiToken, opts.signal)
+    }
     if (data.choices?.[0]?.finish_reason === 'length') throw new ModelRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
     const said = modelSaid(model, content)
     if (said) voiceLogger?.(said)
@@ -561,7 +686,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean } = {},
+  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean; requestId?: string } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -719,13 +844,13 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   // Özet gövdeden ÖNCE yazılır; `build` artık tanımlı olduğu için görüntü GERÇEK istekten okunur (1.9.115).
   gonderimOzeti(false)
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId }, withImage ? build(false) : undefined)
   } catch (e) {
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
     gonderimOzeti(true)
-    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined })
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId })
   }
 
   const decoded = parseJson(content)
