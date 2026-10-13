@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  baglamOlcumu,
-  baglamOlcumunuKaydet,
-  baglamOnbelleginiTemizle,
-  baglamOnbellekBoyu,
-  etkinPencere,
-  parseOllamaPs,
-  parseOllamaShow,
-} from '../electron/local-context'
+import { baglamYenilenmeli, pencereKaynagi, statikYenilenmeli, baglamOlcumu, baglamOlcumunuKaydet, baglamOnbelleginiTemizle, baglamOnbellekBoyu, etkinPencere, parseOllamaPs, parseOllamaShow } from '../electron/local-context'
 
 /**
  * Yerel bağlam ölçümü (adım 1) — üç kavram ayrı: azami kapasite / yapılandırılmış num_ctx / çalışan pencere.
@@ -99,5 +91,36 @@ describe('5) farklı modellerin kapasiteleri karışmaz', () => {
     baglamOlcumunuKaydet('gui-owl:latest', SUNUCU, { ...parseOllamaShow({ parameters: 'num_ctx 32768\n', model_info: { 'guiowl.context_length': 262144 } }), olcumAt: 1 })
     expect(etkinPencere(baglamOlcumu('qwen3.5-64k:latest', SUNUCU))).toBe(65536)
     expect(etkinPencere(baglamOlcumu('gui-owl:latest', SUNUCU))).toBe(32768)
+  })
+})
+
+describe('6) boş /api/ps, kaldırılma ve pencere değişimi eski değeri GÜNCEL bırakmaz', () => {
+  const olcum = { calisanPencere: 32768, yapilandirilmisPencere: 65536, olcumAt: 1_000 }
+  it('BOŞ liste = model yüklü değil -> yenilenmeli (eski kontrol bunu kaçırıyordu)', () => {
+    expect(baglamYenilenmeli(olcum, 'm', { durum: 'ok', calisanlar: [] }, 2_000)).toBe(true)
+  })
+  it('sorgu HATASI ile boş liste AYRI: ikisi de yenilenmeli ama sebep farklı', () => {
+    expect(baglamYenilenmeli(olcum, 'm', { durum: 'hata' }, 2_000)).toBe(true)
+    expect(baglamYenilenmeli(olcum, 'm', { durum: 'ok', calisanlar: [{ model: 'm', pencere: 32768 }] }, 2_000)).toBe(false)
+  })
+  it('aynı model FARKLI pencereyle yeniden yüklenirse yenilenir', () => {
+    expect(baglamYenilenmeli(olcum, 'm', { durum: 'ok', calisanlar: [{ model: 'm', pencere: 8192 }] }, 2_000)).toBe(true)
+  })
+  it('statik bilgi daha uzun ömürlü: 5 dk sonra statik YENİLENMEZ, 30 dk sonra yenilenir', () => {
+    const s = { yapilandirilmisPencere: 65536, statikAt: 0, olcumAt: 0 }
+    expect(statikYenilenmeli(s, 6 * 60_000)).toBe(false)
+    expect(statikYenilenmeli(s, 31 * 60_000)).toBe(true)
+  })
+})
+
+describe('7) pencerenin KAYNAĞI taşınır; istenen değer "yüklü" diye sunulmaz', () => {
+  it('sıra ve kaynak etiketi', () => {
+    expect(pencereKaynagi({ istekNumCtx: 8192, calisanPencere: 32768, yapilandirilmisPencere: 65536, olcumAt: 1 })).toEqual({ token: 8192, kaynak: 'istek' })
+    expect(pencereKaynagi({ calisanPencere: 32768, yapilandirilmisPencere: 65536, olcumAt: 1 })).toEqual({ token: 32768, kaynak: 'yuklu' })
+    expect(pencereKaynagi({ yapilandirilmisPencere: 65536, olcumAt: 1 })).toEqual({ token: 65536, kaynak: 'yapilandirilmis' })
+  })
+  it('azami kapasite pencere yerine GEÇMEZ; hiçbiri yoksa bilinmiyor', () => {
+    expect(pencereKaynagi({ azamiKapasite: 262144, olcumAt: 1 })).toEqual({ token: null, kaynak: 'bilinmiyor' })
+    expect(pencereKaynagi(undefined)).toEqual({ token: null, kaynak: 'bilinmiyor' })
   })
 })

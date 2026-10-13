@@ -22,6 +22,8 @@ export type BaglamOlcumu = {
   istekNumCtx?: number
   /** Ölçümün alındığı an (yenileme kararı için). */
   olcumAt: number
+  /** STATİK (/api/show) bilginin alındığı an: yüklü durumdan daha uzun önbelleklenir. */
+  statikAt?: number
 }
 
 const sayi = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined)
@@ -92,9 +94,38 @@ export const BAGLAM_TAZELIK_MS = 5 * 60_000
  * Ölçüm yenilenmeli mi? Ollama yeniden başlatılırsa, model yeniden yüklenirse veya num_ctx değişirse eski
  * bilgi kalmasın diye çağrı sınırında sorulur. /api/ps'te model YOKSA da yenilenir (ilk çağrı modeli yükler).
  */
-export function baglamYenilenmeli(o: BaglamOlcumu | undefined, model: string, calisanlar: string[] | undefined, simdi: number): boolean {
+export function baglamYenilenmeli(
+  o: BaglamOlcumu | undefined,
+  model: string,
+  ps: { durum: 'ok' | 'hata'; calisanlar?: { model: string; pencere?: number }[] },
+  simdi: number,
+): boolean {
   if (!o) return true
   if (simdi - o.olcumAt > BAGLAM_TAZELIK_MS) return true
-  if (Array.isArray(calisanlar) && calisanlar.length && !calisanlar.some((m) => m.replace(/:latest$/, '') === String(model ?? '').replace(/:latest$/, ''))) return true
+  if (ps.durum === 'hata') return true // sorgu başarısız: eski ölçüm GÜNCEL sayılmaz, çağrı sınırında yeniden dene
+  const ad = (s: unknown) => String(s ?? '').replace(/:latest$/, '')
+  const bulunan = (ps.calisanlar ?? []).find((m) => ad(m.model) === ad(model))
+  if (!bulunan) return true // BOŞ liste dâhil: model yüklü değil -> eski "yüklü pencere" geçersiz
+  if (bulunan.pencere !== undefined && bulunan.pencere !== o.calisanPencere) return true // aynı model, FARKLI pencere
   return false
+}
+
+/** STATİK (/api/show) bilgi daha uzun önbelleklenir; yüklü durum çağrı sınırında yenilenir. */
+export const BAGLAM_STATIK_TAZELIK_MS = 30 * 60_000
+export function statikYenilenmeli(o: BaglamOlcumu | undefined, simdi: number): boolean {
+  return !o || !o.statikAt || simdi - o.statikAt > BAGLAM_STATIK_TAZELIK_MS
+}
+
+/** Pencerenin KAYNAĞI: istenen/yapılandırılan değer "gerçek yüklü pencere" diye sunulmaz. */
+export type PencereKaynagi = 'istek' | 'yuklu' | 'yapilandirilmis' | 'bilinmiyor'
+export function pencereKaynagi(o: BaglamOlcumu | undefined): { token: number | null; kaynak: PencereKaynagi } {
+  if (o) {
+    const istenen = sayi(o.istekNumCtx)
+    if (istenen) return { token: istenen, kaynak: 'istek' }
+    const yuklu = sayi(o.calisanPencere)
+    if (yuklu) return { token: yuklu, kaynak: 'yuklu' }
+    const yapilandirilmis = sayi(o.yapilandirilmisPencere)
+    if (yapilandirilmis) return { token: yapilandirilmis, kaynak: 'yapilandirilmis' }
+  }
+  return { token: null, kaynak: 'bilinmiyor' }
 }
