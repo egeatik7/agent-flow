@@ -411,6 +411,8 @@ export default function NodeCanvas(p: Props) {
     const d0: Drag = { ids, frozen, over: ownerOf(g, lead)?.id ?? null, skip }
     dragRef.current = d0
     let moved = false
+    let lastDx = 0
+    let lastDy = 0
 
     const move = (ev: MouseEvent) => {
       if (lockedRef.current || !dragRef.current) return
@@ -418,6 +420,8 @@ export default function NodeCanvas(p: Props) {
       const c = toCanvas(ev.clientX, ev.clientY)
       const dx = Math.round((c.x - start.x) / 8) * 8
       const dy = Math.round((c.y - start.y) / 8) * 8
+      lastDx = dx
+      lastDy = dy
       if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return
       if (!moved) {
         moved = true
@@ -449,8 +453,31 @@ export default function NodeCanvas(p: Props) {
       dragRef.current = null
       setDrag(null)
       if (!moved || !d) return
-      const changed = ids.filter((id) => (ownerOf(graphRef.current, id)?.id ?? null) !== d.over)
-      p.onSetMembership(changed, d.over)
+      // Each selected node joins the box under its own top edge. The lead's box must not
+      // enroll the rest of the selection.
+      const groups = new Map<string | null, string[]>()
+      for (const id of ids) {
+        const node = byId.get(id)
+        const o = orig[id]
+        if (!node || !o || node.kind === 'start') continue
+        const w = node.kind === 'loop' ? Math.min(frameRect(g, node).w, NODE_W) : nodeWidth(node.kind)
+        const px = o.x + lastDx + w / 2
+        const py = o.y + lastDy + 16
+        let over: string | null = null
+        let area = Infinity
+        for (const [fid, r] of frozen) {
+          if (skip.has(fid) || !inside(r, px, py)) continue
+          if (r.w * r.h < area) {
+            area = r.w * r.h
+            over = fid
+          }
+        }
+        if ((ownerOf(graphRef.current, id)?.id ?? null) === over) continue
+        const list = groups.get(over) ?? []
+        list.push(id)
+        groups.set(over, list)
+      }
+      for (const [over, group] of groups) p.onSetMembership(group, over)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -699,7 +726,7 @@ export default function NodeCanvas(p: Props) {
             .filter(Boolean)
             .join(' ')
           return (
-            <div key={f.loop.id} className={cls} style={{ left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth } as React.CSSProperties}>
+            <div key={f.loop.id} className={cls} data-node-id={f.loop.id} style={{ left: f.rect.x, top: f.rect.y, width: f.rect.w, height: f.rect.h, zIndex: f.depth } as React.CSSProperties}>
               <div
                 className="loop-frame-head"
                 data-node-id={f.loop.id}

@@ -162,7 +162,15 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   const { n } = p
   const items = n.items ?? []
   const members = (n.members ?? []).length
-  const mark = loopStartIndex(n, items.length, true)
+  // The run drops blank rows (listItems). The tick index has to be that list, not the raw textarea.
+  const filledCount = items.reduce((n0, row) => n0 + (row.trim() ? 1 : 0), 0)
+  const mark = loopStartIndex(n, filledCount, true)
+  const filledIndex = (raw: number) => {
+    if (!items[raw]?.trim()) return -1
+    let k = 0
+    for (let j = 0; j < raw; j++) if (items[j]?.trim()) k++
+    return k
+  }
   const folder = n.folder ?? ''
   const folderIsTemplate = /\{\{/.test(folder)
   const setItem = (index: number, value: string) => {
@@ -190,7 +198,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         {items.length > 0 ? (
           <div className="xp-tick-list">
             {items.map((item, i) => (
-              <div className={'xp-tick-row' + (i === mark ? ' on' : '')} key={i}
+              <div className={'xp-tick-row' + (filledIndex(i) === mark && filledIndex(i) >= 0 ? ' on' : '')} key={i}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   const full = fullItemPath(item, n.folder)
@@ -204,8 +212,12 @@ function LoopEditor(p: Props & { n: AgentNode }) {
                 <label className="xp-tick">
                   <input
                     type="checkbox"
-                    checked={i === mark}
-                    onChange={() => p.onUpdateNode({ startIndex: i })}
+                    checked={filledIndex(i) === mark && filledIndex(i) >= 0}
+                    disabled={!item.trim()}
+                    onChange={() => {
+                      const at = filledIndex(i)
+                      if (at >= 0) p.onUpdateNode({ startIndex: at })
+                    }}
                   />
                   <span className="xp-tick-box" />
                 </label>

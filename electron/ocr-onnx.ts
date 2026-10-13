@@ -150,7 +150,10 @@ function fillDet(bgra: Uint8Array, sw: number, sh: number, dw: number, dh: numbe
       for (let c = 0; c < 3; c++) {
         const top = bgra[o00 + c] + (bgra[o10 + c] - bgra[o00 + c]) * tx
         const bot = bgra[o01 + c] + (bgra[o11 + c] - bgra[o01 + c]) * tx
-        data[c * plane + base] = (top + (bot - top) * ty) / 255 * 2 - 1
+        // PP-OCRv4 det is trained as BGR (pixel/255 - mean) / std. The recognizer uses a different map.
+        const mean = [0.485, 0.456, 0.406][c]
+        const std = [0.229, 0.224, 0.225][c]
+        data[c * plane + base] = ((top + (bot - top) * ty) / 255 - mean) / std
       }
     }
   }

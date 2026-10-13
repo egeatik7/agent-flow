@@ -228,9 +228,11 @@ describe('araç katmanı', () => {
     expect(fast.findOrder).toEqual(['chrome', 'uia', 'icon', 'windows', 'onnx'])
     expect(fast.findOrder).not.toContain('tars')
     expect(fast.findOrder).not.toContain('offset')
-    expect(fast.findOff).toEqual([])
-    // Hiç ekran aşaması yoksa en azından UIA kalır: arama boş bir merdivenle çalışmaz.
+    expect(fast.findOff).toEqual(['list'])
+    // Hiç ekran aşaması yoksa ve UIA kapatılmadıysa UIA kalır.
     expect(withFastFind({ findOrder: ['list', 'tars'], findOff: [] } as unknown as AppSettings).findOrder).toEqual(['uia'])
+    // Kullanıcının kapattığı UIA hızlı bakışta geri açılmaz.
+    expect(withFastFind({ findOrder: ['uia', 'tars'], findOff: ['uia'] } as unknown as AppSettings).findOrder).toEqual([])
     // Ve ayarın kendisi değişmez.
     expect(settings.findOrder).toHaveLength(8)
   })

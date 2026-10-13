@@ -451,21 +451,29 @@ export function applyPlan(graph: AgentGraph, plan: Plan): AgentGraph {
     const uyeler = kutu ? ((kutu as { members?: string[] }).members as string[]) : null
     if (uyeler && !uyeler.includes(add.node.id)) uyeler.push(add.node.id)
   }
-  // Aynı yapı AYRI komutlarla da kurulabilir (önce addNode, sonra iki connect). Ölçüldü: yalnız
-  // connectFrom'a bakan kontrol, bu biçimde eklenen node'u üyeliğe almıyordu ve kutu onu çalıştırmıyordu.
-  // Bu yüzden bağlantı komutlarıyla kurulan yapı da taranır: hedefi bir kutunun içinde olan node
-  // (kutunun üyesine bağlı) o kutunun üyesi sayılır.
+  // Aynı yapı AYRI komutlarla da kurulabilir (önce addNode, sonra connect). Yalnız BU planın
+  // eklediği oklar üyeliğe alınır. Kutunun eski çıkış oku (üye → kutunun dışı) yürüyüşe katılmaz;
+  // aksi hâlde tek alan yaması bile kutunun dışındaki bütün akışı üyeliğe taşır.
+  const planOku = new Set<string>()
+  for (const add of plan.adds) {
+    if (add.fromId) planOku.add(`${add.fromId}|${add.node.id}`)
+  }
+  for (const edge of plan.edges) planOku.add(`${edge.from}|${edge.to}`)
   for (const dugum of next.nodes) {
     if (dugum.kind !== 'loop') continue
     const uyeler = (dugum as { members?: string[] }).members
     if (!Array.isArray(uyeler)) continue
-    let buyudu = true
-    while (buyudu) {
-      buyudu = false
+    const kuyruk: string[] = []
+    for (const e of next.edges) {
+      if (e.to === dugum.id || !planOku.has(`${e.from}|${e.to}`)) continue
+      if (uyeler.includes(e.from) && !uyeler.includes(e.to)) kuyruk.push(e.to)
+    }
+    while (kuyruk.length) {
+      const id = kuyruk.shift()!
+      if (id === dugum.id || uyeler.includes(id)) continue
+      uyeler.push(id)
       for (const e of next.edges) {
-        if (!uyeler.includes(e.from) || uyeler.includes(e.to)) continue
-        uyeler.push(e.to)
-        buyudu = true
+        if (e.from === id && planOku.has(`${e.from}|${e.to}`) && e.to !== dugum.id && !uyeler.includes(e.to)) kuyruk.push(e.to)
       }
     }
   }

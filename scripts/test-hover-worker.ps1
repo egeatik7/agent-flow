@@ -45,12 +45,15 @@ if ([XpNative]::Moves -ne 1 -or $script:clicks -ne 0 -or $r.hwnd -ne 42) { throw
 [XpNative]::MoveOk=$false
 Reject 'moveAt' ([pscustomobject]@{x=10;y=20}) 'INPUT_MOVE_FAILED'
 [XpNative]::MoveOk=$true
-Reject 'clickCurrentAt' ([pscustomobject]@{x=10;y=20}) 'INPUT_CLICK_STALE'
+$warn = Invoke-Op 'clickCurrentAt' ([pscustomobject]@{x=10;y=20})
+if ($script:clicks -lt 1 -or [string]$warn.warning -notlike '*INPUT_CLICK_STALE*') { throw 'Missing hover window must click and warn' }
 [XpWin]::Root=99
-Reject 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42}) 'INPUT_CLICK_STALE'
+$warn = Invoke-Op 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42})
+if ([string]$warn.warning -notlike '*INPUT_CLICK_STALE*') { throw 'Changed window must click and warn' }
 [XpWin]::Root=42; $script:cursor=[pscustomobject]@{X=100;Y=200}
-Reject 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42}) 'INPUT_CLICK_STALE'
-if ($script:clicks -ne 0) { throw 'Rejected action sent click' }
+$beforeDrift = $script:clicks
+$warn = Invoke-Op 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42})
+if ($script:clicks -le $beforeDrift -or [string]$warn.warning -notlike '*INPUT_CLICK_STALE*') { throw 'Cursor drift must click at the current point and warn' }
 $script:cursor=[pscustomobject]@{X=11;Y=20}
 [void](Invoke-Op 'clickCurrentAt' ([pscustomobject]@{x=10;y=20;hwnd=42}))
 if ($script:clicks -ne 1 -or $script:clicked.x -ne 11) { throw 'Did not click at actual current pointer' }
@@ -80,6 +83,6 @@ function Get-CursorPoint {
  if ($script:cursorReads -eq 1) { return [pscustomobject]@{X=11;Y=20} }
  return [pscustomobject]@{X=500;Y=500}
 }
-Reject 'clickCurrentAt' ([pscustomobject]@{x=11;y=20;hwnd=42;button='left';ownPid=99}) 'INPUT_CLICK_STALE'
-if ([XpNative]::Buttons.Count -ne 0) { throw 'Cursor drift at button boundary sent input' }
-Write-Output 'PASS: actual worker move sends no click; failed movement, missing window, changed window and cursor drift reject; valid current click uses fresh cursor. OS APIs mocked.'
+[void](Invoke-Op 'clickCurrentAt' ([pscustomobject]@{x=11;y=20;hwnd=42;button='left';ownPid=99}))
+if ([XpNative]::Buttons.Count -eq 0) { throw 'A later cursor read must not cancel a click that already started' }
+Write-Output 'PASS: actual worker move sends no click; failed movement rejects; missing window, changed window and cursor drift click with a warning; valid current click uses fresh cursor. OS APIs mocked.'

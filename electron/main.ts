@@ -161,7 +161,9 @@ let derivedRun = false
 let fastRun = false
 
 function send(channel: string, payload: unknown) {
-  viewerState.event(channel,payload)
+  // A branch test must not move the tablet's running canvas. The same filter keeps those
+  // step, patch and edge events off the open desktop canvas.
+  if (windowEventAllowed(channel, derivedRun)) viewerState.event(channel, payload)
   if (channel === 'agent:step') {
     // The tool layer watches the same step events the canvas does, so `run.state` never guesses.
     noteStep(payload)
@@ -1026,7 +1028,7 @@ async function runFlow(
     if (!opts?.derived) store.set('graph', graph)
     // The tool layer keeps this graph so `run.state` can say which box and item the run is on.
     runId = beginRun(graph, startId)
-    viewerState.begin(runId,opts?.canvasId??'',graph)
+    if (!opts?.derived) viewerState.begin(runId, opts?.canvasId ?? '', graph)
     const s = getSettings()
     let shotDir = ''
     try {
@@ -1193,7 +1195,7 @@ async function runFlow(
     // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
     // still ask how the run ended after it is over.
     endRun(outcome)
-    if(runId)viewerState.finish(outcome)
+    if (runId && !derivedRun) viewerState.finish(outcome)
     hudRunGraph = null
     stopHudCountdown()
     // Koşu bitti: bağlam kartı da temizlenir, eski ölçüm bir sonraki koşuya taşınmaz.

@@ -44,7 +44,7 @@ else {
   } catch {
     alive = false
   }
-  line(`  uç nokta     : port ${ep.port} · pid ${ep.pid} ${alive ? '(yaşıyor)' : '(ÖLÜ — jeton eski oturumdan)'} · sürüm ${ep.version || '?'} · build ${ep.build || 'damgasız'} · profil ${ep.profile || '?'}`)
+  line(`  uç nokta     : port ${ep.port} · pid ${ep.pid} ${alive ? '(yaşıyor)' : '(ÖLÜ — jeton eski oturumdan)'} · sürüm ${ep.app || '?'} · şema ${ep.version || '?'} · build ${ep.build || 'damgasız'} · profil ${ep.profile || '?'}`)
   if ((ep.build || '').replace(/-dirty$/, '') !== sha) line(`  UYARI        : jetonun damgası “${ep.build || ''}”, dalınki “${sha}” — eski build olabilir.`)
 }
 

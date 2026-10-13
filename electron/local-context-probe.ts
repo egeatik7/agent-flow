@@ -149,7 +149,9 @@ export function olcumuTazele(
       if (typeof ek?.girisToken === 'number' && ek.girisToken >= 0) yeni.girisToken = ek.girisToken
     }
     baglamOlcumunuKaydet(model, sunucu, yeni)
-  })().finally(() => { ucusan.delete(anahtar); coalesceOldu = false })
+  })().finally(() => {
+    if (ucusan.get(anahtar) === is) ucusan.delete(anahtar)
+  })
   ucusan.set(anahtar, is)
   return is
 }

@@ -162,8 +162,16 @@ export const OLCUM_BETIGI = [
   '} catch { $out.sayacHata=[string]$_.Exception.Message }',
   'try {',
   '  $ps=Get-Process',
+  '  function Sum-U64($list, $prop) {',
+  '    $arr = @($list)',
+  '    if ($arr.Count -eq 0) { return [uint64]0 }',
+  '    $s = ($arr | Measure-Object -Property $prop -Sum).Sum',
+  '    if ($null -eq $s) { return [uint64]0 }',
+  '    return [uint64]$s',
+  '  }',
   '  $parent=@{}',
-  '  foreach($p in $ps){ $parent[[int]$p.Id]=[int]$p.ParentProcessId }',
+  '  try { foreach($w in (Get-CimInstance Win32_Process -ErrorAction Stop)){ $parent[[int]$w.ProcessId]=[int]$w.ParentProcessId } }',
+  '  catch { foreach($p in $ps){ $parent[[int]$p.Id]=0 } }',
   '  $grup=@{}',
   '  foreach($p in $ps){ $n=([string]$p.ProcessName).ToLowerInvariant(); if(-not $grup.ContainsKey($n)){ $grup[$n]=@() }; $grup[$n]+=$p }',
   // ollama surec AGACI: kok + TUM soy (gercek yukleyici surecleri dâhil). Ad tahmini DEGIL.
@@ -183,10 +191,12 @@ export const OLCUM_BETIGI = [
   // Agaçtaki süreçlerden kaçı TANINAN çalıştırıcı adını taşıyor: ağaç dışı artık = isim toplamı - bu.
   '  $eslesen=0; foreach($p in $agac){ $n=([string]$p.ProcessName).ToLowerInvariant(); if($adlar -contains $n){ $eslesen++ } }',
   '  $out.isimEslesen=$eslesen',
-  '  $out.agacAdet=$agac.Count; $out.agacPb=[uint64](($agac | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.agacWs=[uint64](($agac | Measure-Object -Property WorkingSet64 -Sum).Sum)',
-  '  $out.isimAdet=$isim.Count; $out.isimPb=[uint64](($isim | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.isimWs=[uint64](($isim | Measure-Object -Property WorkingSet64 -Sum).Sum)',
+  '  $out.agacAdet=@($agac).Count; $out.agacPb=(Sum-U64 $agac PrivateMemorySize64); $out.agacWs=(Sum-U64 $agac WorkingSet64)',
+  '  $out.isimAdet=@($isim).Count; $out.isimPb=(Sum-U64 $isim PrivateMemorySize64); $out.isimWs=(Sum-U64 $isim WorkingSet64)',
+  '  $artik=@(); foreach($p in @($isim)){ if(-not $sec.Contains([int]$p.Id)){ $artik+=$p } }',
+  '  $out.artikAdet=@($artik).Count; $out.artikPb=(Sum-U64 $artik PrivateMemorySize64); $out.artikWs=(Sum-U64 $artik WorkingSet64)',
   "  $bl=@(); if($grup.ContainsKey('blender')){ $bl=$grup['blender'] }",
-  '  $out.blenderAdet=$bl.Count; $out.blenderPb=[uint64](($bl | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.blenderWs=[uint64](($bl | Measure-Object -Property WorkingSet64 -Sum).Sum)',
+  '  $out.blenderAdet=@($bl).Count; $out.blenderPb=(Sum-U64 $bl PrivateMemorySize64); $out.blenderWs=(Sum-U64 $bl WorkingSet64)',
   '} catch { $out.surecHata=[string]$_.Exception.Message }',
   '[Console]::Out.Write(($out | ConvertTo-Json -Compress -Depth 3))',
 ].join('\n')
@@ -284,7 +294,7 @@ export function olcumKur(ham: Record<string, unknown> | null | undefined, gpu: G
   const artikAdet = isim ? Math.max(0, isim.adet - agacEslesen) : 0
   if (agac && isim && artikAdet > 0) {
     const etiket = 'Tanınan diğer yerel çalıştırıcılar (ağaç dışı)'
-    const artik = surecGrubuYap(etiket, artikAdet, null, null, 'isim')
+    const artik = surecGrubuYap(etiket, artikAdet, h.artikPb, h.artikWs, 'isim')
     if (artik) diger.push(artik)
   }
   if (gpu.length === 0) notlar.push('VRAM ölçülemedi (nvidia-smi yok veya GPU yok).')

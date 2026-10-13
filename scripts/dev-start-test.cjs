@@ -262,7 +262,10 @@ async function main() {
     const info = readToken()
     if (info?.port && (await health(info.port))) {
       console.log(`  ✓ hazır: port ${info.port} · pid ${info.pid} · sürüm ${info.app || '?'} · build ${info.build || '(damgasız)'} · profil ${info.profile || '?'}`)
-      if ((info.build || '') !== build) console.log(`  UYARI: jetonun damgası “${info.build || ''}”, beklenen “${build}” — eski örnek olabilir.`)
+      if ((info.build || '') !== build) {
+        console.error(`  HATA: jetonun damgası “${info.build || ''}”, beklenen “${build}”. Eski örnek; bu kapı onu hazır saymaz.`)
+        process.exit(3)
+      }
       // Ölçüldü: uygulama açılırken ön planı alır ve arka plandaki bir süreç ondan ALAMAZ; canlı
       // senaryo ise fikstür penceresinin önde olmasını bekler (yoksa hedefi yanlış pencerede arar
       // ve haklı olarak bulamaz). Uygulama küçültülünce ön plan serbest kalır ve fikstür kendini öne

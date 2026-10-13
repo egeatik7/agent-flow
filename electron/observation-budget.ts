@@ -13,5 +13,8 @@ export async function observeWithin<T>(work: Promise<T>, signal?: AbortSignal): 
   let abort!: () => void
   const cancelled = new Promise<never>((_, reject) => { abort = () => reject(signal.reason instanceof Error ? signal.reason : new ObservationTimeoutError()); signal.addEventListener('abort', abort, { once: true }) })
   try { return await Promise.race([work, cancelled]) }
-  finally { signal.removeEventListener('abort', abort) }
+  finally {
+    signal.removeEventListener('abort', abort)
+    void work.catch(() => {})
+  }
 }

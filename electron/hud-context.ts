@@ -116,10 +116,11 @@ export function baglamKartiYap(g: BaglamKartiGirdi): BaglamKarti {
   const girisToken = typeof o?.girisToken === 'number' && o.girisToken >= 0 ? o.girisToken : (typeof g.girisToken === 'number' ? g.girisToken : null)
   const tahminiToken = typeof g.tahminiToken === 'number' && Number.isFinite(g.tahminiToken) ? Math.round(g.tahminiToken) : null
 
-  // ANA SATIR: yüklü pencere varsa O; pencere ölçülemediyse "bilinmiyor".
-  const yukluMetin = bilinmiyor
+  // ANA SATIR yalnız gerçekten yüklü pencereyi söyler. İsteğin num_ctx'i ve yapılandırılmış
+  // pencere kendi satırlarındadır; ikisi de "yüklü" diye yazılmaz.
+  const yukluMetin = yukluToken === null
     ? 'Yüklü bağlam: bilinmiyor'
-    : `Yüklü bağlam: ${tokenYaz(kaynak.token)} token`
+    : `Yüklü bağlam: ${tokenYaz(yukluToken)} token`
 
   const satirlar = [yukluMetin]
   satirlar.push(`Azami kapasite: ${tokenYaz(azamiToken)} (desteklenen sınır)`)
@@ -214,7 +215,12 @@ export function baglamKartiDurumuYap(): BaglamKartiDurumu {
         tahminiToken: olay.tahminiToken ?? null, simdi: olay.simdi,
       })
       if (olay.asama === 'cevap') son = { model: olay.model, sunucu: olay.sunucu, cevapAt: damga }
-      else if (!son) son = { model: olay.model, sunucu: olay.sunucu, cevapAt: 0 }
+      else {
+        // A newer request raises the watermark. A late probe from the previous model must not
+        // replace this card when its reply stamp is older than this request.
+        const damgaIstek = Math.max(son?.cevapAt ?? 0, olay.simdi || 0, damga)
+        son = { model: olay.model, sunucu: olay.sunucu, cevapAt: damgaIstek }
+      }
       kart = yeni
       return { kart: yeni }
     },

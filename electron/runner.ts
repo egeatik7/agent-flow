@@ -217,9 +217,11 @@ export async function runGraph(
   if (!opts.afterNodeId && !entry) throw new Error('Başlangıç node’u bulunamadı.')
   let packageExitReached = false
   let incomplete = false
-  const observeExit = (node: AgentNode, port: string, scope: AgentNode | null) => {
-    // An edge from a loop member to outside its scope does not leave the loop.
-    if (!scope && opts.packageExit?.from === node.id) packageExitReached = opts.packageExit.fromPort === port
+  const observeExit = (node: AgentNode, port: string, _scope: AgentNode | null) => {
+    // The recorded package exit is the node and port, including when that node sits inside a
+    // Her Öğe İçin box. Scope still stops an ordinary edge from leaving the loop; it must not
+    // drop the exit the package was saved with.
+    if (opts.packageExit?.from === node.id) packageExitReached = opts.packageExit.fromPort === port
   }
   const exitEvidence = () => opts.packageExit ? { packageExitReached } : {}
   const root = opts.root ?? graph
@@ -344,7 +346,9 @@ export async function runGraph(
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
         const result = await runGraph(inner, ex, { packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
+        if (result.incomplete) incomplete = true
         if (node.packageExit && !result.packageExitReached) {
+          incomplete = true
           ex.log('info', `“${node.title}” kayıtlı çıkışına ulaşmadı; dışarıdaki sonraki adım çalıştırılmıyor.`)
           return 'blocked'
         }

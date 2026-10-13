@@ -193,8 +193,12 @@ const FAST_STAGES = ['chrome', 'uia', 'icon', 'windows', 'onnx']
  * trip — and it follows the project rule that a certain, local job is not sent to a model.
  */
 export function withFastFind(settings: AppSettings): AppSettings {
-  const order = settings.findOrder.filter((stage) => FAST_STAGES.includes(stage))
-  return { ...settings, findOrder: order.length ? order : ['uia'], findOff: [] }
+  const off = new Set(settings.findOff ?? [])
+  const order = settings.findOrder.filter((stage) => FAST_STAGES.includes(stage) && !off.has(stage))
+  // A stage the user turned off stays off. UIA is the fallback only when they did not turn it off
+  // and the ladder would otherwise have no screen stage left.
+  const findOrder: AppSettings['findOrder'] = order.length ? order : off.has('uia') ? [] : ['uia']
+  return { ...settings, findOrder, findOff: settings.findOff ?? [] }
 }
 
 /** The flow the caller means: its live canvas when it sent one, otherwise the saved flow. */
@@ -307,15 +311,25 @@ const flowSuggest: ToolDef = {
       }
     }
 
-    const check = planOps(
-      /* Paket içi planlar da denetlenir: flow.edit paketin içini düzenleyebiliyor, denetleyici de
-         aynı yeri görmeli. Aksi hâlde var olan bir node için "bulunamadı" deniyordu. */
-      (Array.isArray(args.packagePath) && args.packagePath.length
-        ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
-        : graph),
-      args.ops
-    )
-    const lines = describePlan(graph, check.plan)
+    let planGraph = graph
+    if (Array.isArray(args.packagePath) && args.packagePath.length) {
+      const found = targetGraph(graph, args.packagePath as string[])
+      if (!found) {
+        const message = `Paket bulunamadı: ${(args.packagePath as string[]).join(' › ')}. Kök grafa düşülmedi.`
+        ctx.log('warn', `Ajan · öneri · ${message}`)
+        return {
+          ok: true,
+          tool: flowSuggest.name,
+          outcome: 'plan-gecersiz',
+          message,
+          observed: { note: 'Akışa hiçbir şey yazılmadı.' },
+          data: { valid: false, errors: [message], warnings: [], diff: null, lines: [] },
+        }
+      }
+      planGraph = found.graph as AgentGraph
+    }
+    const check = planOps(planGraph, args.ops)
+    const lines = describePlan(planGraph, check.plan)
     if (!check.ok) {
       const head = check.errors.slice(0, 3).join(' ')
       const rest = check.errors.length > 3 ? ` (+${check.errors.length - 3} hata daha)` : ''
@@ -331,17 +345,7 @@ const flowSuggest: ToolDef = {
       }
     }
 
-    const diff = diffGraphs(
-      (Array.isArray(args.packagePath) && args.packagePath.length
-        ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
-        : graph),
-      applyPlan(
-        (Array.isArray(args.packagePath) && args.packagePath.length
-          ? ((targetGraph(graph, args.packagePath as string[])?.graph as AgentGraph) ?? graph)
-          : graph),
-        check.plan
-      )
-    )
+    const diff = diffGraphs(planGraph, applyPlan(planGraph, check.plan))
     const warn = check.warnings.length ? ` Uyarı: ${check.warnings.join(' ')}` : ''
     const message = `Plan geçerli: ${diff.summary}. Hiçbir şey yazılmadı; uygulamak için flow.edit kullan. Yeni node’ların gerçek id’lerini uygulamadan sonra flow.read ile al.${warn}`
     ctx.log('info', `Ajan · öneri · ${message}`)
@@ -663,7 +667,9 @@ const branchMerge: ToolDef = {
     if (view.failed.length) notes.push(`${view.failed.length} grup artık uymuyor ve atlanacak: ${view.failed.join(' | ')}`)
     const tail = notes.length ? ` ${notes.join(' ')}` : ''
     // The alternative's shape, if it has one: where it leaves the flow and where it comes back.
-    const path = branch.path ?? (view.base ? derivePath(view.base.graph, branch) : null)
+    // view.path is recomputed when the base changed. The stored branch.path must not delete
+    // nodes on a canvas that no longer matches the route it was saved from.
+    const path = view.path ?? (view.base ? derivePath(view.base.graph, branch) : null)
     if (path && !branch.path) {
       branch.path = path
       ctx.log('info', `Ajan · merge · “${branch.name}” alternatif yol olarak okundu: giriş ${path.entry.nodeId} · çıkış ${path.exit.nodeId}.`)
@@ -910,7 +916,7 @@ const targetPreview: ToolDef = {
       log: () => {},
       send: () => {},
       settings: () => (fast ? withFastFind(ctx.getSettings()) : ctx.getSettings()),
-      shouldStop: () => false,
+      shouldStop: () => ctx.userStop(),
       onTargetTrace: (event) => {
         if (traces.length < 200) traces.push(event)
       },
@@ -1505,7 +1511,9 @@ const actWait: ToolDef = {
   summary: 'Belirtilen süre kadar bekle (akış kurmadan).',
   sendsInput: false,
   ready: true,
-  run: async (args, ctx) => {
+  run: async (args, ctx, source) => {
+    const denied = writeGate(ctx, source)
+    if (denied) return failed(actWait.name, denied)
     const ms = num(args.ms) ?? 1000
     return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle`, fields: { ms } }, args, ctx)
   },
