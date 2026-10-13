@@ -46,6 +46,7 @@ export function gbOran(kullanilan: number | null | undefined, toplam: number | n
 
 /** Negatif olmayan sonlu sayı ya da null ("bilinmiyor"). */
 export function sayiYaNull(v: unknown): number | null {
+  if (v === null || v === undefined || typeof v === 'boolean' || typeof v === 'string' && !v.trim()) return null
   const n = typeof v === 'number' ? v : Number(v)
   return Number.isFinite(n) && n >= 0 ? n : null
 }
@@ -59,7 +60,7 @@ export type BellekGrubu = {
   privateBayt: number | null
   /** Working set TOPLAMI. Ortak (paylaşılan) sayfalar birden çok kez sayılabilir. */
   workingSetBayt: number | null
-  /** Toplamın nasıl kurulduğu: 'agac' = ollama süreç ağacı, 'isim' = çalıştırıcı adları. */
+  /** Toplamın nasıl kurulduğu: ağaç, ad eşleşmesi veya ikisinin PID ile birleşimi. */
   kaynak: 'agac' | 'isim'
   /** İnsan okur satır: "Blender · 3 süreç · commit 4,2 GB · working set 5,1 GB". */
   metin: string
@@ -126,6 +127,29 @@ export const OLCUM_BETIGI = [
   'using System;',
   'using System.Runtime.InteropServices;',
   'public class NubboBellek {',
+  '  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]',
+  '  public struct PROCESSENTRY32 {',
+  '    public uint dwSize, cntUsage, th32ProcessID; public UIntPtr th32DefaultHeapID;',
+  '    public uint th32ModuleID, cntThreads, th32ParentProcessID; public int pcPriClassBase; public uint dwFlags;',
+  '    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string szExeFile;',
+  '  }',
+  '  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);',
+  '  [DllImport("kernel32.dll", EntryPoint="Process32FirstW", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]',
+  '  [return: MarshalAs(UnmanagedType.Bool)] static extern bool Process32First(IntPtr snapshot, ref PROCESSENTRY32 entry);',
+  '  [DllImport("kernel32.dll", EntryPoint="Process32NextW", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]',
+  '  [return: MarshalAs(UnmanagedType.Bool)] static extern bool Process32Next(IntPtr snapshot, ref PROCESSENTRY32 entry);',
+  '  [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool CloseHandle(IntPtr handle);',
+  '  public static System.Collections.Generic.Dictionary<int,int> Ebeveynler() {',
+  '    IntPtr snapshot=CreateToolhelp32Snapshot(2,0);',
+  '    if(snapshot==new IntPtr(-1)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());',
+  '    try {',
+  '      var result=new System.Collections.Generic.Dictionary<int,int>();',
+  '      PROCESSENTRY32 entry=new PROCESSENTRY32(); entry.dwSize=(uint)Marshal.SizeOf(typeof(PROCESSENTRY32));',
+  '      if(!Process32First(snapshot,ref entry)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());',
+  '      do { result[(int)entry.th32ProcessID]=(int)entry.th32ParentProcessID; } while(Process32Next(snapshot,ref entry));',
+  '      return result;',
+  '    } finally { CloseHandle(snapshot); }',
+  '  }',
   '  [StructLayout(LayoutKind.Sequential)]',
   '  public struct MEMORYSTATUSEX {',
   '    public uint dwLength; public uint dwMemoryLoad; public ulong ullTotalPhys; public ulong ullAvailPhys;',
@@ -162,31 +186,14 @@ export const OLCUM_BETIGI = [
   '} catch { $out.sayacHata=[string]$_.Exception.Message }',
   'try {',
   '  $ps=Get-Process',
-  '  $parent=@{}',
-  '  foreach($p in $ps){ $parent[[int]$p.Id]=[int]$p.ParentProcessId }',
-  '  $grup=@{}',
-  '  foreach($p in $ps){ $n=([string]$p.ProcessName).ToLowerInvariant(); if(-not $grup.ContainsKey($n)){ $grup[$n]=@() }; $grup[$n]+=$p }',
-  // ollama surec AGACI: kok + TUM soy (gercek yukleyici surecleri dâhil). Ad tahmini DEGIL.
-  "  $kok=@(); foreach($n in @('ollama','ollama app','ollama-app')){ if($grup.ContainsKey($n)){ $kok+=$grup[$n] } }",
-  '  $sec=New-Object "System.Collections.Generic.HashSet[int]"',
-  '  foreach($p in $kok){ [void]$sec.Add([int]$p.Id) }',
-  '  $degisti=$true; $tur=0',
-  '  while($degisti -and $tur -lt 12){',
-  '    $degisti=$false; $tur++',
-  '    foreach($p in $ps){ $id=[int]$p.Id; if($sec.Contains($id)){ continue }',
-  '      $par=0; if($parent.ContainsKey($id)){ $par=[int]$parent[$id] }',
-  '      if($par -gt 0 -and $sec.Contains($par)){ [void]$sec.Add($id); $degisti=$true } }',
-  '  }',
-  '  $agac=@(); foreach($p in $ps){ if($sec.Contains([int]$p.Id)){ $agac+=$p } }',
-  "  $adlar=@('ollama','ollama app','ollama-app','ollama_llama_server','llama-server','llamafile','koboldcpp','text-generation-launcher','vllm','lm-studio','lmstudio','jan','gpt4all','localai','comfyui','sglang')",
-  '  $isim=@(); foreach($p in $ps){ $n=([string]$p.ProcessName).ToLowerInvariant(); if($adlar -contains $n){ $isim+=$p } }',
-  // Agaçtaki süreçlerden kaçı TANINAN çalıştırıcı adını taşıyor: ağaç dışı artık = isim toplamı - bu.
-  '  $eslesen=0; foreach($p in $agac){ $n=([string]$p.ProcessName).ToLowerInvariant(); if($adlar -contains $n){ $eslesen++ } }',
-  '  $out.isimEslesen=$eslesen',
-  '  $out.agacAdet=$agac.Count; $out.agacPb=[uint64](($agac | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.agacWs=[uint64](($agac | Measure-Object -Property WorkingSet64 -Sum).Sum)',
-  '  $out.isimAdet=$isim.Count; $out.isimPb=[uint64](($isim | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.isimWs=[uint64](($isim | Measure-Object -Property WorkingSet64 -Sum).Sum)',
-  "  $bl=@(); if($grup.ContainsKey('blender')){ $bl=$grup['blender'] }",
-  '  $out.blenderAdet=$bl.Count; $out.blenderPb=[uint64](($bl | Measure-Object -Property PrivateMemorySize64 -Sum).Sum); $out.blenderWs=[uint64](($bl | Measure-Object -Property WorkingSet64 -Sum).Sum)',
+  '  $parent=@{}; $parentHata=""',
+  '  try { $parent=[NubboBellek]::Ebeveynler() } catch { $parentHata=[string]$_.Exception.Message }',
+  '  $out.surecAgacHata=$parentHata',
+  '  $out.surecler=@(foreach($p in $ps){',
+  '    $pidDeger=[int]$p.Id; $par=$null; if($parent.ContainsKey($pidDeger)){ $par=[int]$parent[$pidDeger] }',
+  '    $pb=$null; $ws=$null; try { $pb=[uint64]$p.PrivateMemorySize64; $ws=[uint64]$p.WorkingSet64 } catch {}',
+  '    [ordered]@{ pid=$pidDeger; parentId=$par; name=[string]$p.ProcessName; privateBayt=$pb; workingSetBayt=$ws }',
+  '  })',
   '} catch { $out.surecHata=[string]$_.Exception.Message }',
   '[Console]::Out.Write(($out | ConvertTo-Json -Compress -Depth 3))',
 ].join('\n')
@@ -263,6 +270,52 @@ export function gpuListesiAyikla(cikti: unknown): GpuOlcumu[] {
   return liste
 }
 
+/** The collector supplies PID records; count the tree and detached runners once per PID. */
+export function surecKayitlariniGrupla(raw: unknown[]): {
+  blender: BellekGrubu | null; model: BellekGrubu | null; notlar: string[]
+} {
+  type Row = { pid: number; parentId: number | null; name: string; pb: number | null; ws: number | null }
+  const rows = new Map<number, Row>()
+  for (const value of raw) {
+    if (!value || typeof value !== 'object') continue
+    const r = value as Record<string, unknown>, pid = sayiYaNull(r.pid)
+    if (pid === null || !Number.isSafeInteger(pid) || pid <= 0 || typeof r.name !== 'string') continue
+    rows.set(pid, { pid, parentId: sayiYaNull(r.parentId), name: r.name.toLowerCase().replace(/\.exe$/, ''),
+      pb: sayiYaNull(r.privateBayt), ws: sayiYaNull(r.workingSetBayt) })
+  }
+  const roots = new Set(['ollama', 'ollama app', 'ollama-app'])
+  const runners = new Set(['ollama_llama_server', 'llama-server', 'llamafile', 'koboldcpp',
+    'text-generation-launcher', 'vllm', 'lm-studio', 'lmstudio', 'jan', 'gpt4all', 'localai', 'comfyui', 'sglang'])
+  const children = new Map<number, number[]>()
+  for (const r of rows.values()) if (r.parentId !== null && r.parentId > 0) {
+    children.set(r.parentId, [...(children.get(r.parentId) ?? []), r.pid])
+  }
+  const tree = new Set<number>()
+  const queue = [...rows.values()].filter(r => roots.has(r.name)).map(r => r.pid)
+  for (let at = 0; at < queue.length; at++) {
+    const pid = queue[at]
+    if (tree.has(pid)) continue
+    tree.add(pid); queue.push(...(children.get(pid) ?? []))
+  }
+  const selected = new Set(tree)
+  const detached: Row[] = []
+  for (const r of rows.values()) if (runners.has(r.name)) {
+    if (!selected.has(r.pid)) detached.push(r)
+    selected.add(r.pid)
+  }
+  const group = (label: string, picked: Row[], source: 'agac' | 'isim') => {
+    const sum = (key: 'pb' | 'ws') => picked.some(r => r[key] === null) ? null : picked.reduce((n, r) => n + r[key]!, 0)
+    return surecGrubuYap(label, picked.length, sum('pb'), sum('ws'), source)
+  }
+  const modelRows = [...selected].map(pid => rows.get(pid)!)
+  const model = group('Yerel model çalıştırıcıları', modelRows, tree.size ? 'agac' : 'isim')
+  const blender = group('Blender', [...rows.values()].filter(r => r.name === 'blender'), 'isim')
+  const notlar: string[] = []
+  if (detached.length && tree.size) notlar.push(`Model toplamı: Ollama ağacı + ${detached.length} ağaç dışı çalıştırıcı; her PID bir kez sayıldı.`)
+  if (modelRows.some(r => r.pb === null || r.ws === null)) notlar.push('Bazı model süreç sayaçları okunamadı; eksik toplam bilinmiyor gösterildi.')
+  return { blender, model, notlar }
+}
+
 /** Ham JSON'dan tam ölçüm nesnesi. Ana süreçte ağ/disk erişimi YOKTUR: saf dönüşüm (test edilir). */
 export function olcumKur(ham: Record<string, unknown> | null | undefined, gpu: GpuOlcumu[], olcumAt: number, sureMs: number): BellekOlcumu {
   const h = ham ?? {}
@@ -271,18 +324,19 @@ export function olcumKur(ham: Record<string, unknown> | null | undefined, gpu: G
   const surecHata = typeof h.surecHata === 'string' ? h.surecHata.trim() : ''
   if (olcumHata) notlar.push(`Sistem belleği okunamadı: ${olcumHata}`)
   if (surecHata) notlar.push(`Süreç sayaçları okunamadı: ${surecHata}`)
-  const blender = surecGrubuYap('Blender', h.blenderAdet, h.blenderPb, h.blenderWs, 'isim')
-  // Yerel model çalıştırıcıları: ÖNCE gerçek ollama süreç AĞACI, yoksa aynı çalıştırıcı adları.
+  const snapshot = Array.isArray(h.surecler) ? surecKayitlariniGrupla(h.surecler) : undefined
+  const blender = snapshot ? snapshot.blender : surecGrubuYap('Blender', h.blenderAdet, h.blenderPb, h.blenderWs, 'isim')
+  // Yeni ölçüm PID kayıtlarıyla tek toplam kurar. Eski ham özetler yalnız geriye uyumluluk içindir.
   const agac = surecGrubuYap('Yerel model çalıştırıcıları', h.agacAdet, h.agacPb, h.agacWs, 'agac')
   const isim = surecGrubuYap('Yerel model çalıştırıcıları', h.isimAdet, h.isimPb, h.isimWs, 'isim')
-  const model = agac ?? isim
+  const model = snapshot ? snapshot.model : agac ?? isim
+  if (snapshot) notlar.push(...snapshot.notlar)
+  if (typeof h.surecAgacHata === 'string' && h.surecAgacHata.trim()) notlar.push(`Süreç ağacı okunamadı; tanınan adlar kullanıldı: ${h.surecAgacHata}`)
   const diger: BellekGrubu[] = []
-  // Ağaç kurulabildiği hâlde AĞAÇ DIŞINDA kalan tanınan çalıştırıcı süreçleri varsa (ör. ayrı
-  // başlatılmış bir llama-server), bunlar "Yerel model çalıştırıcıları" toplamına KARIŞTIRILMAZ:
-  // ayrı ve açıkça etiketlenmiş bir grup olarak yazılır. Ağacın içindeki süreçler iki kez sayılmaz.
-  const agacEslesen = sayiYaNull(h.agacEslesen) ?? 0
+  // Eski ham özet biçimi: PID verisi yokken toplamları körlemesine birleştirmeyiz.
+  const agacEslesen = sayiYaNull(h.agacEslesen ?? h.isimEslesen) ?? 0
   const artikAdet = isim ? Math.max(0, isim.adet - agacEslesen) : 0
-  if (agac && isim && artikAdet > 0) {
+  if (!snapshot && agac && isim && artikAdet > 0) {
     const etiket = 'Tanınan diğer yerel çalıştırıcılar (ağaç dışı)'
     const artik = surecGrubuYap(etiket, artikAdet, null, null, 'isim')
     if (artik) diger.push(artik)
@@ -519,6 +573,7 @@ export function olcumGunlukSatiri(o: BellekOlcumu, etiket: string): string {
     o.blender ? o.blender.metin : 'Blender süreci yok',
     o.model ? o.model.metin : 'Yerel model çalıştırıcısı yok',
   ]
+  for (const n of o.notlar) parca.push(n)
   if (s.commitDoluluk !== null) parca.push(`doluluk %${(s.commitDoluluk * 100).toFixed(0)}`)
   return parca.join(' · ')
 }

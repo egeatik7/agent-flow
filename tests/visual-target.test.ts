@@ -58,6 +58,14 @@ describe('visual target reply contract', () => {
 })
 
 describe('target requests leave the initiative API alone', () => {
+  it('uses the configured backup after the exact corrupted GUI-Owl reply, without returning its point', async () => {
+    const requests = capture(model => model === 'fixture/gui-owl'
+      ? '{"intent":"target","x":66,":[20, 137] }":"target","x":66,"y":137}'
+      : '{"intent":"target","x":500,"y":200}')
+    const result = await chooseVisualTarget({ apiKey: 'fake', model: ['fixture/gui-owl', 'vision'], goal: 'User Perspective', screen: image, allowDismiss: false })
+    expect(requests.map(r => r.model)).toEqual(['fixture/gui-owl', 'vision'])
+    expect(result).toMatchObject({ intent: 'target', x: .5, y: .2 })
+  })
   it('requests the explicit native intent without a broad future-task plan', async () => {
     const requests = capture(() => reply('target'))
     await chooseVisualTarget({ apiKey: 'fake', model: native, goal: 'Image folder input', screen: image, allowDismiss: true })

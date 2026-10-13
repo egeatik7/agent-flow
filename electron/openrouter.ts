@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { visualReplyJson } from './visual-reply-json'
 import { olcumFor, olcumuTazele, olcumGoreviEkle, pencereTokenFor } from './local-context-probe'
 import { olcumEskiMi, pencereKaynagi, type BaglamOlcumu } from './local-context'
 import { baglamKartiOzet, baglamKartiYap, sunucuEtiketi } from './hud-context'
@@ -1472,6 +1473,11 @@ export type VisualTargetResult = {
 }
 
 /** A separate, strict reply contract; normal GUI/initiative parsers are untouched. */
+function parseVisualReply(content: string, fields: readonly string[]): Record<string, unknown> {
+  try { return visualReplyJson(content, fields) }
+  catch (error) { throw new ModelRejected(`VISUAL_JSON_INVALID: ${(error as Error).message}`) }
+}
+
 export function validateVisualTargetReply(content: string, model: string, screen: Img, allowDismiss: boolean): VisualTargetResult {
   if (!Number.isFinite(screen.w) || !Number.isFinite(screen.h) || screen.w <= 0 || screen.h <= 0) throw new ModelRejected('Görsel hedef görüntü boyutu geçersiz')
   let intent: unknown, reason = '', point: [number, number] | null = null
@@ -1497,7 +1503,7 @@ export function validateVisualTargetReply(content: string, model: string, screen
     }
     if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
   } else {
-    const p = parseJson(content)
+    const p = parseVisualReply(content, ['intent', 'x', 'y', 'reason'])
     intent = p.intent
     reason = String(p.reason ?? '').trim()
     if (p.action != null) throw new ModelRejected('Görsel hedef JSON yanıtı eylem değil intent taşımalı')
@@ -1556,7 +1562,7 @@ export function validateVisualPointerReply(content: string, model: string, scree
     }
     if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
   } else {
-    const p = parseJson(content)
+    const p = parseVisualReply(content, ['decision', 'x', 'y', 'reason'])
     decision = p.decision; reason = String(p.reason ?? '').trim()
     if (Object.prototype.hasOwnProperty.call(p, 'action') || Object.prototype.hasOwnProperty.call(p, 'mode')) throw new ModelRejected('Görsel konum yanıtı eylem veya tıklama modu seçemez')
     if (decision !== 'adjust' && (p.x !== undefined || p.y !== undefined)) throw new ModelRejected('Konum onayı yeni koordinat taşıyamaz')
