@@ -22,9 +22,9 @@ export function applyViewerMessage(current:ViewerSnapshot|null,message:ViewerMes
  else if(message.channel==='recovery:report'){const r=p as RecoveryReport;next.reports=[...next.reports.filter(v=>v.id!==r.id),r].slice(-100)}
  else if(message.channel==='recovery:removed')next.reports=next.reports.filter(r=>!(p as string[]).includes(r.id))
  else if(run){
-  if(message.channel==='agent:step'){const s=p as {id:string;status:StepStatus};run.status[s.id]=s.status;if(s.status==='running'||s.status==='error'){if(s.status!=='error'||!run.nodeId||!runNodePath(run.graph,run.nodeId).includes(s.id))run.nodeId=s.id}}
+  if(message.channel==='agent:step'){const s=p as {id:string;status:StepStatus};run.status[s.id]=s.status;if(s.status==='running'||s.status==='error'){if(s.status!=='error'||!run.nodeId||!runNodePath(run.graph,run.nodeId).includes(s.id))run.nodeId=s.id}if(s.status==='running'&&run.edges.length){const incoming=run.edges[run.edges.length-1]?.to===s.id;const cut=incoming?-1:run.edges.findIndex(e=>runNodePath(run.graph,e.from).includes(s.id));if(cut>=0)run.edges=run.edges.slice(0,cut)}}
   else if(message.channel==='agent:patch'){const s=p as {id:string;patch:Record<string,unknown>};patch(run.graph,s.id,s.patch)}
-  else if(message.channel==='agent:edge'){const edge=p as {id:string;from:string;to:string},cut=run.edges.findIndex(e=>e.from===edge.to);if(cut>=0)run.edges=run.edges.slice(0,cut);if(!run.edges.some(e=>e.id===edge.id))run.edges.push(edge)}
+  else if(message.channel==='agent:edge'){const edge=p as {id:string;from:string;to:string},cut=run.edges.findIndex(e=>runNodePath(run.graph,e.from).includes(edge.to));if(cut>=0)run.edges=run.edges.slice(0,cut);if(!run.edges.some(e=>e.id===edge.id))run.edges.push(edge)}
   else if(message.channel==='hud:loop')run.loop=(p as {text:string}).text
   else if(message.channel==='hud:method')run.method=(p as {text:string}).text
   else if(message.channel==='recovery:status')run.recovery=p as ViewerRun['recovery']

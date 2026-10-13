@@ -425,6 +425,17 @@ export function createAgent(ctx: AgentContext) {
       trace(node, { kind: 'resolved', source, target: { x: target.x, y: target.y, label: target.label }, rect, item })
       return target
     }
+    const take = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved | undefined => {
+      try {
+        return resolved(target, source, rect, item)
+      } catch (e) {
+        if (e instanceof NotFoundError && /görev çubuğunda/.test((e as Error).message)) {
+          log('info', (e as Error).message)
+          return undefined
+        }
+        throw e
+      }
+    }
     const frame = async (source: FindStageId) => {
       if (!ctx.onTargetTrace || !ctx.captureTargetImages) return
       try {
@@ -483,7 +494,10 @@ export function createAgent(ctx: AgentContext) {
           ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
           const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition')
-          if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
+          if (pick) {
+            const got = take({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
+            if (got) return got
+          }
           log('info', '[chrome] Sayfada bulunamadı.')
         }
         if (stage === 'uia' && !loc && node.kind === 'click' && hasText) {
@@ -495,12 +509,13 @@ export function createAgent(ctx: AgentContext) {
           const hit = clickableBy(scan.items, (quoted || prompt || '').trim(), lastClickPoint)
           if (hit) {
             log('info', `[uia] Uygulama öğesi bulundu: “${hit.text}” (${hit.type}) @${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)}`)
-            return resolved(
+            const got = take(
               { ...center(hit), label: `uygulama öğesi “${hit.text || hit.type}”`, memo: memoOf(hit, scan.area, 'uia') },
               'uia',
               hit,
               hit
             )
+            if (got) return got
           }
         }
         if (stage === 'uia' && !loc && node.kind === 'type' && hasText) {
@@ -515,12 +530,13 @@ export function createAgent(ctx: AgentContext) {
           const hit = writableBy(scan.items, wanted, lastClickPoint)
           if (hit) {
             log('info', `[uia] Yazılabilir alan bulundu: “${hit.text}” (${hit.type}) @${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)}`)
-            return resolved(
+            const got = take(
               { ...center(hit), label: `yazılabilir alan “${hit.text || hit.type}”`, memo: memoOf(hit, scan.area, 'uia') },
               'uia',
               hit,
               hit
             )
+            if (got) return got
           }
         }
         if (stage === 'uia' && loc && win && (loc.automationId || loc.name?.trim()) && !['Pane', 'Window', 'Document', 'Point'].includes(loc.controlType)
@@ -531,7 +547,8 @@ export function createAgent(ctx: AgentContext) {
             trace(node, { kind: 'observation', source: 'uia', value: r })
             if (r && r.enabled !== false && r.w * r.h < 600 * 400) {
               if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('uia')
-              return resolved({ ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }, 'uia', r)
+              const got = take({ ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }, 'uia', r)
+              if (got) return got
             }
           } catch {
             /* next stage */
@@ -548,12 +565,13 @@ export function createAgent(ctx: AgentContext) {
               if (ctx.onTargetTrace && ctx.captureTargetImages) await frame('icon')
               log('info', `[simge] Kayıtlı resim ekranda bulundu (%${Math.round(best.score * 100)} benzer).`)
               const sa = screenArea()
-              return resolved({
+              const got = take({
                 x: best.x,
                 y: best.y,
                 label: '[simge] kayıtlı resim',
                 memo: { win: best.window || win, type: 'Simge', src: 'ocr', rx: (best.x - sa.x) / sa.w, ry: (best.y - sa.y) / sa.h, text: loc.text || 'simge', at: Date.now() },
               }, 'icon')
+              if (got) return got
             }
             if (best) log('info', `[simge] Kayıtlı resim ekranda net değil (en iyi %${Math.round(best.score * 100)}).`)
           } catch (e) {
@@ -571,7 +589,8 @@ export function createAgent(ctx: AgentContext) {
           const pick = quoteOnScreen(scan, quoted, scan.window || win)
           if (pick) {
             const reader = pick.item.src === 'ocr' ? (pick.item.ocrSources ?? ['windows']).join('+') : 'uygulama öğesi'
-            return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'windows', pick.target, pick.item)
+            const got = take({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (${reader}, ${pick.how})` }, 'windows', pick.target, pick.item)
+            if (got) return got
           }
           log('info', `“${quoted}” birleşik OCR’da doğrudan bulunamadı.`)
           if (esitAdayNotu) {
@@ -584,13 +603,18 @@ export function createAgent(ctx: AgentContext) {
           const scan = await windowsScan()
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
           const pick = await pickFrom(node, scan, scan.window || win, true, true)
-          if (pick) return resolved({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
+          if (pick) {
+            const got = take({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
+            if (got) return got
+          }
         }
         if (stage === 'tars' && (s.apiKey || localConfigured()) && (hasText || loc?.icon)) {
           ctx.setMethod?.('Görsel hedefleme')
           try {
             log('info', 'Görsel model ekran görüntüsüne bakıyor.')
-            return await locateWithTars(node, wide, readOnly)
+            const visual = await locateWithTars(node, wide, readOnly)
+            const got = take(visual, 'tars')
+            if (got) return got
           } catch (e) {
             // O04 (yönerge): KALICI API hatası (401/402, kota) burada YUTULMAMALI. Önceden yalnız
             // StoppedError ve VisualTargetRecoveryError yeniden fırlatılıyordu; FatalApiError
@@ -932,7 +956,9 @@ export function createAgent(ctx: AgentContext) {
     if (ahead?.next?.kind === 'condition') {
       await act()
       log('info', `“${node.title}” bir kez yapıldı. Sıradaki adım (${ahead.next.title}) ekrana kendisi baktığı için kontrol edilmeden geçiliyor.`)
-      return true
+      // The condition looks for itself. This click was not shown to be the right control,
+      // so it is not a proven target and must not be written into memory.
+      return false
     }
     if (process.platform !== 'win32') {
       await act()

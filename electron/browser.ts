@@ -120,7 +120,7 @@ async function pageOnScreen(p: Page): Promise<DomBox[]> {
 function pageMatches(title: string, win: string): boolean {
   const bare = win.replace(/\s+-\s+Google Chrome\s*$/i, '').replace(/\s+-\s+Chromium\s*$/i, '').trim()
   if (!bare || !title) return false
-  return bare.includes(title) || title.includes(bare)
+  return title === bare || title === win
 }
 
 async function chromeBoxes(win?: string): Promise<DomBox[] | null> {

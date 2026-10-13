@@ -91,7 +91,8 @@ describe('3) dört kavram AYRI gösterilir (yapılandırılmış "yüklü" diye 
     expect(k.yukluToken).toBeNull()
     expect(k.kaynak).toBe('yapilandirilmis')
     // Etkin pencere yapılandırılmıştır ama ana satır bunu "yüklü" demez.
-    expect(k.yukluMetin).toBe('Yüklü bağlam: 65.536 token')
+    expect(k.yukluMetin).toBe('Yüklü bağlam: bilinmiyor')
+    expect(k.satirlar[0]).toBe('Yüklü bağlam: bilinmiyor')
     expect(k.satirlar.join(' ')).toContain('Yapılandırılmış pencere: 65.536')
   })
 

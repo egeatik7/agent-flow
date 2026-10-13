@@ -182,13 +182,16 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
 public static class XpText {
-  [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+  static extern short VkKeyScanW(char ch);
 
   /// Every character can be produced by the current keyboard layout (so SendKeys can type it).
+  /// VkKeyScan (ANSI) best-fits characters outside the code page to '?', which has a key, so it
+  /// reports them as typeable and the field is cleared before the Unicode send throws.
   public static bool CanType(string s) {
     foreach (char c in s) {
       if (c == '\n' || c == '\r' || c == '\t') continue;
-      if (VkKeyScan(c) == -1) return false;
+      if (VkKeyScanW(c) == -1) return false;
     }
     return true;
   }
@@ -230,12 +233,17 @@ public static class XpText {
   }
 
   /// FindAll with a time limit. Huge trees (browsers) are dropped instead of stalling the whole scan.
+  static int walkBusy;
   public static AutomationElementCollection FindAllBounded(AutomationElement root, Condition cond, CacheRequest cr, int timeoutMs) {
+    // A timed-out walk keeps running. Do not start another until it finishes, or a long loop
+    // piles FindAll threads onto the worker.
+    if (System.Threading.Interlocked.CompareExchange(ref walkBusy, 1, 0) != 0) return null;
     AutomationElementCollection result = null;
     var t = new Thread(() => {
       try {
         using (cr.Activate()) { result = root.FindAll(TreeScope.Descendants, cond); }
       } catch { }
+      finally { System.Threading.Interlocked.Exchange(ref walkBusy, 0); }
     });
     t.IsBackground = true;
     t.Start();

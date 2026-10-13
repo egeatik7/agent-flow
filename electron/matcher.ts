@@ -178,7 +178,8 @@ function refineToWords(item: ScreenItem, q: string): { x: number; y: number; w: 
   const qn = q.split(' ').length
   for (let i = 0; i + qn <= words.length; i++) {
     const slice = words.slice(i, i + qn)
-    if (norm(slice.map((w) => w.t).join(' ')) === q || (qn === 1 && norm(slice[0].t).startsWith(q))) {
+    // Exact words only. "İndir" must not take the box of "İndirim" on the same line.
+    if (norm(slice.map((w) => w.t).join(' ')) === q) {
       const x1 = Math.min(...slice.map((w) => w.x))
       const y1 = Math.min(...slice.map((w) => w.y))
       const x2 = Math.max(...slice.map((w) => w.x + w.w))
@@ -323,9 +324,11 @@ function editDistance(a: string, b: string, max: number): number {
 
 function wordSimilarity(q: string, w: string): number {
   if (q === w) return 1
-  if (q.length >= 3 && w.length >= 3 && (w.startsWith(q) || q.startsWith(w))) {
-    const extra = Math.abs(q.length - w.length)
-    if (extra <= 5) return 0.9
+  // The query may carry a short suffix ("Opera'ya" → "Opera"). The screen word must not be a
+  // longer different word ("İndir" → "İndirildi", "Kaydet" → "Kaydetme").
+  if (q.length >= 3 && w.length >= 3 && q.startsWith(w)) {
+    const extra = q.length - w.length
+    if (extra > 0 && extra <= 5) return 0.9
   }
   const allowed = q.length >= 7 ? 2 : q.length >= 4 ? 1 : 0
   if (allowed && editDistance(q, w, allowed) <= allowed) return 0.8

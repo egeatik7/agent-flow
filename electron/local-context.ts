@@ -143,7 +143,11 @@ export function olcumEskiMi(o: BaglamOlcumu | undefined, simdi: number, sinirMs 
  * "kesin kanıt" sayılmaz; yalnız o anki yüklü durumu bildirir.
  */
 export function cevapSonrasiTazeleme(o: BaglamOlcumu | undefined): boolean {
-  return !!o && (Number(o.cevapAt) || 0) > (Number(o.olcumAt) || 0)
+  const cevap = Number(o?.cevapAt) || 0
+  const olcum = Number(o?.olcumAt) || 0
+  // Production stamps both at the same millisecond after a reply. That record is still a
+  // post-response refresh: it is the loaded window now, not proof of the request that just finished.
+  return cevap > 0 && cevap >= olcum
 }
 
 /** Pencerenin KAYNAĞI: istenen/yapılandırılan değer "gerçek yüklü pencere" diye sunulmaz. */

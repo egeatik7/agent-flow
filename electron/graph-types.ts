@@ -868,7 +868,11 @@ export function normalizeGraph(raw: unknown): AgentGraph {
   })
 
   if (!nodes.some((n) => n.kind === 'start')) {
-    const firstFree = nodes.find((n) => !edges.some((e) => e.to === n.id))
+    const memberIds = new Set(nodes.flatMap((n) => n.members ?? []))
+    const free = nodes.filter((n) => !edges.some((e) => e.to === n.id))
+    // A loop body step often has no incoming edge of its own. Wiring Başlangıç to it runs the
+    // body once and never enters the box. Prefer a free node that is not already a member.
+    const firstFree = free.find((n) => !memberIds.has(n.id)) ?? free[0]
     const minX = nodes.length ? Math.min(...nodes.map((n) => n.x)) : 300
     const start = createNode('start', Math.max(20, minX - NODE_W - 60), firstFree ? firstFree.y : 80)
     // Konum/kenar/x kaydırma davranışı aynen kalır; yalnız kimlik kararlı hâle gelir.

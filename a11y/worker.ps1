@@ -1065,25 +1065,30 @@ function Invoke-Op([string]$op, $P) {
       $button = 'left'
       if ($null -ne $P.button) { $button = [string]$P.button }
       if ($button -notin @('left', 'double', 'right')) { throw 'INPUT_CLICK_MODE: Invalid current-pointer click mode; click not sent' }
-      if (-not $P.hwnd -or [long]$P.hwnd -le 0) { throw 'INPUT_CLICK_STALE: No hover window identity; click not sent' }
-      # Fare konumundan tıklama. $P.hwnd, TAŞIMA anındaki penceredir; arada pencere
-      # değiştiyse ya da nokta başka pencereyle örtüldüyse TIKLAMAYIZ.
-      # Re-read at execution time too: a cursor read in the caller can already be stale.
+      # Belirsizlik tıklamayı kesmez (clickAt ile aynı kural). Kendi penceresi ve bozuk tuş hâlâ keser.
+      # Çift tıklamada ikinci basıştan önce fırlatmak, ilk basış inmişken "gönderilmedi" deyip
+      # yeniden tıklatıyordu.
+      $uyari = ''
       $cursor = Get-CursorPoint
-      $dx = [double]$cursor.X - [double]$P.x; $dy = [double]$cursor.Y - [double]$P.y
-      if ([Math]::Sqrt($dx * $dx + $dy * $dy) -gt 3) { throw 'INPUT_CLICK_STALE: Cursor moved before input; click not sent' }
       $x = [int]$cursor.X; $y = [int]$cursor.Y
+      if ($null -ne $P.x -and $null -ne $P.y) {
+        $dx = [double]$cursor.X - [double]$P.x; $dy = [double]$cursor.Y - [double]$P.y
+        if ([Math]::Sqrt($dx * $dx + $dy * $dy) -gt 3) { $uyari = 'INPUT_CLICK_STALE: imleç kaydı; güncel noktadan tıklandı' }
+      }
       $kok = [XpWin]::RootAt($x, $y)
       if ($P.ownPid -and [XpWin]::ProcessOf($kok) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine tiklamaz.' }
-      if ($P.hwnd -and [IntPtr]([long]$P.hwnd) -ne [IntPtr]::Zero -and $kok -ne [IntPtr]([long]$P.hwnd)) {
-        throw 'INPUT_CLICK_STALE: Fare noktası artık aynı pencerede değil; tıklama gönderilmedi'
-      }
+      if (-not $P.hwnd -or [long]$P.hwnd -le 0) { $uyari = 'INPUT_CLICK_STALE: hover penceresi yok; yine de tıklandı' }
+      elseif ($kok -ne [IntPtr]([long]$P.hwnd)) { $uyari = 'INPUT_CLICK_STALE: pencere değişti; yine de tıklandı' }
       if ($P.target) {
-        [void](Get-BoundWindow $P.target $false)
-        if ($kok -ne [IntPtr]([long]$P.target.hwnd)) { throw 'INPUT_CLICK_OCCLUDED: Target point is covered by another window' }
+        try {
+          [void](Get-BoundWindow $P.target $false)
+          if ($kok -ne [IntPtr]([long]$P.target.hwnd)) { $uyari = 'INPUT_CLICK_OCCLUDED: nokta örtülü; yine de tıklandı' }
+        } catch {
+          $uyari = 'INPUT_TARGET_STALE: ' + $_.Exception.Message.Split([char]10)[0]
+        }
       }
-      Invoke-MouseAt $x $y $button $true ([long]$P.hwnd)
-      return $true
+      Invoke-MouseAt $x $y $button $false 0
+      return [pscustomobject]@{ ok = $true; warning = $uyari }
     }
     'moveAt' {
       # Yalnız imleci taşır. Bilinen kapalı/PID değiştirmiş hedef gerçek hatadır;
@@ -1168,6 +1173,16 @@ function Invoke-Op([string]$op, $P) {
         if ($P.guard -and $P.guard.window) { Assert-KnownWindowIdentity $P.guard.window }
         if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine yazmaz.' }
         $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; writeSent = $false; focusType = ''; focusHwnd = ''; via = 'keyboard'; value = $null }
+        $text = [string]$P.text
+        $usePaste = $text.Length -gt 0 -and -not [XpText]::CanType($text)
+        $oldClip = $null
+        if ($usePaste) {
+          # Prove the clipboard can hold the text BEFORE clearing the field. The host is MTA;
+          # SetClipboard runs the OLE call on an STA thread.
+          $oldClip = [XpText]::SetClipboard($text)
+          Start-Sleep -Milliseconds 80
+          if (-not [XpText]::ClipboardHas($text)) { throw 'CLIPBOARD_SET_FAILED: Pano yaziyi kabul etmedi; alan temizlenmedi.' }
+        }
         if ($P.clearFirst) {
           Start-Sleep -Milliseconds 120
           [System.Windows.Forms.SendKeys]::SendWait('^a')
@@ -1177,19 +1192,14 @@ function Invoke-Op([string]$op, $P) {
           Start-Sleep -Milliseconds 200
           $out.cleared = $true
         }
-        $text = [string]$P.text
         if ($text.Length -gt 0) {
-          if ([XpText]::CanType($text)) {
+          if (-not $usePaste) {
             Send-TextPaced $text 20
           } else {
-            $old = Get-ClipboardSnapshot
             try {
-              [System.Windows.Forms.Clipboard]::SetText($text)
-              Start-Sleep -Milliseconds 80
-              if (-not [XpText]::ClipboardHas($text)) { throw 'CLIPBOARD_SET_FAILED: Pano yaziyi kabul etmedi; eski pano yapistirilmadi.' }
               [System.Windows.Forms.SendKeys]::SendWait('^v')
               Start-Sleep -Milliseconds 250
-            } finally { [System.Windows.Forms.Clipboard]::SetDataObject($old, $true) }
+            } finally { [XpText]::RestoreClipboard($oldClip) }
             $out.pasted = $true
           }
           $out.writeSent = $true

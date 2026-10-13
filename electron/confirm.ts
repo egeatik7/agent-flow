@@ -12,7 +12,8 @@ export type Verdict = {
   changed: boolean
 }
 
-const LOADING = /yuklen|loading|please wait|lutfen bekle|isleniyor|bekleyin|processing|tamamlani/
+// "yukleni" is yükleniyor / yüklenmekte. "yüklendi" and "yüklenenler" are finished words.
+const LOADING = /yukleni|yuklenmekte|loading|please wait|lutfen bekle|isleniyor|bekleyin|processing|tamamlani/
 
 /** The first quoted token in a condition, or the whole text when it is already short. */
 export function conditionNeedle(text: string): string {
