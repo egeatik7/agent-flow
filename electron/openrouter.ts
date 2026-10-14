@@ -1,3 +1,4 @@
+import { visualToolCall, type VisualToolCall } from './visual-tool-call'
 import { spawnSync } from 'node:child_process'
 import { visualReplyJson } from './visual-reply-json'
 import { olcumFor, olcumuTazele, olcumGoreviEkle, pencereTokenFor } from './local-context-probe'
@@ -1571,12 +1572,11 @@ ${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''
   })
 }
 
-export type VisualTargetResult = {
-  intent: 'target' | 'dismiss' | 'missing'
+export type VisualTargetResult = VisualToolCall & {
   model?: string
-  x?: number
-  y?: number
   reason: string
+  /** Existing UI-TARS popup classification only; not accepted in computer_use replies. */
+  dismiss?: boolean
 }
 
 /** A separate, strict reply contract; normal GUI/initiative parsers are untouched. */
@@ -1610,21 +1610,17 @@ export function validateVisualTargetReply(content: string, model: string, screen
     }
     if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
   } else {
-    const p = parseVisualReply(content, ['intent', 'x', 'y', 'reason'])
-    intent = p.intent
-    reason = String(p.reason ?? '').trim()
-    if (p.action != null) throw new ModelOutputRejected('Görsel hedef JSON yanıtı eylem değil intent taşımalı')
-    if (intent !== 'missing' && typeof p.x === 'number' && typeof p.y === 'number') point = [p.x, p.y]
-    if (intent === 'missing' && (p.x != null || p.y != null)) throw new ModelOutputRejected('Eksik hedef koordinat taşıyamaz')
+    try { return visualToolCall(content) }
+    catch (error) { throw new ModelOutputRejected(`VISUAL_TOOL_INVALID: ${(error as Error).message}`) }
   }
   if (!['target', 'dismiss', 'missing'].includes(String(intent))) throw new ModelOutputRejected('Görsel hedef intent alanı geçersiz')
   if (intent === 'dismiss' && !allowDismiss) throw new ModelOutputRejected('Bu hedef aramasında popup kapatma etkin değil')
-  if (intent === 'missing') return { intent, reason }
+  if (intent === 'missing') return { name: 'computer_use', arguments: { action: 'terminate', status: 'failure' }, reason }
   if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || maxX <= 0 || maxY <= 0 ||
       point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) {
     throw new ModelOutputRejected('Görsel hedef koordinatı eksik veya görüntünün dışında')
   }
-  return { intent: intent as 'target' | 'dismiss', x: point[0] / maxX, y: point[1] / maxY, reason }
+  return { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [point[0] / maxX * 1000, point[1] / maxY * 1000] }, reason, ...(intent === 'dismiss' ? { dismiss: true } : {}) }
 }
 
 export async function chooseVisualTarget(opts: {
@@ -1632,17 +1628,19 @@ export async function chooseVisualTarget(opts: {
   dismissalRecord?: string; tarsPrompt?: string; jsonPrompt?: string
   revision?: number; chainSource?: string
 }): Promise<VisualTargetResult> {
-  const context = `${VISUAL_TARGET_RULES}\nDismissals enabled: ${opts.allowDismiss ? 'YES (one unrelated popup only)' : 'NO'}.\n${opts.dismissalRecord ? `Executor record: ${opts.dismissalRecord}\n` : ''}Original requested target: ${opts.goal}`
   return runModelChain(asModelChain(opts.model), async model => {
     const native = isTarsModel(model)
     const custom = native ? opts.tarsPrompt : opts.jsonPrompt
     const standard = native ? TARS_TEMPLATE : SCREEN_PROMPT
     const contract = native ? VISUAL_TARGET_TARS_PROMPT : VISUAL_TARGET_JSON_PROMPT
+    const context = native
+      ? `${VISUAL_TARGET_RULES}\nDismissals enabled: ${opts.allowDismiss ? 'YES (one unrelated popup only)' : 'NO'}.\n${opts.dismissalRecord ? `Executor record: ${opts.dismissalRecord}\n` : ''}Original requested target: ${opts.goal}`
+      : `${opts.dismissalRecord ? `Executor record (not proof of current visibility): ${opts.dismissalRecord}\n` : ''}Requested target: ${opts.goal}`
     const prompt = `${custom?.trim() && custom !== standard ? fillGoal(custom, opts.goal) + '\n\n' : ''}${fillGoal(contract, opts.goal)}\n\n${context}`
     const messages: Message[] = native
       ? [{ role: 'user', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
       : [{ role: 'system', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
-    const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-target' })
+    const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, stage: 'visual-target' })
     const result = validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
     chatLogger?.(`CEVAPLAYAN asama=visual-target model=${model}`)
     return { ...result, model }

@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body); h.requests.push(body)
     const verification = JSON.stringify(body.messages).includes('"decision\\"') || JSON.stringify(body.messages).includes('confirm|adjust|uncertain')
-    const reply = verification ? h.answers.shift() ?? { decision: 'confirm', reason: 'crosshair inside Blender' } : { intent: 'target', x: 300, y: 400, reason: 'Blender' }
+    const reply = verification ? h.answers.shift() ?? { decision: 'confirm', reason: 'crosshair inside Blender' } : { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [300, 400] } }
     if (verification && h.drift) h.point = { x: 800, y: 600 }
     return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
@@ -61,7 +61,7 @@ it('backup B that locates the target also handles each pointer adjustment; never
     const pointer = JSON.stringify(body.messages).includes('confirm|adjust|uncertain')
     const reply = body.model === 'A' ? { intent: 'target', x: 300, y: 400, strconv: 210 }
       : pointer ? (h.moves.length === 1 ? { decision: 'adjust', x: 600, y: 500 } : { decision: 'confirm' })
-      : { intent: 'target', x: 300, y: 400 }
+      : { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [300, 400] } }
     return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
   const agent = executor({ visionModel: 'A', visionBackups: ['B', 'C'], agentModel: 'Yap-only', agentBackups: ['Other-Yap'] })
@@ -80,7 +80,7 @@ it('if B fails pointer output twice, C continues all subsequent adjustments with
     const reply = body.model === 'A' ? { intent: 'target', x: 300, y: 400, strconv: 210 }
       : pointer && body.model === 'B' ? { decision: 'confirm', x: 900 }
       : pointer ? (h.moves.length === 1 ? { decision: 'adjust', x: 600, y: 500 } : { decision: 'confirm' })
-      : { intent: 'target', x: 300, y: 400 }
+      : { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [300, 400] } }
     return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
   await executor({ visionModel: 'A', visionBackups: ['B', 'C'], agentModel: 'Yap-only' }).click(node(), 1)

@@ -152,7 +152,7 @@ export default function LlmPanel(p: Props) {
                 <p className="llm-note">Yukarıdaki kutu UI-TARS’a ek talimattır. Boşsa aşağıdaki yerleşik hedef promptu kullanılır.</p>
                 {fixedRules('UI-TARS yerleşik hedef promptu', VISUAL_TARGET_TARS_PROMPT)}
                 {promptBox('screen', 'Diğer görsel modeller — ek talimat', 'Bu kutu ortak görsel hedefleme ek talimatıdır; boşsa yerleşik JSON hedef promptu kullanılır.', prompts.screen === SCREEN_PROMPT ? '' : prompts.screen ?? '')}
-                {fixedRules('JSON yerleşik hedef promptu', VISUAL_TARGET_JSON_PROMPT)}
+                {fixedRules('computer_use yerleşik hedef promptu', VISUAL_TARGET_JSON_PROMPT)}
                 {fixedRules('Her görsel isteğe eklenen hedef kuralları', VISUAL_TARGET_RULES)}
                 {nodeTab === 'click' && promptBox('visualPointer', 'Görsel konum doğrulama — önce fareyi taşı', 'Yalnız görsel modelle bulunan tıklama hedefinde: fare taşınır, gerçek imleç işaretli yeni kare modele gönderilir. Onaylanan konumdan seçili modla tıklanır. En fazla iki konum düzeltmesi; belirsizlikte tıklama yok. UIA/OCR ve Fareyi Oynat modunda bu çağrı yapılmaz.')}
                 {nodeTab === 'click' && fixedRules('Konum doğrulaması — sabit JSON ve UI-TARS yanıt sözleşmeleri', VISUAL_POINTER_JSON_CONTRACT + '\n\n' + VISUAL_POINTER_TARS_CONTRACT)}

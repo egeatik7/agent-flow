@@ -18,14 +18,14 @@ function capture(answer: (model: string) => string) {
 describe('visual target reply contract', () => {
   it('distinguishes a popup point from a target with native screenshot pixel scaling', () => {
     const result = validateVisualTargetReply(reply('dismiss'), native, image, true)
-    expect(result.intent).toBe('dismiss'); expect(result.x).toBeCloseTo(808 / 1288); expect(result.y).toBeCloseTo(292 / 728)
-    expect(validateVisualTargetReply(reply('target'), native, image, false).intent).toBe('target')
+    expect(result.dismiss).toBe(true); expect(result.arguments.action).toBe('mouse_move'); if (result.arguments.action === 'mouse_move') { expect(result.arguments.coordinate[0]).toBeCloseTo(808 / 1288 * 1000); expect(result.arguments.coordinate[1]).toBeCloseTo(292 / 728 * 1000) }
+    expect(validateVisualTargetReply(reply('target'), native, image, false).arguments.action).toBe('mouse_move')
   })
   it('keeps the older TARS 0-1000 coordinate system separate from native pixels', () => {
-    expect(validateVisualTargetReply(reply('target', "click(start_box='(500,250)')"), 'ui-tars-old', image, false)).toMatchObject({ x: .5, y: .25 })
+    expect(validateVisualTargetReply(reply('target', "click(start_box='(500,250)')"), 'ui-tars-old', image, false)).toMatchObject({ arguments: { action: 'mouse_move', coordinate: [500, 250] } })
   })
   it('JSON always uses its declared 0-1000 grid, including a coordinate of 1', () => {
-    expect(validateVisualTargetReply('{"intent":"target","x":1,"y":500}', 'vision', image, false)).toMatchObject({ x: .001, y: .5 })
+    expect(validateVisualTargetReply('{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[1,500]}}', 'vision', image, false)).toMatchObject({ arguments: { coordinate: [1, 500] } })
   })
   it('rejects a bare click and does not guess intent from the thought', () => {
     expect(() => validateVisualTargetReply("Thought: Close popup first.\nAction: click(start_box='(808,292)')", native, image, true)).toThrow(ModelRejected)
@@ -51,8 +51,8 @@ describe('visual target reply contract', () => {
     expect(() => validateVisualTargetReply(reply('target'), native, { ...image, w: NaN }, true)).toThrow(ModelRejected)
   })
   it('returns missing without a clickable point and refuses dismissal when disabled', () => {
-    expect(validateVisualTargetReply(reply('missing', 'call_user()'), native, image, false)).toEqual({ intent: 'missing', reason: 'One control.' })
-    expect(validateVisualTargetReply('{"intent":"missing","reason":"Blocked"}', 'vision', image, false)).toEqual({ intent: 'missing', reason: 'Blocked' })
+    expect(validateVisualTargetReply(reply('missing', 'call_user()'), native, image, false)).toEqual({ name: 'computer_use', arguments: { action: 'terminate', status: 'failure' }, reason: 'One control.' })
+    expect(validateVisualTargetReply('{"name":"computer_use","arguments":{"action":"terminate","status":"failure"}}', 'vision', image, false)).toEqual({ name: 'computer_use', arguments: { action: 'terminate', status: 'failure' }, reason: '' })
     expect(() => validateVisualTargetReply(reply('dismiss'), native, image, false)).toThrow(ModelRejected)
   })
 })
@@ -61,10 +61,10 @@ describe('target requests leave the initiative API alone', () => {
   it('uses the configured backup after the exact corrupted GUI-Owl reply, without returning its point', async () => {
     const requests = capture(model => model === 'fixture/gui-owl'
       ? '{"intent":"target","x":66,":[20, 137] }":"target","x":66,"y":137}'
-      : '{"intent":"target","x":500,"y":200}')
+      : '{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[500,200]}}')
     const result = await chooseVisualTarget({ apiKey: 'fake', model: ['fixture/gui-owl', 'vision'], goal: 'User Perspective', screen: image, allowDismiss: false })
     expect(requests.map(r => r.model)).toEqual(['fixture/gui-owl', 'fixture/gui-owl', 'vision'])
-    expect(result).toMatchObject({ intent: 'target', x: .5, y: .2 })
+    expect(result).toMatchObject({ name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [500, 200] } })
   })
   it('requests the explicit native intent without a broad future-task plan', async () => {
     const requests = capture(() => reply('target'))
@@ -75,18 +75,20 @@ describe('target requests leave the initiative API alone', () => {
     expect(requests[0].messages[0].content).toContain('Do not approve confirmations')
   })
   it('passes the original target and factual dismissal record beside the new image', async () => {
-    const requests = capture(() => '{"intent":"target","x":500,"y":300}')
+    const requests = capture(() => '{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[500,300]}}')
     await chooseVisualTarget({ apiKey: 'fake', model: 'vision', goal: 'Output folder input', screen: image, allowDismiss: false, dismissalRecord: 'One left click sent; application result unknown', jsonPrompt: 'SAVED CUSTOM' })
     expect(requests[0].messages[0].content).toContain('SAVED CUSTOM')
-    expect(requests[0].messages[0].content).toContain('Dismissals enabled: NO')
+    expect(requests[0].messages[0].content).toContain('Do not choose a popup dismissal')
+    expect(requests[0]).not.toHaveProperty('response_format')
+    expect(requests[0].messages[0].content).not.toContain('target: the requested control')
     expect(requests[0].messages[0].content).toContain('Output folder input')
     expect(requests[0].messages[0].content).toContain('One left click sent; application result unknown')
     expect(requests[0].messages[1].content[0].image_url.url).toContain('NEW_SCREEN')
   })
   it('tries the configured backup when TARS omits intent rather than dispatching its ambiguous click', async () => {
-    const requests = capture(model => model === native ? "Thought: Close it first.\nAction: click(start_box='(808,292)')" : '{"intent":"target","x":500,"y":200}')
+    const requests = capture(model => model === native ? "Thought: Close it first.\nAction: click(start_box='(808,292)')" : '{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[500,200]}}')
     const result = await chooseVisualTarget({ apiKey: 'fake', model: [native, 'vision'], goal: 'Input', screen: image, allowDismiss: true })
-    expect(result).toMatchObject({ intent: 'target', x: .5, y: .2 })
+    expect(result).toMatchObject({ name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [500, 200] } })
     expect(requests.map(r => r.model)).toEqual([native, native, 'vision'])
   })
   it('still accepts ordinary initiative move/click responses without an intent field', async () => {

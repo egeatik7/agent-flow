@@ -65,10 +65,11 @@ async function replayTrace(bundle, observer) {
       chooseOcrWord: async () => { const value = nextModel('wordChoice'); return value.result === null ? null : value; },
       isTarsModel: () => false, localConfigured: () => false, chooseScreenTarget: async () => nextModel('list'), chooseVisualTarget: async () => {
       const value = nextModel('tars');
-      if (value.intent) return value;
+      if (value.name === 'computer_use' && value.arguments) return value;
       // Legacy diagnostic traces used GuiAction. Replay their recorded target interpretation
       // read-only; this adapter never runs on live model responses or sends input.
-      return {intent:['click','double','right'].includes(value.kind)?'target':'missing',x:value.x,y:value.y,reason:value.thought||''};
+      const intent=value.intent||(['click','double','right'].includes(value.kind)?'target':'missing');
+      return {name:'computer_use',arguments:intent==='missing'?{action:'terminate',status:'failure'}:{action:'mouse_move',coordinate:[value.x*1000,value.y*1000]},reason:value.reason||value.thought||'',...(intent==='dismiss'?{dismiss:true}:{})};
     } },
   };
   const saved = new Map();

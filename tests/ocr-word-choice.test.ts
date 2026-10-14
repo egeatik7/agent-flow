@@ -32,7 +32,7 @@ function respond(first: number, second: unknown, fallback = false) {
     const request = JSON.parse(init.body); state.requests.push(request)
     const short = typeof request.messages[1].content === 'string' && request.messages[1].content.startsWith('Instruction:')
     const pointerCheck = JSON.stringify(request.messages).includes('confirm|adjust|uncertain')
-    const reply = pointerCheck ? { decision: 'confirm', reason: 'pointer on visual target' } : short ? second : fallback && state.requests.length > 2 ? { intent: 'target', x: 900, y: 800, reason: 'fallback' } : { id: first, reason: 'fixture' }
+    const reply = pointerCheck ? { decision: 'confirm', reason: 'pointer on visual target' } : short ? second : fallback && state.requests.length > 2 ? { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [900, 800] } } : { id: first, reason: 'fixture' }
     return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
 }

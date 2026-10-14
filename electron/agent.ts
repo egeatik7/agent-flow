@@ -669,7 +669,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   function validVisualPoint(result: VisualTargetResult): boolean {
-    return Number.isFinite(result.x) && Number.isFinite(result.y) && result.x! >= 0 && result.x! < 1 && result.y! >= 0 && result.y! < 1
+    return result.arguments.action === 'mouse_move' && result.arguments.coordinate.every(n => Number.isFinite(n) && n >= 0 && n < 1000)
   }
 
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
@@ -706,10 +706,11 @@ export function createAgent(ctx: AgentContext) {
         checkStopped()
         if (action.model) session.accept(action.model)
         trace(node, { kind: 'model', source: 'tars', value: action })
-        if (action.intent !== 'dismiss') break
+        if (!action.dismiss) break
         if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
-        if (!validVisualPoint(action)) throw new VisualTargetRecoveryError('Popup kapatma yanıtında geçerli nokta yok; tıklama gönderilmedi.')
-        let x = res.area.x + action.x! * res.area.w, y = res.area.y + action.y! * res.area.h
+        if (!validVisualPoint(action) || action.arguments.action !== 'mouse_move') throw new VisualTargetRecoveryError('Popup kapatma yanıtında geçerli nokta yok; tıklama gönderilmedi.')
+        let x = res.area.x + action.arguments.coordinate[0] / 1000 * res.area.w
+        let y = res.area.y + action.arguments.coordinate[1] / 1000 * res.area.h
         await waitUnlocked()
         checkStopped()
         clearHover()
@@ -732,7 +733,7 @@ export function createAgent(ctx: AgentContext) {
         await pause(FOCUS_MS)
         res = await capture()
       }
-      let pointed = action.intent === 'target' && validVisualPoint(action)
+      let pointed = !action.dismiss && validVisualPoint(action)
       let a = res.area
       let thought = action.reason
       // A small, wordless target - a colour swatch, a tiny icon - is easy to miss on a whole screen and
@@ -779,14 +780,13 @@ export function createAgent(ctx: AgentContext) {
               })
               if (again.model) session.accept(again.model)
               trace(node, { kind: 'model', source: 'tars', value: again })
-              const ok2 = again.intent === 'target' && validVisualPoint(again)
+              const ok2 = !again.dismiss && validVisualPoint(again)
               log('info', `[Görsel model] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
               if (ok2) {
                 pointed = true
                 a = crop.area
                 thought = again.reason
-                action.x = again.x
-                action.y = again.y
+                action = again
               }
             }
           } catch (e) {
@@ -801,10 +801,11 @@ export function createAgent(ctx: AgentContext) {
         if (didDismiss) throw new VisualTargetRecoveryError(`${message} Popup tıklaması tekrarlanmayacak; sonraki node'a geçilmedi.`)
         throw new NotFoundError(message)
       }
-      const x = a.x + action.x! * a.w
-      const y = a.y + action.y! * a.h
+      if (action.arguments.action !== 'mouse_move') throw new NotFoundError('Görsel model hedef koordinatı vermedi.')
+      const x = a.x + action.arguments.coordinate[0] / 1000 * a.w
+      const y = a.y + action.arguments.coordinate[1] / 1000 * a.h
       trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[Görsel model] ekran görüntüsü' } })
-      log('info', `[Görsel model] ${thought || action.intent}`)
+      log('info', `[Görsel model] ${thought || action.arguments.action}`)
       return {
         x,
         y,

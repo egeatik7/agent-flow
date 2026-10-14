@@ -153,9 +153,20 @@ Action: click(start_box='(x,y)') OR call_user()
 Use click with coordinates for target or dismiss. Use call_user() for missing. No other actions. UI-TARS 1.5 coordinates are pixels of the supplied image; other UI-TARS versions use their normal 0-1000 grid.
 Requested target: {{hedef}}`
 
-export const VISUAL_TARGET_JSON_PROMPT = `Locate one requested control in the screenshot. Classify it explicitly as target, dismiss or missing.
-Reply with JSON only: {"intent":"target|dismiss|missing","x":0,"y":0,"reason":"one short reason"}.
-x and y use the 0-1000 screenshot grid, NOT screen pixels or 0-1 fractions. For missing, omit coordinates. Do not return an action plan.`
+/** Shared non-TARS visual grounding protocol; the name remains for existing imports. */
+export const VISUAL_TARGET_JSON_PROMPT = `# Tools
+You locate ONE requested target in the current screenshot. You do not execute a workflow.
+You are provided with the function signature below:
+<tools>
+{"type":"function","function":{"name":"computer_use","description":"Locate the exact requested control. Coordinates use a 1000x1000 relative screen grid. Point at the visible target's center. Only mouse_move is permitted; no clicking, typing, keys, scrolling, opening menus or closing popups. If the target is missing, covered or ambiguous, terminate with status failure.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["mouse_move","terminate"]},"coordinate":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"status":{"type":"string","enum":["failure"]}},"required":["action"],"additionalProperties":false}}}
+</tools>
+Return exactly ONE JSON function call within <tool_call></tool_call> tags.
+Visible target: <tool_call>{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[500,250]}}</tool_call>
+Missing or obstructed target: <tool_call>{"name":"computer_use","arguments":{"action":"terminate","status":"failure"}}</tool_call>
+Coordinates must satisfy 0 <= x,y < 1000. No intent, x, y, reason or other extra JSON fields. Never invent a point.
+Do not choose a popup dismissal instead of the requested target. If closing a popup is explicitly the requested target, locate that exact control.
+This output contract overrides conflicting format examples in additional instructions. The executor only moves the pointer; its own position check and the node's click mode control any later click.
+Requested target: {{hedef}}`
 
 export const REACTION_PROMPT = `You receive two screenshots, BEFORE and AFTER an automation step. Decide whether the next step is possible.
 Pick one verdict: ready, missed, loading, blocked, unknown.

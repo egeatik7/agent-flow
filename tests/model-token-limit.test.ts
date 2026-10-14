@@ -42,8 +42,8 @@ describe('Provider uses its own output token defaults', () => {
   })
 
   it.each(['fixture/model', 'bytedance/ui-tars-1.5-7b'])('does not limit visual target selection for %s', async model => {
-    const requests = mockReply(model.includes('ui-tars') ? 'Intent: missing\nAction: call_user()' : '{"intent":"missing"}')
-    expect((await chooseVisualTarget({ apiKey: 'fixture-key', model, goal: 'Chrome', screen: image, allowDismiss: false })).intent).toBe('missing')
+    const requests = mockReply(model.includes('ui-tars') ? 'Intent: missing\nAction: call_user()' : '{"name":"computer_use","arguments":{"action":"terminate","status":"failure"}}')
+    expect((await chooseVisualTarget({ apiKey: 'fixture-key', model, goal: 'Chrome', screen: image, allowDismiss: false })).arguments.action).toBe('terminate')
     noAppLimit(requests)
   })
 })

@@ -5,7 +5,7 @@ import { validateVisualTargetReply, validateVisualPointerReply, ModelRejected } 
 const image = { data: 'fixture', w: 1400, h: 788 }
 describe('recorded visual reply corruption', () => {
   it('keeps legitimate numeric points and a complete JSON fence', () => {
-    expect(validateVisualTargetReply('```json\n{"intent":"target","x":66,"y":137}\n```', 'vision', image, false)).toMatchObject({ x: .066, y: .137 })
+    expect(validateVisualTargetReply('```json\n{"name":"computer_use","arguments":{"action":"mouse_move","coordinate":[66,137]}}\n```', 'vision', image, false)).toMatchObject({ arguments: { coordinate: [66, 137] } })
     expect(validateVisualPointerReply('{"decision":"adjust","x":193,"y":546}', 'vision', image)).toMatchObject({ x: .193, y: .546 })
   })
   it.each([
