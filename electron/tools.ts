@@ -46,6 +46,7 @@ import {
 } from './tool-branch'
 import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { actionGraph, runAction, type ActSpec } from './tool-act'
+import { getStopCheck, setStopCheck } from './openrouter'
 import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, reviewCount, lastReviewLine, setStopAt, snapshot, stopReason, boundaryPending, actPointWithin, noteActPoint } from './tool-state'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
@@ -1048,6 +1049,8 @@ const stepRun: ToolDef = {
     const traces: TargetTrace[] = []
     let timedOut = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    const prevStop = getStopCheck()
+    setStopCheck(() => timedOut || ctx.userStop() || prevStop())
     try {
       const { createAgent } = await import('./agent')
       const { probeOnce } = await import('./tool-probe')
@@ -1160,6 +1163,7 @@ const stepRun: ToolDef = {
       ctx.log(outcome === 'hedef-yok' ? 'warn' : 'error', `Ajan · tek adım · ${message}`)
       return { ok: true, tool: stepRun.name, outcome, message, node: nodeRef(place), action: { kind: node.kind, sent: false }, loop, log: logs.slice(-12) }
     } finally {
+      setStopCheck(prevStop)
       if (timer) clearTimeout(timer)
       endProbe()
     }
@@ -1337,6 +1341,8 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
   let timedOut = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let hidden = false
+  const prevStop = getStopCheck()
+  setStopCheck(() => timedOut || ctx.userStop() || prevStop())
   try {
     const { createAgent } = await import('./agent')
     // The previous action's target is a hint, not an answer: it only helps tell two same-named
@@ -1422,6 +1428,7 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
     ctx.log('warn', `Ajan · eylem · ${message}`)
     return { ok: true, tool: name, outcome: 'eylem-belirsiz', message, action: { kind: spec.kind, sent: false }, data: { logs: logs.slice(-16), status: 'none', ms: r.ms, stages: t.stages } }
   } finally {
+    setStopCheck(prevStop)
     if (timer) clearTimeout(timer)
     endProbe()
     // Bringing the window back must not take the focus back: in a sequence like Win+R, type, Enter

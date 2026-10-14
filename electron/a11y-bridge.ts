@@ -176,6 +176,14 @@ class Worker {
         this.drop(proc)
       }
       signal?.addEventListener('abort', abort, { once: true })
+      try { checkObservation(signal) }
+      catch (e) {
+        this.pending.delete(id)
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', abort)
+        reject(e)
+        return
+      }
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
     }).finally(() => { if (abort) signal?.removeEventListener('abort', abort) })
   }

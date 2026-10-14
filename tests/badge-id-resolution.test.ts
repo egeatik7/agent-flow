@@ -66,12 +66,12 @@ it('MARKED görüntüde rozet numarası doğru OCR SATIRINA çözülür ve kelim
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
   const secim = await sor(tarama(true))
-  expect(secim.id).toBe(36)            // satırın kendisi (adres alanı)
-  expect(secim.wordIndex).toBeUndefined() // merkeze düşmesin: kelimeyi kısa ikinci seçim belirleyecek
-  expect(secim.rejected).toBeUndefined()
-  const rozetSatiri = satirlar.find((s) => s.startsWith('GORUNTU-ROZETI'))!
-  expect(rozetSatiri).toContain('#36')
-  expect(rozetSatiri).toContain('cok-kelimeli=evet')
+  // The badge number matches the row, but the model's text does not match the OCR line.
+  // A contradiction does not click; the word-box helper below is unchanged.
+  expect(secim.id).toBeNull()
+  expect(secim.badgeResolved).toBeUndefined()
+  expect(secim.rejected).toBe('contradicts')
+  expect(satirlar.some((s) => s.startsWith('CELISKI'))).toBe(true)
   // Kelime kutusuna gidiş: kısa ikinci seçim bir kelime indeksi seçtiğinde tıklama GERÇEK kelime kutusudur
   // (satır merkezi DEĞİL) — refineWordTarget kelimenin kendi dikdörtgenini verir.
   const satir = adresSatiri() as never
@@ -107,9 +107,10 @@ it('rozetten cozulen secim badgeResolved tasir ve kelime indeksi VERILMEZ', asyn
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
   const secim = await sor(tarama(true))
-  expect(secim.badgeResolved).toBe(true)
+  expect(secim.badgeResolved).toBeUndefined()
   expect(secim.wordIndex).toBeUndefined()
-  expect(satirlar.some((s) => s.startsWith('GORUNTU-ROZETI'))).toBe(true)
+  expect(secim.rejected).toBe('contradicts')
+  expect(satirlar.some((s) => s.startsWith('CELISKI'))).toBe(true)
   setChatLogger(null)
 })
 

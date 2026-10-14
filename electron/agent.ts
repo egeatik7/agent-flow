@@ -36,6 +36,8 @@ import {
   FatalApiError,
   type ScreenChoice,
   chooseVisualTarget,
+  ModelFailed,
+  ModelOutputRejected,
   verifyVisualPointer,
   type VisualTargetResult,
   isTarsModel,
@@ -121,8 +123,13 @@ function visionModels(s: AppSettings): string[] {
 
 export function createAgent(ctx: AgentContext) {
   const { log, send } = ctx
-  const getSettings = ctx.settings
+  const readSettings = ctx.settings
+  // A running flow keeps the settings it started with. Standby edits stay live
+  // because this copy exists only between beginRun and releaseRunSettings.
+  let frozenSettings: AppSettings | null = null
+  const getSettings = () => frozenSettings ?? readSettings()
   const stopped = ctx.shouldStop
+  let inputSent = false
   /** Her yeni LLM çağrısının hemen öncesi. Süren isteğe verilen dizi burada kopyalanmaz; çağrı kendi kopyasını alır. */
   function fresh(stage: ChainStage) {
     const s = getSettings()
@@ -172,6 +179,8 @@ export function createAgent(ctx: AgentContext) {
 
   /** Called when a run starts: forget this run's memory copies. */
   function beginRun(logDir = '') {
+    try { frozenSettings = structuredClone(readSettings()) }
+    catch { frozenSettings = JSON.parse(JSON.stringify(readSettings())) as AppSettings }
     failDir = logDir
     clearHover()
     runMemo.clear()
@@ -179,6 +188,10 @@ export function createAgent(ctx: AgentContext) {
     lastClickPoint = undefined
     guiReplace = false
     warnedMissing.clear()
+  }
+
+  function releaseRunSettings() {
+    frozenSettings = null
   }
 
   function warnMissingWindow(res: ScanResult) {
@@ -619,27 +632,35 @@ export function createAgent(ctx: AgentContext) {
             // NotFoundError ile devam ediyordu → bozuk anahtarla listenin TAMAMI öğe öğe deneniyordu
             // (runner'ın serviceFailure durdurma kuralı devreye girmiyordu). Aynı dosyada 243/372 ve
             // koşul dalı 586 FatalApiError'ı zaten fırlatır; bu dal artık tutarlı.
-            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError) throw e
+            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError || e instanceof ModelFailed || e instanceof ModelOutputRejected) throw e
             if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
             if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
           }
         }
-        if (stage === 'offset' && loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
-          // A recorded point is never evidence on its own. When the locator carries a picture,
-          // the icon stage above already searched for it and did not find it; when it carries
-          // none, there is nothing to check at all. Either way, clicking the old point would be
-          // the "click somewhere and hope" the product forbids, so the step stops with a reason
-          // instead. Every target captured on screen stores a picture, so a locator without one
-          // is a legacy or hand-made entry.
+        if (stage === 'offset' && ((loc?.offsetX !== undefined && loc.offsetY !== undefined) || (loc?.x !== undefined && loc?.y !== undefined))) {
+          // Earlier stages already failed. The saved point is the last resort, not a new target.
+          ctx.setMethod?.('Kayıtlı konum')
           try {
-            const r = await bridge.windowRect(win)
-            trace(node, { kind: 'observation', source: 'offset', value: r })
-          } catch {
-            /* window gone */
+            if (loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
+              const r = await bridge.windowRect(win)
+              trace(node, { kind: 'observation', source: 'offset', value: r })
+              if (r && r.w > 0 && r.h > 0) {
+                const x = r.x + loc.offsetX
+                const y = r.y + loc.offsetY
+                log('warn', `Önceki yöntemler bulamadı. Kayıtlı konum son çare, pencereye göre @${Math.round(x)},${Math.round(y)}.`)
+                const got = take({ x, y, label: 'kayıtlı konum (pencereye göre)' }, 'offset')
+                if (got) return got
+              }
+            }
+            if (loc?.x !== undefined && loc?.y !== undefined) {
+              log('warn', `Önceki yöntemler bulamadı. Kayıtlı konum son çare, ekrana göre @${Math.round(loc.x)},${Math.round(loc.y)}.`)
+              const got = take({ x: loc.x, y: loc.y, label: 'kayıtlı konum (ekrana göre)' }, 'offset')
+              if (got) return got
+            }
+          } catch (e) {
+            log('warn', `Kayıtlı konum kullanılamadı: ${(e as Error).message}`)
           }
-          log('warn', `Kayıtlı konuma tıklanmadı: ${loc.icon ? 'kayıtlı resim ekranda bulunamadı' : 'kayıtlı resim yok'} — tıklamayı destekleyen ekran kanıtı yok.`)
-          continue
         }
       }
     } catch (e) {
@@ -704,7 +725,10 @@ export function createAgent(ctx: AgentContext) {
           tarsPrompt: promptOf(live.s.llmPrompts, 'tars'), jsonPrompt: promptOf(live.s.llmPrompts, 'screen'),
         })
         checkStopped()
-        if (action.model) session.accept(action.model)
+        if (action.model) {
+          session.accept(action.model)
+          ctx.setMethod?.(`Görsel hedefleme · ${action.model}`)
+        }
         trace(node, { kind: 'model', source: 'tars', value: action })
         if (!action.dismiss) break
         if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
@@ -790,7 +814,7 @@ export function createAgent(ctx: AgentContext) {
               }
             }
           } catch (e) {
-            if (e instanceof StoppedError) throw e
+            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof ModelFailed || e instanceof ModelOutputRejected) throw e
             log('warn', `[Görsel model] Kırpılmış bölge sorulamadı: ${(e as Error).message}`)
           }
         }
@@ -1023,47 +1047,17 @@ export function createAgent(ctx: AgentContext) {
     return false
   }
 
-  let inRecover = false
-
-  async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>, recover?: () => Promise<T | null>): Promise<T> {
+  async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
     try {
       return await run(false)
     } catch (e) {
       if (!(e instanceof NotFoundError) || stopped()) throw e
-      log('warn', `“${title}” bulunamadı. 3 sn sonra ekran yenilenip bir kez daha denenecek.`)
+      log('warn', `“${title}” bulunamadı. Ekran yenilenip aynı hedef bir kez daha denenecek.`)
       await pause(REFRESH_RETRY_MS)
-      try {
-        return await run(true)
-      } catch (e2) {
-        if (!(e2 instanceof NotFoundError) || stopped() || inRecover || !recover) throw e2
-        log('warn', `“${title}” hâlâ yok. Durup düşünülecek, hemen vazgeçilmiyor.`)
-        inRecover = true
-        try {
-          const alt = await recover()
-          if (alt) return alt
-          throw e2
-        } finally {
-          inRecover = false
-        }
-      }
-    }
-  }
-
-  /** The click/type target was not on screen. Wait, ask for a plan, then look once more before the step fails. */
-  async function recoverTarget(node: AgentNode, ahead: StepAhead | undefined): Promise<Resolved | null> {
-    // The dedicated recovery agent receives the original goal and full run context.
-    // Do not let the legacy plan replace it with the next node's target first.
-    if (getSettings().recovery?.enabled) return null
-    await pause(2000)
-    const plan = await askPlan(node, ahead, `“${node.title}” istediği öğeyi ekranda bulamadı`)
-    if (!plan) return null
-    log('info', `Plan: ${planLabel(plan.action, plan.waitMs)}. ${plan.reason}`)
-    if (plan.action === 'wait') await pause(plan.waitMs)
-    if (plan.action === 'stop') return null
-    try {
-      return await resolveTarget(plan.lookFor ? { ...node, prompt: `“${plan.lookFor}”` } : node, 0, true)
-    } catch {
-      return null
+      if (stopped()) throw new StoppedError()
+      // The second miss stays a NotFoundError. The runner starts the recovery
+      // agent when it is enabled; otherwise the flow stops on the original target.
+      return await run(true)
     }
   }
 
@@ -1251,17 +1245,21 @@ export function createAgent(ctx: AgentContext) {
     shouldStop: stopped,
     setLoop: (text) => ctx.setLoop?.(text),
     click: async (node, stepNo, ahead) => {
+      inputSent = false
+      try {
       await waitUnlocked()
       // A click on a window that is not active only activates it - Windows eats the first click, and
       // a menu that should have opened does not. Written commands have no saved element to fall back
       // on, so they get the same window activation the typing path already does.
       if (ahead?.next?.kind === 'type' || !node.locator) await activateInputWindow(node)
-      let t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+      inputSent = false
+      let t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       const mode = node.clickMode ?? 'left'
       const confirmed = await ensureActed(node, ahead, async () => {
         checkStopped()
         if (t.visualGoal && mode !== 'move') {
           const approved = await dispatchVisualClick(node, t, t.visualGoal, mode, t.visualSession)
+          inputSent = true
           t = { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode, phase: 'sent' })
@@ -1269,13 +1267,17 @@ export function createAgent(ctx: AgentContext) {
           log('info', `${mode === 'double' ? 'Çift tıklama' : mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi: görsel modelin onayladığı imleç @${t.x},${t.y}.`)
           return
         }
-        if (mode === 'left' && ahead?.next?.kind === 'type') await clickInput(t, node)
+        if (mode === 'left' && ahead?.next?.kind === 'type') {
+          await clickInput(t, node)
+          inputSent = true
+        }
         else {
           // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
           // hatırlanır (sonraki adım/ajan o noktadan tıklayabilsin).
           if (mode === 'move') {
             clearHover()
             const tasima = await bridge.moveMouse(t.x, t.y)
+            inputSent = true
             checkStopped()
             // İNCELEME DÜZELTMESİ: node'un "Fareyi Oynat" modu kaydı GERÇEKTEN güncellemeli;
             // yoksa "Fareyi Oynat node'u → Yap'te click_current" zinciri konumu bulamaz.
@@ -1287,6 +1289,7 @@ export function createAgent(ctx: AgentContext) {
           }
           clearHover()
           await sendClick(t.x, t.y, mode)
+          inputSent = true
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: Math.round(t.x), y: Math.round(t.y) }, mode, phase: 'sent' })
         }
@@ -1294,8 +1297,14 @@ export function createAgent(ctx: AgentContext) {
         log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
       })
       if (confirmed) saveMemo(node, t.memo)
+    } catch (e) {
+      if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+      throw e
+    }
     },
     type: async (node, stepNo, ahead) => {
+      inputSent = false
+      try {
       await waitUnlocked()
       const text = node.text ?? ''
       const enter = !!node.pressEnter
@@ -1303,25 +1312,40 @@ export function createAgent(ctx: AgentContext) {
       let t: Resolved | null = null
       if (node.prompt?.trim() || node.locator) {
         await activateInputWindow(node)
-        t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide), () => recoverTarget(node, ahead))
+        t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       }
       let valueVerified = false
       const write = async () => {
         checkStopped()
-        if (t) {
+        if (t?.visualGoal) {
+          const approved = await dispatchVisualClick(node, t, t.visualGoal, 'left', t.visualSession)
+          inputSent = true
+          t = { ...t, x: approved.x, y: approved.y }
+          lastClickPoint = { x: approved.x, y: approved.y }
+          ctx.setMethod?.('Görsel konum onaylandı — yazı alanı seçildi')
+          log('info', `Alan görsel imleç onayıyla seçildi @${approved.x},${approved.y}.`)
+        } else if (t) {
           await clickInput(t, node)
+          inputSent = true
           await sleep(FOCUS_MS)
           log('info', `Alan seçildi: ${t.label}`)
         }
         valueVerified = await typeDirect(text, enter, clear, lastClickPoint)
+        inputSent = true
         if (enter) lastClickPoint = undefined
       }
       // Explicit keyboard dispatch needs no screen-transition or field-value judge.
       await write()
       const confirmed = valueVerified
       if (confirmed) saveMemo(node, t?.memo)
+      } catch (e) {
+        if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+        throw e
+      }
     },
-    key: async (node, ahead) => {
+    key: async (node, _ahead) => {
+      inputSent = false
+      try {
       await waitUnlocked()
       clearHover()
       const keys = node.keys
@@ -1330,6 +1354,11 @@ export function createAgent(ctx: AgentContext) {
       guiReplace = false
       checkStopped()
       await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
+      inputSent = true
+      } catch (e) {
+        if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+        throw e
+      }
     },
     exists: async (text, node, options) => {
       const signal = options?.signal
@@ -1411,5 +1440,5 @@ export function createAgent(ctx: AgentContext) {
 
   /** Same resolver, one read-only pass. No click, typing, recovery actions or memory write. */
   const previewTarget = (node: AgentNode) => resolveTarget(node, 0, false, true)
-  return { executor, beginRun, previewTarget }
+  return { executor, beginRun, releaseRunSettings, previewTarget }
 }

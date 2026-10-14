@@ -19,10 +19,14 @@ import { VISUAL_POINTER_PROMPT, VISUAL_POINTER_JSON_CONTRACT, VISUAL_POINTER_TAR
 const REQUEST_TIMEOUT_MS = 90000
 
 let stopCheck: () => boolean = () => false
+const attemptCaps: number[] = []
 
 /** Lets Ctrl+Shift+Q cut a pending model request instead of waiting for it. */
 export function setStopCheck(fn: () => boolean) {
   stopCheck = fn
+}
+export function getStopCheck(): () => boolean {
+  return stopCheck
 }
 
 class TransientError extends Error { readonly serviceFailure = true }
@@ -580,6 +584,7 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
       if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
       const model = chain[i]
       if (invalidOutputs.has(model)) continue
+      attemptCaps.push(Math.max(1000, deadline - Date.now()))
       try {
         try { return await run(model) }
         catch (error) {
@@ -608,6 +613,8 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         const neden = brief(e)
         chatLogger?.(`ATLANDI asama=${limits.stage ?? '-'} model=${model} neden=${neden} sonraki=${last ? (cycles + 1 >= maxCycles ? 'yok' : chain[0]) : next}`)
         chatLogger?.(last ? `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${next} deneniyor.`)
+      } finally {
+        attemptCaps.pop()
       }
     }
     if (chain.every(model => invalidOutputs.has(model))) throw lastOutputError!
@@ -710,7 +717,7 @@ async function chatOnce(
       method: 'POST',
       headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
       body: JSON.stringify(istekGovdesi),
-    }, target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, () => false, opts.signal)
+    }, Math.min(target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, attemptCaps.length ? attemptCaps[attemptCaps.length - 1] : Number.POSITIVE_INFINITY), () => false, opts.signal)
     checkObservation(opts.signal)
     if (!res.ok) {
       reportIn(target.local, `hata ${res.status}: ${res.text.slice(0, 2000)}`)

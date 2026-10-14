@@ -883,6 +883,8 @@ function hudStep(payload: unknown) {
     stopHudCountdown()
     return
   }
+  hudAsamalar = []
+  hudSonAsamaTs = 0
   const place = findPlace(hudRunGraph, p.id)
   if (!place) return
   const kind = place.node.kind
@@ -1195,6 +1197,7 @@ async function runFlow(
     // Reset the run state even when preparation failed before a resource
     // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
     // still ask how the run ended after it is over.
+    agent.releaseRunSettings()
     endRun(outcome)
     if (runId && !derivedRun) viewerState.finish(outcome)
     hudRunGraph = null

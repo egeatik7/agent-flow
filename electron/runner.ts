@@ -30,6 +30,8 @@ export type RecoveryRequest = {
   stepNo: number
   ahead: StepAhead
   vars: Record<string, string>
+  /** The failed node already delivered a click, key or text to the OS. */
+  inputAlreadySent?: boolean
 }
 
 export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
@@ -397,7 +399,7 @@ export async function runGraph(
             port = await execStep(node, live, tally.n, ahead)
           } catch (error) {
             if (isFatal(error) || !ex.recover || !['click', 'type', 'key', 'wait'].includes(node.kind)) throw error
-            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars } })
+            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars }, inputAlreadySent: (error as { inputAlreadySent?: boolean }).inputAlreadySent === true })
             recovering = decision === 'retry' || decision === 'completed'
             if (ex.shouldStop()) throw new StoppedError()
             if (decision === 'completed') port = 'next'

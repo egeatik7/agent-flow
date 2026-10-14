@@ -96,7 +96,7 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const allowedTools = new Set(tools.map(t => t.function.name))
   const execute = deps.makeExecute(stopped)
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
-  let failedNodeSent = false
+  let failedNodeSent = request.inputAlreadySent === true
   let freshScreen = false
   const modelsUsed: string[] = []
   const usage = { prompt: 0, completion: 0, total: 0 }

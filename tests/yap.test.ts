@@ -43,10 +43,12 @@ describe('Yap task agent', () => {
     expect(h.transcripts.at(-1)).toContain('Bu araç Yap ajanına açık değil')
   })
   it('stops on user cancellation and fails at budget instead of pretending success', async () => {
-    const h = harness([call('screen_read')])
-    await expect(runYap({ ...createNode('ai',0,0), maxActions: 1 }, {}, h.deps)).rejects.toThrow('sınırında')
-    await expect(runYap(createNode('ai',0,0), {}, { ...h.deps, shouldStop: () => true })).rejects.toBeInstanceOf(StoppedError)
-    expect(h.executed).toEqual(['screen.read'])
+    const budget = harness([call('act_key', { keys: 'enter' })])
+    await expect(runYap({ ...createNode('ai',0,0), maxActions: 1 }, {}, budget.deps)).rejects.toThrow('sınırında')
+    expect(budget.executed).toEqual(['act.key'])
+    const stop = harness([call('screen_read')])
+    await expect(runYap(createNode('ai',0,0), {}, { ...stop.deps, shouldStop: () => true })).rejects.toBeInstanceOf(StoppedError)
+    expect(stop.executed).toEqual([])
   })
   it('does not interpret malformed parameters as desktop actions', async () => {
     const h = harness([call('act_key', { keys: 5 }), call('screen_read'), call('task_complete', { summary: 'done' })])

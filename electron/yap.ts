@@ -14,6 +14,13 @@ export function yapTools(allowCode = true): ModelTool[] {
 }
 
 const names: Record<string, string> = { screen_read: 'screen.read', flow_read: 'flow.read', flow_context: 'flow.context', act_click: 'act.click', act_move: 'act.move', act_click_current: 'act.clickCurrent', act_click_point: 'act.clickPoint', act_type: 'act.type', act_key: 'act.key', act_wait: 'act.wait' }
+const READ_OR_FINISH = new Set(['screen_read', 'local_context', 'task_complete', 'flow_read', 'flow_context'])
+function spendsAction(name: string): boolean {
+  return name.startsWith('act_') || name === 'act_scroll' || name === 'window_action' || name === 'powershell_run'
+}
+function clearsScreen(name: string): boolean {
+  return name.startsWith('act_') || name === 'window_action' || name === 'powershell_run'
+}
 
 type Deps = {
   system?: string
@@ -37,7 +44,8 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
   const tools = yapTools(node.allowCode !== false)
   let observed = false
   const messages: ToolMessage[] = [{ role: 'system', content: deps.system?.trim() || YAP_PROMPT }, { role: 'user', content: JSON.stringify({ task: node.prompt, context }, (key, value) => ['icon', 'patch', 'sig', 'path', 'trace'].includes(key) ? undefined : value) }]
-  for (let used = 0, turns = 0; used < budget && turns < budget + 3; turns++) {
+  const maxTurns = Math.max(budget * 4, 40)
+  for (let used = 0, turns = 0; used < budget && turns < maxTurns; turns++) {
     check()
     let answer: ToolMessage
     try {
@@ -54,10 +62,13 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
     const pictures: ToolMessage[] = []
     for (const call of answer.tool_calls) {
       check()
-      if (used++ >= budget) break
+      const toolName = call.function.name
+      if (spendsAction(toolName) && used >= budget) break
+      if (spendsAction(toolName) && !READ_OR_FINISH.has(toolName)) used++
       let result: RecoveryToolResult
+      if (clearsScreen(toolName)) observed = false
       try {
-        const definition = tools.find(t => t.function.name === call.function.name)
+        const definition = tools.find(t => t.function.name === toolName)
         if (!definition) throw new Error('Bu araç Yap ajanına açık değil.')
         const args = JSON.parse(call.function.arguments)
         if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Araç argümanları nesne olmalı.')
@@ -68,23 +79,16 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
           const spec = properties[key]
           if (!spec || (spec.type === 'integer' ? !Number.isInteger(value) : typeof value !== spec.type) || (spec.enum && !spec.enum.includes(String(value)))) throw new Error(`Geçersiz alan: ${key}`)
         }
-        if (call.function.name === 'task_complete') {
+        if (toolName === 'task_complete') {
           if (!args.summary.trim()) throw new Error('Tamamlandı açıklaması boş olamaz.')
-          // O20 (yönerge): mesaj ile GERÇEK kural aynı olmalı. Kapıyı yalnız BAŞARILI bir `screen_read`
-          // açıyor (aşağıda `observed = result.ok && result.outcome === 'tamam'`). Önceki mesaj
-          // "güncel ekranı VEYA doğrudan işlem sonucunu incele" diyordu; oysa pencere/komut sonuçlarını
-          // kanıt sayan bir kod yolu YOK. Sıradan `ok:true` (ör. bir komut çalıştı) hedefin
-          // tamamlandığını kanıtlamaz — bu ürün kararı KORUNDU; yalnız yanıltıcı vaat kaldırıldı.
           if (!observed) throw new Error('Tamamlandı demeden önce güncel ekranı OKU (screen_read) ve okuma başarılı olsun. Pencere/komut sonucu tek başına tamamlanma kanıtı sayılmaz.')
           deps.log('success', `Yap tamamlandı: ${args.summary.slice(0, 2000)}`)
           return true
         }
-        deps.log('info', `Yap aracı: ${call.function.name} ${JSON.stringify(args)}`)
-        if (call.function.name.startsWith('act_') && call.function.name !== 'act_wait') observed = false
-        result = await execute(names[call.function.name] || call.function.name, args)
+        deps.log('info', `Yap aracı: ${toolName} ${JSON.stringify(args)}`)
+        result = await execute(names[toolName] || toolName, args)
         check()
-        if (call.function.name === 'window_action' || call.function.name === 'powershell_run') observed = false
-        if (call.function.name === 'screen_read') observed = result.ok && result.outcome === 'tamam'
+        if (toolName === 'screen_read') observed = result.ok && result.outcome === 'tamam'
       } catch (error) {
         check()
         result = { ok: false, outcome: 'hata', message: (error as Error).message }

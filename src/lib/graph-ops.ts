@@ -106,7 +106,7 @@ export function duplicateNode(graph: AgentGraph, id: string): { graph: AgentGrap
   const map = new Map<string, string>()
   assignFreshIds([n], map)
   const copy: AgentNode = {
-    ...rewriteNode(cloneData(n), map, 30, 30, true),
+    ...rewriteNode(structuredClone(n), map, 30, 30, true),
     title: `${n.title} (kopya)`,
     x: n.x + 30,
     y: n.y + 30,
