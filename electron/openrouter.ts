@@ -94,47 +94,74 @@ export async function recoveryToolTurn(args: {
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
   let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
   for (const model of chain) {
-    if (args.shouldStop() || stopCheck()) throw new StoppedError()
-    if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
-    try {
-      const target = args.allowLocal ? targetFor(model) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
-      chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
-      if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
-      if (target.local && args.messages.some(m => Array.isArray(m.content)) && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
-      const res = await guardedFetch(target.url, {
-        method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
-        body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
-      }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+    for (let outputAttempt = 0; outputAttempt < 2; outputAttempt++) {
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
-      if (!res.ok) {
-        chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
-        if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`OpenRouter kurtarma çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
-        throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
+      if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
+      try {
+        const target = args.allowLocal ? targetFor(model) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+        chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
+        if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
+        if (target.local && args.messages.some(m => Array.isArray(m.content)) && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+        const res = await guardedFetch(target.url, {
+          method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
+          body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
+        }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+        if (args.shouldStop() || stopCheck()) throw new StoppedError()
+        if (!res.ok) {
+          chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
+          if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`OpenRouter kurtarma çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
+          throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
+        }
+        const data = JSON.parse(res.text)
+        if (data.error) throw new ModelRejected(`OpenRouter: ${providerError(data.error).slice(0, 300)}`)
+        const choice = data.choices?.[0]
+        if (!choice?.message || choice.finish_reason === 'length') throw new ModelOutputRejected('Kurtarma modelinin yanıtı boş veya kesilmiş.')
+        const m = choice.message
+        if (m.tool_calls !== undefined && (!Array.isArray(m.tool_calls) || m.tool_calls.some((c: ModelToolCall) =>
+          !c || typeof c.id !== 'string' || !c.id || c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string'))) {
+          throw new ModelOutputRejected('Kurtarma modeli geçersiz araç çağrısı verdi.')
+        }
+        for (const call of m.tool_calls ?? []) {
+          const definition = args.tools.find(tool => tool.function.name === call.function.name)
+          if (!definition) throw new ModelOutputRejected(`Araç yanıtı tanınmıyor: ${call.function.name}`)
+          let value: unknown
+          try { value = JSON.parse(call.function.arguments) }
+          catch { throw new ModelOutputRejected('Araç argümanları geçerli JSON değil.') }
+          if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ModelOutputRejected('Araç argümanları nesne olmalı.')
+          const values = value as Record<string, unknown>
+          const schema = definition.function.parameters
+          const properties = schema.properties as Record<string, { type?: string; enum?: unknown[] }> | undefined
+          for (const key of (schema.required as string[] | undefined) ?? []) {
+            if (!(key in values)) throw new ModelOutputRejected(`Araç yanıtında eksik alan: ${key}`)
+          }
+          for (const [key, val] of Object.entries(values)) {
+            const spec = properties?.[key]
+            if (!spec && schema.additionalProperties === false) throw new ModelOutputRejected(`Araç yanıtında bilinmeyen alan: ${key}`)
+            if (spec && (spec.type === 'integer' ? !Number.isInteger(val) : spec.type === 'array' ? !Array.isArray(val) : spec.type && typeof val !== spec.type)) throw new ModelOutputRejected(`Araç yanıtında geçersiz alan: ${key}`)
+            if (spec?.enum && !spec.enum.includes(val)) throw new ModelOutputRejected(`Araç yanıtında geçersiz değer: ${key}`)
+          }
+        }
+        reportIn(target.local, JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
+        const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
+        const answered = typeof data.model === 'string' && data.model ? data.model : model
+        chatLogger?.(`CEVAPLAYAN asama=${args.stage ?? 'recovery'} model=${answered}`)
+        chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
+        return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
+          ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+          ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
+          model: answered,
+          ...(billed && (billed.total_tokens || typeof billed.cost === 'number') ? { usage: billed } : {}) }
+      } catch (error) {
+        if (error instanceof StoppedError || error instanceof FatalApiError) throw error
+        if (error instanceof ModelOutputRejected && outputAttempt === 0) {
+          chatLogger?.(`CIKTI-TEKRAR asama=${args.stage ?? 'recovery'} model=${model} deneme=2/2 neden=${brief(error)}`)
+          continue
+        }
+        last = error
+        chatLogger?.(`ATLANDI asama=${args.stage ?? 'recovery'} model=${model} neden=${brief(error)}`)
+        chatLogger?.(`Kurtarma modeli ${model} yanıtlayamadı: ${brief(error)}`)
+        break
       }
-      const data = JSON.parse(res.text)
-      if (data.error) throw new ModelRejected(`OpenRouter: ${providerError(data.error).slice(0, 300)}`)
-      const choice = data.choices?.[0]
-      if (!choice?.message || choice.finish_reason === 'length') throw new Error('Kurtarma modelinin yanıtı boş veya kesilmiş.')
-      const m = choice.message
-      if (m.tool_calls !== undefined && (!Array.isArray(m.tool_calls) || m.tool_calls.some((c: ModelToolCall) =>
-        !c || typeof c.id !== 'string' || !c.id || c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string'))) {
-        throw new Error('Kurtarma modeli geçersiz araç çağrısı verdi.')
-      }
-      reportIn(target.local, JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
-      const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
-      const answered = typeof data.model === 'string' && data.model ? data.model : model
-      chatLogger?.(`CEVAPLAYAN asama=${args.stage ?? 'recovery'} model=${answered}`)
-      chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
-      return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
-        ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
-        ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
-        model: answered,
-        ...(billed && (billed.total_tokens || typeof billed.cost === 'number') ? { usage: billed } : {}) }
-    } catch (error) {
-      if (error instanceof StoppedError || error instanceof FatalApiError) throw error
-      last = error
-      chatLogger?.(`ATLANDI asama=${args.stage ?? 'recovery'} model=${model} neden=${brief(error)}`)
-      chatLogger?.(`Kurtarma modeli ${model} yanıtlayamadı: ${brief(error)}`)
     }
   }
   throw last
@@ -500,6 +527,11 @@ export class ModelFailed extends Error { readonly serviceFailure = true }
 
 /** This model will not answer however often it is asked: wrong name or request (400/404/422), empty or unreadable answer. Outages and rate limits are not this. */
 export class ModelRejected extends ModelFailed {}
+/** Only an actual model response rejected by the output contract gets one extra attempt. */
+export class ModelOutputRejected extends ModelRejected {}
+class CandidateOutputRejected extends ModelOutputRejected {
+  constructor(message: string, readonly content: string) { super(message) }
+}
 
 const CYCLE_PAUSE_MS = 4000
 /** Whole rounds in a row in which every model was rejected for good before the step gives up. */
@@ -531,6 +563,9 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
   // Sıra, çağrı başında kopyalanır. Kayıt bu istek bitmeden değişse de bu dizi durur.
   if (limits.stage) chatLogger?.(`ZINCIR asama=${limits.stage} revizyon=${limits.revision ?? 0} kaynak=${limits.source ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0]}`)
+  const retriedOutputs = new Set<string>()
+  const invalidOutputs = new Set<string>()
+  let lastOutputError: ModelOutputRejected | undefined
   let rejectedCycles = 0
   const maxCycles = Math.max(1, limits.maxCycles ?? 256)
   const deadline = Date.now() + Math.max(1, limits.maxWaitMs ?? 15 * 60_000)
@@ -543,8 +578,25 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
       if (stopCheck()) throw new StoppedError()
       if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
       const model = chain[i]
+      if (invalidOutputs.has(model)) continue
       try {
-        return await run(model)
+        try { return await run(model) }
+        catch (error) {
+          if (!(error instanceof ModelOutputRejected)) throw error
+          if (retriedOutputs.has(model)) {
+            invalidOutputs.add(model); lastOutputError = error; throw error
+          }
+          retriedOutputs.add(model)
+          checkObservation(limits.signal)
+          if (stopCheck()) throw new StoppedError()
+          if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu.')
+          chatLogger?.(`CIKTI-TEKRAR asama=${limits.stage ?? '-'} model=${model} deneme=2/2 neden=${brief(error)}`)
+          try { return await run(model) }
+          catch (again) {
+            if (again instanceof ModelOutputRejected) { invalidOutputs.add(model); lastOutputError = again }
+            throw again
+          }
+        }
       } catch (e) {
         checkObservation(limits.signal)
         if (e instanceof StoppedError || e instanceof FatalApiError) throw e
@@ -557,6 +609,7 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         chatLogger?.(last ? `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${cycles + 1 >= maxCycles ? 'Deneme zinciri bitti.' : 'Sıra başa dönüyor.'}` : `${targetTag(isLocalName(model))} ${model} olmadı (${neden}). ${next} deneniyor.`)
       }
     }
+    if (chain.every(model => invalidOutputs.has(model))) throw lastOutputError!
     rejectedCycles = allRejected ? rejectedCycles + 1 : 0
     if (rejectedCycles >= MAX_REJECTED_CYCLES) {
       throw new Error(`Hiçbir model cevap vermedi: ${rejectedCycles} tur üst üste reddedildi (model adını ve ayarları kontrol et). Son hata: ${lastError}`)
@@ -572,9 +625,9 @@ export function responseText(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) return content.map(part => {
     if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') return part.text
-    throw new ModelRejected('Model yanıtında desteklenmeyen içerik parçası var.')
+    throw new ModelOutputRejected('Model yanıtında desteklenmeyen içerik parçası var.')
   }).join('\n')
-  throw new ModelRejected('Model yanıtının içerik biçimi geçersiz.')
+  throw new ModelOutputRejected('Model yanıtının içerik biçimi geçersiz.')
 }
 function providerError(error: unknown): string {
   if (typeof error === 'string') return redact(error)
@@ -703,7 +756,7 @@ async function chatOnce(
       const gercekGiris = gercekGirisTokeni(data)
       cevapSonrasiOlcumBaslat(target.model, target.url, istekId, gercekGiris, tahminiToken, opts.signal)
     }
-    if (data.choices?.[0]?.finish_reason === 'length') throw new ModelRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
+    if (data.choices?.[0]?.finish_reason === 'length') throw new ModelOutputRejected('MODEL_OUTPUT_TRUNCATED: Yanıt token sınırında kesildi; hedef yok sayılmadı')
     const said = modelSaid(model, content)
     if (said) voiceLogger?.(said)
     return content
@@ -730,8 +783,13 @@ async function chat(
     checkObservation(opts.signal)
     try {
       const text = await chatOnce(apiKey, name, messages, hasImage, opts)
-      if (!text.trim()) throw new ModelRejected('boş yanıt')
-      opts.validate?.(text)
+      if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
+      try { opts.validate?.(text) }
+      catch (error) {
+        if (error instanceof ModelOutputRejected) throw error
+        if (error instanceof ModelRejected) throw new ModelOutputRejected(error.message)
+        throw error
+      }
       chatLogger?.(`CEVAPLAYAN asama=${opts.stage ?? '-'} model=${name}`)
       return text
     } catch (e) {
@@ -739,8 +797,13 @@ async function chat(
       if (!withoutImage) throw new ModelRejected(`${name} ekran görüntüsü kabul etmiyor.`)
       chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
       const text = await chatOnce(apiKey, name, withoutImage, false, opts)
-      if (!text.trim()) throw new ModelRejected('boş yanıt')
-      opts.validate?.(text)
+      if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
+      try { opts.validate?.(text) }
+      catch (error) {
+        if (error instanceof ModelOutputRejected) throw error
+        if (error instanceof ModelRejected) throw new ModelOutputRejected(error.message)
+        throw error
+      }
       chatLogger?.(`CEVAPLAYAN asama=${opts.stage ?? '-'} model=${name}`)
       return text
     }
@@ -888,18 +951,38 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     },
   ]
 
+  const validateChoice = (content: string) => {
+    if (opts.kind === 'condition') validateConditionReply(content)
+    else validateTargetReply(content)
+    const parsed = parseJson(content)
+    const id = Object.prototype.hasOwnProperty.call(parsed, 'id') ? parseListedId(parsed.id) : parseListedId(parsed.i ?? parsed.index)
+    if (id === null) return // A legitimate missing/uncertain answer is not malformed output.
+    const candidate = candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition'))
+    const badge = !candidate && usedImage && opts.kind !== 'condition' && (scan.image as { marked?: boolean } | null)?.marked === true
+      ? scan.items.find(item => item.id === id && item.w > 0 && item.h > 0) : undefined
+    const actual = candidate?.item ?? badge
+    if (!actual || !listedTextAgrees(parsed.text, actual.text)) {
+      const reason = !actual ? `id=${id} bu istekte seçilebilir değil` : `id=${id} metin=${String(parsed.text ?? '')} çözülen=${actual.text}`
+      chatLogger?.(`CIKTI-RET asama=${opts.kind} ${reason}`)
+      saveRequestEvidence(istekId, { response: content })
+      throw new CandidateOutputRejected(`MODEL_TARGET_REJECTED: ${reason}`, content)
+    }
+  }
   let content: string
   let usedImage = withImage
   // Özet gövdeden ÖNCE yazılır; `build` artık tanımlı olduğu için görüntü GERÇEK istekten okunur (1.9.115).
   gonderimOzeti(false)
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateChoice, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
   } catch (e) {
-    if (!(e instanceof ImageUnsupportedError)) throw e
-    opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
-    usedImage = false
-    gonderimOzeti(true)
-    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: opts.kind === 'condition' ? validateConditionReply : validateTargetReply, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource })
+    if (e instanceof CandidateOutputRejected) content = e.content
+    else {
+      if (!(e instanceof ImageUnsupportedError)) throw e
+      opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
+      usedImage = false
+      gonderimOzeti(true)
+      content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateChoice, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource })
+    }
   }
 
   const decoded = parseJson(content)
@@ -1461,7 +1544,7 @@ export async function guiStep(opts: {
       }
       messages.push({ role: 'user', content: [...(opts.initiative ? [{ type: 'text', text: initiativeTurnInstruction(opts.goal, 'tars') }] : []), imagePart(opts.screen)] })
       const content = await chatOnce(opts.apiKey, model, messages, true, { json: false })
-      if (!content.trim()) throw new ModelRejected('boş yanıt')
+      if (!content.trim()) throw new ModelOutputRejected('boş yanıt')
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
     const lines = opts.history.map((t, i) => `${i + 1}. ${opts.initiative ? initiativeHistoryRecord(t) : `${t.thought ? `${t.thought} → ` : ''}${t.raw}${t.note ? ` (${t.note})` : ''}`}`)
@@ -1476,13 +1559,18 @@ ${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
     ]
     const content = await chatOnce(opts.apiKey, model, messages, true)
-    if (!content.trim()) throw new ModelRejected('boş yanıt')
-    return parseJsonAction(content)
+    if (!content.trim()) throw new ModelOutputRejected('boş yanıt')
+    try { return parseJsonAction(content) }
+    catch (error) {
+      if (error instanceof ModelRejected) throw new ModelOutputRejected(error.message)
+      throw error
+    }
   })
 }
 
 export type VisualTargetResult = {
   intent: 'target' | 'dismiss' | 'missing'
+  model?: string
   x?: number
   y?: number
   reason: string
@@ -1491,7 +1579,7 @@ export type VisualTargetResult = {
 /** A separate, strict reply contract; normal GUI/initiative parsers are untouched. */
 function parseVisualReply(content: string, fields: readonly string[]): Record<string, unknown> {
   try { return visualReplyJson(content, fields) }
-  catch (error) { throw new ModelRejected(`VISUAL_JSON_INVALID: ${(error as Error).message}`) }
+  catch (error) { throw new ModelOutputRejected(`VISUAL_JSON_INVALID: ${(error as Error).message}`) }
 }
 
 export function validateVisualTargetReply(content: string, model: string, screen: Img, allowDismiss: boolean): VisualTargetResult {
@@ -1500,20 +1588,20 @@ export function validateVisualTargetReply(content: string, model: string, screen
   let maxX = 1000, maxY = 1000
   if (isTarsModel(model)) {
     const tags = [...content.matchAll(/^\s*Intent:\s*(\w+)\s*$/gim)]
-    if (tags.length !== 1) throw new ModelRejected('Görsel hedef yanıtında tek bir Intent alanı gerekli')
+    if (tags.length !== 1) throw new ModelOutputRejected('Görsel hedef yanıtında tek bir Intent alanı gerekli')
     intent = tags[0][1].toLowerCase()
     reason = (content.match(/Thought:\s*([\s\S]*?)(?:\n\s*Intent:|\n\s*Action:|$)/i)?.[1] ?? '').trim()
     const actions = [...content.matchAll(/^\s*Action:\s*(.+)$/gim)]
-    if (actions.length !== 1) throw new ModelRejected('Görsel hedef yanıtında tek bir Action gerekli')
+    if (actions.length !== 1) throw new ModelOutputRejected('Görsel hedef yanıtında tek bir Action gerekli')
     const raw = actions[0][1].trim()
     if (intent === 'missing') {
-      if (!/^call_user\(\s*\)$/.test(raw)) throw new ModelRejected('Eksik hedef için call_user() gerekli')
+      if (!/^call_user\(\s*\)$/.test(raw)) throw new ModelOutputRejected('Eksik hedef için call_user() gerekli')
     } else {
       const match = raw.match(/^click\(\s*start_box\s*=\s*(['"])([^'"\r\n]+)\1\s*\)$/)
-      if (!match) throw new ModelRejected('Görsel hedef yalnız tek koordinatlı click kabul eder')
+      if (!match) throw new ModelOutputRejected('Görsel hedef yalnız tek koordinatlı click kabul eder')
       const box = match[2].replace(/<\|box_start\|>|<\|box_end\|>/g, '').trim()
       if (!/^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)?\s*\)$/.test(box)) {
-        throw new ModelRejected('Görsel hedef noktası biçimi geçersiz')
+        throw new ModelOutputRejected('Görsel hedef noktası biçimi geçersiz')
       }
       point = pointOf(match[2])
     }
@@ -1522,16 +1610,16 @@ export function validateVisualTargetReply(content: string, model: string, screen
     const p = parseVisualReply(content, ['intent', 'x', 'y', 'reason'])
     intent = p.intent
     reason = String(p.reason ?? '').trim()
-    if (p.action != null) throw new ModelRejected('Görsel hedef JSON yanıtı eylem değil intent taşımalı')
+    if (p.action != null) throw new ModelOutputRejected('Görsel hedef JSON yanıtı eylem değil intent taşımalı')
     if (intent !== 'missing' && typeof p.x === 'number' && typeof p.y === 'number') point = [p.x, p.y]
-    if (intent === 'missing' && (p.x != null || p.y != null)) throw new ModelRejected('Eksik hedef koordinat taşıyamaz')
+    if (intent === 'missing' && (p.x != null || p.y != null)) throw new ModelOutputRejected('Eksik hedef koordinat taşıyamaz')
   }
-  if (!['target', 'dismiss', 'missing'].includes(String(intent))) throw new ModelRejected('Görsel hedef intent alanı geçersiz')
-  if (intent === 'dismiss' && !allowDismiss) throw new ModelRejected('Bu hedef aramasında popup kapatma etkin değil')
+  if (!['target', 'dismiss', 'missing'].includes(String(intent))) throw new ModelOutputRejected('Görsel hedef intent alanı geçersiz')
+  if (intent === 'dismiss' && !allowDismiss) throw new ModelOutputRejected('Bu hedef aramasında popup kapatma etkin değil')
   if (intent === 'missing') return { intent, reason }
   if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || maxX <= 0 || maxY <= 0 ||
       point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) {
-    throw new ModelRejected('Görsel hedef koordinatı eksik veya görüntünün dışında')
+    throw new ModelOutputRejected('Görsel hedef koordinatı eksik veya görüntünün dışında')
   }
   return { intent: intent as 'target' | 'dismiss', x: point[0] / maxX, y: point[1] / maxY, reason }
 }
@@ -1554,7 +1642,7 @@ export async function chooseVisualTarget(opts: {
     const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-target' })
     const result = validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
     chatLogger?.(`CEVAPLAYAN asama=visual-target model=${model}`)
-    return result
+    return { ...result, model }
   }, CYCLE_PAUSE_MS, { stage: 'visual-target', revision: opts.revision, source: opts.chainSource })
 }
 
@@ -1565,27 +1653,27 @@ export function validateVisualPointerReply(content: string, model: string, scree
   if (isTarsModel(model)) {
     const tags = [...content.matchAll(/^\s*Decision:\s*(\w+)\s*$/gim)]
     const actions = [...content.matchAll(/^\s*Action:\s*(.+)$/gim)]
-    if (tags.length !== 1 || actions.length !== 1) throw new ModelRejected('Görsel konum yanıtında tek Decision ve Action gerekli')
+    if (tags.length !== 1 || actions.length !== 1) throw new ModelOutputRejected('Görsel konum yanıtında tek Decision ve Action gerekli')
     decision = tags[0][1].toLowerCase()
     reason = (content.match(/Thought:\s*([\s\S]*?)(?:\n\s*Decision:|\n\s*Action:|$)/i)?.[1] ?? '').trim()
     const raw = actions[0][1].trim()
-    if (decision === 'confirm' && !/^click_current\(\s*\)$/.test(raw) || decision === 'uncertain' && !/^call_user\(\s*\)$/.test(raw)) throw new ModelRejected('Görsel konum kararı ile Action uyuşmuyor')
+    if (decision === 'confirm' && !/^click_current\(\s*\)$/.test(raw) || decision === 'uncertain' && !/^call_user\(\s*\)$/.test(raw)) throw new ModelOutputRejected('Görsel konum kararı ile Action uyuşmuyor')
     if (decision === 'adjust') {
       const match = raw.match(/^move\(\s*start_box\s*=\s*(['"])([^'"\r\n]+)\1\s*\)$/)
       const box = match?.[2].replace(/<\|box_start\|>|<\|box_end\|>/g, '').trim()
-      if (!box || !/^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$/.test(box)) throw new ModelRejected('Görsel konum düzeltmesi yalnız tek move noktası kabul eder')
+      if (!box || !/^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$/.test(box)) throw new ModelOutputRejected('Görsel konum düzeltmesi yalnız tek move noktası kabul eder')
       point = pointOf(box) ?? undefined
     }
     if (tarsAbsolute(model)) { maxX = screen.w; maxY = screen.h }
   } else {
     const p = parseVisualReply(content, ['decision', 'x', 'y', 'reason'])
     decision = p.decision; reason = String(p.reason ?? '').trim()
-    if (Object.prototype.hasOwnProperty.call(p, 'action') || Object.prototype.hasOwnProperty.call(p, 'mode')) throw new ModelRejected('Görsel konum yanıtı eylem veya tıklama modu seçemez')
-    if (decision !== 'adjust' && (p.x !== undefined || p.y !== undefined)) throw new ModelRejected('Konum onayı yeni koordinat taşıyamaz')
+    if (Object.prototype.hasOwnProperty.call(p, 'action') || Object.prototype.hasOwnProperty.call(p, 'mode')) throw new ModelOutputRejected('Görsel konum yanıtı eylem veya tıklama modu seçemez')
+    if (decision !== 'adjust' && (p.x !== undefined || p.y !== undefined)) throw new ModelOutputRejected('Konum onayı yeni koordinat taşıyamaz')
     if (decision === 'adjust' && typeof p.x === 'number' && typeof p.y === 'number') point = [p.x, p.y]
   }
   if (decision === 'confirm' || decision === 'uncertain') return { decision, reason }
-  if (decision !== 'adjust' || !point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) throw new ModelRejected('Görsel konum kararı veya düzeltme noktası geçersiz')
+  if (decision !== 'adjust' || !point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || point[0] < 0 || point[1] < 0 || point[0] >= maxX || point[1] >= maxY) throw new ModelOutputRejected('Görsel konum kararı veya düzeltme noktası geçersiz')
   return { decision, x: point[0] / maxX, y: point[1] / maxY, reason }
 }
 
@@ -1594,7 +1682,7 @@ export async function verifyVisualPointer(opts: {
   apiKey: string; model: string | string[]; goal: string; screen: Img
   area: ScanResult['area']; pointer: { x: number; y: number }; system?: string; nodeId?: string
   revision?: number; chainSource?: string
-}): Promise<VisualPointerDecision> {
+}): Promise<VisualPointerDecision & { model?: string }> {
   if (!opts.screen.data) throw new ModelRejected('Görsel konum doğrulaması için yeni görüntü yok')
   return runModelChain(asModelChain(opts.model), async model => {
     const native = isTarsModel(model), absolute = native && tarsAbsolute(model)
@@ -1616,7 +1704,7 @@ export async function verifyVisualPointer(opts: {
       const result = validateVisualPointerReply(content, model, opts.screen)
       chatLogger?.(`CEVAPLAYAN asama=visual-pointer-check model=${model}`)
       chatLogger?.(`YANIT id=${id} | karar=${result.decision} | imlec=${opts.pointer.x},${opts.pointer.y} | neden=${result.reason.replace(/\s+/g, ' ').slice(0, 180)}`)
-      return result
+      return { ...result, model }
     } catch (e) {
       chatLogger?.(`YANIT id=${id} | karar=reddedildi | neden=${brief(e)}`)
       throw e

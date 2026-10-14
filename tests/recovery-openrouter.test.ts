@@ -20,13 +20,14 @@ describe('OpenRouter recovery native tool calls', () => {
     const fetch = vi.fn(async (_url, init) => {
       const req = JSON.parse(init.body)
       expect(req.parallel_tool_calls).toBe(false); expect(req.tool_choice).toBe('auto')
+      expect(req.tools[0].function.name).toBe('act_key')
       return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { content: null,
         reasoning_details: [{ type: 'reasoning.encrypted', data: 'opaque' }],
         tool_calls: [{ id: 'native-id', type: 'function', function: { name: 'act_key', arguments: '{"keys":"win+d"}' } }],
       } }] }) }
     })
     vi.stubGlobal('fetch', fetch)
-    const reply = await recoveryToolTurn(args)
+    const reply = await recoveryToolTurn({ ...args, tools: [{ type: 'function', function: { name: 'act_key', description: 'Send keys', parameters: { type: 'object', properties: { keys: { type: 'string' } }, required: ['keys'], additionalProperties: false } } }] })
     expect(reply.tool_calls?.[0].id).toBe('native-id')
     expect(reply.reasoning_details).toEqual([{ type: 'reasoning.encrypted', data: 'opaque' }])
     expect(fetch).toHaveBeenCalledTimes(1)

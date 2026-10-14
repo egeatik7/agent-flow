@@ -43,7 +43,7 @@ describe('visual target reply contract', () => {
     expect(() => validateVisualTargetReply(reply('target', `click(start_box='(${x},${y})')`), native, image, true)).toThrow(ModelRejected)
   })
   it('rejects malformed JSON coordinates instead of replacing them with a guessed center', () => {
-    for (const text of ['{"intent":"target","x":"500","y":500}', '{"intent":"target","x":1000,"y":500}', '{"intent":"missing","x":10,"y":20}', '{"intent":"new-task"}', '{"intent":"target","action":"hotkey","x":500,"y":500}']) {
+    for (const text of ['{"intent":"target","x":"500","y":500}', '{"intent":"target","x":1000,"y":500}', '{"intent":"missing","x":10,"y":20}', '{"intent":"new-task"}', '{"intent":"target","action":"hotkey","x":500,"y":500}', '{"intent":"target","x":168,"syncpointx":484,"y":477,"syncpointy":477}']) {
       expect(() => validateVisualTargetReply(text, 'vision', image, true)).toThrow(ModelRejected)
     }
   })
@@ -63,7 +63,7 @@ describe('target requests leave the initiative API alone', () => {
       ? '{"intent":"target","x":66,":[20, 137] }":"target","x":66,"y":137}'
       : '{"intent":"target","x":500,"y":200}')
     const result = await chooseVisualTarget({ apiKey: 'fake', model: ['fixture/gui-owl', 'vision'], goal: 'User Perspective', screen: image, allowDismiss: false })
-    expect(requests.map(r => r.model)).toEqual(['fixture/gui-owl', 'vision'])
+    expect(requests.map(r => r.model)).toEqual(['fixture/gui-owl', 'fixture/gui-owl', 'vision'])
     expect(result).toMatchObject({ intent: 'target', x: .5, y: .2 })
   })
   it('requests the explicit native intent without a broad future-task plan', async () => {
@@ -87,7 +87,7 @@ describe('target requests leave the initiative API alone', () => {
     const requests = capture(model => model === native ? "Thought: Close it first.\nAction: click(start_box='(808,292)')" : '{"intent":"target","x":500,"y":200}')
     const result = await chooseVisualTarget({ apiKey: 'fake', model: [native, 'vision'], goal: 'Input', screen: image, allowDismiss: true })
     expect(result).toMatchObject({ intent: 'target', x: .5, y: .2 })
-    expect(requests.map(r => r.model)).toEqual([native, 'vision'])
+    expect(requests.map(r => r.model)).toEqual([native, native, 'vision'])
   })
   it('still accepts ordinary initiative move/click responses without an intent field', async () => {
     capture(() => '{"action":"move","x":400,"y":500}')

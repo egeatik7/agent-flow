@@ -1,3 +1,4 @@
+import { mergeSettingsPatch, type SettingsPatch } from '../electron/settings-patch'
 import { exportCanvasFile, readCanvasFile } from '../electron/canvas-file'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
@@ -150,6 +151,11 @@ function projectView(full: AgentGraph, stack: Crumb[]): { view: AgentGraph; stac
 export default function App() {
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState('')
+  const [savedSettings, setSavedSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve())
+  const settingsSaveSequence = useRef(0)
+  const settingsFieldSequence = useRef(new Map<string, number>())
   const [graph, setGraph] = useState<AgentGraph>({ nodes: [], edges: [] })
   const [activeId, setActiveId] = useState(book0.activeId)
   const [tabList, setTabList] = useState(book0.tabs.map((t) => ({ id: t.id, name: t.name })))
@@ -335,7 +341,8 @@ export default function App() {
     void (async () => {
       try {
         if (api) {
-          setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
+          const loadedSettings = { ...DEFAULT_SETTINGS, ...(await api.getSettings()) }
+          setSettings(loadedSettings); setSavedSettings(loadedSettings)
           if(api.libraryInfo)setLibraryDirectory((await api.libraryInfo()).directory)
           const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
           showCanvas(book, '', false)
@@ -346,7 +353,7 @@ export default function App() {
           showCanvas(book, '', false)
           await persistBook(book)
           const s = localStorage.getItem(LOCAL_SETTINGS)
-          if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
+          if (s) { const loadedSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(s) }; setSettings(loadedSettings); setSavedSettings(loadedSettings) }
           pushLog('info', 'Tarayıcı önizlemesi: tıklamalar simüle edilir. Gerçek otomasyon Windows exe’de çalışır.')
         }
         setLoaded(true)
@@ -937,23 +944,44 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const saveSettings = async (partial: Partial<AppSettings>) => {
-    if (api) {
+  const saveSettings = async (partial: SettingsPatch) => {
+    const patch = structuredClone(partial)
+    const sequence = ++settingsSaveSequence.current
+    const keys = Object.keys(patch)
+    for (const key of keys) settingsFieldSequence.current.set(key, sequence)
+    setSettings(prev => mergeSettingsPatch(prev, patch))
+    setSettingsSaveStatus('Kaydediliyor…')
+    const save = async () => {
       try {
-        const next = await api.saveSettings(partial)
-        // A partial save must not discard drafts in another settings section.
-        setSettings(prev => ({ ...prev, ...Object.fromEntries(Object.keys(partial).map(key => [key, next[key as keyof AppSettings]])) }))
-      } catch (e) {
-        pushLog('error', errText(e))
-        return
+        const next = api ? await api.saveSettings(patch) : undefined
+        if (next) setSavedSettings(next)
+        else setSavedSettings(prev => mergeSettingsPatch(prev, patch))
+        setSettings(prev => {
+          const accepted = Object.fromEntries(keys.filter(key => settingsFieldSequence.current.get(key) === sequence).map(key => {
+            const field = key as keyof AppSettings
+            // Do not replace a newer uncommitted text draft with an older save response.
+            const requested = key === 'recovery' ? { ...prev.recovery, ...patch.recovery } : patch[field as keyof SettingsPatch]
+            const unchangedDraft = key === 'recovery'
+              ? Object.keys(patch.recovery ?? {}).every(k => JSON.stringify(prev.recovery?.[k as keyof NonNullable<AppSettings['recovery']>]) === JSON.stringify(patch.recovery?.[k as keyof NonNullable<SettingsPatch['recovery']>]))
+              : JSON.stringify(prev[field]) === JSON.stringify(requested)
+            return [key, unchangedDraft && next ? key === 'recovery'
+              ? Object.fromEntries(Object.keys(patch.recovery ?? {}).map(k => [k, next.recovery?.[k as keyof NonNullable<AppSettings['recovery']>]]))
+              : next[field] : prev[field]]
+          })) as SettingsPatch
+          const updated = mergeSettingsPatch(prev, accepted)
+          if (!api) localStorage.setItem(LOCAL_SETTINGS, JSON.stringify(updated))
+          return next ? { ...updated, modelRevision: next.modelRevision } : updated
+        })
+        if (sequence === settingsSaveSequence.current) setSettingsSaveStatus('Kaydedildi. Sonraki yeni çağrı kayıtlı sırayı kullanır.')
+        pushLog('success', `Kaydedildi: ${keys.join(', ')}`)
+      } catch (error) {
+        if (sequence === settingsSaveSequence.current) setSettingsSaveStatus(`Kaydedilemedi: ${errText(error)}. Kaydet ile tekrar dene.`)
+        pushLog('error', errText(error))
       }
-    } else {
-      const next = { ...settings, ...partial }
-      setSettings(next)
-      localStorage.setItem(LOCAL_SETTINGS, JSON.stringify(next))
     }
-    const keys = Object.keys(partial)
-    pushLog('success', keys.length > 2 ? 'Tüm ayarlar kaydedildi.' : `Kaydedildi: ${keys.join(', ')}`)
+    const queued = settingsSaveQueue.current.then(save, save)
+    settingsSaveQueue.current = queued
+    await queued
   }
 
   const captureAfterDelay = async (): Promise<Locator | null> => {
@@ -1642,6 +1670,8 @@ export default function App() {
             settings={settings}
             setSettings={setSettings}
             onSaveSettings={saveSettings}
+            settingsSaveStatus={settingsSaveStatus}
+            savedSettings={savedSettings}
             windows={windows}
             onRefreshWindows={refreshWindows}
             models={models.filter(m => !m.id.startsWith('local:') || localCatalogBase === (settings.localBaseUrl ?? '').trim()).map(m =>

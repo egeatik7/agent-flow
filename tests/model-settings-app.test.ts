@@ -57,3 +57,37 @@ it('a model response from a previous server address cannot populate the current 
   expect(await response).toContain('Sunucu adresi değişti')
   expect(panel().models).toEqual([])
 })
+
+it('serializes rapid saves and an older reply cannot replace the newer visible model choice', async () => {
+  const requests: any[] = [], completions: ((value: any) => void)[] = []
+  api.saveSettings = vi.fn((partial: any) => { requests.push(partial); return new Promise(resolve => completions.push(resolve)) })
+  let first!: Promise<void>, second!: Promise<void>
+  await act(async () => {
+    first = panel().onSaveSettings({ model: 'A', modelBackups: ['B'] })
+    second = panel().onSaveSettings({ model: 'B', modelBackups: ['A'] })
+  })
+  expect(requests).toHaveLength(1)
+  expect(panel().settings.model).toBe('B')
+  expect(panel().savedSettings.model).toBe(DEFAULT_SETTINGS.model)
+  await act(async () => { completions[0]({ ...DEFAULT_SETTINGS, ...requests[0], modelRevision: 1 }); await first })
+  expect(requests).toHaveLength(2)
+  expect(panel().settings.model).toBe('B')
+  expect(panel().savedSettings.model).toBe('A')
+  await act(async () => { completions[1]({ ...DEFAULT_SETTINGS, ...requests[1], modelRevision: 2 }); await second })
+  expect(panel().settings).toMatchObject({ model: 'B', modelBackups: ['A'], modelRevision: 2 })
+  expect(panel().savedSettings.model).toBe('B')
+  expect(panel().settingsSaveStatus).toContain('Kaydedildi')
+})
+it('a pending save does not overwrite newer uncommitted typing, and failure is visibly reported', async () => {
+  let complete!: (value: any) => void
+  api.saveSettings = () => new Promise(resolve => { complete = resolve })
+  let pending!: Promise<void>
+  await act(async () => { pending = panel().onSaveSettings({ visionModel: 'A' }) })
+  act(() => panel().setSettings((s: any) => ({ ...s, visionModel: 'new-draft' })))
+  await act(async () => { complete({ ...DEFAULT_SETTINGS, visionModel: 'A' }); await pending })
+  expect(panel().settings.visionModel).toBe('new-draft')
+  expect(panel().savedSettings.visionModel).toBe('A')
+  api.saveSettings = async () => { throw new Error('fixture disk failure') }
+  await act(async () => { await panel().onSaveSettings({ visionModel: 'B' }) })
+  expect(panel().settingsSaveStatus).toContain('Kaydedilemedi')
+})

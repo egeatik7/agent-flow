@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 export default function ModelChain(props: {
   localModels?: { id: string }[]
   primary: string
@@ -6,11 +7,21 @@ export default function ModelChain(props: {
   placeholder: string
   inputId?: string
   onChange: (primary: string, backups: string[]) => void
+  onCommit?: (primary: string, backups: string[]) => void
 }) {
   const rows = [props.primary, ...(props.backups ?? [])].slice(0, 5)
-  const setRows = (next: string[]) => {
+  const latestRows = useRef(rows)
+  latestRows.current = rows
+  const [draft, setDraft] = useState(false)
+  const commit = (list = latestRows.current) => {
+    setDraft(false)
+    props.onCommit?.((list[0] ?? '').trim(), list.slice(1).map(name => name.trim()))
+  }
+  const setRows = (next: string[], save = false) => {
     const list = next.length ? next.slice(0, 5) : ['']
+    latestRows.current = list
     props.onChange(list[0] ?? '', list.slice(1))
+    if (save) commit(list)
   }
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir
@@ -18,7 +29,7 @@ export default function ModelChain(props: {
     const next = rows.slice()
     const [row] = next.splice(i, 1)
     next.splice(j, 0, row)
-    setRows(next)
+    setRows(next, true)
   }
   return (
     <div className="backup-box">
@@ -36,8 +47,10 @@ export default function ModelChain(props: {
             onChange={(e) => {
               const next = rows.slice()
               next[i] = e.target.value
-              setRows(next)
+              setDraft(true); setRows(next)
             }}
+            onBlur={() => { if (draft) commit() }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commit() } }}
           />
           <button type="button" className="xp-btn backup-x" title="Yukarı" disabled={i === 0} onClick={() => move(i, -1)}>
             ↑
@@ -49,7 +62,7 @@ export default function ModelChain(props: {
             type="button"
             className="xp-btn backup-x"
             title="Bu modeli sil"
-            onClick={() => setRows(rows.length === 1 ? [''] : rows.filter((_, j) => j !== i))}
+            onClick={() => setRows(rows.length === 1 ? [''] : rows.filter((_, j) => j !== i), true)}
           >
             ×
           </button>
@@ -66,11 +79,12 @@ export default function ModelChain(props: {
           const next = rows.slice()
           if (empty >= 0) next[empty] = e.target.value
           else next.push(e.target.value)
-          setRows(next)
+          setRows(next, true)
         }}>
         <option value="">+ Yerel model ekle…</option>
         {props.localModels.map(m => <option key={m.id} value={m.id} disabled={rows.includes(m.id)}>{m.id.replace(/^local:/, '')}</option>)}
       </select>}
+      {props.onCommit && <p className="hint" role="status">{draft ? 'Model adı taslak: Enter veya alandan çıkınca kaydedilir.' : 'Sıra, silme ve listeden seçim hemen kaydedilir; yazılan ad Enter veya alandan çıkınca kaydedilir.'}</p>}
     </div>
   )
 }

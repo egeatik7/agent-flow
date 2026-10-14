@@ -28,13 +28,6 @@ function visionResolved(s: AppSettings): { chain: string[]; source: string; sepa
   return { chain: textChain(s), source: 'Metin Modeli', separate: false }
 }
 
-function agentResolved(s: AppSettings): { chain: string[]; source: string; separate: boolean } {
-  if (String(s.agentModel ?? '').trim() || modelChain(s.agentModel, s.agentBackups).length) {
-    return { chain: modelChain(s.agentModel, s.agentBackups), source: 'Yap modeli', separate: true }
-  }
-  return visionResolved(s)
-}
-
 /** Yap araç döngüsü: UI-TARS adları çıkar. Ana ad UI-TARS ise Metin Modeli'nin ilk adı kullanılır; yedekler Yap listesinden kalır. */
 export function yapChain(s: AppSettings): string[] {
   const primary = s.agentModel && !/ui-?tars/i.test(s.agentModel) ? s.agentModel : s.model
@@ -53,7 +46,7 @@ export function resolveStage(s: AppSettings, stage: ChainStage): ResolvedChain {
     return { stage, label: 'OCR kelime seçimi', source: 'Metin Modeli', chain: textChain(s), separate: false }
   }
   if (stage === 'visual' || stage === 'pointer') {
-    const agent = agentResolved(s)
+    const agent = visionResolved(s)
     const label = stage === 'visual' ? 'Görsel hedefleme' : 'İmleç doğrulama'
     return { stage, label, source: agent.source, chain: agent.chain, separate: agent.separate }
   }
@@ -109,8 +102,8 @@ export function stageHint(s: AppSettings, stage: ChainStage): string {
       : `OCR kelime seçimi boş: Metin Modeli sırası kullanılır: ${order}.`
   }
   if (stage === 'visual') return `Görsel hedefleme bu sırayı kullanır (${resolved.source}): ${order}.`
-  if (stage === 'pointer') return `İmleç doğrulama, görsel hedefleme ile aynı sırayı kullanır (${resolved.source}): ${order}.`
-  if (stage === 'stall') return `Takılma planı bu sırayı kullanır (${resolved.source}): ${order}. Görsel hedefleme, Yap modeli doluysa bu listeyi kullanmaz.`
+  if (stage === 'pointer') return `İmleç doğrulama görsel hedeflemeye cevap veren modelle devam eder; gerekirse yalnız sonraki yedeklere geçer (${resolved.source}): ${order}.`
+  if (stage === 'stall') return `Takılma planı bu sırayı kullanır (${resolved.source}): ${order}.`
   if (stage === 'yap') return `Yap araç döngüsü bu sırayı kullanır: ${order}. UI-TARS adları bu döngüye girmez.`
   if (stage === 'condition') {
     return resolved.separate

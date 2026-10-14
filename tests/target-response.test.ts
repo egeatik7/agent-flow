@@ -36,7 +36,7 @@ describe('target response failures', () => {
       return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: req.model === 'broken' ? 'Need {"id":1,' : '{"id":1}' }, finish_reason: 'stop' }] }) }
     }))
     const result = await chooseScreenTarget({ apiKey: 'fake', model: ['broken', 'valid'], prompt: 'path', kind: 'click', stepTitle: 'Click', scan, sendImage: false })
-    expect(result.id).toBe(1); expect(calls).toEqual(['broken', 'valid'])
+    expect(result.id).toBe(1); expect(calls).toEqual(['broken', 'broken', 'valid'])
   })
   it('rejects finish_reason=length even if an early JSON object happens to be complete', async () => {
     const calls: string[] = []
@@ -45,7 +45,7 @@ describe('target response failures', () => {
       return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: req.model === 'cut' ? '{"id":null}' : '{"id":1}' }, finish_reason: req.model === 'cut' ? 'length' : 'stop' }] }) }
     }))
     expect((await chooseScreenTarget({ apiKey: 'fake', model: ['cut', 'valid'], prompt: 'path', kind: 'click', stepTitle: 'Click', scan, sendImage: false })).id).toBe(1)
-    expect(calls).toEqual(['cut', 'valid'])
+    expect(calls).toEqual(['cut', 'cut', 'valid'])
   })
   it('adds scope/move contract to runtime messages even with a saved old screenshot prompt', async () => {
     let req: any
