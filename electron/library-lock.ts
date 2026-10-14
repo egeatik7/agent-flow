@@ -160,40 +160,27 @@ export function claimLibraryLock(directory: string): LibraryLock {
   let released = false
   return {
     assertOwned: () => { if (released) throw lost(); assertOwned(file, owned.owner) },
-    release: () => {
-      if (released) return
-      released = true
-      if (--owned.refs > 0) return
-      // A re-claim may already have installed a newer generation; a stale handle
-      // must not evict it from the map.
-      if (held.get(file) === owned) held.delete(file)
-      removeOwned(file, owned.owner)
-    },
+    release: () => releaseHeld(file, owned, () => released, (value) => { released = value }),
   }
+}
+function releaseHeld(file: string, owned: Held, isReleased: () => boolean, markReleased: (value: boolean) => void): void {
+  if (isReleased()) return
+  markReleased(true)
+  if (--owned.refs > 0) return
+  if (held.get(file) === owned) held.delete(file)
+  removeOwned(file, owned.owner)
 }
 export function withLibraryLock<T>(directory: string, fn: () => T): T {
   const file = lockFile(directory), record = held.get(file)
   if (record) {
     let valid = true
     try { assertOwned(file, record.owner) } catch { valid = false }
-    if (valid) return fn()
-    // The session record was invalidated by an outside deletion or rename. Drop
-    // the stale map entry before claiming again: claimLibraryLock would otherwise
-    // see the dead generation and throw. A missing or dead generation is taken
-    // over and stays as this session's record, while a live foreign owner answers
-    // busy() and is never deleted. Nothing is ever written under a foreign lock.
-    // The returned handle is deliberately not released: the regained record stays
-    // as this session's claim, exactly like a record that was never lost.
-    held.delete(file)
-    claimLibraryLock(directory)
-    return fn()
+    if (!valid) held.delete(file)
   }
   const lock = claimLibraryLock(directory)
   let asyncWork = false
   try {
     const result = fn()
-    // An async body must keep the lock until it settles. A sync body still
-    // releases before withLibraryLock returns.
     if (result instanceof Promise) {
       asyncWork = true
       return result.finally(() => lock.release()) as T

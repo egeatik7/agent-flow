@@ -46,9 +46,10 @@ export function actionGraph(spec: ActSpec): { graph: AgentGraph; node: AgentNode
 export async function runAction(
   spec: ActSpec,
   executor: Executor,
-  opts: { maxSteps: number; stepDelayMs: number; userStop?: () => boolean; onTrace?: (event: unknown) => void }
+  opts: { maxSteps: number; stepDelayMs: number; userStop?: () => boolean; onTrace?: (event: unknown) => void; resumeTypeProgress?: import('./graph-types').TypeProgress }
 ): Promise<ActResult> {
   const { graph, node } = actionGraph(spec)
+  if (opts.resumeTypeProgress && node.kind === 'type') node.resumeTypeProgress = opts.resumeTypeProgress
   let done = false
   const wrapped: Executor = {
     ...executor,

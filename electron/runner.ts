@@ -18,6 +18,7 @@ import {
 import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
 import { outsideFolder, outsideVars, packageHost } from './enclosing'
+import type { DeliveryState, TypeProgress } from './graph-types'
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -34,6 +35,10 @@ export type RecoveryRequest = {
   inputAlreadySent?: boolean
   /** A native send started and its result is uncertain. Also blocks a blind second press. */
   inputMayHaveBeenSent?: boolean
+  /** Focus, text and Enter each stay not_sent, uncertain or sent. */
+  typeProgress?: TypeProgress
+  /** not_sent: nothing reached the worker. uncertain: written, not confirmed. sent: worker succeeded. */
+  inputDelivery?: DeliveryState
 }
 
 export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
@@ -401,13 +406,14 @@ export async function runGraph(
             port = await execStep(node, live, tally.n, ahead)
           } catch (error) {
             if (isFatal(error) || !ex.recover || !['click', 'type', 'key', 'wait'].includes(node.kind)) throw error
-            const marked = error as { inputAlreadySent?: boolean; inputMayHaveBeenSent?: boolean }
-            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars }, inputAlreadySent: marked.inputAlreadySent === true, inputMayHaveBeenSent: marked.inputMayHaveBeenSent === true })
+            const marked = error as { inputAlreadySent?: boolean; inputMayHaveBeenSent?: boolean; typeProgress?: TypeProgress; inputDelivery?: DeliveryState }
+            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars }, inputAlreadySent: marked.inputAlreadySent === true, inputMayHaveBeenSent: marked.inputMayHaveBeenSent === true, typeProgress: marked.typeProgress, inputDelivery: marked.inputDelivery })
             recovering = decision === 'retry' || decision === 'completed'
             if (ex.shouldStop()) throw new StoppedError()
             if (decision === 'completed') port = 'next'
             else if (decision === 'retry') {
               ex.log('info', `Kurtarma sonrası “${node.title}” aynı öğede yeniden deneniyor.`)
+              if (marked.typeProgress) live.resumeTypeProgress = marked.typeProgress
               try { port = await execStep(node, live, tally.n, ahead) }
               catch (again) {
                 if (isFatal(again)) throw again

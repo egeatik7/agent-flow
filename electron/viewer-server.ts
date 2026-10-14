@@ -41,6 +41,6 @@ export async function startViewerServer(state:ViewerState,directory:string,token
   ws.on('close',()=>{clearTimeout(timeout);off?.()})
  })
  const heartbeat=setInterval(()=>{const message=JSON.stringify({type:'heartbeat',session:state.state.session,seq:state.state.seq,at:Date.now()});for(const ws of sockets.clients)if(ws.readyState===WebSocket.OPEN&&(ws as WebSocket&{authenticated?:boolean}).authenticated){if(ws.bufferedAmount>2*1024*1024){ws.terminate();continue}ws.send(message)}},5000)
- try{await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{server.off('error',reject);resolve()})})}catch(e){clearInterval(heartbeat);sockets.close();throw e}
- return {port:(server.address() as {port:number}).port,close:async()=>{clearInterval(heartbeat);for(const ws of sockets.clients)ws.terminate();sockets.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}}
+ try{await new Promise<void>((resolve,reject)=>{const onStart=(error:Error)=>reject(error);server.once('error',onStart);server.listen(port,'127.0.0.1',()=>{server.off('error',onStart);server.on('error',()=>{});resolve()})})}catch(e){clearInterval(heartbeat);sockets.close();throw e}
+ return {port:(server.address() as {port:number}).port,server,close:async()=>{clearInterval(heartbeat);for(const ws of sockets.clients)ws.terminate();sockets.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}}
 }

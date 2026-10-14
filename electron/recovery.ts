@@ -97,7 +97,8 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const execute = deps.makeExecute(stopped)
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
   const sentFlag = request.error as Error & { inputAlreadySent?: boolean; inputMayHaveBeenSent?: boolean }
-  let failedNodeSent = request.inputAlreadySent === true || request.inputMayHaveBeenSent === true || sentFlag.inputAlreadySent === true || sentFlag.inputMayHaveBeenSent === true
+  const textUncertain = request.typeProgress?.text === 'uncertain'
+  let failedNodeSent = textUncertain || request.inputAlreadySent === true || request.inputMayHaveBeenSent === true || sentFlag.inputAlreadySent === true || sentFlag.inputMayHaveBeenSent === true
   let freshScreen = false
   const modelsUsed: string[] = []
   const usage = { prompt: 0, completion: 0, total: 0 }

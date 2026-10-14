@@ -20,6 +20,15 @@ async function message(ws:WebSocket){const [raw]=await once(ws,'message');return
 async function subscribe(ws:WebSocket,token='a'.repeat(64)){const pending=message(ws);ws.send(JSON.stringify({type:'subscribe',protocol:1,token}));return pending}
 
 describe('private read-only tablet transport',()=>{
+ it('handles a runtime server error after listen without becoming an uncaught exception', async () => {
+  await setup()
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('runtime error escaped')), 300)
+    process.once('uncaughtException', (error) => { clearTimeout(timer); reject(error) })
+    service!.server.emit('error', new Error('runtime'))
+    setTimeout(() => { clearTimeout(timer); process.removeAllListeners('uncaughtException'); resolve() }, 30)
+  })
+ })
  it('never serves workspace/settings/tool endpoints and redirects HTML to the monitor',async()=>{
   await setup();const base=`http://127.0.0.1:${service!.port}`
   for(const route of ['/settings','/tools/run','/library.json','/assets/..%2fsecret'])expect((await fetch(base+route)).status).toBe(404)

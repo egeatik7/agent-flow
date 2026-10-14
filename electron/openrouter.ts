@@ -584,9 +584,15 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
       if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
       const model = chain[i]
       if (invalidOutputs.has(model)) continue
-      attemptCaps.push(Math.max(1000, deadline - Date.now()))
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
+      attemptCaps.push(remaining)
       try {
-        try { return await run(model) }
+        try {
+          const value = await run(model)
+          if (Date.now() > deadline) throw new ModelFailed('Model deneme süresi doldu (geç yanıt reddedildi).')
+          return value
+        }
         catch (error) {
           if (!(error instanceof ModelOutputRejected)) throw error
           if (retriedOutputs.has(model)) {
@@ -597,7 +603,14 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
           if (stopCheck()) throw new StoppedError()
           if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu.')
           chatLogger?.(`CIKTI-TEKRAR asama=${limits.stage ?? '-'} model=${model} deneme=2/2 neden=${brief(error)}`)
-          try { return await run(model) }
+          const againRemaining = deadline - Date.now()
+          if (againRemaining <= 0) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
+          attemptCaps[attemptCaps.length - 1] = againRemaining
+          try {
+            const value = await run(model)
+            if (Date.now() > deadline) throw new ModelFailed('Model deneme süresi doldu (geç yanıt reddedildi).')
+            return value
+          }
           catch (again) {
             if (again instanceof ModelOutputRejected) { invalidOutputs.add(model); lastOutputError = again }
             throw again
@@ -606,6 +619,7 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
       } catch (e) {
         checkObservation(limits.signal)
         if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+        if (e instanceof ModelFailed && e.message.includes('geç yanıt reddedildi')) throw e
         if (!(e instanceof ModelRejected)) allRejected = false
         lastError = brief(e)
         const last = i === chain.length - 1

@@ -7,7 +7,7 @@ import path from 'path'
 import * as bridge from './a11y-bridge'
 import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
-import { NODE_SPECS, conditionCompatibilityError, modelChain, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type TargetMemo } from './graph-types'
+import { NODE_SPECS, conditionCompatibilityError, modelChain, screenCheckMode, type AgentNode, type AppSettings, type DeliveryState, type LogLevel, type TargetMemo, type TypeProgress } from './graph-types'
 import { resolveStage, type ChainStage } from './model-chain'
 import { VisualModelSession } from './visual-session'
 import { clickableBy, writableBy } from './target-match'
@@ -1241,33 +1241,51 @@ export function createAgent(ctx: AgentContext) {
   }
 
   /** Send explicit keyboard input once; do not classify or read the selected field. */
+  function stampType(progress: TypeProgress, error: unknown): never {
+    const delivery: DeliveryState = progress.text === 'not_sent' && progress.enter === 'not_sent' ? 'not_sent' : (progress.text === 'uncertain' || progress.enter === 'uncertain' ? 'uncertain' : 'sent')
+    const err = error instanceof Error ? error : new Error(String(error))
+    Object.assign(err, {
+      typeProgress: { ...progress, focusPoint: progress.focusPoint ? { ...progress.focusPoint } : undefined },
+      inputDelivery: delivery,
+      inputAlreadySent: delivery !== 'not_sent',
+      inputMayHaveBeenSent: delivery === 'uncertain',
+      ...(delivery !== 'not_sent' ? { haltLoop: true } : {}),
+    })
+    throw err
+  }
+
   async function typeDirect(
     text: string,
     enter: boolean,
     clear: boolean,
-    at?: { x: number; y: number },
+    at: { x: number; y: number } | undefined,
+    progress: TypeProgress,
   ) {
     clearHover()
     checkStopped()
-    // The user/flow already selected the field. Send the requested input once;
-    // UIA labels, caret geometry and the old contents do not authorize or veto it.
-    const hasInput = !!text || clear
+    if (progress.text === 'uncertain') stampType(progress, new Error('Metin gönderimi belirsiz; körlemesine tekrar yazılmadı.'))
+    const hasInput = (!!text || clear) && progress.text === 'not_sent'
     let typed: bridge.TypeResult | null = null
-    try { typed = hasInput ? await bridge.typeText(text, false, clear, at) : null }
-    catch (error) { inputFailure(error) }
+    try {
+      typed = hasInput ? await bridge.typeText(text, false, clear, at, undefined, undefined, { onDispatched: () => { progress.text = 'uncertain' } }) : null
+    } catch (error) { inputFailure(error) }
     checkStopped()
-    if (hasInput && (!typed || typed.skippedClear || typed.needChoice || typed.writeSent !== true)) {
-      throw new Error('INPUT_NOT_SENT: Yazma işçisi girdiyi gönderemedi; Enter gönderilmedi.')
+    if (hasInput) {
+      if (!typed || typed.skippedClear || typed.needChoice || typed.writeSent !== true) {
+        throw new Error('INPUT_NOT_SENT: Yazma işçisi girdiyi gönderemedi; Enter gönderilmedi.')
+      }
+      progress.text = 'sent'
+      reportTyping(typed)
+      log('info', clear ? 'Ctrl+A → Delete → yazma gönderildi; alan içeriği okunmadı.' : 'Yazma gönderildi; alan içeriği okunmadı.')
     }
-    reportTyping(typed)
-    if (hasInput) log('info', clear ? 'Ctrl+A → Delete → yazma gönderildi; alan içeriği okunmadı.' : 'Yazma gönderildi; alan içeriği okunmadı.')
-    if (enter) {
+    if (enter && progress.enter === 'not_sent') {
       await pause(240)
       checkStopped()
-      try { await bridge.sendKeys('{ENTER}') } catch (error) { inputFailure(error) }
+      try { await bridge.sendKeys('{ENTER}', getSettings().targetWindow || undefined, undefined, undefined, { onDispatched: () => { progress.enter = 'uncertain' } }) }
+      catch (error) { inputFailure(error) }
+      progress.enter = 'sent'
     }
     if (enter) lastClickPoint = undefined
-    // Sending input is not a claim that an unreadable field contains the expected value.
     return false
   }
 
@@ -1387,18 +1405,20 @@ export function createAgent(ctx: AgentContext) {
     },
     type: async (node, stepNo, ahead) => {
       inputSent = false
+      const progress: TypeProgress = node.resumeTypeProgress
+        ? { ...node.resumeTypeProgress, focusPoint: node.resumeTypeProgress.focusPoint ? { ...node.resumeTypeProgress.focusPoint } : undefined }
+        : { focus: 'not_sent', text: 'not_sent', enter: 'not_sent' }
       try {
       await waitUnlocked()
       const text = node.text ?? ''
       const enter = !!node.pressEnter
       const clear = node.clearFirst !== false
       let t: Resolved | null = null
-      if (node.prompt?.trim() || node.locator) {
+      if (progress.focus === 'sent' && progress.focusPoint) {
+        lastClickPoint = { ...progress.focusPoint }
+      } else if (node.prompt?.trim() || node.locator) {
         await activateInputWindow(node)
         t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
-      }
-      let valueVerified = false
-      const write = async () => {
         checkStopped()
         if (t?.visualGoal) {
           const result = await approveWithMethodFallback(node, t, stepNo, 'left')
@@ -1409,29 +1429,25 @@ export function createAgent(ctx: AgentContext) {
             lastClickPoint = { x: t.x, y: t.y }
             trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode: 'left', phase: 'sent' })
             ctx.setMethod?.('Görsel konum onaylandı — yazı alanı seçildi')
-          } else {
-            inputSent = true
-            await clickInput(t, node)
-          }
-          await sleep(FOCUS_MS)
-          log('info', `Alan seçildi: ${t.label}`)
-        } else if (t) {
-          inputSent = true
-          await clickInput(t, node)
-          await sleep(FOCUS_MS)
-          log('info', `Alan seçildi: ${t.label}`)
-        }
-        valueVerified = await typeDirect(text, enter, clear, lastClickPoint)
-        inputSent = true
-        if (enter) lastClickPoint = undefined
+          } else await clickInput(t, node)
+        } else if (t) await clickInput(t, node)
+        progress.focus = 'sent'
+        progress.focusPoint = { x: (t ?? lastClickPoint)!.x, y: (t ?? lastClickPoint)!.y }
+        lastClickPoint = { ...progress.focusPoint }
+        await sleep(FOCUS_MS)
+        log('info', `Alan seçildi: ${t?.label ?? 'odak'}`)
       }
-      // Explicit keyboard dispatch needs no screen-transition or field-value judge.
-      await write()
-      const confirmed = valueVerified
-      if (confirmed) saveMemo(node, t?.memo)
+      if (progress.text === 'sent' && progress.enter === 'not_sent' && enter) {
+        await bridge.sendKeys('{ENTER}', getSettings().targetWindow || undefined, undefined, undefined, { onDispatched: () => { progress.enter = 'uncertain' } })
+        progress.enter = 'sent'
+        return
+      }
+      if (progress.text !== 'sent') {
+        await typeDirect(text, enter, clear, progress.focusPoint ?? lastClickPoint, progress)
+      }
+      if (t) saveMemo(node, t.memo)
       } catch (e) {
-        if (inputSent) inputFailure(e, true)
-        throw e
+        stampType(progress, e)
       }
     },
     key: async (node, _ahead) => {

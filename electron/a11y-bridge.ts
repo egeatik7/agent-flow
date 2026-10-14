@@ -135,7 +135,7 @@ class Worker {
    * One request at a time. The worker answers in order, so a request's time limit has to count from when it is
    * written, not from when it queued behind a long scan; otherwise a short call times out and kills a healthy worker.
    */
-  async call<T>(op: string, payload: object = {}, timeoutMs = 60000, signal?: AbortSignal): Promise<T> {
+  async call<T>(op: string, payload: object = {}, timeoutMs = 60000, signal?: AbortSignal, hooks?: { onDispatched?: () => void }): Promise<T> {
     const turn = this.tail
     let release!: () => void
     this.tail = new Promise<void>((resolve) => (release = resolve))
@@ -143,13 +143,13 @@ class Worker {
     catch (e) { void turn.then(release, release); throw e }
     try {
       checkObservation(signal)
-      return await this.send<T>(op, payload, timeoutMs, signal)
+      return await this.send<T>(op, payload, timeoutMs, signal, hooks)
     } finally {
       release()
     }
   }
 
-  private async send<T>(op: string, payload: object, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+  private async send<T>(op: string, payload: object, timeoutMs: number, signal?: AbortSignal, hooks?: { onDispatched?: () => void }): Promise<T> {
     const startedHere = !this.proc || !this.ready
     if (startedHere) this.ready = this.start()
     const startupProc = this.proc
@@ -176,14 +176,15 @@ class Worker {
         this.drop(proc)
       }
       signal?.addEventListener('abort', abort, { once: true })
-      try { checkObservation(signal) }
-      catch (e) {
+      // Kept inside the class: the worker cancellation test evaluates this body alone.
+      if (signal?.aborted) {
         this.pending.delete(id)
         clearTimeout(timer)
-        signal?.removeEventListener('abort', abort)
-        reject(e)
+        signal.removeEventListener('abort', abort)
+        reject(new Error('Durduruldu; komut worker’a yazılmadı.'))
         return
       }
+      hooks?.onDispatched?.()
       proc.stdin.write(`${id}\t${op}\t${b64}\n`)
     }).finally(() => { if (abort) signal?.removeEventListener('abort', abort) })
   }
@@ -518,7 +519,8 @@ export async function typeText(
   clearFirst: boolean,
   at?: { x: number; y: number },
   fieldToken?: string,
-  guard?: InputGuard
+  guard?: InputGuard,
+  hooks?: DispatchHooks,
 ): Promise<TypeResult | null> {
   if (!IS_WIN) return null
   if (!text && !pressEnter && !clearFirst) return null
@@ -535,7 +537,16 @@ export async function typeText(
     ownPid: process.pid,
     fieldToken: fieldToken ?? '',
     guard,
-  }, budgetMs)
+  }, budgetMs, undefined, hooks)
+}
+
+export type DispatchHooks = { onDispatched?: () => void }
+
+/** False means the command is still not_sent: Stop won before the worker was written. */
+export function nativeWriteStarted(signal: AbortSignal | undefined, onDispatched?: () => void): boolean {
+  if (signal?.aborted) return false
+  onDispatched?.()
+  return true
 }
 
 export async function inputState(): Promise<InputState | null> {
@@ -582,9 +593,9 @@ export async function patchAt(x: number, y: number, size = 64): Promise<{ data: 
   }
 }
 
-export async function sendKeys(keys: string, windowTitle?: string, target?: InputWindow, focusHwnd?: string): Promise<void> {
+export async function sendKeys(keys: string, windowTitle?: string, target?: InputWindow, focusHwnd?: string, hooks?: DispatchHooks): Promise<void> {
   if (!IS_WIN) return
-  await worker.call('keys', { keys, ownPid: process.pid, direct: true, windowTitle: windowTitle || '', target, focusHwnd })
+  await worker.call('keys', { keys, ownPid: process.pid, direct: true, windowTitle: windowTitle || '', target, focusHwnd }, 60000, undefined, hooks)
 }
 
 /** The element under a scanner box, with a picture of the box. */

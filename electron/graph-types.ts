@@ -1,3 +1,12 @@
+/** How far a native command got. `not_sent` never reached the worker; `uncertain` was written and not confirmed; `sent` got a success reply. */
+export type DeliveryState = 'not_sent' | 'uncertain' | 'sent'
+export type TypeProgress = {
+  focus: DeliveryState
+  text: DeliveryState
+  enter: DeliveryState
+  focusPoint?: { x: number; y: number }
+}
+
 export type NodeKind =
   | 'start'
   | 'click'
@@ -105,6 +114,8 @@ export type AgentNode = {
   engine?: 'screen' | 'list'
   allowCode?: boolean
   maxActions?: number
+  /** Runtime only. Recovery resume must not be written into a saved flow. */
+  resumeTypeProgress?: TypeProgress
   url?: string
   browser?: 'auto' | 'msedge' | 'chrome'
   /** Dosyayı Bekle: e.g. *.glb (empty = any file). */

@@ -76,6 +76,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       const found = findPlace(graph, id)?.node
       if (!allowed.has(id) || !found || !RECOVERY_ACTION_KINDS.includes(found.kind)) throw new Error('Bu node’u çağırma yetkisi yok.')
       node = structuredClone(id === request.node.id ? request.live : found)
+      if (id === request.node.id && request.typeProgress) node.resumeTypeProgress = request.typeProgress
       // Use the paused lap's actual variables; no new folder listing or resumed loop is built.
       for (const field of ['prompt', 'text', 'keys', 'folder', 'pattern', 'source', 'url'] as const) node[field] = renderTemplate(node[field], request.vars)
     } else {
