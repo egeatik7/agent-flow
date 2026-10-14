@@ -200,7 +200,7 @@ export function imageFromMessages(messages: { content?: unknown }[], mimeFromObj
  * İsteğin kanıtını diske yazar: özet, tam sistem promptu, talimat, gönderilen aday listesi, görüntünün
  * AYNISI (yeniden ekran görüntüsü alınmaz; istekteki veri kullanılır) ve modelin ham yanıtı.
  */
-export function saveRequestEvidence(id: string, files: { summary?: string; system?: string; instruction?: string; candidates?: string; image?: { buffer: Buffer; mime: string }; response?: string }): string {
+export function saveRequestEvidence(id: string, files: { summary?: string; system?: string; instruction?: string; candidates?: string; image?: { buffer: Buffer; mime: string }; response?: string; mapping?: unknown; resolution?: unknown }): string {
   if (!root) return ''
   try {
     const dir = path.join(root, id)
@@ -211,6 +211,8 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
     if (files.instruction) yaz('talimat.txt', files.instruction)
     if (files.candidates) yaz('aday-listesi.txt', files.candidates)
     if (files.response) yaz('yanit.txt', files.response)
+    if (files.mapping !== undefined) yaz('ocr-esleme.json', JSON.stringify(files.mapping, null, 2))
+    if (files.resolution !== undefined) yaz('id-cozumleme.json', JSON.stringify(files.resolution, null, 2))
     if (files.image) {
       const uzanti = files.image.mime.includes('png') ? 'png' : 'jpg'
       try { fs.writeFileSync(path.join(dir, `gonderilen-goruntu.${uzanti}`), files.image.buffer) } catch { /* aynı */ }

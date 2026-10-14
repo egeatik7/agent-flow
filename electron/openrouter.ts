@@ -866,7 +866,14 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
       promptChars: listText.length,
     })
     chatLogger?.(ozet)
-    saveRequestEvidence(istekId, { summary: ozet, system, instruction: opts.prompt, candidates: listText, image: resim ?? undefined })
+    const sentIds = new Set(Array.from(listText.matchAll(/^#(\d+)\s/gm), match => Number(match[1])))
+    const evidenceDir = saveRequestEvidence(istekId, { summary: ozet, system, instruction: opts.prompt, candidates: listText, image: resim ?? undefined,
+      mapping: { requestId: istekId, instruction: opts.prompt, area: scan.area,
+        imageSent: !!resim, imageMarked: !!resim && (scan.image as { marked?: boolean } | null)?.marked === true,
+        fallbackNoImage: goruntusuzDonus,
+        originalItems: scan.items,
+        candidates: candidates.map(c => ({ ...c, sent: sentIds.has(c.item.id) })) } })
+    if (evidenceDir) chatLogger?.(`OCR-KANIT id=${istekId} | klasor=${evidenceDir}`)
   }
   const build = (img: boolean): Message[] => [
     { role: 'system', content: system },
@@ -926,7 +933,16 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     resolvedWord: chosen?.wordIndex !== undefined ? `#${chosen.item.id} w${chosen.wordIndex}` : undefined,
     targetText: (chosen?.item ?? badge)?.text.slice(0, 80),
   }))
-  saveRequestEvidence(istekId, { response: content })
+  saveRequestEvidence(istekId, { response: content, resolution: {
+    requestId: istekId, returnedId: id, modelText: parsed.text ?? null, rawResponse: content,
+    inSentList: gonderilenMi, imageUsed: usedImage,
+    candidateWithReturnedId: aday ?? null,
+    originalItemWithReturnedId: scan.items.find(item => item.id === id) ?? null,
+    selectedBeforeTextCheck: selected ?? null, badgeBeforeTextCheck: rozet ?? null,
+    textClash: clash, rejected: rejected ?? null,
+    acceptedCandidate: chosen ?? null, acceptedBadge: badge ?? null,
+    resolvedParentId: chosen?.parentId ?? badge?.id ?? null,
+  } })
   return {
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!chosen) } : {}),
     id: chosen?.parentId ?? badge?.id ?? null,
