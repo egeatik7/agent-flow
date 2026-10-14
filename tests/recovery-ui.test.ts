@@ -55,7 +55,7 @@ describe('recovery settings UI', () => {
     act(() => mounted!.root.findAllByType('button').find(b => b.children.includes('Model listesini getir'))!.props.onClick())
     expect(onLoadModels).toHaveBeenCalledOnce()
     act(() => mounted!.root.findAllByType('button').find(b => b.children.includes('Kurtarma Ayarlarını Kaydet'))!.props.onClick())
-    expect(onSave.mock.calls[0][0]).toMatchObject({ recovery: { apiKey: 'new-recovery-fixture', model: 'second', backups: ['third'] } })
+    expect(onSave.mock.calls.at(-1)![0]).toMatchObject({ recovery: { apiKey: 'new-recovery-fixture', model: 'second', backups: ['third'] } })
     expect(onSave.mock.calls[0][0]).not.toHaveProperty('apiKey')
   })
   it('shows saved probable cause, evidence, actions and the actual resume result', async () => {

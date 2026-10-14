@@ -51,6 +51,7 @@ import {
   type CanvasBook,
   type LogLevel,
 } from './graph-types'
+import { mergeSettingsPatch, type SettingsPatch } from './settings-patch'
 import { nextModelRevision, resolveStage } from './model-chain'
 type WorkspaceWriter = 'window' | 'tools' | 'session'
 import { ZipLibraryStorage, type ZipLibrarySnapshot } from './zip-library-storage'
@@ -1260,9 +1261,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
 
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:save', (_e, partial: Partial<AppSettings>) => {
+  ipcMain.handle('settings:save', (_e, partial: SettingsPatch) => {
     const onceki = getSettings()
-    const next = { ...onceki, ...partial }
+    const next = mergeSettingsPatch(onceki, partial)
     next.apiKey = validateApiKey(next.apiKey)
     if (next.recovery?.apiKey) next.recovery = { ...next.recovery, apiKey: validateApiKey(next.recovery.apiKey) }
     next.ocrEngine = 'combined'
@@ -1746,7 +1747,9 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       if (hidden) showSelf()
     }
     if (!shot.image) throw new Error('Ekran görüntüsü alınamadı.')
-    return { model: models[0] ?? '', text: await visionDescribe({ apiKey: s.apiKey, model: models, image: shot.image }) }
+    let answered = ''
+    const text = await visionDescribe({ apiKey: s.apiKey, model: models, image: shot.image, onAnsweredModel: model => { answered = model } })
+    return { model: answered, text }
   })
 }
 

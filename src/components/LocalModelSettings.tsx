@@ -10,11 +10,12 @@ const PRESETS = [
   { title: 'LM Studio', url: 'http://127.0.0.1:1234/v1' },
 ]
 
-export default function LocalModelSettings({ settings: s, setSettings, onSave, onLoad, models, disabled }: {
+export default function LocalModelSettings({ settings: s, setSettings, onSave, onLoad, onBeforeChat, models, disabled }: {
   settings: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
   onSave: (patch: Partial<AppSettings>) => void
   onLoad?: () => Promise<ModelInfo[]>
+  onBeforeChat?: () => Promise<boolean>
   models: ModelInfo[]
   disabled?: boolean
 }) {
@@ -76,7 +77,7 @@ export default function LocalModelSettings({ settings: s, setSettings, onSave, o
       <button type="button" className="xp-btn save block" onClick={() => onSave({ localBaseUrl: (s.localBaseUrl ?? '').trim(), localTimeoutMs: s.localTimeoutMs ?? 180_000, localVision: s.localVision === true, localOff: s.localOff === true, localThink: s.localThink ?? '' })}>Yerel ayarları kaydet</button>
       <p className="hint">Kurtarma ajanı kendi OpenRouter bağlantısını kullanmaya devam eder.</p>
       {/* "Yerel model mi, API mi cevap veriyor" sorusunu canlı denemeyle yanıtlar. */}
-      <LocalChat settings={s} models={models} disabled={disabled} />
+      <LocalChat settings={s} models={models} disabled={disabled} onBeforeSend={onBeforeChat} />
     </div>
   </fieldset>
 }

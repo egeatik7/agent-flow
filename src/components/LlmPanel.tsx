@@ -17,6 +17,7 @@ import {
 type Props = {
   settings: AppSettings
   onSave: (partial: Partial<AppSettings>) => void
+  saveStatus?: string
   onDraft?: (partial: Partial<AppSettings>) => void
 }
 
@@ -65,7 +66,7 @@ export default function LlmPanel(p: Props) {
     setPrompts((prev) => {
       if (!spec?.prompt) return prev
       const next = { ...prev }
-      delete next[spec.prompt]
+      delete next[nodeTab === 'type' && spec.prompt === 'list' ? 'typeList' : spec.prompt]
       return next
     })
     setOff((prev) => {
@@ -109,6 +110,8 @@ export default function LlmPanel(p: Props) {
 
   return (
     <div className="llm-panel">
+      <p className="llm-note">Değişiklikler otomatik kaydedilir; Kaydet düğmesi yeniden kayıt için kalır.</p>
+      {p.saveStatus && <p className="llm-note" role="status">{p.saveStatus}</p>}
       <div className="llm-node-tabs" role="tablist" aria-label="Node yöntemleri" onKeyDown={e => {
         const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
         const index = buttons.indexOf(e.target as HTMLButtonElement)
@@ -129,8 +132,8 @@ export default function LlmPanel(p: Props) {
           const spec = FIND_STAGES.find((s) => s.id === id)
           if (!spec) return null
           const visual = id === 'tars'
-          const prompt = spec.prompt
-          const stageText = prompt ? (visual ? (prompts.tars === TARS_TEMPLATE ? '' : prompts.tars ?? '') : nodeTab === 'type' && prompt === 'list' ? listPromptFor('type', prompts.list) : text(prompt)) : ''
+          const prompt = nodeTab === 'type' && spec.prompt === 'list' ? 'typeList' : spec.prompt
+          const stageText = prompt ? (visual ? (prompts.tars === TARS_TEMPLATE ? '' : prompts.tars ?? '') : prompt === 'typeList' ? (prompts.typeList ?? listPromptFor('type', prompts.list)) : text(prompt)) : ''
           return (
             <li key={id} className={`llm-stage${enabled(id) ? '' : ' off'}`}>
               <div className="llm-stage-head">

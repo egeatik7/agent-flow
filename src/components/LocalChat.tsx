@@ -12,10 +12,11 @@ const yeniId = () => ++sayac
  * (yerel sunucu mu, OpenRouter mı) her cevabın yanında, alttaki son turlarda ve Ajan Günlüğü'nde
  * açıkça yazar. VRAM yalnız ölçülebiliyorsa görünür (IPC yanıtındaki `gpu` alanı).
  */
-export default function LocalChat({ settings, models, disabled }: {
+export default function LocalChat({ settings, models, disabled, onBeforeSend }: {
   settings: AppSettings
   models: ModelInfo[]
   disabled?: boolean
+  onBeforeSend?: () => Promise<boolean>
 }) {
   const yerelModeller = models.filter((m) => m.id.startsWith('local:'))
   const apiModeller = models.filter((m) => !m.id.startsWith('local:'))
@@ -60,6 +61,7 @@ export default function LocalChat({ settings, models, disabled }: {
     try {
       const api = typeof window === 'undefined' ? undefined : window.xpAgent
       if (!api?.localChat) throw new Error('Sohbet yalnız masaüstü uygulamasında çalışır.')
+      if (onBeforeSend && !await onBeforeSend()) throw new Error('Ayarlar kaydedilemedi; sohbet başlatılmadı.')
       const res = await api.localChat({ prompt, target, ...(secili ? { model: secili } : {}) })
       if (!res.ok) throw new Error(res.error || 'Model cevap vermedi.')
       const kaynak = `${res.target === 'local' ? 'Yerel' : 'API'} · ${res.model} · ${(res.ms / 1000).toFixed(1)} sn${res.gpu ? ` · VRAM ${res.gpu}` : ''}`

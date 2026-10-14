@@ -4,7 +4,7 @@ export const FIND_STAGE_IDS = ['chrome', 'uia', 'icon', 'windows', 'list', 'tars
 // 'onnx' remains accepted only for old saved settings and API clients.
 export type FindStageId = (typeof FIND_STAGE_IDS)[number] | 'onnx'
 
-export type PromptId = 'list' | 'tars' | 'screen' | 'initiative' | 'reaction' | 'stall' | 'conditionUia' | 'conditionOcr' | 'yap' | 'wordChoice' | 'visualPointer'
+export type PromptId = 'list' | 'typeList' | 'tars' | 'screen' | 'initiative' | 'reaction' | 'stall' | 'conditionUia' | 'conditionOcr' | 'yap' | 'wordChoice' | 'visualPointer'
 
 export const FIND_STAGES: { id: FindStageId; title: string; note: string; prompt?: PromptId }[] = [
   { id: 'chrome', title: 'Chrome sayfası', note: '9222 portundaki sayfanın yazıları. Tam eşleşmezse kelime listesi yazı modeline gider.' },
@@ -192,6 +192,7 @@ export const DEFAULT_PROMPTS: Record<PromptId, string> = {
   conditionOcr: CONDITION_OCR_PROMPT,
   yap: YAP_PROMPT,
   list: LIST_PROMPT,
+  typeList: listPromptFor('type'),
   tars: TARS_TEMPLATE,
   screen: SCREEN_PROMPT,
   initiative: INITIATIVE_PROMPT,

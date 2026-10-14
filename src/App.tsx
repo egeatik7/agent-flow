@@ -1,3 +1,5 @@
+import { SettingsWriter, settingsDelta } from './lib/settings-writer'
+import { mergeSettingsPatch, type SettingsPatch } from '../electron/settings-patch'
 import { exportCanvasFile, readCanvasFile } from '../electron/canvas-file'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
@@ -150,6 +152,9 @@ function projectView(full: AgentGraph, stack: Crumb[]): { view: AgentGraph; stac
 export default function App() {
   const [book0] = useState(emptyBook)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState('')
+  const [savedSettings, setSavedSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const settingsWriter = useRef<SettingsWriter | null>(null)
   const [graph, setGraph] = useState<AgentGraph>({ nodes: [], edges: [] })
   const [activeId, setActiveId] = useState(book0.activeId)
   const [tabList, setTabList] = useState(book0.tabs.map((t) => ({ id: t.id, name: t.name })))
@@ -335,7 +340,8 @@ export default function App() {
     void (async () => {
       try {
         if (api) {
-          setSettings({ ...DEFAULT_SETTINGS, ...(await api.getSettings()) })
+          const loadedSettings = { ...DEFAULT_SETTINGS, ...(await api.getSettings()) }
+          setSettings(loadedSettings); setSavedSettings(loadedSettings)
           if(api.libraryInfo)setLibraryDirectory((await api.libraryInfo()).directory)
           const book = startCanvasSession(normalizeCanvasBook(await api.getCanvases()))
           showCanvas(book, '', false)
@@ -346,7 +352,7 @@ export default function App() {
           showCanvas(book, '', false)
           await persistBook(book)
           const s = localStorage.getItem(LOCAL_SETTINGS)
-          if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) })
+          if (s) { const loadedSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(s) }; setSettings(loadedSettings); setSavedSettings(loadedSettings) }
           pushLog('info', 'Tarayıcı önizlemesi: tıklamalar simüle edilir. Gerçek otomasyon Windows exe’de çalışır.')
         }
         setLoaded(true)
@@ -937,23 +943,43 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const saveSettings = async (partial: Partial<AppSettings>) => {
-    if (api) {
-      try {
-        const next = await api.saveSettings(partial)
-        // A partial save must not discard drafts in another settings section.
-        setSettings(prev => ({ ...prev, ...Object.fromEntries(Object.keys(partial).map(key => [key, next[key as keyof AppSettings]])) }))
-      } catch (e) {
-        pushLog('error', errText(e))
-        return
-      }
-    } else {
-      const next = { ...settings, ...partial }
-      setSettings(next)
+  if (!settingsWriter.current) settingsWriter.current = new SettingsWriter(
+    async patch => {
+      if (api) return api.saveSettings(patch)
+      const previous = JSON.parse(localStorage.getItem(LOCAL_SETTINGS) || 'null') ?? DEFAULT_SETTINGS
+      const next = mergeSettingsPatch(previous, patch)
       localStorage.setItem(LOCAL_SETTINGS, JSON.stringify(next))
-    }
-    const keys = Object.keys(partial)
-    pushLog('success', keys.length > 2 ? 'Tüm ayarlar kaydedildi.' : `Kaydedildi: ${keys.join(', ')}`)
+      return next
+    },
+    (next, patch) => {
+      setSavedSettings(next)
+      // Store normalization must never erase a space/newline the user is currently typing.
+      settingsRef.current = { ...settingsRef.current, modelRevision: next.modelRevision }
+      setSettings(prev => ({ ...prev, modelRevision: next.modelRevision }))
+      pushLog('success', `Kaydedildi: ${Object.keys(patch).join(', ')}`)
+    },
+    (pending, failed, error) => {
+      if (error) pushLog('error', errText(error))
+      setSettingsSaveStatus(pending ? 'Otomatik kaydediliyor…' : failed.length
+        ? `Kaydedilemedi: ${failed.join(', ')}. Kaydet ile tekrar dene.`
+        : 'Otomatik kaydedildi. Programı yeniden açınca da korunur.')
+    },
+  )
+  const saveSettings = async (partial: SettingsPatch) => {
+    const next = mergeSettingsPatch(settingsRef.current, partial)
+    settingsRef.current = next; setSettings(next)
+    await settingsWriter.current!.enqueue(partial)
+  }
+  const changeSettings: React.Dispatch<React.SetStateAction<AppSettings>> = action => {
+    const before = settingsRef.current
+    const next = typeof action === 'function' ? action(before) : action
+    const patch = settingsDelta(before, next)
+    if (Object.keys(patch).length) void saveSettings(patch)
+  }
+  const flushSettings = async () => {
+    const ok = await settingsWriter.current!.flush()
+    if (!ok) pushLog('error', 'Ayarlar kaydedilemedi; eski ayarlarla işlem başlatılmadı. Kaydet ile tekrar dene.')
+    return ok
   }
 
   const captureAfterDelay = async (): Promise<Locator | null> => {
@@ -1209,6 +1235,7 @@ export default function App() {
     let failed = false
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
+      if (!await flushSettings()) return
       if (!(await guardMissingPaths([{ name, graph: full }])) || stopRequested.current || closingRef.current) return
       if (!startId) { const reset = resetLoopTicks(full); full.nodes = reset.nodes; full.edges = reset.edges; writeCanvas(full) }
       setStepStatus({})
@@ -1262,6 +1289,7 @@ export default function App() {
     let halted = true
     let failed = false
     try {
+      if (!await flushSettings()) return
       if (!(await guardMissingPaths(ordered.map(t => ({ name: t.name, graph: t.graph })))) || stopRequested.current || closingRef.current) return
       pushLog('info', startNodeId
         ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
@@ -1412,6 +1440,7 @@ export default function App() {
       }
       // Drain writes before final saves/discards; a delayed autosave cannot undo them.
       await writeQueue.current
+      if (!await flushSettings()) return
       if (!await settleChanges()) return
       const next = emptyCanvasSession(commitActive())
       if (!await persistBook(next)) return
@@ -1435,8 +1464,8 @@ export default function App() {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (!loaded) return
       const book = commitActive()
-      // Synchronously flush the last keystroke before browser reload/crash recovery.
-      try { localStorage.setItem(LOCAL_BOOK, JSON.stringify(book)) } catch { /* native prompt still protects the page */ }
+      // Synchronously preserve settings and canvas before browser reload.
+      try { localStorage.setItem(LOCAL_SETTINGS, JSON.stringify(settingsRef.current)); localStorage.setItem(LOCAL_BOOK, JSON.stringify(book)) } catch { /* native prompt still protects the page */ }
       if (!book.tabs.some(tab => canvasDirty(book, tab))) return
       event.preventDefault()
       event.returnValue = ''
@@ -1629,7 +1658,7 @@ export default function App() {
             /> : loadError ? <div className="workspace-load-error" role="alert"><h2>Kayıtlar açılamadı</h2><p>{loadError}</p><p>Mevcut kayıtlar korunuyor. Kütüphane klasörünü taşıdıysan yeni konumundan açabilirsin.</p>{api?.manageLibrary && <button className="xp-btn" disabled={libraryBusy} onClick={()=>void manageLibrary('open')}>Kütüphane Aç…</button>}</div> : <WorkspaceWelcome disabled={!loaded || editorLocked} onOpen={setWorkspacePicker} onNew={addTab} />}
           </div>
           <div className="right-sidebar">
-            <fieldset className="canvas-editor-fields" disabled={editorLocked}>
+            <fieldset className="canvas-editor-fields" disabled={editorLocked || !loaded}>
           <SidePanel
             disabled={running || editorLocked}
             canvasPanel={<ZipCanvasLibrary library={zipLibrary} disabled={running || editorLocked || !loaded}
@@ -1640,8 +1669,10 @@ export default function App() {
             tab={sideTab}
             onTab={setSideTab}
             settings={settings}
-            setSettings={setSettings}
+            setSettings={changeSettings}
             onSaveSettings={saveSettings}
+            settingsSaveStatus={settingsSaveStatus}
+            savedSettings={savedSettings}
             windows={windows}
             onRefreshWindows={refreshWindows}
             models={models.filter(m => !m.id.startsWith('local:') || localCatalogBase === (settings.localBaseUrl ?? '').trim()).map(m =>
@@ -1666,9 +1697,11 @@ export default function App() {
                 throw e
               }
             }}
+            onBeforeLocalChat={flushSettings}
             onLoadLocalModels={async () => {
               try {
-                const base = (settings.localBaseUrl ?? '').trim()
+                if (!await flushSettings()) throw new Error('Ayar kaydı tamamlanamadı.')
+                const base = (settingsRef.current.localBaseUrl ?? '').trim()
                 if (!api?.listLocalModels) throw new Error('Yerel bağlantı testi masaüstü uygulamasında kullanılabilir.')
                 const list = await api.listLocalModels(base)
                 if (base !== (settingsRef.current.localBaseUrl ?? '').trim()) throw new Error('Sunucu adresi değişti. Yeni adres için listeyi tekrar getir.')
@@ -1687,6 +1720,7 @@ export default function App() {
                 return
               }
               try {
+                if (!await flushSettings()) return
                 const label = await api.testOpenRouter()
                 pushLog('success', `OpenRouter anahtarı geçerli (${label}).`)
               } catch (e) {
@@ -1700,6 +1734,7 @@ export default function App() {
               }
               pushLog('info', 'Ekran görüntüsü alınıp görsel modele gönderiliyor…')
               try {
+                if (!await flushSettings()) return
                 const r = await api.testVision()
                 pushLog('success', `Görsel model (${r.model}): ${r.text}`)
               } catch (e) {
@@ -1775,9 +1810,7 @@ export default function App() {
           valueLo={settings.valueLo}
           valueHi={settings.valueHi}
           onSave={async (lo, hi) => {
-            setSettings((s) => ({ ...s, valueLo: lo, valueHi: hi }))
-            if (api) await api.saveSettings({ valueLo: lo, valueHi: hi })
-            else localStorage.setItem(LOCAL_SETTINGS, JSON.stringify({ ...settingsRef.current, valueLo: lo, valueHi: hi }))
+            await saveSettings({ valueLo: lo, valueHi: hi })
           }}
           onScan={scanScreen}
           onPick={pickScreenItem}

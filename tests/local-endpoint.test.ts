@@ -60,7 +60,9 @@ describe('local OpenAI-compatible integration', () => {
       return { ok: true, status: 200, text: async () => '{"choices":[{"message":{"content":"{\\"text\\":\\"cloud\\"}"}}]}' }
     })
     vi.stubGlobal('fetch', fetch)
-    expect(await visionDescribe({ apiKey: 'cloud-key', model: ['local:vision', 'cloud/vision'], image })).toBe('cloud')
+    const answered = vi.fn()
+    expect(await visionDescribe({ apiKey: 'cloud-key', model: ['local:vision', 'cloud/vision'], image, onAnsweredModel: answered })).toBe('cloud')
+    expect(answered).toHaveBeenCalledWith('cloud/vision')
     expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(1) // ÜRETİM isteği tek; tanılama sorguları (/api/ps, /api/show) ayrı sayılır
   })
   it('does not wait forever when only a disabled local row or a missing cloud key is configured', async () => {

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetSta
 import AgentTab from './AgentTab'
 import RecoverySettingsPanel from './RecoverySettingsPanel'
 import ModelChain from './ModelChain'
+import type { SettingsPatch } from '../../electron/settings-patch'
 import { stageHint } from '../../electron/model-chain'
+import NumberDraft from './NumberDraft'
 import LocalModelSettings from './LocalModelSettings'
 import LlmPanel from './LlmPanel'
 import NubboMascot from './NubboMascot'
@@ -47,7 +49,9 @@ type Props = {
   onTab: (t: SideTab) => void
   settings: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
-  onSaveSettings: (partial: Partial<AppSettings>) => void
+  onSaveSettings: (partial: SettingsPatch) => void
+  settingsSaveStatus?: string
+  savedSettings?: AppSettings
   windows: { title: string; handle: string }[]
   onRefreshWindows: () => void
   models: ModelInfo[]
@@ -69,6 +73,7 @@ type Props = {
   onLoopFolder: (nodeId: string, folder: string) => void
   /** Yerel (OpenAI uyumlu) sunucudan model listesi çeker; satırlar "local:model" olarak eklenir. */
   onLoadLocalModels?: () => Promise<ModelInfo[]>
+  onBeforeLocalChat?: () => Promise<boolean>
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
   onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
@@ -595,13 +600,15 @@ function NodeInspector(p: Props) {
 function Settings(p: Props) {
   const [section, setSection] = useState<'general' | 'local' | 'recovery'>('general')
   return <>
+    <p className="hint">Tüm ayarlar değiştikçe otomatik kaydedilir. Kaydet düğmeleri yeniden kayıt için kullanılabilir.</p>
+    {p.settingsSaveStatus && <p className="hint" role="status">{p.settingsSaveStatus}</p>}
     <div className="tabs settings-subtabs" role="tablist" aria-label="Ayar bölümleri">
       <button type="button" role="tab" aria-selected={section === 'general'} className={`tab ${section === 'general' ? 'active' : ''}`} onClick={() => setSection('general')}>Genel</button>
       <button type="button" role="tab" aria-selected={section === 'local'} className={`tab ${section === 'local' ? 'active' : ''}`} onClick={() => setSection('local')}>Yerel Model</button>
       <button type="button" role="tab" aria-selected={section === 'recovery'} className={`tab ${section === 'recovery' ? 'active' : ''}`} onClick={() => setSection('recovery')}>Kurtarma Ajanı</button>
     </div>
-    {section === 'general' ? <GeneralSettings {...p} /> : section === 'local' ? <LocalModelSettings settings={p.settings} setSettings={p.setSettings} onSave={p.onSaveSettings} onLoad={p.onLoadLocalModels} models={p.models} disabled={p.disabled} /> : <RecoverySettingsPanel settings={p.settings} setSettings={p.setSettings}
-      disabled={p.disabled} onSave={p.onSaveSettings} graph={p.rootGraph ?? p.graph} models={p.models} onLoadModels={p.onLoadModels} />}
+    {section === 'general' ? <GeneralSettings {...p} /> : section === 'local' ? <LocalModelSettings settings={p.settings} setSettings={p.setSettings} onSave={p.onSaveSettings} onLoad={p.onLoadLocalModels} onBeforeChat={p.onBeforeLocalChat} models={p.models} disabled={p.disabled} /> : <RecoverySettingsPanel settings={p.settings} setSettings={p.setSettings}
+      disabled={p.disabled} savedSettings={p.savedSettings} onSave={p.onSaveSettings} graph={p.rootGraph ?? p.graph} models={p.models} onLoadModels={p.onLoadModels} />}
   </>
 }
 
@@ -651,7 +658,7 @@ function GeneralSettings(p: Props) {
         <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ model: s.model.trim(), modelBackups: s.modelBackups ?? [] })}>
           Kaydet
         </button>
-        <p className="hint">{stageHint(s, 'list')}</p>
+        <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'list')}</p>
         <p className="hint">Akış sürerken de kaydedilir. Sonraki yeni çağrı bu sırayla başlar; o anda giden istek değişmez.</p>
         <datalist id="model-list">
           {p.models.map((m) => (
@@ -673,7 +680,7 @@ function GeneralSettings(p: Props) {
             listId="model-list" inputId="wordChoiceModel" placeholder="Boş = Metin Modeli; API veya local:model"
             onChange={(wordChoiceModel, wordChoiceBackups) => set({ wordChoiceModel, wordChoiceBackups })} />
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ wordChoiceModel: s.wordChoiceModel?.trim() ?? '', wordChoiceBackups: s.wordChoiceBackups ?? [] })}>Kaydet</button>
-          <p className="hint">{stageHint(s, 'word')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'word')}</p>
           <p className="hint">Tıkla’nın liste aşamasında seçilen çok kelimeli OCR satırı için kullanılır. Tam talimat ve yalnız o satırın kelimeleri gönderilir; görüntü ve geçmiş yoktur. Düşünme kapalı istenir. Prompt: LLM → Tıkla → OCR kelime seçimi.</p>
         </div>
       </fieldset>
@@ -693,7 +700,9 @@ function GeneralSettings(p: Props) {
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ visionModel: s.visionModel.trim(), visionBackups: s.visionBackups ?? [] })}>
             Kaydet
           </button>
-          <p className="hint">{stageHint(s, 'stall')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'visual')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'pointer')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'stall')}</p>
           <datalist id="vision-model-list">
             {p.models
               .filter((m) => m.vision)
@@ -724,9 +733,7 @@ function GeneralSettings(p: Props) {
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ agentModel: s.agentModel.trim(), agentBackups: s.agentBackups ?? [] })}>
             Kaydet
           </button>
-          <p className="hint">{stageHint(s, 'visual')}</p>
-          <p className="hint">{stageHint(s, 'pointer')}</p>
-          <p className="hint">{stageHint(s, 'yap')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'yap')}</p>
           <datalist id="agent-model-list">
             {p.models
               .filter((m) => m.vision)
@@ -752,7 +759,7 @@ function GeneralSettings(p: Props) {
           <button type="button" className="xp-btn save backup-save" onClick={() => p.onSaveSettings({ conditionModel: s.conditionModel.trim(), conditionBackups: s.conditionBackups ?? [] })}>
             Kaydet
           </button>
-          <p className="hint">{stageHint(s, 'condition')}</p>
+          <p className="hint">Kayıtlı sıra: {stageHint(p.savedSettings ?? s, 'condition')}</p>
           <datalist id="condition-model-list">
             {p.models.map((m) => (
               <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />
@@ -799,14 +806,14 @@ function GeneralSettings(p: Props) {
       <div className="field">
         <label htmlFor="delay">Adımlar arası bekleme (ms)</label>
         <SaveRow onSave={() => p.onSaveSettings({ stepDelayMs: s.stepDelayMs })}>
-          <input id="delay" className="xp-input" type="number" min={0} step={100} value={s.stepDelayMs} onChange={(e) => set({ stepDelayMs: Math.max(0, Number(e.target.value) || 0) })} />
+          <NumberDraft id="delay" min={0} max={Number.MAX_SAFE_INTEGER} step={100} value={s.stepDelayMs} onCommit={stepDelayMs => set({ stepDelayMs })} />
         </SaveRow>
       </div>
 
       <div className="field">
         <label htmlFor="maxSteps">Maks. adım (sonsuz döngü koruması)</label>
         <SaveRow onSave={() => p.onSaveSettings({ maxSteps: s.maxSteps })}>
-          <input id="maxSteps" className="xp-input" type="number" min={1} value={s.maxSteps} onChange={(e) => set({ maxSteps: Math.max(1, Number(e.target.value) || 1) })} />
+          <NumberDraft id="maxSteps" min={1} max={Number.MAX_SAFE_INTEGER} value={s.maxSteps} onCommit={maxSteps => set({ maxSteps })} />
         </SaveRow>
       </div>
       </fieldset>
@@ -845,8 +852,9 @@ export default function SidePanel(p: Props) {
             stepStatus={p.stepStatus} highlightedNodeIds={p.highlightedNodeIds} runPhase={p.runPhase} />
           {p.tab === 'node' && (p.selected || p.selectedEdge) && <fieldset className="node-inspector" disabled={p.disabled}><NodeInspector {...p} /></fieldset>}
         </div>
-        {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} onSave={p.onSaveSettings} onDraft={patch => p.setSettings(prev => ({ ...prev, ...patch }))} /></fieldset>}
+        {p.tab === 'llm' && <fieldset className="panel-fields" disabled={p.disabled}><LlmPanel settings={p.settings} saveStatus={p.settingsSaveStatus} onSave={p.onSaveSettings} onDraft={patch => p.setSettings(prev => ({ ...prev, ...patch }))} /></fieldset>}
         {p.tab === 'settings' && <Settings {...p} />}
+        {p.tab === 'agent' && p.settingsSaveStatus && <p className="hint" role="status">{p.settingsSaveStatus}</p>}
         {p.tab === 'agent' && <fieldset className="panel-fields" disabled={p.disabled}><AgentTab settings={p.settings} onSaveSettings={p.onSaveSettings} /></fieldset>}
         {p.canvasPanel && <div className="canvas-tab-content" style={{ display: p.tab === 'canvases' ? undefined : 'none' }}>{p.canvasPanel}<div className="library-brand"><NubboMascot /></div></div>}
       </div>

@@ -26,19 +26,21 @@ function appRun(ctx:any){
 }
 function context(){
  const pending:Array<(p:string[])=>void>=[]
- const ctx:any={structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:graph(['C:\\a.glb'])},stackRef:{current:[]},
+ const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:graph(['C:\\a.glb'])},stackRef:{current:[]},
  api:{missingPaths:vi.fn(()=>new Promise<string[]>(r=>pending.push(r))),runAgent:vi.fn(async()=>({ok:true}))},collectLoopPaths,missingLoopPaths:()=>[],canvasName:()=> 'T',rooted:(g:any)=>g,resetLoopTicks:(g:any)=>g,writeCanvas:vi.fn(),setRunning:vi.fn(),setStepStatus:vi.fn(),stopRequested:{current:false},setRunProgress:vi.fn(),beginProgress:()=>({}),pushLog:vi.fn(),bookRef:{current:{tabs:[{id:'tab'}]}},finishProgress:()=>({}),runIdle:{current:null},errText:String}
  return {ctx,pending}
 }
 it('N1: actual App run handler locks before asynchronous preflight',async()=>{
  const {ctx,pending}=context();const run=appRun(ctx)
  const a=run();const b=run()
+ await Promise.resolve();
  expect(pending).toHaveLength(1);expect(ctx.runningRef.current).toBe(true)
  pending[0]([]);await Promise.all([a,b])
  expect(ctx.api.runAgent).toHaveBeenCalledTimes(1)
 })
 it('N1: App runs the checked snapshot even if a graph ref changes',async()=>{
  const {ctx,pending}=context();const run=appRun(ctx);const a=run()
+ await Promise.resolve();
  expect(ctx.api.missingPaths).toHaveBeenCalledWith(['C:\\a.glb'])
  const next=graph(['C:\\unchecked.glb']);ctx.graphRef.current=next
  pending[0]([]);await a
@@ -49,6 +51,7 @@ it('N1: ignored second request does not clear the active run state',async()=>{
  const {ctx,pending}=context();let finish:any
  ctx.api.runAgent=vi.fn().mockImplementationOnce(()=>new Promise(r=>finish=r)).mockRejectedValueOnce(new Error('Ajan zaten çalışıyor.'))
  const run=appRun(ctx);const a=run();const b=run()
+ await Promise.resolve();
  pending[0]([]);await b;await Promise.resolve();await Promise.resolve()
  expect(ctx.api.runAgent).toHaveBeenCalledTimes(1)
  expect(ctx.runningRef.current).toBe(true)

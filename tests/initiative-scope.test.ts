@@ -101,8 +101,8 @@ describe('bounded initiative requests', () => {
   it('model fallback receives the same bounded context without another completion judge', async () => {
     const requests = capture(model => model.includes('ui-tars') ? '' : '{"action":"finished"}')
     const result = await guiStep({ apiKey: 'fake', model: ['bytedance/ui-tars-1.5-7b', 'json-model'], goal, initiative: true, history, screen })
-    expect(result.kind).toBe('finished'); expect(requests.map(r => r.model)).toEqual(['bytedance/ui-tars-1.5-7b', 'json-model'])
+    expect(result.kind).toBe('finished'); expect(requests.map(r => r.model)).toEqual(['bytedance/ui-tars-1.5-7b', 'bytedance/ui-tars-1.5-7b', 'json-model'])
     expect(JSON.stringify(requests)).not.toMatch(/UNREQUESTED_PROFILE_CREATION_PLAN|UNREQUESTED_OTHER_WINDOW_AUDIT/)
-    expect(requests[1].messages[1].content[0].text).toContain(goal)
+    expect(requests[2].messages[1].content[0].text).toContain(goal)
   })
 })

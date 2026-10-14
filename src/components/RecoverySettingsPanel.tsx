@@ -3,14 +3,16 @@ import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '.
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
 import ModelChain from './ModelChain'
+import type { SettingsPatch } from '../../electron/settings-patch'
 import { stageHint } from '../../electron/model-chain'
 import NumberDraft from './NumberDraft'
 import type { RecoveryReport } from '../../electron/recovery'
 
-export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled }: {
+export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled, savedSettings }: {
   settings: AppSettings
+  savedSettings?: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
-  onSave: (partial: Partial<AppSettings>) => void
+  onSave: (partial: SettingsPatch) => void
   graph: AgentGraph
   models: ModelInfo[]
   onLoadModels: () => void | Promise<void>
@@ -85,7 +87,7 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       {modelError && <p className="hint warn" role="status">{modelError}</p>}
       {[s.model, ...s.backups].some(name => name.startsWith('local:')) && <p className="hint warn">Kurtarma ajanı OpenRouter kullanır. Buraya bir OpenRouter model kimliği yaz.</p>}
       <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
-      <p className="hint">{stageHint(settings, 'recovery')}</p>
+      <p className="hint">Kayıtlı sıra: {stageHint(savedSettings ?? settings, 'recovery')}</p>
       <p className="hint">Akış sürerken de kaydedilir. Sonraki yeni kurtarma çağrısı bu sırayla başlar; süren çağrı değişmez.</p>
       <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Model sırasını kaydet</button>
     </div>
