@@ -32,6 +32,8 @@ export type RecoveryRequest = {
   vars: Record<string, string>
   /** The failed node already delivered a click, key or text to the OS. */
   inputAlreadySent?: boolean
+  /** A native send started and its result is uncertain. Also blocks a blind second press. */
+  inputMayHaveBeenSent?: boolean
 }
 
 export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
@@ -399,7 +401,8 @@ export async function runGraph(
             port = await execStep(node, live, tally.n, ahead)
           } catch (error) {
             if (isFatal(error) || !ex.recover || !['click', 'type', 'key', 'wait'].includes(node.kind)) throw error
-            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars }, inputAlreadySent: (error as { inputAlreadySent?: boolean }).inputAlreadySent === true })
+            const marked = error as { inputAlreadySent?: boolean; inputMayHaveBeenSent?: boolean }
+            const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo: tally.n, ahead, vars: { ...vars }, inputAlreadySent: marked.inputAlreadySent === true, inputMayHaveBeenSent: marked.inputMayHaveBeenSent === true })
             recovering = decision === 'retry' || decision === 'completed'
             if (ex.shouldStop()) throw new StoppedError()
             if (decision === 'completed') port = 'next'
@@ -574,6 +577,10 @@ export async function runGraph(
           tally.failed++
           ex.log('error', `${label}: ${msg}`)
           await ex.captureFailure?.(label).catch(error => ex.log('warn', `Hata ekran görüntüsü kaydedilemedi: ${(error as Error).message}`))
+          if ((e as { haltLoop?: boolean }).haltLoop === true) {
+            ex.log('error', 'Hedefleme tamamlanamadı; döngü bu öğede durdu. Sonraki öğeye geçilmedi.')
+            throw new LoopHalted(msg)
+          }
           const serviceFailure = (e as { serviceFailure?: boolean }).serviceFailure === true || isApiDown(msg)
           // Only infrastructure failures may be normalized across item-specific text.
           const signature = serviceFailure ? msg.replace(/[“"'][^“"']*[”"']/g, '<öğe>').replace(/\b\d+\b/g, '#') : msg

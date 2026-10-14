@@ -25,6 +25,16 @@ function harness(answers: ToolMessage[], patch = {}) {
 }
 
 describe('recovery controller', () => {
+  it('does not blindly retry an original input that may already have been dispatched', async () => {
+    const done = call('recovery_complete', { probableCause: 'Observation failed', evidence: 'Current screen read', summary: 'Inspected current result' })
+    const h = harness([finish(), call('step_run', { nodeId: leaf.id }), call('screen_read'), done])
+    const error = Object.assign(new Error('Native click outcome unknown'), { inputMayHaveBeenSent: true })
+    const result = await runRecovery({ ...request, error }, h.deps)
+    expect(result.decision).toBe('completed')
+    expect(h.execute.mock.calls.map(([name]) => name)).toEqual(['screen.read'])
+    expect(h.reports[0].actions.filter(a => a.outcome === 'hata')).toHaveLength(2)
+  })
+
   it('reads canvas JSON, lap and prior reports, repairs with a shortcut, then requests the same node', async () => {
     const h = harness([call('act_key', { keys: 'win+d' }), finish()])
     const before = JSON.stringify(graph)

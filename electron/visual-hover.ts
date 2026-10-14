@@ -4,7 +4,10 @@ export type VisualPointerDecision = { decision: 'confirm' | 'adjust' | 'uncertai
 type Point = { x: number; y: number }
 export type ApprovedPointer = Point & { hwnd: number; area: ScanResult['area'] }
 
-export class VisualPointerError extends Error {}
+export class VisualPointerError extends Error {
+  readonly haltLoop = true
+  constructor(message: string, readonly allowMethodFallback = false) { super(message) }
+}
 
 const validPoint = (p: Point | null | undefined): p is Point => !!p && Number.isFinite(p.x) && Number.isFinite(p.y)
 const near = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y) <= 3
@@ -47,10 +50,10 @@ export async function alignVisualPointer(initial: Point, deps: {
     deps.checkStopped()
     if (!validPoint(current) || !near(current, cursor)) throw new VisualPointerError('Model beklenirken fare hareket etti; onay kullanılmadı.')
     if (answer.decision === 'confirm') return { ...cursor, hwnd: moved.hwnd!, area }
-    if (answer.decision !== 'adjust') throw new VisualPointerError(`Görsel model konumu onaylamadı${answer.reason ? `: ${answer.reason}` : ''}. Tıklama gönderilmedi.`)
-    if (attempt === 2) throw new VisualPointerError('İki görsel konum düzeltmesinden sonra hedef onaylanmadı; tıklama gönderilmedi.')
+    if (answer.decision !== 'adjust') throw new VisualPointerError(`Görsel model konumu onaylamadı${answer.reason ? `: ${answer.reason}` : ''}. Tıklama gönderilmedi.`, true)
+    if (attempt === 2) throw new VisualPointerError('İki görsel konum düzeltmesinden sonra hedef onaylanmadı; tıklama gönderilmedi.', true)
     if (!Number.isFinite(answer.x) || !Number.isFinite(answer.y) || answer.x! < 0 || answer.x! >= 1 || answer.y! < 0 || answer.y! >= 1) {
-      throw new VisualPointerError('Görsel düzeltme noktası geçersiz; tıklama gönderilmedi.')
+      throw new VisualPointerError('Görsel düzeltme noktası geçersiz; tıklama gönderilmedi.', true)
     }
     point = { x: Math.round(area.x + answer.x! * area.w), y: Math.round(area.y + answer.y! * area.h) }
   }

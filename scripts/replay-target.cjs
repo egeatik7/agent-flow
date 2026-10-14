@@ -4,13 +4,14 @@ const path = require('node:path');
 const Module = require('node:module');
 const { loadTrace } = require('./target-recorder.cjs');
 const dist = path.resolve(__dirname, '../dist-electron');
+class ReplayIncompleteError extends Error { targetSearchFatal = true; }
 
 async function replayTrace(bundle, observer) {
   const request = bundle.events.find(e => e.kind === 'request');
-  if (!request || bundle.events.filter(e => e.kind === 'request').length !== 1) throw new Error('Replay needs exactly one resolver request');
+  if (!request || bundle.events.filter(e => e.kind === 'request').length !== 1) throw new ReplayIncompleteError('Replay needs exactly one resolver request');
   const observations = source => bundle.events.filter(e => e.kind === 'observation' && e.source === source);
   const dismissals = bundle.events.map((e,i)=>({e,i})).filter(({e})=>e.kind==='input'&&e.mode==='popup-dismiss'&&e.phase==='sent');
-  if (dismissals.length > 1) throw new Error('Replay contains repeated popup input; not a single target resolution');
+  if (dismissals.length > 1) throw new ReplayIncompleteError('Replay contains repeated popup input; not a single target resolution');
   const dismissalIndex = dismissals[0]?.i ?? -1;
   // Live recovery already sent its intermediate click. Offline preview must never send it:
   // reproduce only the recorded post-dismissal visual decision from its matching new frame.
@@ -18,31 +19,31 @@ async function replayTrace(bundle, observer) {
   const windows = observations('windows'), onnx = observations('onnx'), tars = visualEvents.filter(e=>e.kind==='observation');
   const models = bundle.events.filter((e,i)=>e.kind==='model'&&(e.source!=='tars'||i>dismissalIndex));
   if (dismissalIndex >= 0 && (!tars.some(e=>e.scan?.image) || !models.some(e=>e.source==='tars'))) {
-    throw new Error('Popup recovery replay is incomplete: fresh frame and target decision required');
+    throw new ReplayIncompleteError('Popup recovery replay is incomplete: fresh frame and target decision required');
   }
   let iconPass = 0, inputCalls = 0;
   function observed(source) {
     const e = observations(source).find(e => Object.hasOwn(e, 'value'));
-    if (!e) throw new Error(`No recorded ${source} observation; replay is incomplete`);
+    if (!e) throw new ReplayIncompleteError(`No recorded ${source} observation; replay is incomplete`);
     return structuredClone(e.value);
   }
-  const noInput = async () => { inputCalls++; throw new Error('Offline replay must never send input'); };
+  const noInput = async () => { inputCalls++; throw new ReplayIncompleteError('Offline replay must never send input'); };
   const bridge = {
     scan: async opts => {
-      if (!opts.readOnly) throw new Error('Replay must be read-only');
+      if (!opts.readOnly) throw new ReplayIncompleteError('Replay must be read-only');
       const e = opts.ocr === false ? tars.shift() : windows.shift();
-      if (!e?.scan) throw new Error('No recorded screen observation; replay is incomplete');
+      if (!e?.scan) throw new ReplayIncompleteError('No recorded screen observation; replay is incomplete');
       const scan = structuredClone(e.scan);
       if (opts.ocr !== false) scan.image = null; // diagnostic image was not a live model input
       return scan;
     },
     applyOnnx: async () => {
       const e = onnx.shift();
-      if (!e?.scan) throw new Error('No recorded ONNX observation; replay is incomplete');
+      if (!e?.scan) throw new ReplayIncompleteError('No recorded ONNX observation; replay is incomplete');
       return structuredClone(e.scan);
     },
     locate: async (_loc, _win, readOnly) => {
-      if (!readOnly) throw new Error('Replay must not activate a window');
+      if (!readOnly) throw new ReplayIncompleteError('Replay must not activate a window');
       return observed('uia');
     },
     findImage: async () => { const v = observed('icon'); return ++iconPass === 1 ? v.hit : v.again; },
@@ -53,7 +54,7 @@ async function replayTrace(bundle, observer) {
   const nextModel = source => {
     const i = models.findIndex(e => source === 'wordChoice' ? e.value?.stage === 'wordChoice'
       : e.value?.stage !== 'wordChoice' && (e.source === source || (source === 'list' && e.source === 'chrome')));
-    if (i < 0) throw new Error('No recorded model answer; replay is incomplete');
+    if (i < 0) throw new ReplayIncompleteError('No recorded model answer; replay is incomplete');
     return structuredClone(models.splice(i, 1)[0].value);
   };
   const chrome = observations('chrome')[0]?.scan;

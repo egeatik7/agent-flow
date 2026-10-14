@@ -71,11 +71,24 @@ export type AgentContext = {
   captureTargetImages?: boolean
 }
 
-type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string; visualSession?: VisualModelSession }
+type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string; visualSession?: VisualModelSession; remainingMethods?: FindStageId[] }
 
 class NotFoundError extends Error {}
 /** A popup input was attempted: never replay it through the generic target retry. */
-class VisualTargetRecoveryError extends Error {}
+class VisualTargetRecoveryError extends Error { readonly haltLoop = true }
+/** Still offered to Recovery, but never silently skip the failed loop item. */
+class TargetMethodsExhaustedError extends NotFoundError { readonly haltLoop = true }
+class InputDispatchError extends Error {
+  readonly haltLoop = true
+  readonly inputMayHaveBeenSent = true
+  constructor(error: unknown) { super(`Girdi gönderilmiş olabilir; otomatik yeniden basılmadı: ${error instanceof Error ? error.message : String(error)}`) }
+}
+function inputFailure(error: unknown, knownSent = false): never {
+  if (error instanceof StoppedError) throw error
+  const wrapped = error instanceof InputDispatchError ? error : new InputDispatchError(error)
+  if (knownSent) (wrapped as InputDispatchError & { inputAlreadySent?: boolean }).inputAlreadySent = true
+  throw wrapped
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** After a click, before keys: lets the field take focus. */
@@ -200,12 +213,12 @@ export function createAgent(ctx: AgentContext) {
     log('warn', `Hedef pencere “${res.missingWindow}” açık değil, tüm ekran okunuyor. Kalıcı çözüm: Ayarlar > Hedef pencere > “Tüm ekran” > Kaydet.`)
   }
 
-  async function scanFor(withImage: boolean, wide = false, deferOnnx = false, readOnly = false, targetTrace = false, ocrOnly = false): Promise<ScanResult & { shot?: string }> {
+  async function scanFor(withImage: boolean, wide = false, deferOnnx = false, readOnly = false, targetTrace = false, ocrOnly = false, forceFresh = false): Promise<ScanResult & { shot?: string }> {
     const s = getSettings()
     const res = await bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
       image: withImage ? 'marked' : targetTrace && ctx.onTargetTrace && ctx.captureTargetImages ? 'plain' : 'none',
-      fresh: wide,
+      fresh: wide || forceFresh,
       tilt: true,
       ocrEngine: 'combined',
       deferOnnx,
@@ -221,6 +234,12 @@ export function createAgent(ctx: AgentContext) {
     if (ocrVia === 'kapalı') log('warn', 'Windows OCR kullanılamıyor; sadece uygulamanın bildirdiği isimler görülebiliyor.')
     if (process.platform === 'win32' && res.onnx === false) noteOnce('scan', 'onnx', 'ONNX okuması kullanılamadı veya ek yazı bulamadı; mevcut Windows OCR sonuçları korunuyor.')
     return res
+  }
+
+  function rethrowTerminalSearch(error: unknown): void {
+    if (stopped()) throw new StoppedError()
+    if (error instanceof StoppedError || error instanceof FatalApiError || error instanceof VisualTargetRecoveryError ||
+        (error as { targetSearchFatal?: boolean })?.targetSearchFatal === true) throw error
   }
 
   // ---------- finding targets ----------
@@ -409,7 +428,7 @@ export function createAgent(ctx: AgentContext) {
     window,
   })
 
-  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false, readOnly = false): Promise<Resolved> {
+  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false, readOnly = false, continuation?: { methods: readonly FindStageId[]; fresh: boolean }): Promise<Resolved> {
     const s = getSettings()
     const prompt = node.prompt?.trim() ?? ''
     const loc = node.locator
@@ -419,7 +438,8 @@ export function createAgent(ctx: AgentContext) {
     // Quotes embedded inside a descriptive condition must not erase its numbers/negations.
     const marked = node.kind === 'condition' ? null : extractTarget(prompt)
     const quoted = marked?.quoted ? marked.text : ''
-    const requestedOrder = activeFindOrder(s.findOrder, s.findOff)
+    const enabledOrder = activeFindOrder(s.findOrder, s.findOff)
+    const requestedOrder = continuation ? enabledOrder.filter(stage => continuation.methods.includes(stage)) : enabledOrder
     // Conditions reuse the Click resolver and its OCR/list handlers, but may never
     // use a picture, UIA/DOM control, saved icon or coordinate as state evidence.
     const ocrOnly = node.kind === 'condition'
@@ -432,8 +452,9 @@ export function createAgent(ctx: AgentContext) {
       if (asksDesktopShortcut(prompt) && winScan && taskbarItem(winScan, { x: target.x, y: target.y, w: 0, h: 0 })) {
         throw new NotFoundError('Masaüstü kısayolu istendi, ancak hedef görev çubuğunda bulundu; tıklama gönderilmedi.')
       }
+      checkStopped()
       trace(node, { kind: 'resolved', source, target: { x: target.x, y: target.y, label: target.label }, rect, item })
-      return target
+      return { ...target, remainingMethods: order.slice(order.indexOf(source) + 1) }
     }
     const take = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved | undefined => {
       try {
@@ -469,7 +490,7 @@ export function createAgent(ctx: AgentContext) {
     const wantImage = !!s.sendScreenshot && !ocrOnly && !!prompt && (!!s.apiKey.trim() || localConfigured())
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(wantImage, wide, false, readOnly, !ocrOnly, ocrOnly)
+        winScan = await scanFor(wantImage, wide, false, readOnly, !ocrOnly, ocrOnly, continuation?.fresh ?? false)
         const { shot: _temporary, ...snapshot } = winScan
         trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
         // Tanılama görüntüsü kendiliğinden model girdisi olmaz: resim yalnız ayar istediğinde kalır.
@@ -493,9 +514,16 @@ export function createAgent(ctx: AgentContext) {
       return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
     }
 
+    const methodErrors: string[] = []
     try {
-      if (asksDesktopShortcut(prompt)) await windowsScan()
+      if (asksDesktopShortcut(prompt)) {
+        try { await windowsScan() } catch (error) {
+          rethrowTerminalSearch(error)
+          log('warn', `Masaüstü ön taraması yapılamadı; açık yöntemler denenecek: ${(error as Error).message}`)
+        }
+      }
       for (const stage of order) {
+        try {
         if (stopped()) throw new StoppedError()
         if (stage === 'chrome') {
           const userChrome = await browser.userChromeItems(win || undefined)
@@ -560,7 +588,8 @@ export function createAgent(ctx: AgentContext) {
               const got = take({ ...center(r), label: `kayıtlı öğe “${r.name || loc.text || loc.name}”` }, 'uia', r)
               if (got) return got
             }
-          } catch {
+          } catch (error) {
+            rethrowTerminalSearch(error)
             /* next stage */
           }
         }
@@ -585,6 +614,7 @@ export function createAgent(ctx: AgentContext) {
             }
             if (best) log('info', `[simge] Kayıtlı resim ekranda net değil (en iyi %${Math.round(best.score * 100)}).`)
           } catch (e) {
+            rethrowTerminalSearch(e)
             log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
           }
         }
@@ -632,35 +662,42 @@ export function createAgent(ctx: AgentContext) {
             // NotFoundError ile devam ediyordu → bozuk anahtarla listenin TAMAMI öğe öğe deneniyordu
             // (runner'ın serviceFailure durdurma kuralı devreye girmiyordu). Aynı dosyada 243/372 ve
             // koşul dalı 586 FatalApiError'ı zaten fırlatır; bu dal artık tutarlı.
-            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError || e instanceof ModelFailed || e instanceof ModelOutputRejected) throw e
-            if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
-            if (e instanceof NotFoundError) log('warn', e.message)
+            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError) throw e
+            if (e instanceof ModelFailed || e instanceof ModelOutputRejected) {
+              methodErrors.push(e.message)
+              log('warn', `Görsel hedefleme sonuç vermedi; sıradaki yöntem denenecek: ${e.message}`)
+            } else if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
+            else if (e instanceof NotFoundError) log('warn', e.message)
             else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
           }
         }
         if (stage === 'offset' && ((loc?.offsetX !== undefined && loc.offsetY !== undefined) || (loc?.x !== undefined && loc?.y !== undefined))) {
-          // Earlier stages already failed. The saved point is the last resort, not a new target.
-          ctx.setMethod?.('Kayıtlı konum')
+          ctx.setMethod?.('Kayıtlı konum — son çare')
           try {
             if (loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
               const r = await bridge.windowRect(win)
               trace(node, { kind: 'observation', source: 'offset', value: r })
-              if (r && r.w > 0 && r.h > 0) {
+              if (r && Number.isFinite(r.x) && Number.isFinite(r.y) && r.w > 0 && r.h > 0 && Number.isFinite(loc.offsetX) && Number.isFinite(loc.offsetY)) {
                 const x = r.x + loc.offsetX
                 const y = r.y + loc.offsetY
-                log('warn', `Önceki yöntemler bulamadı. Kayıtlı konum son çare, pencereye göre @${Math.round(x)},${Math.round(y)}.`)
-                const got = take({ x, y, label: 'kayıtlı konum (pencereye göre)' }, 'offset')
+                log('warn', `Kayıtlı konum — son çare, pencereye göre @${Math.round(x)},${Math.round(y)}.`)
+                const got = take({ x, y, label: 'kayıtlı konum — son çare (pencereye göre)' }, 'offset')
                 if (got) return got
               }
             }
-            if (loc?.x !== undefined && loc?.y !== undefined) {
-              log('warn', `Önceki yöntemler bulamadı. Kayıtlı konum son çare, ekrana göre @${Math.round(loc.x)},${Math.round(loc.y)}.`)
-              const got = take({ x: loc.x, y: loc.y, label: 'kayıtlı konum (ekrana göre)' }, 'offset')
+            if (loc?.x !== undefined && loc?.y !== undefined && Number.isFinite(loc.x) && Number.isFinite(loc.y)) {
+              log('warn', `Kayıtlı konum — son çare, ekrana göre @${Math.round(loc.x)},${Math.round(loc.y)}.`)
+              const got = take({ x: loc.x, y: loc.y, label: 'kayıtlı konum — son çare (ekrana göre)' }, 'offset')
               if (got) return got
             }
           } catch (e) {
+            rethrowTerminalSearch(e)
             log('warn', `Kayıtlı konum kullanılamadı: ${(e as Error).message}`)
           }
+        }
+        } catch (error) {
+          rethrowTerminalSearch(error)
+          log('warn', `[Yöntem geçişi] ${stage} sonuç veremedi; sıradaki açık yöntem: ${(error as Error).message}`)
         }
       }
     } catch (e) {
@@ -670,13 +707,15 @@ export function createAgent(ctx: AgentContext) {
       bridge.discardShot(shotFile)
     }
 
+    checkStopped()
     const explicit = extractTarget(prompt)
     const seen = sampleTexts(seenItems)
     const message = `“${explicit?.text || prompt || loc?.text || node.title}” ekranda bulunamadı.${s.apiKey || localConfigured() ? '' : ' (API anahtarı ya da yerel adres yok, sadece yazı eşleşmesi denendi.)'}${
         seen ? ` Ekranda görülenlerden bazıları: ${seen}` : ''
       }`
     trace(node, { kind: 'failure', message })
-    throw new NotFoundError(message)
+    const detail = methodErrors.length ? ` Gerçek neden: ${methodErrors.join(' | ')}` : ''
+    throw new TargetMethodsExhaustedError(message + detail)
   }
 
   function visionPrompt(node: AgentNode): string {
@@ -1055,8 +1094,6 @@ export function createAgent(ctx: AgentContext) {
       log('warn', `“${title}” bulunamadı. Ekran yenilenip aynı hedef bir kez daha denenecek.`)
       await pause(REFRESH_RETRY_MS)
       if (stopped()) throw new StoppedError()
-      // The second miss stays a NotFoundError. The runner starts the recovery
-      // agent when it is enabled; otherwise the flow stops on the original target.
       return await run(true)
     }
   }
@@ -1120,12 +1157,13 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function sendClick(...args: Parameters<typeof bridge.clickAt>) {
-    const result = await bridge.clickAt(...args)
+    let result: Awaited<ReturnType<typeof bridge.clickAt>>
+    try { result = await bridge.clickAt(...args) } catch (error) { inputFailure(error) }
     if (result?.warning) log('warn', `Tıklama uyarısı: ${result.warning}`)
     return result
   }
 
-  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right', session?: VisualModelSession) {
+  async function approveVisualPointer(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right', session?: VisualModelSession) {
     const settings = getSettings()
     clearHover()
     const approved = await alignVisualPointer(point, {
@@ -1154,11 +1192,43 @@ export function createAgent(ctx: AgentContext) {
     checkStopped()
     if (await bridge.isLocked()) throw new VisualPointerError('Ekran konum onayından sonra kilitlendi; tıklama gönderilmedi.')
     checkStopped()
-    // The worker re-checks the REAL pointer and its window immediately before dispatch.
-    // No click type is chosen by the model, and no old proposed point is restored.
-    await bridge.clickCurrentAt(approved.x, approved.y, approved.hwnd, undefined, mode)
-    checkStopped()
     return approved
+  }
+
+  async function sendApprovedVisualClick(approved: Awaited<ReturnType<typeof approveVisualPointer>>, mode: 'left' | 'double' | 'right') {
+    checkStopped()
+    if (await bridge.isLocked()) throw new VisualPointerError('Ekran kilitlendi; tıklama gönderilmedi.')
+    checkStopped()
+    // Never catch this native dispatch as a method rejection: it may have sent input.
+    try { await bridge.clickCurrentAt(approved.x, approved.y, approved.hwnd, undefined, mode) }
+    catch (error) { inputFailure(error) }
+    checkStopped()
+  }
+
+  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right', session?: VisualModelSession) {
+    const approved = await approveVisualPointer(node, point, goal, mode, session)
+    await sendApprovedVisualClick(approved, mode)
+    return approved
+  }
+
+  async function approveWithMethodFallback(node: AgentNode, target: Resolved, stepNo: number, mode: 'left' | 'double' | 'right') {
+    let t = target
+    while (t.visualGoal) {
+      let approved: Awaited<ReturnType<typeof approveVisualPointer>>
+      try {
+        approved = await approveVisualPointer(node, t, t.visualGoal, mode, t.visualSession)
+      } catch (error) {
+        if (error instanceof StoppedError || error instanceof FatalApiError || stopped() || error instanceof VisualPointerError && !error.allowMethodFallback) throw error
+        const remaining = t.remainingMethods ?? []
+        clearHover(); lastClickPoint = undefined
+        log('warn', `[Yöntem geçişi] Görsel onay alınamadı; tıklama gönderilmedi. Kalan sıra: ${remaining.join(' → ') || 'yok'}. ${(error as Error).message}`)
+        if (!remaining.length) throw new TargetMethodsExhaustedError(`“${node.prompt || node.title}”: açık hedefleme yöntemleri tükendi; görsel onay alınamadı. ${(error as Error).message}`)
+        t = await resolveTarget(node, stepNo, false, false, { methods: remaining, fresh: true })
+        continue
+      }
+      return { target: { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }, approved }
+    }
+    return { target: t, approved: undefined }
   }
 
   async function clickInput(point: Point, node?: AgentNode, mode: 'left' | 'double' | 'right' = 'left') {
@@ -1182,7 +1252,9 @@ export function createAgent(ctx: AgentContext) {
     // The user/flow already selected the field. Send the requested input once;
     // UIA labels, caret geometry and the old contents do not authorize or veto it.
     const hasInput = !!text || clear
-    const typed = hasInput ? await bridge.typeText(text, false, clear, at) : null
+    let typed: bridge.TypeResult | null = null
+    try { typed = hasInput ? await bridge.typeText(text, false, clear, at) : null }
+    catch (error) { inputFailure(error) }
     checkStopped()
     if (hasInput && (!typed || typed.skippedClear || typed.needChoice || typed.writeSent !== true)) {
       throw new Error('INPUT_NOT_SENT: Yazma işçisi girdiyi gönderemedi; Enter gönderilmedi.')
@@ -1192,7 +1264,7 @@ export function createAgent(ctx: AgentContext) {
     if (enter) {
       await pause(240)
       checkStopped()
-      await bridge.sendKeys('{ENTER}')
+      try { await bridge.sendKeys('{ENTER}') } catch (error) { inputFailure(error) }
     }
     if (enter) lastClickPoint = undefined
     // Sending input is not a claim that an unreadable field contains the expected value.
@@ -1255,21 +1327,28 @@ export function createAgent(ctx: AgentContext) {
       inputSent = false
       let t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
       const mode = node.clickMode ?? 'left'
-      const confirmed = await ensureActed(node, ahead, async () => {
+      let inputStarted = false
+      let confirmed: boolean
+      try { confirmed = await ensureActed(node, ahead, async () => {
         checkStopped()
-        if (t.visualGoal && mode !== 'move') {
-          const approved = await dispatchVisualClick(node, t, t.visualGoal, mode, t.visualSession)
-          inputSent = true
-          t = { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }
-          lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
-          trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode, phase: 'sent' })
-          ctx.setMethod?.('Görsel konum onaylandı — tıklama gönderildi')
-          log('info', `${mode === 'double' ? 'Çift tıklama' : mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi: görsel modelin onayladığı imleç @${t.x},${t.y}.`)
-          return
+        if (mode !== 'move' && t.visualGoal) {
+          const result = await approveWithMethodFallback(node, t, stepNo, mode)
+          t = result.target
+          if (result.approved) {
+            inputStarted = true
+            await sendApprovedVisualClick(result.approved, mode)
+            inputSent = true
+            lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
+            trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode, phase: 'sent' })
+            ctx.setMethod?.('Görsel konum onaylandı — tıklama gönderildi')
+            log('info', `${mode === 'double' ? 'Çift tıklama' : mode === 'right' ? 'Sağ tıklama' : 'Tıklama'} gönderildi: görsel modelin onayladığı imleç @${t.x},${t.y}.`)
+            return
+          }
         }
         if (mode === 'left' && ahead?.next?.kind === 'type') {
-          await clickInput(t, node)
+          inputStarted = true
           inputSent = true
+          await clickInput(t, node)
         }
         else {
           // "Fareyi Oynat" modu: hedef bulunur ama TIKLANMAZ; imleç oraya taşınır ve konum
@@ -1288,6 +1367,7 @@ export function createAgent(ctx: AgentContext) {
             return
           }
           clearHover()
+          inputStarted = true
           await sendClick(t.x, t.y, mode)
           inputSent = true
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
@@ -1295,10 +1375,13 @@ export function createAgent(ctx: AgentContext) {
         }
         const verb = mode === 'double' ? 'Çift tıklandı' : mode === 'right' ? 'Sağ tıklandı' : 'Tıklandı'
         log('success', `${verb}: ${t.label} @${Math.round(t.x)},${Math.round(t.y)}`)
-      })
+      }) } catch (error) {
+        if (inputStarted) inputFailure(error)
+        throw error
+      }
       if (confirmed) saveMemo(node, t.memo)
     } catch (e) {
-      if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+      if (inputSent) inputFailure(e, true)
       throw e
     }
     },
@@ -1318,15 +1401,23 @@ export function createAgent(ctx: AgentContext) {
       const write = async () => {
         checkStopped()
         if (t?.visualGoal) {
-          const approved = await dispatchVisualClick(node, t, t.visualGoal, 'left', t.visualSession)
-          inputSent = true
-          t = { ...t, x: approved.x, y: approved.y }
-          lastClickPoint = { x: approved.x, y: approved.y }
-          ctx.setMethod?.('Görsel konum onaylandı — yazı alanı seçildi')
-          log('info', `Alan görsel imleç onayıyla seçildi @${approved.x},${approved.y}.`)
+          const result = await approveWithMethodFallback(node, t, stepNo, 'left')
+          t = result.target
+          if (result.approved) {
+            await sendApprovedVisualClick(result.approved, 'left')
+            inputSent = true
+            lastClickPoint = { x: t.x, y: t.y }
+            trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode: 'left', phase: 'sent' })
+            ctx.setMethod?.('Görsel konum onaylandı — yazı alanı seçildi')
+          } else {
+            inputSent = true
+            await clickInput(t, node)
+          }
+          await sleep(FOCUS_MS)
+          log('info', `Alan seçildi: ${t.label}`)
         } else if (t) {
-          await clickInput(t, node)
           inputSent = true
+          await clickInput(t, node)
           await sleep(FOCUS_MS)
           log('info', `Alan seçildi: ${t.label}`)
         }
@@ -1339,7 +1430,7 @@ export function createAgent(ctx: AgentContext) {
       const confirmed = valueVerified
       if (confirmed) saveMemo(node, t?.memo)
       } catch (e) {
-        if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+        if (inputSent) inputFailure(e, true)
         throw e
       }
     },
@@ -1356,7 +1447,7 @@ export function createAgent(ctx: AgentContext) {
       await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
       inputSent = true
       } catch (e) {
-        if (inputSent && e && typeof e === 'object') (e as { inputAlreadySent?: boolean }).inputAlreadySent = true
+        if (inputSent) inputFailure(e, true)
         throw e
       }
     },
