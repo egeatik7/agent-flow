@@ -9,7 +9,6 @@ import * as browser from './browser'
 import { conditionNeedle, describeAhead, expectation, judgeScreen, type Verdict } from './confirm'
 import { NODE_SPECS, conditionCompatibilityError, modelChain, screenCheckMode, type AgentNode, type AppSettings, type LogLevel, type TargetMemo } from './graph-types'
 import { resolveStage, type ChainStage } from './model-chain'
-import { VisualModelSession } from './visual-session'
 import { clickableBy, writableBy } from './target-match'
 import {
   containsText,
@@ -69,7 +68,7 @@ export type AgentContext = {
   captureTargetImages?: boolean
 }
 
-type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string; visualSession?: VisualModelSession }
+type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string }
 
 class NotFoundError extends Error {}
 /** A popup input was attempted: never replay it through the generic target retry. */
@@ -118,6 +117,10 @@ function visionModels(s: AppSettings): string[] {
   return vision.length ? vision : textModels(s)
 }
 
+function agentModels(s: AppSettings): string[] {
+  const agent = modelChain(s.agentModel, s.agentBackups)
+  return agent.length ? agent : visionModels(s)
+}
 
 export function createAgent(ctx: AgentContext) {
   const { log, send } = ctx
@@ -676,8 +679,7 @@ export function createAgent(ctx: AgentContext) {
   async function locateWithTars(node: AgentNode, wide = false, readOnly = false): Promise<Resolved> {
     const s = getSettings()
     if (!s.apiKey && !localConfigured()) throw new NotFoundError('Görsel hedefleme için API anahtarı yok.')
-    const initial = fresh('visual')
-    const session = new VisualModelSession(initial.chain, initial.revision, initial.source)
+    const model = agentModels(s)
     const prompt = visionPrompt(node)
     const canDismiss = !readOnly && node.kind === 'click' && node.clickMode !== 'move'
     let dismissalRecord: string | undefined
@@ -685,8 +687,8 @@ export function createAgent(ctx: AgentContext) {
     const capture = () => bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
       image: 'plain', uia: false, ocr: false, fresh: wide || didDismiss,
-      maxImageW: isTarsModel(session.models[0] || '') ? 1288 : 1400,
-      snap: isTarsModel(session.models[0] || '') ? 28 : 0, fit: true, readOnly,
+      maxImageW: isTarsModel(model[0] || '') ? 1288 : 1400,
+      snap: isTarsModel(model[0] || '') ? 28 : 0, fit: true, readOnly,
     })
     try {
       let res = await capture()
@@ -698,12 +700,11 @@ export function createAgent(ctx: AgentContext) {
         if (!res.image) throw new NotFoundError('Görsel hedefleme için ekran görüntüsü alınamadı.')
         const live = fresh('visual')
         action = await chooseVisualTarget({
-          apiKey: live.s.apiKey, model: session.models, revision: session.revision, chainSource: session.source, goal: prompt, screen: res.image,
+          apiKey: live.s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, goal: prompt, screen: res.image,
           allowDismiss: canDismiss && !didDismiss, dismissalRecord,
           tarsPrompt: promptOf(live.s.llmPrompts, 'tars'), jsonPrompt: promptOf(live.s.llmPrompts, 'screen'),
         })
         checkStopped()
-        if (action.model) session.accept(action.model)
         trace(node, { kind: 'model', source: 'tars', value: action })
         if (action.intent !== 'dismiss') break
         if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
@@ -717,7 +718,7 @@ export function createAgent(ctx: AgentContext) {
         // Flag before dispatch: a thrown native call can have partially sent input.
         didDismiss = true
         try {
-          const approved = await dispatchVisualClick(node, { x, y }, `Current target is ONLY the unambiguous Close/X or Cancel control of the unrelated obstructing popup. Do not close the main application or click the underlying original target. Original node context (not this click): ${prompt}. Earlier reason (not proof): ${action.reason}`, 'left', session)
+          const approved = await dispatchVisualClick(node, { x, y }, `Current target is ONLY the unambiguous Close/X or Cancel control of the unrelated obstructing popup. Do not close the main application or click the underlying original target. Original node context (not this click): ${prompt}. Earlier reason (not proof): ${action.reason}`, 'left')
           x = approved.x; y = approved.y
         }
         catch (e) {
@@ -760,22 +761,21 @@ export function createAgent(ctx: AgentContext) {
             h: zoomH,
           }
           try {
-            const crop = await bridge.crop(rect, 1080, true, isTarsModel(session.models[0] || '') ? 28 : 0)
+            const crop = await bridge.crop(rect, 1080, true, isTarsModel(model[0] || '') ? 28 : 0)
             trace(node, { kind: 'observation', source: 'tars', scan: { ...crop, zoomed: rect } as unknown as ScanResult })
             if (crop.image) {
               const live = fresh('visual')
               const again = await chooseVisualTarget({
                 apiKey: live.s.apiKey,
-                model: session.models,
-                revision: session.revision,
-                chainSource: session.source,
+                model: live.chain,
+                revision: live.revision,
+                chainSource: live.source,
                 goal: `This is a ZOOMED-IN crop of one part of the screen, ${crop.area.w}x${crop.area.h} pixels of it. Find the requested target inside the crop: ${prompt}.`,
                 allowDismiss: false, dismissalRecord,
                 screen: crop.image,
                 tarsPrompt: promptOf(live.s.llmPrompts, 'tars'),
                 jsonPrompt: promptOf(live.s.llmPrompts, 'screen'),
               })
-              if (again.model) session.accept(again.model)
               trace(node, { kind: 'model', source: 'tars', value: again })
               const ok2 = again.intent === 'target' && validVisualPoint(again)
               log('info', `[Görsel model] Tam ekranda bulunamadı; ${rect.w}×${rect.h} bölge büyütülüp tekrar soruldu${ok2 ? ' ve bulundu' : ''}.`)
@@ -808,7 +808,6 @@ export function createAgent(ctx: AgentContext) {
         y,
         label: '[Görsel model] ekran görüntüsü',
         visualGoal: prompt,
-        visualSession: session,
         memo: { win: res.window || '', type: 'Nokta', src: 'ocr', rx: a.w ? (x - a.x) / a.w : 0.5, ry: a.h ? (y - a.y) / a.h : 0.5, text: prompt.slice(0, 80), at: Date.now() },
       }
     } catch (e) {
@@ -1126,7 +1125,7 @@ export function createAgent(ctx: AgentContext) {
     return result
   }
 
-  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right', session?: VisualModelSession) {
+  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right') {
     const settings = getSettings()
     clearHover()
     const approved = await alignVisualPointer(point, {
@@ -1138,14 +1137,13 @@ export function createAgent(ctx: AgentContext) {
         trace(node, { kind: 'input', point, mode: 'move', phase: 'sent' })
         return result
       },
-      capture: () => bridge.scan({ image: 'plain', cursorMarker: true, fresh: true, readOnly: true, uia: false, ocr: false, maxImageW: isTarsModel((session?.models ?? resolveStage(settings, 'visual').chain)[0] || '') ? 1288 : 1400, fit: true, snap: isTarsModel((session?.models ?? resolveStage(settings, 'visual').chain)[0] || '') ? 28 : 0 }),
+      capture: () => bridge.scan({ image: 'plain', cursorMarker: true, fresh: true, readOnly: true, uia: false, ocr: false, maxImageW: isTarsModel(agentModels(settings)[0] || '') ? 1288 : 1400, fit: true, snap: isTarsModel(agentModels(settings)[0] || '') ? 28 : 0 }),
       position: () => bridge.cursorPos(), checkStopped, settle: () => pause(FOCUS_MS),
       stage: text => ctx.setMethod?.(text),
       decide: async (scan, pointer) => {
         trace(node, { kind: 'observation', source: 'tars', scan })
         const live = fresh('pointer')
-        const result = await verifyVisualPointer({ apiKey: live.s.apiKey, model: session?.models ?? live.chain, revision: session?.revision ?? live.revision, chainSource: session?.source ?? live.source, goal, screen: scan.image!, area: scan.area, pointer, system: promptOf(live.s.llmPrompts, 'visualPointer'), nodeId: node.id })
-        if (session && result.model) session.accept(result.model)
+        const result = await verifyVisualPointer({ apiKey: live.s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, goal, screen: scan.image!, area: scan.area, pointer, system: promptOf(live.s.llmPrompts, 'visualPointer'), nodeId: node.id })
         trace(node, { kind: 'model', source: 'tars', value: result })
         log('info', `[Görsel hizalama] ${result.decision}${result.reason ? `: ${result.reason}` : ''}`)
         return result
@@ -1255,7 +1253,7 @@ export function createAgent(ctx: AgentContext) {
       const confirmed = await ensureActed(node, ahead, async () => {
         checkStopped()
         if (t.visualGoal && mode !== 'move') {
-          const approved = await dispatchVisualClick(node, t, t.visualGoal, mode, t.visualSession)
+          const approved = await dispatchVisualClick(node, t, t.visualGoal, mode)
           t = { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }
           lastClickPoint = mode === 'left' ? { x: t.x, y: t.y } : undefined
           trace(node, { kind: 'input', point: { x: t.x, y: t.y }, mode, phase: 'sent' })

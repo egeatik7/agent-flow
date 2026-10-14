@@ -3,16 +3,14 @@ import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '.
 import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
 import ModelChain from './ModelChain'
-import type { SettingsPatch } from '../../electron/settings-patch'
 import { stageHint } from '../../electron/model-chain'
 import NumberDraft from './NumberDraft'
 import type { RecoveryReport } from '../../electron/recovery'
 
-export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled, savedSettings }: {
+export default function RecoverySettingsPanel({ settings, setSettings, onSave, graph, models, onLoadModels, disabled }: {
   settings: AppSettings
-  savedSettings?: AppSettings
   setSettings: Dispatch<SetStateAction<AppSettings>>
-  onSave: (partial: SettingsPatch) => void
+  onSave: (partial: Partial<AppSettings>) => void
   graph: AgentGraph
   models: ModelInfo[]
   onLoadModels: () => void | Promise<void>
@@ -81,14 +79,13 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
     <div className="field"><label htmlFor="recovery-model">Kurtarma modelleri (OpenRouter)</label>
       <ModelChain primary={settings.recovery?.model ?? s.model} backups={settings.recovery?.backups ?? []}
         inputId="recovery-model" listId="recovery-models" placeholder="Sağlayıcı/model kimliği"
-        onChange={(model, backups) => update({ model, backups })}
-        onCommit={(model, backups) => onSave({ recovery: { model, backups } })} />
+        onChange={(model, backups) => update({ model, backups })} />
       <datalist id="recovery-models">{cloudModels.map(m => <option key={m.id} value={m.id} label={m.vision ? 'görsel destekli' : undefined} />)}</datalist>
       <button type="button" className="xp-btn" disabled={loadingModels} onClick={() => void loadModels()}>{loadingModels ? 'Liste alınıyor…' : 'Model listesini getir'}</button>
       {modelError && <p className="hint warn" role="status">{modelError}</p>}
       {[s.model, ...s.backups].some(name => name.startsWith('local:')) && <p className="hint warn">Kurtarma ajanı OpenRouter kullanır. Buraya bir OpenRouter model kimliği yaz.</p>}
       <p className="hint">Model alanına yazarak listede ara. İlk satır ana modeldir; sonraki satırlar sırayla denenen yedeklerdir (en fazla 4). Ekran görüntüsü ve araç çağırma desteği olan modeller seç.</p>
-      <p className="hint">Kayıtlı sıra: {stageHint(savedSettings ?? settings, 'recovery')}</p>
+      <p className="hint">{stageHint(settings, 'recovery')}</p>
       <p className="hint">Akış sürerken de kaydedilir. Sonraki yeni kurtarma çağrısı bu sırayla başlar; süren çağrı değişmez.</p>
       <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Model sırasını kaydet</button>
     </div>

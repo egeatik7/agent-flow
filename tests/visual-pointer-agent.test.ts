@@ -16,7 +16,7 @@ vi.mock('../electron/runner', async importOriginal => ({ ...await importOriginal
 import { createAgent } from '../electron/agent'
 import { createNode, DEFAULT_SETTINGS } from '../electron/graph-types'
 import { setLocalEndpoint, setStopCheck } from '../electron/openrouter'
-function executor(extra: Partial<typeof DEFAULT_SETTINGS> = {}) { return createAgent({ log: () => {}, send: () => {}, shouldStop: () => h.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey: 'fixture', model: 'vision', agentModel: 'vision', agentBackups: [], findOrder: ['tars'], findOff: [], screenCheck: 'off', stepDelayMs: 0, ...extra }) }).executor }
+function executor() { return createAgent({ log: () => {}, send: () => {}, shouldStop: () => h.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey: 'fixture', model: 'vision', agentModel: 'vision', agentBackups: [], findOrder: ['tars'], findOff: [], screenCheck: 'off', stepDelayMs: 0 }) }).executor }
 const node = (mode: 'left' | 'double' | 'right' | 'move' = 'left') => ({ ...createNode('click', 0, 0), prompt: 'Masaüstündeki Blender', clickMode: mode })
 beforeEach(() => {
   Object.assign(h, { point: { x: 0, y: 0 }, moves: [], clicks: [], scans: [], requests: [], answers: [], stopped: false, drift: false, marker: true, locked: false, windowChanged: false })
@@ -53,37 +53,4 @@ it.each(['uncertain', 'drift', 'marker', 'windowChanged'])('does not click on %s
 })
 it('move-only node sends no confirmation call and never clicks', async () => {
   await executor().click(node('move'), 1); expect(h.requests).toHaveLength(1); expect(h.moves).toHaveLength(1); expect(h.clicks).toHaveLength(0)
-})
-
-it('backup B that locates the target also handles each pointer adjustment; never returns to A or the Yap list', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-    const body = JSON.parse(init.body); h.requests.push(body)
-    const pointer = JSON.stringify(body.messages).includes('confirm|adjust|uncertain')
-    const reply = body.model === 'A' ? { intent: 'target', x: 300, y: 400, strconv: 210 }
-      : pointer ? (h.moves.length === 1 ? { decision: 'adjust', x: 600, y: 500 } : { decision: 'confirm' })
-      : { intent: 'target', x: 300, y: 400 }
-    return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
-  }))
-  const agent = executor({ visionModel: 'A', visionBackups: ['B', 'C'], agentModel: 'Yap-only', agentBackups: ['Other-Yap'] })
-  await agent.click(node(), 1)
-  expect(h.requests.map(r => r.model)).toEqual(['A', 'A', 'B', 'B', 'B'])
-  expect(h.clicks).toHaveLength(1)
-  expect(h.clicks[0].current.slice(0, 2)).toEqual([600, 350])
-  // A different node starts from the user's current visual priority, not the previous backup.
-  await agent.click(node(), 2)
-  expect(h.requests.slice(5, 8).map(r => r.model)).toEqual(['A', 'A', 'B'])
-})
-it('if B fails pointer output twice, C continues all subsequent adjustments without returning to A or B', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-    const body = JSON.parse(init.body); h.requests.push(body)
-    const pointer = JSON.stringify(body.messages).includes('confirm|adjust|uncertain')
-    const reply = body.model === 'A' ? { intent: 'target', x: 300, y: 400, strconv: 210 }
-      : pointer && body.model === 'B' ? { decision: 'confirm', x: 900 }
-      : pointer ? (h.moves.length === 1 ? { decision: 'adjust', x: 600, y: 500 } : { decision: 'confirm' })
-      : { intent: 'target', x: 300, y: 400 }
-    return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
-  }))
-  await executor({ visionModel: 'A', visionBackups: ['B', 'C'], agentModel: 'Yap-only' }).click(node(), 1)
-  expect(h.requests.map(r => r.model)).toEqual(['A', 'A', 'B', 'B', 'B', 'C', 'C'])
-  expect(h.moves).toHaveLength(2); expect(h.clicks).toHaveLength(1)
 })

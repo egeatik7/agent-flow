@@ -10,7 +10,6 @@ export {
 } from '../electron/llm-flow'
 export type { ScanResult, ScreenItem } from '../electron/matcher'
 export type { ToolResult, ToolSpec, ToolOutcome, NodeRef, LoopRef } from '../electron/tools'
-import type { SettingsPatch } from '../electron/settings-patch'
 import type { AgentGraph, AppSettings, CanvasBook, Locator, LogLevel } from '../electron/graph-types'
 import type { ScanResult } from '../electron/matcher'
 import type { ToolResult, ToolSpec } from '../electron/tools'
@@ -48,7 +47,7 @@ export type XpAgentApi = {
   finishClose?: (id: number, allow: boolean) => Promise<void>
   bootReady?: () => void
   getSettings: () => Promise<AppSettings>
-  saveSettings: (partial: SettingsPatch) => Promise<AppSettings>
+  saveSettings: (partial: Partial<AppSettings>) => Promise<AppSettings>
   getGraph: () => Promise<AgentGraph>
   saveGraph: (graph: AgentGraph) => Promise<boolean>
   libraryInfo?: () => Promise<{ directory: string }>

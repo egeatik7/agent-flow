@@ -13,10 +13,10 @@ it('boş kelime seçimi Metin sırasını kullanır; doluysa ayrı zincirdir', (
   expect(stageHint({ ...base, wordChoiceModel: 'Kelime', wordChoiceBackups: [] }, 'word')).toContain('ayrı zincir')
 })
 
-it('görsel hedef ve imleç Görsel listesini kullanır; Yap listesi yalnız araç döngüsüne aittir', () => {
-  expect(resolveStage(base, 'visual').chain).toEqual(['Gorsel', 'G2'])
-  expect(resolveStage(base, 'pointer').chain).toEqual(['Gorsel', 'G2'])
-  expect(resolveStage(base, 'pointer').source).toBe('Görsel LLM')
+it('görsel hedef ve imleç Yap listesini kullanır; takılma Görsel listeyi kullanır', () => {
+  expect(resolveStage(base, 'visual').chain).toEqual(['Yap', 'Yedek'])
+  expect(resolveStage(base, 'pointer').chain).toEqual(['Yap', 'Yedek'])
+  expect(resolveStage(base, 'pointer').source).toBe('Yap modeli')
   expect(resolveStage(base, 'stall').chain).toEqual(['Gorsel', 'G2'])
   expect(resolveStage(base, 'stall').separate).toBe(true)
   const metin = resolveStage({ ...base, agentModel: '', agentBackups: [], visionModel: '', visionBackups: [] }, 'visual')

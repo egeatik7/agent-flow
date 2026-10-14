@@ -40,10 +40,9 @@ describe('Condition: one whole-screen observation with model decisions', () => {
   it('asks about empty UIA, then reads and judges OCR once', async () => {
     state.items = [row('Done 60/60')]; respond({ satisfied: true, id: 1 })
     expect(await make().exists('', condition('60/60 tamamlandı mı?'))).toBe(true)
-    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(3)
+    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(2)
     expect(state.requests[0]).not.toContain('Done 60/60')
-    expect(state.requests[1]).toBe(state.requests[0]) // invalid evidence gets one retry, no extra screen read
-    expect(state.requests[2]).toContain('Done 60/60')
+    expect(state.requests[1]).toContain('Done 60/60')
     expect(state.scans[1]).toMatchObject({ uia: false, ocr: true, fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
   })
   it('asks both empty reader lists; an empty list is never a local No shortcut', async () => {
@@ -66,7 +65,7 @@ describe('Condition: one whole-screen observation with model decisions', () => {
   it('satisfied:false remains false even with a valid evidence ID', async () => {
     state.items = [{ ...row('Running 6/60'), src: 'uia' }]; respond({ satisfied: false, id: 1 })
     expect(await make().exists('', condition('60/60 tamamlandı mı?'))).toBe(false)
-    expect(state.requests).toHaveLength(3) // the absent OCR evidence ID is retried once
+    expect(state.requests).toHaveLength(2)
   })
   it('an invented evidence ID cannot prove a positive condition', async () => {
     state.items = [{ ...row('Running'), src: 'uia' }]; respond({ satisfied: true, id: 999 })
@@ -128,11 +127,11 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     await expect(make().exists('', condition('bitti mi?'))).rejects.toThrow('401')
     expect(state.scans).toHaveLength(1)
   })
-  it.each([503, 200])('condition retries invalid output once, but does not retry HTTP error %s', async status => {
+  it.each([503, 200])('condition does not restart the model chain after error %s', async status => {
     const fetchMock = vi.fn(async () => ({ ok: status === 200, status, text: async () => status === 200 ? JSON.stringify({ choices: [{ message: { content: '{"id":null}' } }] }) : 'temporary outage' }))
     vi.stubGlobal('fetch', fetchMock)
     await expect(make().exists('', condition('bitti mi?'))).rejects.toThrow()
-    expect(fetchMock).toHaveBeenCalledTimes(status === 200 ? 2 : 1); expect(state.scans).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1); expect(state.scans).toHaveLength(1)
   })
   it('Stop propagates before observation', async () => {
     state.stopped = true
