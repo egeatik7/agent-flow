@@ -203,6 +203,7 @@ export async function runGraph(
     }
     let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true, packageExit: layers[layers.length - 1].pkg.packageExit })
     for (let i = layers.length - 1; i >= 0; i--) {
+      if (ex.shouldStop()) throw new StoppedError()
       const { parent, pkg } = layers[i]
       summary = await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id,
         afterNodePort: pkg.packageExit && !summary.packageExitReached ? 'blocked' : 'next',

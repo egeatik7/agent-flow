@@ -177,15 +177,29 @@ export function withLibraryLock<T>(directory: string, fn: () => T): T {
     let valid = true
     try { assertOwned(file, record.owner) } catch { valid = false }
     if (valid) return fn()
-    // The session record was invalidated by an outside deletion or rename. Fall
-    // through to the normal claim: a missing or dead generation is taken over and
-    // stays as this session's record, while a live foreign owner answers busy()
-    // and is never deleted. Nothing is ever written under a foreign lock.
+    // The session record was invalidated by an outside deletion or rename. Drop
+    // the stale map entry before claiming again: claimLibraryLock would otherwise
+    // see the dead generation and throw. A missing or dead generation is taken
+    // over and stays as this session's record, while a live foreign owner answers
+    // busy() and is never deleted. Nothing is ever written under a foreign lock.
     // The returned handle is deliberately not released: the regained record stays
     // as this session's claim, exactly like a record that was never lost.
+    held.delete(file)
     claimLibraryLock(directory)
     return fn()
   }
   const lock = claimLibraryLock(directory)
-  try { return fn() } finally { lock.release() }
+  let asyncWork = false
+  try {
+    const result = fn()
+    // An async body must keep the lock until it settles. A sync body still
+    // releases before withLibraryLock returns.
+    if (result instanceof Promise) {
+      asyncWork = true
+      return result.finally(() => lock.release()) as T
+    }
+    return result
+  } finally {
+    if (!asyncWork) lock.release()
+  }
 }

@@ -91,7 +91,7 @@ export function removeNode(graph: AgentGraph, id: string): AgentGraph {
     nodes: graph.nodes
       .filter((n) => n.id !== id)
       .map((n) => {
-        if (n.kind !== 'loop' || !n.members) return n
+        if (!n.members) return n
         let members = n.members.filter((m) => m !== id)
         if (parent && n.id === parent.id) members = [...members, ...orphans]
         return members.length === n.members.length && !(parent && n.id === parent.id) ? n : { ...n, members }

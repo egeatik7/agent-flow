@@ -669,7 +669,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   function validVisualPoint(result: VisualTargetResult): boolean {
-    return result.arguments.action === 'mouse_move' && result.arguments.coordinate.every(n => Number.isFinite(n) && n >= 0 && n < 1000)
+    return result.arguments.action === 'mouse_move' && result.arguments.coordinate.every(n => Number.isFinite(n) && n >= 0 && n <= 1000)
   }
 
   /** Last stage: UI-TARS looks at the original upright screenshot and points. The ramp and the 90° turn stay on the OCR copies. */
