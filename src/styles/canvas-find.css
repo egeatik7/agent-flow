@@ -1,0 +1,20 @@
+.canvas-find {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 120;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 8px;
+  background: #ece9d8;
+  border: 1px solid #0a246a;
+  box-shadow: 2px 2px 0 #0004;
+  color: #111;
+  cursor: default;
+  user-select: text;
+}
+.canvas-find-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.canvas-find-row label { font-weight: bold; }
+.canvas-find-row input { width: 190px; min-width: 60px; flex: 1 1 120px; }
+.canvas-find-row .xp-btn { min-width: 28px; }
+.canvas-find-status { margin-top: 6px; max-width: 560px; overflow-wrap: anywhere; font-size: 11px; }

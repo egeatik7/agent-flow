@@ -237,6 +237,25 @@ async function select(renderer: ReactTestRenderer, path: string[], id: string) {
 const logs = (renderer: ReactTestRenderer): string => renderer.root.findByType(LogPanel).props.logs.map((l: { message: string }) => l.message).join('\n')
 
 describe('App scoped navigation preserves canvas work', () => {
+  it('search navigation enters nested packages, focuses the node and keeps the whole graph unchanged', async () => {
+    const fixture = scenario(2), r = await mount()
+    const before = structuredClone(r.root.findByType(NodeCanvas).props.searchGraph)
+    const scopeKey = r.root.findByType(NodeCanvas).props.searchScopeKey
+    await act(async () => {
+      expect(r.root.findByType(NodeCanvas).props.onSearchNavigate({ nodeId: fixture.selected.id, path: fixture.path })).toBe(true)
+    })
+    const canvas = r.root.findByType(NodeCanvas)
+    expect(JSON.parse(canvas.props.canvasKey).slice(1)).toEqual(fixture.path)
+    expect(canvas.props.focus.nodeId).toBe(fixture.selected.id)
+    expect(canvas.props.selectedNodeId).toBe(fixture.selected.id)
+    expect(canvas.props.searchScopeKey).toBe(scopeKey)
+    expect(canvas.props.searchGraph).toEqual(before)
+    await act(async () => {
+      expect(canvas.props.onSearchNavigate({ nodeId: 'removed', path: fixture.path })).toBe(false)
+    })
+    expect(r.root.findByType(NodeCanvas).props.searchGraph).toEqual(before)
+  })
+
   it('retains the Start marker in a newly created empty package and resets history when switching canvases', async () => {
     scenario(0); const r = await mount()
     await act(async () => { r.root.findByType(NodeCanvas).props.onAddAt('package', 2000, 1000) })

@@ -1559,6 +1559,9 @@ export default function App() {
             )}
             {hasCanvas ? <NodeCanvas
               graph={graph}
+              searchGraph={rooted(graph, stack)}
+              searchScopeKey={activeId ?? undefined}
+              onSearchNavigate={hit => applyLocation({ path: hit.path, nodeId: hit.nodeId }, true)}
               onExitPackage={exitPackage}
               canExitPackage={stack.length > 0}
               recoveryReports={recoveryReports}

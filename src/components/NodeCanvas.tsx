@@ -23,6 +23,8 @@ import { recoveryReportIndex } from '../lib/recovery-report-view'
 import type { RecoveryReport } from '../../electron/recovery'
 import { packageAppearances } from '../lib/package-appearance'
 import { ViewerGesture } from '../viewer/gesture'
+import CanvasFind from './CanvasFind'
+import type { CanvasSearchHit } from '../lib/canvas-search'
 
 type Frame = { loop: AgentNode; rect: Rect; depth: number; label: string; sub: string }
 
@@ -43,6 +45,9 @@ function computeFrames(graph: AgentGraph, override?: Map<string, Rect>): Frame[]
 }
 
 type Props = {
+  searchGraph?: AgentGraph
+  searchScopeKey?: string
+  onSearchNavigate?: (hit: CanvasSearchHit) => boolean
   readOnly?: boolean
   onInspect?: (id:string) => void
   graph: AgentGraph
@@ -345,7 +350,7 @@ export default function NodeCanvas(p: Props) {
     const el = scrollRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
-      if ((e.target as Element | undefined)?.closest?.('.recovery-note')) return
+      if ((e.target as Element | undefined)?.closest?.('.recovery-note, .canvas-find')) return
       e.preventDefault()
       const v = viewRef.current
       const z = Math.min(MAX_Z, Math.max(MIN_Z, v.z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)))
@@ -594,7 +599,7 @@ export default function NodeCanvas(p: Props) {
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
       onMouseDownCapture={(e) => {
-        if ((e.target as Element | undefined)?.closest?.('.recovery-note, .recovery-report-badge')) return
+        if ((e.target as Element | undefined)?.closest?.('.recovery-note, .recovery-report-badge, .canvas-find')) return
         if(p.readOnly){e.preventDefault();e.stopPropagation();return}
         if (e.button === 0 || e.button === 2) pasteClick.current = { canvasKey: p.canvasKey, point: toCanvas(e.clientX, e.clientY) }
       }}
@@ -1064,6 +1069,13 @@ export default function NodeCanvas(p: Props) {
         )}
       </div>
       {reportNodeId && <RecoveryNote readOnly={p.readOnly} title={byId.get(reportNodeId)?.title ?? 'Node'} reports={reportIndex.get(reportNodeId) ?? []} onClose={() => setReportNodeId(null)} />}
+      {!p.readOnly && p.onSearchNavigate && <CanvasFind
+        graph={p.searchGraph ?? p.graph}
+        scopeKey={p.searchScopeKey ?? p.canvasKey}
+        canvasRef={scrollRef}
+        pointerRef={pointerRef}
+        onNavigate={p.onSearchNavigate}
+      />}
       <button type="button" className="canvas-zoom" title="Tekerlek: yakınlaştır · Orta tuş: kaydır · Tıkla: 100%" onMouseDown={(e) => e.stopPropagation()} onClick={resetZoom}>
         {Math.round(view.z * 100)}%
       </button>
