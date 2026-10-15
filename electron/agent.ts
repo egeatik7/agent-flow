@@ -1,4 +1,4 @@
-import { repeatMethodCycle, methodErrorText, DeliberateStopError } from './method-cycle'
+import { repeatMethodCycle, methodErrorText } from './method-cycle'
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
 import { shouldRefineWord, wordCandidates, refineWordTarget  } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
@@ -241,7 +241,7 @@ export function createAgent(ctx: AgentContext) {
 
   function rethrowTerminalSearch(error: unknown): void {
     if (stopped()) throw new StoppedError()
-    if (error instanceof DeliberateStopError || error instanceof StoppedError || error instanceof VisualTargetRecoveryError ||
+    if (error instanceof StoppedError || error instanceof VisualTargetRecoveryError ||
         (error as { targetSearchFatal?: boolean })?.targetSearchFatal === true) throw error
   }
 
@@ -440,7 +440,7 @@ export function createAgent(ctx: AgentContext) {
     window,
   })
 
-  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false, readOnly = false, continuation?: { methods: readonly FindStageId[]; fresh: boolean }): Promise<Resolved> {
+  async function resolveTarget(node: AgentNode, _stepNo: number, wide = false, readOnly = false, continuation?: { methods: readonly FindStageId[] }): Promise<Resolved> {
     const s = getSettings()
     const prompt = node.prompt?.trim() ?? ''
     const loc = node.locator
@@ -502,7 +502,7 @@ export function createAgent(ctx: AgentContext) {
     const wantImage = !!s.sendScreenshot && !ocrOnly && !!prompt && (!!s.apiKey.trim() || localConfigured())
     const windowsScan = async () => {
       if (!winScan) {
-        winScan = await scanFor(wantImage, wide, false, readOnly, !ocrOnly, ocrOnly, continuation?.fresh ?? false)
+        winScan = await scanFor(wantImage, wide, false, readOnly, !ocrOnly, ocrOnly, true)
         const { shot: _temporary, ...snapshot } = winScan
         trace(node, { kind: 'observation', source: 'windows', scan: snapshot })
         // Tanılama görüntüsü kendiliğinden model girdisi olmaz: resim yalnız ayar istediğinde kalır.
@@ -527,8 +527,8 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const methodErrors: string[] = []
-    let modelGaveUp = ''
-    const noteGiveUp = (reason: string) => { modelGaveUp = reason || 'Model hedefin bulunmadığını bildirdi.' }
+    let targetMissingReason = ''
+    const noteTargetMissing = (reason: string) => { targetMissingReason = reason || 'Model hedefin bulunmadığını bildirdi.' }
     try {
       if (asksDesktopShortcut(prompt)) {
         try { await windowsScan() } catch (error) {
@@ -545,7 +545,7 @@ export function createAgent(ctx: AgentContext) {
           if (!userChrome) continue
           ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
-          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition', noteGiveUp)
+          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition', noteTargetMissing)
           if (pick) {
             const got = take({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
             if (got) return got
@@ -656,7 +656,7 @@ export function createAgent(ctx: AgentContext) {
           ctx.setMethod?.('Kelime listesi')
           const scan = await windowsScan()
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
-          const pick = await pickFrom(node, scan, scan.window || win, true, true, noteGiveUp)
+          const pick = await pickFrom(node, scan, scan.window || win, true, true, noteTargetMissing)
           if (pick) {
             const got = take({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
             if (got) return got
@@ -677,7 +677,7 @@ export function createAgent(ctx: AgentContext) {
               methodErrors.push(e.message)
               log('warn', `Görsel hedefleme sonuç vermedi; sıradaki yöntem denenecek: ${e.message}`)
             } else if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
-            else if (e instanceof VisualTargetMissingError) { noteGiveUp(e.message); log('warn', e.message) }
+            else if (e instanceof VisualTargetMissingError) { noteTargetMissing(e.message); log('warn', e.message) }
             else if (e instanceof NotFoundError) { methodErrors.push(e.message); log('warn', e.message) }
             else { methodErrors.push(methodErrorText(e)); log('warn', `Görsel hedefleme atlandı: ${methodErrorText(e)}`) }
           }
@@ -726,8 +726,8 @@ export function createAgent(ctx: AgentContext) {
       }`
     trace(node, { kind: 'failure', message })
     const detail = methodErrors.length ? ` Gerçek neden: ${methodErrors.join(' | ')}` : ''
-    if (modelGaveUp && !methodErrors.length) throw new DeliberateStopError(`Model bilinçli olarak vazgeçti; açık yöntemler de hedefi bulamadı: ${modelGaveUp}`)
-    throw new TargetMethodsExhaustedError(message + detail)
+    const missing = targetMissingReason ? ` Hedef seçicinin gözlemi: ${targetMissingReason}` : ''
+    throw new TargetMethodsExhaustedError(message + detail + missing)
   }
 
   function visionPrompt(node: AgentNode): string {
@@ -756,7 +756,7 @@ export function createAgent(ctx: AgentContext) {
     let didDismiss = false
     const capture = () => bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
-      image: 'plain', uia: false, ocr: false, fresh: wide || didDismiss,
+      image: 'plain', uia: false, ocr: false, fresh: true,
       maxImageW: isTarsModel(session.models[0] || '') ? 1288 : 1400,
       snap: isTarsModel(session.models[0] || '') ? 28 : 0, fit: true, readOnly,
     })
@@ -1099,19 +1099,15 @@ export function createAgent(ctx: AgentContext) {
     return false
   }
 
-  async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
-    return repeatMethodCycle(round => run(round > 1), {
-      check: checkStopped,
-      wait: () => pause(REFRESH_RETRY_MS),
-      terminal: error => error instanceof DeliberateStopError || error instanceof StoppedError || error instanceof VisualTargetRecoveryError ||
-        (error as { inputMayHaveBeenSent?: boolean; targetSearchFatal?: boolean })?.inputMayHaveBeenSent === true ||
-        (error as { targetSearchFatal?: boolean })?.targetSearchFatal === true,
-      retry: (error, round) => {
-        clearHover(); lastClickPoint = undefined
-        ctx.setMethod?.(`Yöntemler yeniden deneniyor · tur ${round + 1}`)
-        log('warn', `YONTEM-TUR “${title}” tur=${round}: ${methodErrorText(error)}; güncel ekranla ilk açık yöntemden devam.`)
-      },
-    })
+  // One full method pass belongs to this layer. Only the runner owns Recovery/retry.
+  async function targetMethodPass<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
+    try { return await run(false) }
+    catch (error) {
+      clearHover(); lastClickPoint = undefined
+      checkStopped()
+      log('warn', `“${title}”: yöntem turu sonuç vermedi; kontrol kurtarma aşamasına aktarılıyor. ${methodErrorText(error)}`)
+      throw error
+    }
   }
 
 
@@ -1235,12 +1231,10 @@ export function createAgent(ctx: AgentContext) {
         log('warn', `[Yöntem geçişi] Görsel onay alınamadı; tıklama gönderilmedi. Kalan sıra: ${remaining.join(' → ') || 'yok'}. ${(error as Error).message}`)
         try {
           if (!remaining.length) throw new TargetMethodsExhaustedError('Görsel onaydan sonra açık yöntem kalmadı.')
-          t = await resolveTarget(node, stepNo, true, false, { methods: remaining, fresh: true })
+          t = await resolveTarget(node, stepNo, true, false, { methods: remaining })
         } catch (nextError) {
           rethrowTerminalSearch(nextError)
-          log('warn', `YONTEM-TUR “${node.title}”: kalan yöntemler tükendi; ilk açık yöntemden yeni ekranla başlanacak. ${methodErrorText(nextError)}`)
-          await pause(REFRESH_RETRY_MS)
-          t = await withScreenRetry(node.title, () => findTarget(node, stepNo, true))
+          throw new TargetMethodsExhaustedError(`Görsel onay ve kalan yöntemler sonuç vermedi; kurtarma gerekiyor. ${methodErrorText(nextError)}`)
         }
         continue
       }
@@ -1362,7 +1356,7 @@ export function createAgent(ctx: AgentContext) {
       // on, so they get the same window activation the typing path already does.
       if (ahead?.next?.kind === 'type' || !node.locator) await activateInputWindow(node)
       inputSent = false
-      let t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
+      let t = await targetMethodPass(node.title, (wide) => findTarget(node, stepNo, wide))
       const mode = node.clickMode ?? 'left'
       let inputStarted = false
       let confirmed: boolean
@@ -1437,7 +1431,7 @@ export function createAgent(ctx: AgentContext) {
         lastClickPoint = { ...progress.focusPoint }
       } else if (node.prompt?.trim() || node.locator) {
         await activateInputWindow(node)
-        t = await withScreenRetry(node.title, (wide) => findTarget(node, stepNo, wide))
+        t = await targetMethodPass(node.title, (wide) => findTarget(node, stepNo, wide))
         checkStopped()
         if (t?.visualGoal) {
           const result = await approveWithMethodFallback(node, t, stepNo, 'left')

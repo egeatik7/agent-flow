@@ -1,4 +1,4 @@
-import {repeatMethodCycle,methodErrorText,DeliberateStopError} from './method-cycle'
+import {repeatMethodCycle,methodErrorText,TaskNeedsRecoveryError} from './method-cycle'
 import {interruptibleSleep} from './runner'
 import { YAP_PROMPT } from './llm-flow'
 import { windowsTools } from './windows-tools'
@@ -13,7 +13,7 @@ export function yapTools(allowCode = true): ModelTool[] {
   return [...windowsTools(allowCode), ...recoveryTools({ ...DEFAULT_RECOVERY, allowDesktop: true, allowNodes: false }).filter(t => !excluded.has(t.function.name)), {
     type: 'function' as const, function: { name: 'task_complete', description: 'Verilen görev tamamlandı. Araç sonucuna veya güncel ekran gözlemine dayanan kısa açıklamayla bitir.', parameters: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'], additionalProperties: false } },
   }, {
-    type: 'function' as const, function: { name: 'task_give_up', description: 'Güncel ekranı okuyup alternatifleri değerlendirdikten sonra hedefin gerçekten bulunamadığına veya görevin yapılamadığına bilinçli karar verdiysen gerekçeyle vazgeç. Timeout, araç/model hatası ve eksik gözlem vazgeçme gerekçesi değildir.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'], additionalProperties: false } },
+    type: 'function' as const, function: { name: 'task_give_up', description: 'Güncel ekranı okuyup alternatifleri değerlendirdikten sonra görevi tamamlayamıyorsan gerekçeyle kurtarma aşamasına aktar. Bu araç koşuyu doğrudan durdurmaz.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'], additionalProperties: false } },
   }]
 }
 
@@ -123,7 +123,7 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
         }
         if (toolName === 'task_give_up') {
           if (!observed || !args.reason.trim()) throw new Error('Bilinçli vazgeçme için önce güncel ekranı oku ve açık gerekçe ver.')
-          throw new DeliberateStopError(`Model bilinçli olarak vazgeçti: ${args.reason}`)
+          throw new TaskNeedsRecoveryError(`Yap görevi tamamlayamadı; kurtarma gerekiyor: ${args.reason}`)
         }
         if (toolName === 'task_complete') {
           if (!args.summary.trim()) throw new Error('Tamamlandı açıklaması boş olamaz.')
@@ -137,7 +137,7 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
         if (toolName === 'screen_read') observed = result.ok && result.outcome === 'tamam'
       } catch (error) {
         check()
-        if (error instanceof DeliberateStopError) throw error
+        if (error instanceof TaskNeedsRecoveryError) return markFailure(error)
         result = { ok: false, outcome: 'hata', message: (error as Error).message }
       }
       const data = result.data ? { ...result.data } : undefined

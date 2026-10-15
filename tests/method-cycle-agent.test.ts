@@ -13,7 +13,12 @@ vi.mock('../electron/shots',()=>({rememberShot:()=>{}}))
 vi.mock('../electron/local-context-probe',async original=>({...await original<any>(),olcumuTazele:async()=>{}}))
 import {createAgent} from '../electron/agent'
 import {createNode,DEFAULT_SETTINGS} from '../electron/graph-types'
+import {runGraph} from '../electron/runner'
 import {setLocalEndpoint,setStopCheck} from '../electron/openrouter'
+const retryClick = (ex: ReturnType<typeof agent>, node: ReturnType<typeof createNode>) => {
+ ex.recover = async () => 'retry'
+ return runGraph({nodes:[node],edges:[]},ex,{maxSteps:10,stepDelayMs:0})
+}
 const reply=(content:any)=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify(content)}}]})})
 const agent=(extra={})=>createAgent({settings:()=>({...DEFAULT_SETTINGS,apiKey:'fake',model:'vision',visionModel:'vision',visionBackups:[],findOrder:['list','uia'],findOff:[],screenCheck:'off',...extra}),shouldStop:()=>h.stop,log:(_l,line)=>h.logs.push(line),send:()=>{}}).executor
 beforeEach(()=>{h.scans=[];h.logs=[];h.inputs=[];h.point={x:0,y:0};h.stop=false;vi.useFakeTimers();setStopCheck(()=>h.stop);setLocalEndpoint('')})
@@ -43,25 +48,25 @@ it('a model error in Click proceeds to the next enabled UIA method and clicks on
 })
 it('after the last visual method misses, the next pass captures a fresh image and clicks only after pointer confirmation',async()=>{
  let calls=0;vi.stubGlobal('fetch',vi.fn(async()=>++calls===1?{ok:false,status:503,text:async()=> 'offline'}:calls===2?reply({name:'computer_use',arguments:{action:'mouse_move',coordinate:[500,500]}}):reply({decision:'confirm'})))
- const pending=agent({findOrder:['tars']}).click({...createNode('click',0,0),prompt:'Run'},1)
+ const pending=retryClick(agent({findOrder:['tars']}),{...createNode('click',0,0),prompt:'Run'})
  await vi.advanceTimersByTimeAsync(4000);expect(calls,h.logs.join("\n")).toBe(3);await pending
  expect(calls).toBe(3);expect(h.inputs).toEqual(['visual']);expect(h.scans.length).toBeGreaterThanOrEqual(3)
  expect(h.scans[1].fresh).toBe(true)
 })
 
-it('a formal visual missing decision gives up only after all enabled methods finish without technical error',async()=>{
+it('a formal visual missing decision returns a recoverable method exhaustion',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>reply({name:'computer_use',arguments:{action:'terminate',status:'failure'}})))
- await expect(agent({findOrder:['tars']}).click({...createNode('click',0,0),prompt:'Run'},1)).rejects.toThrow('Model bilinçli olarak vazgeçti')
+ await expect(agent({findOrder:['tars']}).click({...createNode('click',0,0),prompt:'Run'},1)).rejects.toThrow('ekranda bulunamadı')
  expect(h.inputs).toEqual([])
 })
-it('an explicit list give_up decision is distinguished from an ordinary uncertain null',async()=>{
+it('an explicit list give_up cannot stop the run without Recovery',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>reply({id:null,give_up:true,text:'Run',reason:'The requested application is closed.'})))
- await expect(agent({findOrder:['list']}).click({...createNode('click',0,0),prompt:'Run'},1)).rejects.toThrow('Model bilinçli olarak vazgeçti')
+ await expect(agent({findOrder:['list']}).click({...createNode('click',0,0),prompt:'Run'},1)).rejects.toThrow('ekranda bulunamadı')
  expect(h.inputs).toEqual([])
 })
 it('a method error cannot become give-up just because another method returned missing',async()=>{
  let calls=0;vi.stubGlobal('fetch',vi.fn(async()=>++calls===1?{ok:false,status:503,text:async()=> 'offline'}:calls===2?reply({name:'computer_use',arguments:{action:'terminate',status:'failure'}}):reply({id:1,text:'Run'})))
- const pending=agent({findOrder:['list','tars']}).click({...createNode('click',0,0),prompt:'Run'},1)
+ const pending=retryClick(agent({findOrder:['list','tars']}),{...createNode('click',0,0),prompt:'Run'})
  await vi.advanceTimersByTimeAsync(3100);await pending
  expect(calls).toBe(3);expect(h.inputs).toEqual(['direct'])
 })
@@ -72,7 +77,7 @@ it('another enabled method may find the target after a valid give-up suggestion'
 })
 it('an API/key/credit failure in visual targeting cannot be hidden by a later give_up response',async()=>{
  let calls=0;vi.stubGlobal('fetch',vi.fn(async()=>++calls===1?{ok:false,status:402,text:async()=> 'Insufficient credits'}:calls===2?reply({id:null,give_up:true,reason:'not found'}):calls===3?reply({name:'computer_use',arguments:{action:'mouse_move',coordinate:[500,500]}}):reply({decision:'confirm'})))
- const pending=agent({findOrder:['tars','list']}).click({...createNode('click',0,0),prompt:'Run'},1)
+ const pending=retryClick(agent({findOrder:['tars','list']}),{...createNode('click',0,0),prompt:'Run'})
  await vi.advanceTimersByTimeAsync(4000);await pending
  expect(calls).toBe(4);expect(h.inputs).toEqual(['visual'])
 })

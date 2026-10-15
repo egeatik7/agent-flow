@@ -1097,14 +1097,14 @@ async function runFlow(
         const settings = recoverySettings(getSettings().recovery)
         if (!settings.enabled || opts?.fast || opts?.debug) {
           const reason = !settings.enabled ? 'Kurtarma sekmesinde kapalı.' : opts?.fast ? 'Hızlı koşu model çağırmaz.' : 'Hata ayıklama koşusu hata anında durur.'
-          log('warn', `Kurtarma ajanı devreye girmedi: ${reason}`)
-          recoveryStatus(false, request.node.title, `Kurtarma devreye girmedi: ${reason}`)
-          return undefined
+          log('warn', `Kurtarma aşamasına ulaşıldı; ajan çalıştırılmadı: ${reason}`)
+          recoveryStatus(false, request.node.title, `Kurtarma aşamasına ulaşıldı; ajan çalıştırılmadı: ${reason}`)
+          return 'disabled' as const
         }
         if (++recoveries > settings.maxRecoveries) {
           log('warn', `Bu koşunun ${settings.maxRecoveries} kurtarma sınırı doldu; mevcut öğede kalınıyor.`)
           recoveryStatus(false, request.node.title, 'Koşunun kurtarma sınırı doldu; akış tamamlanamadı.')
-          return 'stop' as const
+          return 'failed' as const
         }
         recoveryStatus(true, request.node.title, 'Hata inceleniyor; akış kurtarma sonucunu bekliyor.')
         recoveryActive = true

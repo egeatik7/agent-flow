@@ -99,7 +99,7 @@ describe('recovery controller', () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
     h.deps.turn = vi.fn(async () => { clock.mockReturnValue(now + 11_000); return call('act_key', { keys: 'delete' }) })
-    expect((await runRecovery(request, h.deps)).decision).toBe('stop')
+    expect((await runRecovery(request, h.deps)).decision).toBe('failed')
     expect(h.execute).not.toHaveBeenCalled()
     expect(h.reports[0].summary).toContain('süresi doldu')
   })
@@ -128,15 +128,20 @@ describe('recovery controller', () => {
   })
   it('stops on the current item when its action budget is spent; bare prose is not success', async () => {
     const h = harness([call('act_key', { keys: 'win+d' }), finish()], { maxCalls: 1 })
-    expect((await runRecovery(request, h.deps)).decision).toBe('stop')
+    expect((await runRecovery(request, h.deps)).decision).toBe('failed')
     expect(h.reports[0].summary).toContain('sınırı')
     const prose = harness(Array.from({ length: 8 }, () => ({ role: 'assistant' as const, content: 'Done!' })), { maxCalls: 1 })
-    expect((await runRecovery(request, prose.deps)).decision).toBe('stop')
+    expect((await runRecovery(request, prose.deps)).decision).toBe('failed')
     expect(prose.execute).not.toHaveBeenCalled()
+  })
+  it('reserves stop for the recovery agent explicit recovery_stop tool', async () => {
+    const h = harness([call('recovery_stop', { probableCause:'unresolved', evidence:'current state', summary:'Unable to recover' })])
+    expect((await runRecovery(request,h.deps)).decision).toBe('stop')
+    expect(h.reports[0].summary).toBe('Unable to recover')
   })
   it('is silent and consumes no model calls when disabled', async () => {
     const h = harness([finish()], { enabled: false })
-    expect((await runRecovery(request, h.deps)).decision).toBeUndefined()
+    expect((await runRecovery(request, h.deps)).decision).toBe('disabled')
     expect(h.deps.turn).not.toHaveBeenCalled(); expect(h.reports).toEqual([])
   })
   it('sends actual screenshot image content after all tool results of a batch', async () => {

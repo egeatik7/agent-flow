@@ -1,5 +1,5 @@
 import { assertRunStructure } from './run-structure'
-import { repeatMethodCycle, methodErrorText, DeliberateStopError } from './method-cycle'
+import { repeatMethodCycle, methodErrorText, DeliberateStopError, RecoveryFailedError } from './method-cycle'
 import { type ObservationOptions } from './observation-budget'
 import {
   NODE_SPECS,
@@ -43,7 +43,7 @@ export type RecoveryRequest = {
   inputDelivery?: DeliveryState
 }
 
-export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
+export type RecoveryDecision = 'retry' | 'completed' | 'stop' | 'disabled' | 'failed' | undefined
 
 export type LoopProgress = { id: string; title: string; index: number; total: number; item: string }
 
@@ -160,7 +160,7 @@ export function renderNode(node: AgentNode, vars: Record<string, string>): Agent
 const FAIL_PORTS = new Set(['timeout', 'fail'])
 
 function isFatal(e: unknown) {
-  return e instanceof DeliberateStopError || e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
+  return e instanceof RecoveryFailedError || e instanceof DeliberateStopError || e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
 }
 
 export async function runGraph(
@@ -404,21 +404,28 @@ export async function runGraph(
       const unsafeReplay = !resumableType && (marked.inputAlreadySent === true || marked.inputMayHaveBeenSent === true || marked.inputDelivery === 'uncertain' || marked.inputDelivery === 'sent')
       if (unsafeReplay) blocked = error
       if (ex.recover && ['click', 'type', 'key', 'wait', 'ai'].includes(node.kind)) {
+        ex.log('warn', `“${node.title}”: normal yöntemler sonuç vermedi; aynı adım ve öğe korunarak kurtarma aşamasına geçiliyor.`)
         try {
           const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo, ahead, vars: { ...vars },
             inputAlreadySent: marked.inputAlreadySent === true, inputMayHaveBeenSent: marked.inputMayHaveBeenSent === true,
             typeProgress: progress, inputDelivery: marked.inputDelivery })
           if (ex.shouldStop()) throw new StoppedError()
-          if (decision === 'completed') { ex.recoveryFinished?.(node.id, true); return 'next' }
-          if (decision === 'stop') throw new DeliberateStopError(`Model bilinçli olarak vazgeçti: “${node.title}”. ${methodErrorText(error)}`)
+          if (decision === 'completed') { ex.recoveryFinished?.(node.id, true); await settle(); return 'next' }
+          if (decision === 'stop') throw new DeliberateStopError(`Kurtarma ajanı bilinçli olarak vazgeçti: “${node.title}”. ${methodErrorText(error)}`)
+          if (decision !== 'retry') throw new RecoveryFailedError(decision === 'failed'
+            ? `Kurtarma başarısız oldu; “${node.title}” adımında koşu durduruldu. ${methodErrorText(error)}`
+            : `Kurtarma aşamasına ulaşıldı ancak kurtarma ajanı kapalı veya kullanılamıyor; “${node.title}” adımında koşu durduruldu. ${methodErrorText(error)}`)
           // A retry is allowed only when it cannot duplicate a dispatched action.
           if (decision === 'retry' && !unsafeReplay) blocked = undefined
           ex.recoveryFinished?.(node.id, false, methodErrorText(error))
         } catch (recoveryError) {
           if (ex.shouldStop()) throw new StoppedError()
-          if (recoveryError instanceof DeliberateStopError) throw recoveryError
-          ex.log('warn', `Kurtarma karar veremedi; aynı adım korunuyor: ${methodErrorText(recoveryError)}`)
+          if (recoveryError instanceof DeliberateStopError || recoveryError instanceof RecoveryFailedError) throw recoveryError
+          throw new RecoveryFailedError(`Kurtarma çağrısı başarısız; “${node.title}” adımında koşu durduruldu: ${methodErrorText(recoveryError)}`)
         }
+      }
+      else if (['click', 'type', 'key', 'wait', 'ai'].includes(node.kind)) {
+        throw new RecoveryFailedError(`Kurtarma aşamasına ulaşıldı ancak kurtarma ajanı bağlı değil; “${node.title}” adımında koşu durduruldu. ${methodErrorText(error)}`)
       }
       if (unsafeReplay) ex.log('warn', 'Girdi gönderilmiş olabilir; aynı komut yeniden gönderilmeden güncel durumun toparlanması bekleniyor.')
       throw error

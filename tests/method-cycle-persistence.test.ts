@@ -5,7 +5,7 @@ import { createNode, type AgentGraph } from '../electron/graph-types'
 
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
-const base = (): Executor => ({ shouldStop: () => false, log: () => {}, step: () => {}, click: async () => {}, type: async () => {}, key: async () => {}, exists: async () => false })
+const base = (): Executor => ({ recover: async () => 'retry', shouldStop: () => false, log: () => {}, step: () => {}, click: async () => {}, type: async () => {}, key: async () => {}, exists: async () => false })
 const graph = (kind: 'click'|'type'|'key'|'condition'|'ai'): AgentGraph => {
  const start = createNode('start',0,0), loop = createNode('loop',0,0), previous = createNode('key',0,0), node = createNode(kind,0,0), end = createNode('end',0,0)
  loop.items=['a','b']; loop.members=[previous.id,node.id]; node.text='BİTTİ var mı'; node.prompt='{{öğe}}'; node.keys='ENTER'; previous.keys='previous'
@@ -26,12 +26,12 @@ it.each(['click','type','key','condition','ai'] as const)('%s: random error retr
  expect(await pending).toMatchObject({failed:0,reachedEnd:true})
  expect(seen.slice(0,3).every(value=>value.endsWith(':a'))).toBe(true);expect(seen[3].endsWith(':b')).toBe(true);expect(calls).toBe(4);expect(prior).toHaveBeenCalledTimes(2);expect(new Set(seen.slice(0,3).map(s=>s.split(':')[0]))).toEqual(new Set([node.id]));expect(statuses).not.toContain('error')
 })
-it('native uncertain delivery stays on this node without another dispatch; recovery may fail or remain undecided, then complete',async()=>{
+it('native uncertain delivery is not replayed when Recovery asks for a retry, then completes',async()=>{
  const g=graph('click'); const click=vi.fn(async()=>{throw Object.assign(Error('unknown native outcome'),{inputMayHaveBeenSent:true})});let attempts=0
- const ex=base();ex.click=click;ex.recover=async()=>{if(++attempts===1)throw Error('recovery offline');return attempts===2?undefined:'completed'}
+ const ex=base();ex.click=click;ex.recover=async()=>++attempts===1?'retry':'completed'
  const pending=runGraph(g,ex,{maxSteps:20,stepDelayMs:0,reportEnd:true})
- await vi.advanceTimersByTimeAsync(13000)
- expect(await pending).toMatchObject({failed:0,reachedEnd:true}); expect(click).toHaveBeenCalledTimes(2) // once per item, never a duplicate
+ await vi.advanceTimersByTimeAsync(7000)
+ expect(await pending).toMatchObject({failed:0,reachedEnd:true}); expect(click).toHaveBeenCalledTimes(2)
 })
 it('confirmed focus-only type progress resumes without dropping the progress checkpoint',async()=>{
  const n=createNode('type',0,0);n.text='abc';let calls=0
@@ -55,5 +55,5 @@ it('the shared method cycle retries a complete pass after arbitrary rejection va
 
 it('a valid deliberate model give-up is honored, unlike a failed model request',async()=>{
  const n=createNode('click',0,0),ex=base();ex.click=async()=>{throw Error('target missing')};ex.recover=async()=> 'stop'
- await expect(runGraph({nodes:[n],edges:[]},ex,{maxSteps:3,stepDelayMs:0})).rejects.toThrow('Model bilinçli olarak vazgeçti')
+ await expect(runGraph({nodes:[n],edges:[]},ex,{maxSteps:3,stepDelayMs:0})).rejects.toThrow('Kurtarma ajanı bilinçli olarak vazgeçti')
 })

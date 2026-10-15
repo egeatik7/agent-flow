@@ -21,7 +21,12 @@ export async function repeatMethodCycle<T>(attempt: (round: number) => Promise<T
 }
 export const methodErrorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
-/** A valid, intentional model decision; never synthesized from a technical error. */
+/** Only an explicit recovery-agent stop decision; never a target/Yap rejection. */
 export class DeliberateStopError extends Error {
   readonly deliberateStop = true
 }
+
+/** A normal task agent could not finish; the runner must offer this to Recovery. */
+export class TaskNeedsRecoveryError extends Error {}
+/** Recovery was reached but disabled/unavailable, or exhausted its own limits. */
+export class RecoveryFailedError extends Error {}

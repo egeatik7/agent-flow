@@ -62,10 +62,10 @@ it('preserves priority: if the model list precedes direct OCR, it gets the fallb
   expect(h.calls.filter(c => c === 'list')).toEqual(['list'])
   expect(h.calls.filter(c => c === 'visual')).toEqual(['visual'])
 })
-it('disabled UIA and OCR stages stay disabled while a fresh cycle waits for Stop', async () => {
+it('disabled UIA and OCR stages stay disabled when the pass returns to Recovery', async () => {
   h.stopOnRetry = true
   h.items = [uia, ocr]
-  await expect(make({ findOff: ['uia', 'windows', 'list'] }).executor.click(click(), 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
+  await expect(make({ findOff: ['uia', 'windows', 'list'] }).executor.click(click(), 1)).rejects.toThrow('Görsel onay ve kalan yöntemler sonuç vermedi')
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
   expect(h.calls.filter(c => c === 'visual')).toHaveLength(1)
 })
@@ -108,10 +108,10 @@ it('Type visual targets use the same pointer gate, then write only after success
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(1)
   expect(h.calls.indexOf('write')).toBeGreaterThan(h.calls.findIndex(c => c.startsWith('direct:')))
 })
-it('Type keeps retrying without text when every allowed method fails', async () => {
+it('Type returns to Recovery without writing when every allowed method fails', async () => {
   h.stopOnRetry = true
   const n = { ...createNode('type', 0, 0), prompt: '“İzlemeyi başlat”', text: 'hello' }
-  await expect(make().executor.type(n, 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
+  await expect(make().executor.type(n, 1)).rejects.toThrow('kurtarma gerekiyor')
   expect(h.calls).not.toContain('write')
 })
 it('a native click error cannot be caught as a safe unsent visual rejection', async () => {
@@ -136,18 +136,18 @@ it('move-only and read-only preview keep their existing no-click behavior', asyn
   await make().previewTarget(click())
   expect(h.calls).toEqual(['visual'])
 })
-it('method exhaustion starts a fresh pass on the same item, rather than skipping the item', async () => {
+it('method exhaustion stops explicitly without Recovery, preserving the current item', async () => {
   h.stopOnRetry = true
   const start = createNode('start',0,0),loop=createNode('loop',0,0),n=click()
   loop.items=['02','03'];loop.members=[n.id]
-  await expect(runGraph({nodes:[start,loop,n],edges:[{id:'a',from:start.id,fromPort:'next',to:loop.id}]},make().executor,{maxSteps:100,stepDelayMs:0})).rejects.toThrow('Kullanıcı tarafından durduruldu')
+  await expect(runGraph({nodes:[start,loop,n],edges:[{id:'a',from:start.id,fromPort:'next',to:loop.id}]},make().executor,{maxSteps:100,stepDelayMs:0})).rejects.toThrow('Kurtarma aşamasına ulaşıldı')
   expect(loop.startIndex).toBe(0);expect(h.logs.some(l=>l.includes('2/2: 03'))).toBe(false)
 })
 it('legacy stall lookFor does not replace the original command or its constraints', async () => {
   h.stopOnRetry = true
   h.plan = { action: 'continue', waitMs: 0, lookFor: 'Other target', reason: 'try other' }
   h.items = [{ ...ocr, text: 'Other target' }]
-  await expect(make({ findOrder: ['windows'] }).executor.click(click(), 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
+  await expect(make({ findOrder: ['windows'] }).executor.click(click(), 1)).rejects.toThrow('ekranda bulunamadı')
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
 })
 

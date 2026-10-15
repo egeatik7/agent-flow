@@ -1,5 +1,7 @@
 # Israrcı yöntem döngüsü — 1.9.142 / c19df8d
 
+> Tarihsel 1.9.142 raporudur. Hedef seçici/Yap vazgeçmesi ve kurtarma kapalıyken bekleme davranışı artık geçerli değildir. Güncel sözleşme: [Kurtarma devri](kurtarma-devri-145.md).
+
 Bu paket, önceki `nubbo-model-cevap-bekleme-142.patch` yaklaşımının yerine geçer. Önceki paketle üst üste bağımsız tekrar döngüleri bırakılmamalıdır.
 
 ## Çalışma davranışı

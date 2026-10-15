@@ -80,7 +80,7 @@ const names: Record<string, string> = { screen_read: 'screen.read', flow_read: '
 
 export async function runRecovery(request: RecoveryRequest, deps: Dependencies): Promise<{ decision: RecoveryDecision; report?: RecoveryReport }> {
   const settings = recoverySettings(deps.settings)
-  if (!settings.enabled) return { decision: undefined }
+  if (!settings.enabled) return { decision: 'disabled' }
   const startedAt = Date.now()
   const context = contextOf(request.graph, request.node.id)
   const report: RecoveryReport = {
@@ -207,12 +207,12 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
       for (const old of frames.slice(0, -2)) old.content = '[Önceki ekran görüntüsü; yazılı gözlemi araç cevabında.]'
     }
     report.summary = 'Kurtarma ajanının araç/adım sınırı doldu.'
-    return { decision: 'stop', report }
+    return { decision: 'failed', report }
   } catch (error) {
     report.result = deps.shouldStop() ? 'stopped' : 'failed'
     report.summary = deps.shouldStop() ? 'Kullanıcı durdurdu.' : Date.now() >= deadline ? 'Kurtarma süresi doldu.' : `Kurtarma çağrısı başarısız: ${(error as Error).message}`
     if (deps.shouldStop()) throw new StoppedError()
-    return { decision: 'stop', report }
+    return { decision: 'failed', report }
   } finally {
     report.endedAt = Date.now()
     if (modelsUsed.length) report.modelsUsed = modelsUsed

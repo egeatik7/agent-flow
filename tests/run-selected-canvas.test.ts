@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createNode, DEFAULT_SETTINGS, normalizeCanvasBook, type AgentGraph, type AgentNode, type CanvasBook } from '../electron/graph-types'
-import { runGraph, StoppedError, type Executor } from '../electron/runner'
+import { runGraph, StoppedError, type Executor, type RecoveryDecision } from '../electron/runner'
 import Toolbar from '../src/components/Toolbar'
 import NodeCanvas from '../src/components/NodeCanvas'
 import CanvasTabs from '../src/components/CanvasTabs'
@@ -36,6 +36,7 @@ let stopped = false
 let onPatch = (_p: unknown) => {}
 let onStep = (_p: unknown) => {}
 let onEdge = (_p: unknown) => {}
+let recoveryDecision: RecoveryDecision = 'disabled'
 let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
 let onCloseRequested = (_id: unknown) => {}
 const activeTestRuns = new Set<{stop:boolean}>()
@@ -76,6 +77,7 @@ const api = {
     }
     const ex: Executor = {
       log: () => {}, step: (id, status) => onStep({ id, status }), edge: (id, from, to) => onEdge({ id, from, to }), shouldStop: () => stopped || currentRun.stop,
+      recover: async () => recoveryDecision,
       click: record, type: record, key: record, exists: async () => true,
       patchNode: (id, patch) => onPatch({ id, patch }),
     }
@@ -113,6 +115,7 @@ afterEach(() => {
   executed.length = 0
   dispatched.length = 0
   stopped = false
+  recoveryDecision = 'disabled'
   beforeAction = undefined
   lastSaved = undefined
   failPersistence = false
@@ -439,14 +442,14 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(dispatched).toHaveLength(1)
     expect(r.root.findByType(Toolbar).props.running).toBe(false)
   })
-  it('a technical error stays running on the same canvas without launching the right canvas', async () => {
+  it('a technical error stops on the same canvas when Recovery is disabled, without launching the right canvas', async () => {
     const s = scenario(), r = await mount()
     await select(r, s.path, s.selected.id)
     beforeAction = async () => { throw new Error('desktop action failed') }
     await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
     expect(executed).toEqual(['SELECTED {{öğe}}'])
     expect(dispatched).toHaveLength(1)
-    expect(r.root.findByType(Toolbar).props.running).toBe(true)
+    expect(r.root.findByType(Toolbar).props.running).toBe(false)
   })
   it('keeps live and stopped highlights through three package views', async () => {
     const s = scenario(3), r = await mount()
@@ -490,15 +493,16 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(r.root.findByType(NodeCanvas).props.highlightedNodeIds).toEqual([s.selected.id])
     expect(r.root.findByType(NodeCanvas).props.running).toBe(false)
   })
-  it('a nested technical failure keeps the same run active instead of completing the canvas',async()=>{
+  it('a nested technical failure with disabled Recovery stops without completing the canvas',async()=>{
     const s=scenario(3),r=await mount()
     beforeAction=async node=>{if(node.id===s.selected.id)throw Error('nested desktop failure')}
     await act(async()=>{r.root.findByType(Toolbar).props.onRun();await Promise.resolve()})
-    expect(r.root.findByType(NodeCanvas).props.runPhase).toBe('running')
-    expect(r.root.findByType(Toolbar).props.running).toBe(true)
+    expect(r.root.findByType(NodeCanvas).props.runPhase).toBe('stopped')
+    expect(r.root.findByType(Toolbar).props.running).toBe(false)
     expect(dispatched).toHaveLength(1)
   })
-  it('retries the failed member on the same item before completing the next item and End', async () => {
+  it('retries the failed member on the same item after Recovery requests retry, then completes the next item and End', async () => {
+    recoveryDecision = 'retry'
     const start = createNode('start', 0, 0), write = task('loop member'), end = createNode('end', 900, 0)
     const loop = { ...createNode('loop', 200, 0), items: ['one', 'two'], members: [write.id] }
     book = withZipFixture(normalizeCanvasBook({ activeId: 'active', tabs: [{ id: 'active', name: 'Active', graph: {
