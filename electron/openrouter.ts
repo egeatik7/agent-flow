@@ -109,18 +109,32 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
   const chain = asModelChain(args.models)
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
   let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
+  // Within this Yap pass all remote rows share this OpenRouter account; local rows are independent.
+  let rejectedRemoteAccount: FatalApiError | undefined
   for (const model of chain) {
     for (let outputAttempt = 0; outputAttempt < (args.stage === 'yap' ? 1 : 2); outputAttempt++) {
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
       try {
         const target = args.allowLocal ? targetFor(model, runtime) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+        if (args.stage === 'yap' && !target.local && rejectedRemoteAccount) throw rejectedRemoteAccount
         chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
         if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
-        if (target.local && args.messages.some(m => Array.isArray(m.content)) && !runtime.vision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+        const hasImages = args.messages.some(m => Array.isArray(m.content) && m.content.some(p => (p as {type?:string}|null)?.type === 'image_url'))
+        let messages = args.messages
+        if (target.local && hasImages && !runtime.vision) {
+          if (args.stage !== 'yap') throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+          // Adapt a COPY for this target only. Remote/vision backups still receive original screenshots.
+          messages = args.messages.map(message => {
+            if (!Array.isArray(message.content)) return message
+            const parts = message.content.filter(p => (p as {type?:string}|null)?.type !== 'image_url')
+            return {...message,content:parts.length ? parts : 'Görüntü yerel model ayarı nedeniyle gönderilmedi; ekran okumasının metin sonucunu kullan.'}
+          })
+          chatLogger?.(`YAP-MODALITE model=${model} goruntu=0 neden=yerel-goruntu-kapali metin=korundu`)
+        }
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
-          body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
+          body: JSON.stringify({ model: target.model, messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
         }, Math.min(target.local && args.stage === 'yap' ? runtime.timeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
         if (args.shouldStop() || stopCheck()) throw new StoppedError()
         if (!res.ok) {
@@ -157,18 +171,21 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
             if (spec?.enum && !spec.enum.includes(val)) throw new ModelOutputRejected(`Araç yanıtında geçersiz değer: ${key}`)
           }
         }
+        const text = m.content == null ? null : responseText(m.content)
+        if (args.stage === 'yap' && !m.tool_calls?.length && !text?.trim()) throw new ModelOutputRejected('Yap modelinin metni ve araç çağrısı boş; sıradaki model denenecek.')
         reportIn(target.local, JSON.stringify({ content: m.content, tool_calls: m.tool_calls, usage: data.usage }))
         const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
         const answered = typeof data.model === 'string' && data.model ? data.model : model
         chatLogger?.(`CEVAPLAYAN asama=${args.stage ?? 'recovery'} model=${answered}`)
         chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
-        return { role: 'assistant', content: m.content == null ? null : responseText(m.content),
+        return { role: 'assistant', content: text,
           ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
           ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
           model: answered,
           ...(billed && (billed.total_tokens || typeof billed.cost === 'number') ? { usage: billed } : {}) }
       } catch (error) {
-        if (error instanceof StoppedError || error instanceof FatalApiError) throw error
+        if (error instanceof StoppedError || error instanceof FatalApiError && args.stage !== 'yap') throw error
+        if (error instanceof FatalApiError && args.stage === 'yap') rejectedRemoteAccount = error
         if (error instanceof ModelOutputRejected && outputAttempt === 0 && args.stage !== 'yap') {
           chatLogger?.(`CIKTI-TEKRAR asama=${args.stage ?? 'recovery'} model=${model} deneme=2/2 neden=${brief(error)}`)
           continue

@@ -49,7 +49,7 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
   let actionStarted = false
   const execute: ReturnType<Deps['makeExecute']> = async (name, args) => {
     // A failed tool or exhausted task must not make the runner replay prior actions.
-    if (!['screen.read', 'flow.read', 'flow.context', 'window_list', 'system_info', 'file_list'].includes(name)) actionStarted = true
+    if (!['screen.read', 'flow.read', 'flow.context', 'window_list', 'system_info', 'file_list', 'act.wait'].includes(name)) actionStarted = true
     return dispatch(name, args)
   }
   const markFailure = (error: unknown): never => {
@@ -59,6 +59,8 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
   }
   const tools = yapTools(node.allowCode !== false)
   let observed = false
+  // Technical retries replace this one ephemeral observation; action/tool history remains intact.
+  let retryObservation: ToolMessage | undefined
   const messages: ToolMessage[] = [{ role: 'system', content: deps.system?.trim() || YAP_PROMPT }, { role: 'user', content: JSON.stringify({ task: node.prompt, context }, (key, value) => ['icon', 'patch', 'sig', 'path', 'trace'].includes(key) ? undefined : value) }]
   const maxTurns = Math.max(budget * 4, 40)
   for (let used = 0, turns = 0; used < budget && turns < maxTurns; turns++) {
@@ -77,7 +79,10 @@ export async function runYap(node: AgentNode, context: unknown, deps: Deps): Pro
             if (data) delete data.image
             const { data: _previousData, ...details } = fresh
             const text = JSON.stringify({ currentObservation: { ...details, ...(data ? { data } : {}) } }).slice(0, 30_000)
-            messages.push(image?.data ? { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: `data:${image.mime || 'image/png'};base64,${image.data}` } }] } : { role: 'user', content: text })
+            const previous = retryObservation ? messages.indexOf(retryObservation) : -1
+            if (previous >= 0) messages.splice(previous, 1)
+            retryObservation = image?.data ? { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: `data:${image.mime || 'image/png'};base64,${image.data}` } }] } : { role: 'user', content: text }
+            messages.push(retryObservation)
             const frames = messages.filter(m => Array.isArray(m.content))
             for (const frame of frames.slice(0, -2)) frame.content = '[Eski ekran gözlemi.]'
             observed = fresh.ok && fresh.outcome === 'tamam'
