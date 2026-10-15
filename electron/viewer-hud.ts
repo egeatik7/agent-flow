@@ -8,7 +8,7 @@ export function emptyViewerHud(): ViewerHud {
 
 /** The same reducer drives live events and reconnect snapshots. */
 export function updateViewerHud(current: ViewerHud | undefined, channel: string, payload: unknown): ViewerHud | undefined {
-  const value = payload as { text?: unknown; level?: unknown; active?: unknown; nodeTitle?: unknown; message?: unknown; kart?: unknown } | null
+  const value = payload as { text?: unknown; level?: unknown; active?: unknown; nodeTitle?: unknown; message?: unknown; kart?: unknown; loops?: unknown } | null
   if (!value || typeof value !== 'object') return
   const next = { ...(current ?? emptyViewerHud()) }
   if (channel === 'hud:status') {
@@ -18,6 +18,12 @@ export function updateViewerHud(current: ViewerHud | undefined, channel: string,
   } else if (channel === 'hud:loop' || channel === 'hud:method' || channel === 'hud:countdown' || channel === 'hud:stages') {
     if (typeof value.text !== 'string') return
     next[channel.slice(4) as 'loop' | 'method' | 'countdown' | 'stages'] = value.text.trim()
+  } else if (channel === 'hud:loops') {
+    if (!Array.isArray(value.loops)) return
+    next.loops = value.loops.filter((loop): loop is import('./runner').LoopProgress =>
+      !!loop && typeof loop === 'object' && typeof loop.id === 'string' && typeof loop.title === 'string' &&
+      Number.isInteger(loop.index) && Number.isInteger(loop.total) && loop.index > 0 && loop.index <= loop.total && typeof loop.item === 'string'
+    ).map(loop => ({ ...loop }))
   } else if (channel === 'hud:context') {
     // Bağlam ölçümü NESNE olarak taşınır (masaüstü kartının aynısı); `null` = ölçüm temizlendi.
     const kart = value.kart

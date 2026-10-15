@@ -95,3 +95,15 @@
 .viewer-phone-card .viewer-hud-baglam-ana { font-size:clamp(17px,4.8vw,24px); }
 .viewer-phone-card .viewer-hud-baglam-satir { font-size:clamp(13px,3.6vw,18px); }
 @media(orientation:landscape) { .viewer-phone-card .viewer-hud-content { display:flex; } .viewer-phone-card .viewer-hud-mascot { max-height:23dvh; } }
+
+/* Panels keep their natural height. The page scrolls; flex must not crush memory into a strip. */
+.viewer-hud-content > * { flex-shrink:0; min-width:0; }
+.viewer-hud-bellek, .viewer-phone-card .viewer-hud-bellek { max-height:none; overflow:visible; text-align:left; }
+.viewer-hud-bellek h2, .viewer-hud-loops h2 { margin:0 0 12px; font-size:19px; color:#17498b; }
+.viewer-hud-loops { width:100%; max-width:1000px; box-sizing:border-box; padding:14px; border:2px solid #7f9db9; border-radius:5px; background:#fffef5; box-shadow:2px 3px 0 #aca899; overflow-wrap:anywhere; }
+.viewer-hud-loops ol { list-style:none; padding:0; margin:0; }
+.viewer-hud-loops li { padding:10px 0; border-top:1px solid #c9d2dd; }
+.viewer-hud-loops li > div { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.viewer-loop-position { flex-shrink:0; font-weight:bold; color:#17498b; font-variant-numeric:tabular-nums; }
+.viewer-hud-loops p { margin:5px 0 0; font-size:15px; line-height:1.45; }
+@media(orientation:landscape) { .viewer-hud-loops { grid-column:2; } }

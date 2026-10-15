@@ -45,6 +45,8 @@ export type RecoveryRequest = {
 
 export type RecoveryDecision = 'retry' | 'completed' | 'stop' | undefined
 
+export type LoopProgress = { id: string; title: string; index: number; total: number; item: string }
+
 export type Executor = {
   /** Runs only at a failed action boundary; the existing loop stack remains paused. */
   recover?: (request: RecoveryRequest) => Promise<RecoveryDecision>
@@ -69,6 +71,7 @@ export type Executor = {
   captureFailure?: (label: string) => Promise<void>
   /** The loop item the current node is inside. Empty when the node is not in a loop. */
   setLoop?: (text: string) => void
+  setLoopProgress?: (loops: LoopProgress[]) => void
 }
 
 export class StoppedError extends Error {
@@ -188,6 +191,8 @@ export async function runGraph(
     tally?: Tally
     /** Variables the run starts with. A package gets those of the loop lap it runs in. */
     vars?: Record<string, string>
+    /** Runtime telemetry inherited through packages; never saved in graph JSON. */
+    loopProgress?: LoopProgress[]
   }
 ): Promise<RunSummary> {
   // Non-UI/tool callers receive the same structural rejection before execution.
@@ -244,6 +249,10 @@ export async function runGraph(
   // Take them from the loop outside that package: its ticked row, or the lap the run was on.
   const host = !opts.vars && graph !== root ? packageHost(root, graph) : undefined
   let vars: Record<string, string> = opts.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
+  const inheritedLoops = opts.loopProgress ?? []
+  const liveLoops: LoopProgress[] = []
+  const publishLoops = () => ex.setLoopProgress?.([...inheritedLoops, ...liveLoops].map(loop => ({ ...loop })))
+  publishLoops()
   const loopNotes: string[] = []
   const tally: Tally = opts.tally ?? newTally()
   const warnedLeave = new Set<string>()
@@ -359,7 +368,7 @@ export async function runGraph(
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        const result = await runGraph(inner, ex, { packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars })
+        const result = await runGraph(inner, ex, { packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
         if (result.incomplete) incomplete = true
         if (node.packageExit && !result.packageExitReached) {
           incomplete = true
@@ -609,6 +618,7 @@ export async function runGraph(
     let succeeded = 0
     const failedItems: string[] = []
     loopNotes.push('')
+    liveLoops.push({ id: loop.id, title: loop.title, index: 0, total: keys.length, item: '' })
     // Bir tur açıkken adım hataları ÖĞE hatası olarak sayılır (aşağıdaki catch): aynı hata
     // runGraph'un çıkışında bir kez daha "adım hatası" diye sayılmasın.
     tally.loopDepth++
@@ -617,6 +627,8 @@ export async function runGraph(
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
+        liveLoops[liveLoops.length - 1] = { id: loop.id, title: loop.title, index: idx + 1, total: keys.length, item: label }
+        publishLoops()
         patch(loop.id, { loopIndex: idx, startIndex: idx })
         loopNotes[loopNotes.length - 1] = isList ? `${loop.title} ${idx + 1}/${keys.length} · ${label}` : `${loop.title} ${idx + 1}/${keys.length}. tur`
         // Kart: iç/dış döngü konumu tek satırda ve OKUNUR (1.9.120). Uzun " · " ayırıcısı kartta taşıyordu;
@@ -656,6 +668,8 @@ export async function runGraph(
         entry = undefined
       }
     } finally {
+      liveLoops.pop()
+      publishLoops()
       loopNotes.pop()
       ex.setLoop?.(loopNotes.join('   ·   '))
       vars = outer

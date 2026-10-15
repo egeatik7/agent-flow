@@ -23,13 +23,21 @@ export default function ViewerHudScreen(p: { hud?: ViewerHud; connected: boolean
     <div className="viewer-hud-content">
       <img className="viewer-hud-mascot" src={mascot} alt="" draggable={false}/>
       <div className={`viewer-hud-card ${hud.level}`}><h1>Nubbo</h1><p className="viewer-hud-text">{hud.text}</p>{hud.countdown && <p className="viewer-hud-countdown" role="timer">{hud.countdown}</p>}{hud.stages && <p className="viewer-hud-stages">{hud.stages}</p>}</div>
-      <div className="viewer-hud-details">{(hud.method || hud.recovering) && <p>{hud.recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : hud.method}</p>}{hud.loop && <p>{hud.loop}</p>}</div>
+      <div className="viewer-hud-details">{(hud.method || hud.recovering) && <p>{hud.recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : hud.method}</p>}{!hud.loops && hud.loop && <p>{hud.loop}</p>}</div>
+      <section className="viewer-hud-loops" aria-label="Aktif döngüler">
+        <h2>Aktif döngüler</h2>
+        {hud.loops?.length ? <ol>{hud.loops.map((loop, depth) => <li key={`${depth}:${loop.id}`}>
+          <div><strong>{loop.title}</strong><span className="viewer-loop-position">{loop.index} / {loop.total}</span></div>
+          <p>{loop.item}</p>
+        </li>)}</ol> : <p>{hud.loops ? 'Bu düğüm bir döngünün içinde değil.' : hud.loop || 'Döngü bilgisi bekleniyor.'}</p>}
+      </section>
       {/*
         CANLI BELLEK GÖSTERGESİ (1.9.130): masaüstü kartıyla AYNI nesne. Kısa bölüm iki satırdır;
         GPU/süreç ayrıntıları ve kullanıcı açıklamaları bloğun içinde kaydırılır. Kart hiçbir şeyi
         temizlemez; ölçüm yoksa "bilinmiyor", eskiyse "eski ölçüm" yazar.
       */}
       {hud.bellek && <div className={`viewer-hud-bellek${hud.bellek.daraliyor ? ' daraliyor' : ''}${hud.bellek.eski ? ' eski' : ''}`} role="status" aria-label="Canlı bellek ölçümü">
+        <h2>Bilgisayar belleği</h2>
         <p className="viewer-hud-bellek-ana">{hud.bellek.ramVram}</p>
         <p className="viewer-hud-bellek-ana">{hud.bellek.butce}</p>
         {hud.bellek.gpuSatirlari.map((satir) => <p key={satir} className="viewer-hud-bellek-satir">{satir}</p>)}

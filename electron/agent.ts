@@ -60,6 +60,7 @@ export type AgentContext = {
   settings: () => AppSettings
   shouldStop: () => boolean
   setLoop?: (text: string) => void
+  setLoopProgress?: Executor['setLoopProgress']
   setMethod?: (text: string) => void
   /**
    * Hands the error screenshot's path to the tool layer as data, when one was written. An empty
@@ -1351,6 +1352,7 @@ export function createAgent(ctx: AgentContext) {
     patchNode: (id, patch) => send('agent:patch', { id, patch }),
     shouldStop: stopped,
     setLoop: (text) => ctx.setLoop?.(text),
+    setLoopProgress: (loops) => ctx.setLoopProgress?.(loops),
     click: async (node, stepNo, ahead) => {
       inputSent = false
       try {

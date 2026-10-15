@@ -129,6 +129,10 @@ async function phoneHtml(): Promise<string> {
   let t: ReactTestRenderer
   const hud = {
     level: 'info' as const, text: 'PC bilgi kartı', loop: 'Modeller · 3/12', method: 'Windows OCR',
+    loops: [
+      { id: 'outer', title: 'Gruplar', index: 2, total: 4, item: '02' },
+      { id: 'inner', title: 'Dosyalar', index: 7, total: 20, item: 'MetalTongs.glb' },
+    ],
     countdown: 'Model cevabı · qwen3.5-64k:latest · 1,4 sn', recovering: false,
     stages: 'OCR + liste · 147 aday 1,2 sn · Model · qwen3.5-64k:latest 3,1 sn',
     bellek: bellekFixture(), baglam: baglamFixture(),
@@ -289,14 +293,25 @@ describe('kart taşma denetimi — GERÇEK tarayıcı düzeni', () => {
     const html = await phoneHtml()
     htmlKaydi.telefon = html
     expect(html).toContain('RAM 12,1 / 15,8 GB · VRAM 9,2 / 12,0 GB')
+    expect(html).toContain('Gruplar')
+    expect(html).toContain('Dosyalar')
+    expect(html).toContain('2 / 4')
+    expect(html).toContain('7 / 20')
     const olcum = await tarayicidaOlc(html, 390, 844, 'telefon 390x844', '.viewer-hud-screen')
     raporlar.push(olcum)
     expect(olcum.kartDisi, `kart dışına taşan kutular: ${JSON.stringify(olcum.kartDisi)}`).toEqual([])
     expect(olcum.kesilenMetin, `kırpılan ölçüm satırları: ${JSON.stringify(olcum.kesilenMetin)}`).toEqual([])
     expect(olcum.onemli.length).toBe(2)
     for (const s of olcum.onemli) expect(s.gorunur, `görünmeyen satır: ${s.metin}`).toBe(true)
-    // Telefonun bellek bloğu SINIRLI yüksekliktedir: uzun ayrıntı listesi ekranı yutmaz.
+    // Bellek paneli içeriği kadar yüksektir; satırlar iç kaydırmayla kırpılmaz. Sayfa kayar.
     const bellek = olcum.olculer.find((o) => o.ad === '.viewer-hud-bellek')!
-    expect(bellek.yukseklik, `telefon bellek bloğu: ${JSON.stringify(olcum.olculer)}`).toBeLessThanOrEqual(Math.round(844 * 0.34) + 2)
+    expect(bellek.icerikYuksekligi, `telefon bellek satırları kırpıldı: ${JSON.stringify(bellek)}`).toBeLessThanOrEqual(bellek.yukseklik + 1)
+    expect(bellek.yukseklik, `telefon bellek paneli ezildi: ${JSON.stringify(bellek)}`).toBeGreaterThan(Math.round(844 * 0.34))
+    const yatay = await tarayicidaOlc(html, 844, 390, 'telefon yatay 844x390', '.viewer-hud-screen')
+    raporlar.push(yatay)
+    expect(yatay.kartDisi, `yatay kart dışına taşan kutular: ${JSON.stringify(yatay.kartDisi)}`).toEqual([])
+    expect(yatay.kesilenMetin, `yatay kırpılan ölçüm satırları: ${JSON.stringify(yatay.kesilenMetin)}`).toEqual([])
+    const yatayBellek = yatay.olculer.find((o) => o.ad === '.viewer-hud-bellek')!
+    expect(yatayBellek.icerikYuksekligi, `yatay bellek satırları kırpıldı: ${JSON.stringify(yatayBellek)}`).toBeLessThanOrEqual(yatayBellek.yukseklik + 1)
   }, 120000)
 })

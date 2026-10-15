@@ -402,6 +402,7 @@ const agent = createAgent({
   settings: () => (fastRun ? withFastFind(getSettings()) : getSettings()),
   shouldStop: () => stopRequested || recoveryAbort(),
   setLoop: (text) => pushLoop(text),
+  setLoopProgress: (loops) => viewerState.event('hud:loops', { loops }),
   setMethod: (text) => pushMethod(text),
   // The screenshot writer hands its path over as data; nothing has to be read out of a log line.
   noteFailureShot: (file: string) => noteFailureShot(file),
