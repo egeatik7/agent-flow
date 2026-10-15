@@ -41,10 +41,7 @@ it('GÖRÜNTÜSÜZ istekte aynı küçük numara reddedilir (rozet çözümlemes
   const satirlar: string[] = []
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
-  const secim = await sor(tarama(null))
-  expect(secim.id).toBeNull()
-  expect(secim.rejected).toBe('absent')
-  expect(secim.rawId).toBe(36)
+  await expect(sor(tarama(null))).rejects.toThrow('id=36')
   expect(satirlar.some((s) => s.startsWith('GORUNTU-ROZETI'))).toBe(false)
   setChatLogger(null)
 })
@@ -54,9 +51,7 @@ it('PLAIN (numarasız) görüntüde de reddedilir: çözümleme yalnız marked g
   const satirlar: string[] = []
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
-  const secim = await sor(tarama(false))
-  expect(secim.id).toBeNull()
-  expect(secim.rejected).toBe('absent')
+  await expect(sor(tarama(false))).rejects.toThrow('id=36')
   setChatLogger(null)
 })
 
@@ -65,12 +60,10 @@ it('MARKED görüntüde rozet numarası doğru OCR SATIRINA çözülür ve kelim
   const satirlar: string[] = []
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
-  const secim = await sor(tarama(true))
+  await expect(sor(tarama(true))).rejects.toThrow('MODEL_TARGET_REJECTED')
   // The badge number matches the row, but the model's text does not match the OCR line.
   // A contradiction does not click; the word-box helper below is unchanged.
-  expect(secim.id).toBeNull()
-  expect(secim.badgeResolved).toBeUndefined()
-  expect(secim.rejected).toBe('contradicts')
+
   expect(satirlar.some((s) => s.startsWith('CELISKI'))).toBe(true)
   // Kelime kutusuna gidiş: kısa ikinci seçim bir kelime indeksi seçtiğinde tıklama GERÇEK kelime kutusudur
   // (satır merkezi DEĞİL) — refineWordTarget kelimenin kendi dikdörtgenini verir.
@@ -106,10 +99,7 @@ it('rozetten cozulen secim badgeResolved tasir ve kelime indeksi VERILMEZ', asyn
   const satirlar: string[] = []
   setChatLogger((s) => satirlar.push(s))
   yanit(36)
-  const secim = await sor(tarama(true))
-  expect(secim.badgeResolved).toBeUndefined()
-  expect(secim.wordIndex).toBeUndefined()
-  expect(secim.rejected).toBe('contradicts')
+  await expect(sor(tarama(true))).rejects.toThrow('MODEL_TARGET_REJECTED')
   expect(satirlar.some((s) => s.startsWith('CELISKI'))).toBe(true)
   setChatLogger(null)
 })

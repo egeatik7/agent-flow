@@ -115,5 +115,5 @@ it('bakiye hatası aynı isteği yeniden göndermez ve reasoning hatasıyla kar�
     return { ok: false, status: 402, text: async () => JSON.stringify({ error: { message: 'Insufficient credits. This request requires more credits.', code: 402 } }) }
   }))
   await expect(chooseOcrWord({ apiKey: 'k', model: ['A', 'B'], scan, parentId: 1, prompt: 'Blender' })).rejects.toBeInstanceOf(FatalApiError)
-  expect(calls).toBe(1)
+  expect(calls).toBe(2)
 })

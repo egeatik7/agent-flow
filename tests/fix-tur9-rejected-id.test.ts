@@ -25,20 +25,13 @@ async function sec(scan: unknown, modelReply: unknown) {
 describe('reddedilen model numarası artık sebebiyle raporlanır', () => {
   it('listede olmayan numara: rejected=absent ve rawId korunur', async () => {
     const scan = scanWith([{ id: 10, text: 'Anvil.glb' }, { id: 11, text: 'Kaydet' }])
-    const choice = await sec(scan, { id: 179, text: 'User Perspective', reason: 'sol üst' })
-    expect(choice.id).toBeNull()
-    expect(choice.rejected).toBe('absent')
-    expect(choice.rawId).toBe(179)
-    expect(choice.text).toBe('User Perspective')
+    await expect(sec(scan, {id:179,text:'User Perspective'})).rejects.toThrow('id=179')
   })
 
   it('tıklanabilir olmayan aday (context-only) ayrı sebeple bildirilir', async () => {
     // Çok kelimeli ve KELİME GEOMETRİSİ OLMAYAN OCR öğesi aday listesinde "context-only" olur.
     const scan = scanWith([{ id: 20, text: 'User Perspective', src: 'ocr' }])
-    const choice = await sec(scan, { id: 20, text: 'User Perspective', reason: 'başlık' })
-    expect(choice.id).toBeNull()
-    expect(choice.rejected).toBe('not-selectable')
-    expect(choice.rawId).toBe(20)
+    await expect(sec(scan, {id:20,text:'User Perspective'})).rejects.toThrow('id=20')
   })
 
   it('geçerli OCR kelime numarası eskisi gibi çözülür (regresyon yok)', async () => {

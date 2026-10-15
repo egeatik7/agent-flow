@@ -12,13 +12,13 @@ it('a corrected second output is accepted without trying a backup', async () => 
   await expect(runModelChain(['A', 'B'], async () => { if (++calls === 1) throw new ModelOutputRejected('bad JSON'); return 'valid' }, 0)).resolves.toBe('valid')
   expect(calls).toBe(2)
 })
-it('configuration errors skip directly to a backup; credit failure does not retry', async () => {
+it('configuration errors skip directly to a backup; credit failure advances the finite model alternatives', async () => {
   const calls: string[] = []
   expect(await runModelChain(['A', 'B'], async model => { calls.push(model); if (model === 'A') throw new ModelRejected('disabled'); return 'ok' }, 0)).toBe('ok')
   expect(calls).toEqual(['A', 'B'])
   const fatal = vi.fn(async () => { throw new FatalApiError('HTTP 402') })
   await expect(runModelChain(['A', 'B'], fatal, 0)).rejects.toThrow('402')
-  expect(fatal).toHaveBeenCalledTimes(1)
+  expect(fatal).toHaveBeenCalledTimes(2)
 })
 it('Stop after the rejected first output prevents the extra attempt', async () => {
   let stopped = false; setStopCheck(() => stopped)

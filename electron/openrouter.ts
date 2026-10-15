@@ -15,7 +15,7 @@ import { StoppedError } from './runner'
 import type { VisualPointerDecision } from './visual-hover'
 import { VISUAL_POINTER_PROMPT, VISUAL_POINTER_JSON_CONTRACT, VISUAL_POINTER_TARS_CONTRACT } from './llm-flow'
 
-/** A model request that has not answered by then is abandoned (and retried once). */
+/** Per-request timeout; failed requests retry without ending the node. */
 const REQUEST_TIMEOUT_MS = 90000
 
 let stopCheck: () => boolean = () => false
@@ -82,7 +82,7 @@ export type ToolMessage = {
 }
 
 /** A bounded tool-calling turn. Model fallback happens before any action is executed. */
-export async function recoveryToolTurn(args: {
+type RecoveryTurnArgs = {
   allowLocal?: boolean
   apiKey: string
   models: string[]
@@ -93,13 +93,23 @@ export async function recoveryToolTurn(args: {
   stage?: string
   revision?: number
   chainSource?: string
-}): Promise<ToolMessage> {
+}
+
+export async function recoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
+  // Return after one finite model-method pass. Yap owns the next pass and must
+  // be able to refresh its screen before asking again.
+  return boundedRecoveryToolTurn(args.stage === 'yap' ? {
+    ...args, timeoutMs: Math.max(REQUEST_TIMEOUT_MS, localTimeoutMs) * Math.max(1, asModelChain(args.models).length),
+  } : args)
+}
+
+async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
   const deadline = Date.now() + args.timeoutMs
   const chain = asModelChain(args.models)
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
   let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
   for (const model of chain) {
-    for (let outputAttempt = 0; outputAttempt < 2; outputAttempt++) {
+    for (let outputAttempt = 0; outputAttempt < (args.stage === 'yap' ? 1 : 2); outputAttempt++) {
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
       try {
@@ -110,7 +120,7 @@ export async function recoveryToolTurn(args: {
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
           body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
-        }, Math.min(REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+        }, Math.min(target.local && args.stage === 'yap' ? localTimeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
         if (args.shouldStop() || stopCheck()) throw new StoppedError()
         if (!res.ok) {
           chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
@@ -158,7 +168,7 @@ export async function recoveryToolTurn(args: {
           ...(billed && (billed.total_tokens || typeof billed.cost === 'number') ? { usage: billed } : {}) }
       } catch (error) {
         if (error instanceof StoppedError || error instanceof FatalApiError) throw error
-        if (error instanceof ModelOutputRejected && outputAttempt === 0) {
+        if (error instanceof ModelOutputRejected && outputAttempt === 0 && args.stage !== 'yap') {
           chatLogger?.(`CIKTI-TEKRAR asama=${args.stage ?? 'recovery'} model=${model} deneme=2/2 neden=${brief(error)}`)
           continue
         }
@@ -172,11 +182,12 @@ export async function recoveryToolTurn(args: {
   throw last
 }
 
-async function stoppableWait(ms: number) {
+async function stoppableWait(ms: number, signal?: AbortSignal, localStop: () => boolean = () => false) {
   const end = Date.now() + ms
   while (Date.now() < end) {
-    if (stopCheck()) throw new StoppedError()
-    await new Promise((r) => setTimeout(r, 200))
+    checkObservation(signal)
+    if (stopCheck() || localStop()) throw new StoppedError()
+    await new Promise((r) => setTimeout(r, Math.min(100, end - Date.now())))
   }
 }
 
@@ -560,10 +571,12 @@ function brief(err: unknown): string {
 
 /**
  * Tries each model once. After the last one fails, waits and starts again at the first.
- * Stops when the user stops, the key / balance is rejected, or every model was rejected for good
- * in MAX_REJECTED_CYCLES rounds in a row. Outages, timeouts and rate limits retry within the total cycle/time bound.
+ * A normal method gets one finite pass over its model alternatives. Exhaustion is
+ * returned to the method owner, which advances methods or starts a FRESH pass.
+ * Explicit diagnostic budgets remain supported; no hidden infinite model loop.
  */
-export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number; signal?: AbortSignal; stage?: string; revision?: number; source?: string } = {}): Promise<T> {
+export async function runModelChain<T>(models: string[], run: (model: string) => Promise<T>, pauseMs = CYCLE_PAUSE_MS, limits: { maxCycles?: number; maxWaitMs?: number; signal?: AbortSignal; shouldStop?: () => boolean; stage?: string; revision?: number; source?: string } = {}): Promise<T> {
+  const stopped = () => stopCheck() || limits.shouldStop?.() === true
   const chain = asModelChain(models)
   if (!chain.length) throw new Error('Model adı yok. Ayarlar’dan bir model yaz.')
   // Sıra, çağrı başında kopyalanır. Kayıt bu istek bitmeden değişse de bu dizi durur.
@@ -572,24 +585,27 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
   const invalidOutputs = new Set<string>()
   let lastOutputError: ModelOutputRejected | undefined
   let rejectedCycles = 0
-  const maxCycles = Math.max(1, limits.maxCycles ?? 256)
-  const deadline = Date.now() + Math.max(1, limits.maxWaitMs ?? 15 * 60_000)
+  const maxCycles = Math.max(1, limits.maxCycles ?? 1)
+  const deadline = limits.maxWaitMs === undefined ? Number.POSITIVE_INFINITY : Date.now() + Math.max(1, limits.maxWaitMs)
   let cycles = 0
   for (;;) {
     let allRejected = true
     let lastError = ''
+    let lastFailure: unknown
     for (let i = 0; i < chain.length; i++) {
       checkObservation(limits.signal)
-      if (stopCheck()) throw new StoppedError()
-      if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
+      if (stopped()) throw new StoppedError()
+      if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu (çağıranın açık süre sınırı).')
       const model = chain[i]
       if (invalidOutputs.has(model)) continue
       const remaining = deadline - Date.now()
-      if (remaining <= 0) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
+      if (remaining <= 0) throw new ModelFailed('Model deneme süresi doldu (çağıranın açık süre sınırı).')
       attemptCaps.push(remaining)
       try {
         try {
           const value = await run(model)
+          checkObservation(limits.signal)
+          if (stopped()) throw new StoppedError()
           if (Date.now() > deadline) throw new ModelFailed('Model deneme süresi doldu (geç yanıt reddedildi).')
           return value
         }
@@ -600,14 +616,16 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
           }
           retriedOutputs.add(model)
           checkObservation(limits.signal)
-          if (stopCheck()) throw new StoppedError()
+          if (stopped()) throw new StoppedError()
           if (Date.now() >= deadline) throw new ModelFailed('Model deneme süresi doldu.')
           chatLogger?.(`CIKTI-TEKRAR asama=${limits.stage ?? '-'} model=${model} deneme=2/2 neden=${brief(error)}`)
           const againRemaining = deadline - Date.now()
-          if (againRemaining <= 0) throw new ModelFailed('Model deneme süresi doldu (15 dakika varsayılan sınır).')
+          if (againRemaining <= 0) throw new ModelFailed('Model deneme süresi doldu (çağıranın açık süre sınırı).')
           attemptCaps[attemptCaps.length - 1] = againRemaining
           try {
             const value = await run(model)
+            checkObservation(limits.signal)
+            if (stopped()) throw new StoppedError()
             if (Date.now() > deadline) throw new ModelFailed('Model deneme süresi doldu (geç yanıt reddedildi).')
             return value
           }
@@ -618,10 +636,11 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         }
       } catch (e) {
         checkObservation(limits.signal)
-        if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+        if (e instanceof StoppedError) throw e
         if (e instanceof ModelFailed && e.message.includes('geç yanıt reddedildi')) throw e
-        if (!(e instanceof ModelRejected)) allRejected = false
+        if (!(e instanceof ModelRejected) || e instanceof ModelOutputRejected) allRejected = false
         lastError = brief(e)
+        lastFailure = e
         const last = i === chain.length - 1
         const next = chain[(i + 1) % chain.length]
         const neden = brief(e)
@@ -631,14 +650,22 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
         attemptCaps.pop()
       }
     }
-    if (chain.every(model => invalidOutputs.has(model))) throw lastOutputError!
+    if (chain.every(model => invalidOutputs.has(model)) && cycles + 1 >= maxCycles) throw lastOutputError!
     rejectedCycles = allRejected ? rejectedCycles + 1 : 0
     if (rejectedCycles >= MAX_REJECTED_CYCLES) {
       throw new Error(`Hiçbir model cevap vermedi: ${rejectedCycles} tur üst üste reddedildi (model adını ve ayarları kontrol et). Son hata: ${lastError}`)
     }
-    if (++cycles >= maxCycles || Date.now() >= deadline) throw new ModelFailed(`Model deneme sınırı doldu (${cycles} tur). Son hata: ${lastError}`)
+    if (++cycles >= maxCycles || Date.now() >= deadline) {
+      if (limits.maxCycles !== undefined || limits.maxWaitMs !== undefined) throw new ModelFailed(`Model deneme sınırı doldu (${cycles} tur). Son hata: ${lastError}`)
+      throw lastFailure ?? new ModelFailed(`Model yöntemleri yanıtlayamadı. Son hata: ${lastError}`)
+    }
+    // Invalid/empty/truncated output is not a permanent model ban. A new round
+    // asks independently again; no native action is replayed by this chain.
+    invalidOutputs.clear()
+    retriedOutputs.clear()
+    chatLogger?.(`MODEL-BEKLE asama=${limits.stage ?? '-'} tur=${cycles} durum=cevap-bekleniyor sonHata=${lastError}`)
     chatLogger?.(`Modellerin hepsi susuyor. ${Math.round(pauseMs / 1000)} sn sonra ${chain[0]} yeniden denenecek.`)
-    await stoppableWait(Math.min(pauseMs, Math.max(0, deadline - Date.now())))
+    await stoppableWait(Math.min(pauseMs, Math.max(0, deadline - Date.now())), limits.signal, stopped)
   }
 }
 
@@ -879,6 +906,9 @@ function parseJson(content: string): Record<string, unknown> {
 export function validateTargetReply(content: string): void {
   if (content.trim() === 'null') return // legacy explicit no-match
   const parsed = parseJson(content)
+  if (parsed.give_up !== undefined && (typeof parsed.give_up !== 'boolean' || parsed.give_up && (parsed.id !== null || typeof parsed.reason !== 'string' || !parsed.reason.trim()))) {
+    throw new ModelRejected('MODEL_TARGET_JSON_INVALID: give_up yalnız id:null ve açık gerekçeyle boolean olabilir.')
+  }
   if (!Object.prototype.hasOwnProperty.call(parsed, 'id') && !Object.prototype.hasOwnProperty.call(parsed, 'i') && !Object.prototype.hasOwnProperty.call(parsed, 'index')) {
     throw new ModelRejected('MODEL_TARGET_JSON_INVALID: Geçerli hedef JSON yanıtı alınamadı; hedef bulunamadı sayılmadı')
   }
@@ -892,7 +922,7 @@ export function validateConditionReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
+export type ScreenChoice = { giveUp?: boolean; satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -929,6 +959,7 @@ ${opts.kind === 'condition' ? CONDITION_TARGET_RULES : WORD_TARGET_RULES}
 ${OCR_READER_RULES}
 Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "id": <one listed evidence id or null for absence>, "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
 
+${opts.kind === 'condition' ? '' : 'If you deliberately conclude that the requested target is definitely absent, you may add "give_up":true ONLY with id:null and a reason. If evidence is incomplete or you are unsure, do not give up; return id:null without give_up. A technical failure is never evidence of absence.'}
 Step: ${opts.stepTitle}
 Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}${opts.hint ? `\n\nMemory: ${opts.hint}\nMemory is only a hint; if the screen differs, follow the screen.` : ''}`
 
@@ -988,7 +1019,17 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     if (!actual || !listedTextAgrees(parsed.text, actual.text)) {
       const reason = !actual ? `id=${id} bu istekte seçilebilir değil` : `id=${id} metin=${String(parsed.text ?? '')} çözülen=${actual.text}`
       chatLogger?.(`CIKTI-RET asama=${opts.kind} ${reason}`)
-      saveRequestEvidence(istekId, { response: content })
+      const textClash = !!actual && !listedTextAgrees(parsed.text, actual.text)
+      const candidate = candidates.find(c => c.item.id === id)
+      const rejected = textClash ? 'contradicts' : !candidate ? 'absent' : candidate.contextOnly ? 'not-selectable' : 'not-listed'
+      if (textClash) chatLogger?.(`CELISKI id=${istekId} | donen-id=${id} | model-metni=${String(parsed.text ?? '').slice(0, 80)} | cozulen=${actual!.text.slice(0, 80)} | tiklama yok`)
+      // Keep evidence even when we continue waiting and never reach the final result.
+      saveRequestEvidence(istekId, { response: content, resolution: {
+        requestId: istekId, returnedId: id, modelText: parsed.text ?? null, rawResponse: content,
+        originalItemWithReturnedId: scan.items.find(item => item.id === id) ?? null,
+        candidateWithReturnedId: candidate ?? null, textClash, rejected,
+        acceptedCandidate: null, acceptedBadge: null,
+      } })
       throw new CandidateOutputRejected(`MODEL_TARGET_REJECTED: ${reason}`, content)
     }
   }
@@ -997,16 +1038,13 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   // Özet gövdeden ÖNCE yazılır; `build` artık tanımlı olduğu için görüntü GERÇEK istekten okunur (1.9.115).
   gonderimOzeti(false)
   try {
-    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateChoice, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
+    content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateChoice, signal: opts.signal, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
   } catch (e) {
-    if (e instanceof CandidateOutputRejected) content = e.content
-    else {
-      if (!(e instanceof ImageUnsupportedError)) throw e
-      opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
-      usedImage = false
-      gonderimOzeti(true)
-      content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateChoice, signal: opts.signal, maxCycles: opts.kind === 'condition' ? 1 : undefined, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource })
-    }
+    if (!(e instanceof ImageUnsupportedError)) throw e
+    opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
+    usedImage = false
+    gonderimOzeti(true)
+    content = await chat(opts.apiKey, opts.model, build(false), false, { validate: validateChoice, signal: opts.signal, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource })
   }
 
   const decoded = parseJson(content)
@@ -1051,6 +1089,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     resolvedParentId: chosen?.parentId ?? badge?.id ?? null,
   } })
   return {
+    ...(opts.kind !== 'condition' && parsed.id === null && parsed.give_up === true ? { giveUp: true } : {}),
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!chosen) } : {}),
     id: chosen?.parentId ?? badge?.id ?? null,
     ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
@@ -1119,7 +1158,7 @@ export async function chooseOcrWord(opts: {
   chatLogger?.(summary)
   saveRequestEvidence(id, { summary, system, instruction: opts.prompt, candidates: list })
   const content = await chat(opts.apiKey, opts.model, [{ role: 'system', content: system }, { role: 'user', content: user }], false,
-    { validate, maxCycles: 1, reasoningOff: true, stage: 'ocr-word-choice', revision: opts.revision, source: opts.chainSource })
+    { validate, reasoningOff: true, stage: 'ocr-word-choice', revision: opts.revision, source: opts.chainSource })
   const parsed = parseJson(content)
   const pickedId = parseListedId(parsed.id)
   const picked = typeof pickedId === 'number' ? candidates.find(c => c.item.id === pickedId) : undefined
@@ -1731,7 +1770,7 @@ export async function verifyVisualPointer(opts: {
       chatLogger?.(`YANIT id=${id} | karar=reddedildi | neden=${brief(e)}`)
       throw e
     }
-  }, 0, { maxCycles: 1, maxWaitMs: 90_000, stage: 'visual-pointer-check', revision: opts.revision, source: opts.chainSource })
+  }, CYCLE_PAUSE_MS, { stage: 'visual-pointer-check', revision: opts.revision, source: opts.chainSource })
 }
 
 export type StallPlan = {

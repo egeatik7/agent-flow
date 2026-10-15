@@ -1,3 +1,4 @@
+import { repeatMethodCycle, methodErrorText, DeliberateStopError } from './method-cycle'
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
 import { shouldRefineWord, wordCandidates, refineWordTarget  } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
@@ -74,8 +75,9 @@ export type AgentContext = {
 type Resolved = { x: number; y: number; label: string; memo?: TargetMemo; visualGoal?: string; visualSession?: VisualModelSession; remainingMethods?: FindStageId[] }
 
 class NotFoundError extends Error {}
+class VisualTargetMissingError extends NotFoundError {}
 /** A popup input was attempted: never replay it through the generic target retry. */
-class VisualTargetRecoveryError extends Error { readonly haltLoop = true }
+class VisualTargetRecoveryError extends Error { readonly haltLoop = true; readonly inputMayHaveBeenSent = true }
 /** Still offered to Recovery, but never silently skip the failed loop item. */
 class TargetMethodsExhaustedError extends NotFoundError { readonly haltLoop = true }
 class InputDispatchError extends Error {
@@ -238,7 +240,7 @@ export function createAgent(ctx: AgentContext) {
 
   function rethrowTerminalSearch(error: unknown): void {
     if (stopped()) throw new StoppedError()
-    if (error instanceof StoppedError || error instanceof FatalApiError || error instanceof VisualTargetRecoveryError ||
+    if (error instanceof DeliberateStopError || error instanceof StoppedError || error instanceof VisualTargetRecoveryError ||
         (error as { targetSearchFatal?: boolean })?.targetSearchFatal === true) throw error
   }
 
@@ -272,9 +274,9 @@ export function createAgent(ctx: AgentContext) {
       log('info', `Kelimeyi ikinci model seçti: “${before}” → “${selected.text}” (#${selected.candidateId}).`)
       return true
     } catch (e) {
-      if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+      if (e instanceof StoppedError) throw e
       log('warn', `İkinci kelime seçimi alınamadı; bu OCR satırına tıklanmadı: ${(e as Error).message}`)
-      return false
+      throw e
     }
   }
 
@@ -282,7 +284,7 @@ export function createAgent(ctx: AgentContext) {
    * Fresh search on this lap's screen. Memory only breaks ties between near-equal matches,
    * and a pick that clearly disagrees with the recent laps is looked at twice.
    */
-  async function pickFrom(node: AgentNode, scan: ScanResult, win: string, allowLlm: boolean, llmOnly = false): Promise<TargetPick | null> {
+  async function pickFrom(node: AgentNode, scan: ScanResult, win: string, allowLlm: boolean, llmOnly = false, onGiveUp?: (reason: string) => void): Promise<TargetPick | null> {
     const s = getSettings()
     const items = asksDesktopShortcut(node.prompt ?? '') ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
     const scopedScan = { ...scan, items }
@@ -332,6 +334,10 @@ export function createAgent(ctx: AgentContext) {
         system: node.kind === 'type' ? promptOf(live.s.llmPrompts, 'typeList') ?? promptOf(live.s.llmPrompts, 'list') : promptOf(live.s.llmPrompts, 'list'),
       })
       trace(node, { kind: 'model', source: win === 'chrome' ? 'chrome' : 'list', value: choice })
+      if (choice.id === null) {
+        if (choice.giveUp) onGiveUp?.(choice.reason)
+        return null
+      }
       const item = choice.id !== null ? items.find((i) => i.id === choice.id) : undefined
       if (item) {
         log('info', `Seçilen hedef #${item.id}: ${item.src}/${item.type} “${item.text.slice(0, 120)}” @${item.x},${item.y} ${item.w}x${item.h}${scan.window ? ` / ${scan.window}` : ''}`)
@@ -396,6 +402,10 @@ export function createAgent(ctx: AgentContext) {
           })
           trace(node, { kind: 'model', source: win === 'chrome' ? 'chrome' : 'list', value: second })
           const item = second.id !== null ? items.find((i) => i.id === second.id) : undefined
+          if (!item) {
+            if (second.giveUp) onGiveUp?.(second.reason)
+            return null
+          }
           if (item && (item.id !== hit.item.id || second.wordIndex !== undefined)) {
             log('info', `İkinci bakış başka öğe seçti: #${item.id} “${item.text}”${second.reason ? ` — ${second.reason}` : ''}`)
             if (!await refineClickWord(node, scopedScan, item, second)) return null
@@ -408,8 +418,9 @@ export function createAgent(ctx: AgentContext) {
             log('info', `İkinci bakış aynı öğeyi onayladı${second.reason ? `: ${second.reason}` : ''}.`)
           }
         } catch (e) {
-          if (e instanceof StoppedError || e instanceof FatalApiError) throw e
-          log('warn', `İkinci bakış atlandı: ${(e as Error).message}`)
+          if (e instanceof StoppedError) throw e
+          log('warn', `İkinci bakış karar veremedi; sonraki yöntem: ${methodErrorText(e)}`)
+          throw e
         }
       } else {
         log('info', 'Değişken içerikli sayfalarda bu normal olabilir; bulunan öğe kullanılıyor.')
@@ -515,10 +526,12 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const methodErrors: string[] = []
+    let modelGaveUp = ''
+    const noteGiveUp = (reason: string) => { modelGaveUp = reason || 'Model hedefin bulunmadığını bildirdi.' }
     try {
       if (asksDesktopShortcut(prompt)) {
         try { await windowsScan() } catch (error) {
-          rethrowTerminalSearch(error)
+          methodErrors.push(methodErrorText(error)); rethrowTerminalSearch(error)
           log('warn', `Masaüstü ön taraması yapılamadı; açık yöntemler denenecek: ${(error as Error).message}`)
         }
       }
@@ -531,7 +544,7 @@ export function createAgent(ctx: AgentContext) {
           if (!userChrome) continue
           ctx.setMethod?.('Chrome sayfası')
           log('info', `[chrome] Sayfada ${userChrome.items.length} yazı okundu.`)
-          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition')
+          const pick = await pickFrom(node, pseudoScan(userChrome.items, userChrome.area, userChrome.host), 'chrome', true, node.kind === 'condition', noteGiveUp)
           if (pick) {
             const got = take({ ...center(pick.target), memo: pick.memo, label: `[chrome] “${pick.target.text}” (${pick.how})` }, 'chrome', pick.target, pick.item)
             if (got) return got
@@ -589,7 +602,7 @@ export function createAgent(ctx: AgentContext) {
               if (got) return got
             }
           } catch (error) {
-            rethrowTerminalSearch(error)
+            methodErrors.push(methodErrorText(error)); rethrowTerminalSearch(error)
             /* next stage */
           }
         }
@@ -614,7 +627,7 @@ export function createAgent(ctx: AgentContext) {
             }
             if (best) log('info', `[simge] Kayıtlı resim ekranda net değil (en iyi %${Math.round(best.score * 100)}).`)
           } catch (e) {
-            rethrowTerminalSearch(e)
+            methodErrors.push(methodErrorText(e)); rethrowTerminalSearch(e)
             log('warn', `[simge] Resim araması atlandı: ${(e as Error).message}`)
           }
         }
@@ -642,7 +655,7 @@ export function createAgent(ctx: AgentContext) {
           ctx.setMethod?.('Kelime listesi')
           const scan = await windowsScan()
           log('info', 'OCR kelime listesi yazı modeline gidiyor.')
-          const pick = await pickFrom(node, scan, scan.window || win, true, true)
+          const pick = await pickFrom(node, scan, scan.window || win, true, true, noteGiveUp)
           if (pick) {
             const got = take({ ...center(pick.target), memo: pick.memo, label: `“${pick.target.text}” (yazı modeli, ${pick.how})` }, 'list', pick.target, pick.item)
             if (got) return got
@@ -656,19 +669,16 @@ export function createAgent(ctx: AgentContext) {
             const got = take(visual, 'tars')
             if (got) return got
           } catch (e) {
-            // O04 (yönerge): KALICI API hatası (401/402, kota) burada YUTULMAMALI. Önceden yalnız
-            // StoppedError ve VisualTargetRecoveryError yeniden fırlatılıyordu; FatalApiError
-            // `serviceFailure=true` taşımasına rağmen "Görsel hedefleme atlandı" diye loglanıp akış
-            // NotFoundError ile devam ediyordu → bozuk anahtarla listenin TAMAMI öğe öğe deneniyordu
-            // (runner'ın serviceFailure durdurma kuralı devreye girmiyordu). Aynı dosyada 243/372 ve
-            // koşul dalı 586 FatalApiError'ı zaten fırlatır; bu dal artık tutarlı.
-            if (e instanceof StoppedError || e instanceof FatalApiError || e instanceof VisualTargetRecoveryError) throw e
+            // Model/API failure rejects this method, not the loop item.
+            // Stop and a possibly dispatched popup remain distinct.
+            if (e instanceof StoppedError || e instanceof VisualTargetRecoveryError) throw e
             if (e instanceof ModelFailed || e instanceof ModelOutputRejected) {
               methodErrors.push(e.message)
               log('warn', `Görsel hedefleme sonuç vermedi; sıradaki yöntem denenecek: ${e.message}`)
             } else if (node.kind === 'condition' && !(e instanceof NotFoundError)) throw e
-            else if (e instanceof NotFoundError) log('warn', e.message)
-            else log('warn', `Görsel hedefleme atlandı: ${(e as Error).message}`)
+            else if (e instanceof VisualTargetMissingError) { noteGiveUp(e.message); log('warn', e.message) }
+            else if (e instanceof NotFoundError) { methodErrors.push(e.message); log('warn', e.message) }
+            else { methodErrors.push(methodErrorText(e)); log('warn', `Görsel hedefleme atlandı: ${methodErrorText(e)}`) }
           }
         }
         if (stage === 'offset' && ((loc?.offsetX !== undefined && loc.offsetY !== undefined) || (loc?.x !== undefined && loc?.y !== undefined))) {
@@ -691,12 +701,12 @@ export function createAgent(ctx: AgentContext) {
               if (got) return got
             }
           } catch (e) {
-            rethrowTerminalSearch(e)
+            methodErrors.push(methodErrorText(e)); rethrowTerminalSearch(e)
             log('warn', `Kayıtlı konum kullanılamadı: ${(e as Error).message}`)
           }
         }
         } catch (error) {
-          rethrowTerminalSearch(error)
+          methodErrors.push(methodErrorText(error)); rethrowTerminalSearch(error)
           log('warn', `[Yöntem geçişi] ${stage} sonuç veremedi; sıradaki açık yöntem: ${(error as Error).message}`)
         }
       }
@@ -715,6 +725,7 @@ export function createAgent(ctx: AgentContext) {
       }`
     trace(node, { kind: 'failure', message })
     const detail = methodErrors.length ? ` Gerçek neden: ${methodErrors.join(' | ')}` : ''
+    if (modelGaveUp && !methodErrors.length) throw new DeliberateStopError(`Model bilinçli olarak vazgeçti; açık yöntemler de hedefi bulamadı: ${modelGaveUp}`)
     throw new TargetMethodsExhaustedError(message + detail)
   }
 
@@ -779,14 +790,14 @@ export function createAgent(ctx: AgentContext) {
         clearHover()
         lastClickPoint = undefined
         guiReplace = false
-        // Flag before dispatch: a thrown native call can have partially sent input.
-        didDismiss = true
         try {
-          const approved = await dispatchVisualClick(node, { x, y }, `Current target is ONLY the unambiguous Close/X or Cancel control of the unrelated obstructing popup. Do not close the main application or click the underlying original target. Original node context (not this click): ${prompt}. Earlier reason (not proof): ${action.reason}`, 'left', session)
+          const approved = await approveVisualPointer(node, { x, y }, `Current target is ONLY the unambiguous Close/X or Cancel control of the unrelated obstructing popup. Do not close the main application or click the underlying original target. Original node context (not this click): ${prompt}. Earlier reason (not proof): ${action.reason}`, 'left', session)
+          didDismiss = true
+          await sendApprovedVisualClick(approved, 'left')
           x = approved.x; y = approved.y
         }
         catch (e) {
-          if (e instanceof StoppedError || e instanceof FatalApiError) throw e
+          if (e instanceof StoppedError || !didDismiss) throw e
           throw new VisualTargetRecoveryError(`Popup kapatma girdisi başarısız; tekrar gönderilmeyecek: ${(e as Error).message}`)
         }
         checkStopped()
@@ -862,6 +873,7 @@ export function createAgent(ctx: AgentContext) {
       if (!pointed) {
         const message = `Görsel model asıl hedefi göstermedi${action.reason ? `: ${action.reason}` : ''}.`
         if (didDismiss) throw new VisualTargetRecoveryError(`${message} Popup tıklaması tekrarlanmayacak; sonraki node'a geçilmedi.`)
+        if (action.arguments.action === 'terminate') throw new VisualTargetMissingError(message)
         throw new NotFoundError(message)
       }
       if (action.arguments.action !== 'mouse_move') throw new NotFoundError('Görsel model hedef koordinatı vermedi.')
@@ -1087,15 +1099,18 @@ export function createAgent(ctx: AgentContext) {
   }
 
   async function withScreenRetry<T>(title: string, run: (wide: boolean) => Promise<T>): Promise<T> {
-    try {
-      return await run(false)
-    } catch (e) {
-      if (!(e instanceof NotFoundError) || stopped()) throw e
-      log('warn', `“${title}” bulunamadı. Ekran yenilenip aynı hedef bir kez daha denenecek.`)
-      await pause(REFRESH_RETRY_MS)
-      if (stopped()) throw new StoppedError()
-      return await run(true)
-    }
+    return repeatMethodCycle(round => run(round > 1), {
+      check: checkStopped,
+      wait: () => pause(REFRESH_RETRY_MS),
+      terminal: error => error instanceof DeliberateStopError || error instanceof StoppedError || error instanceof VisualTargetRecoveryError ||
+        (error as { inputMayHaveBeenSent?: boolean; targetSearchFatal?: boolean })?.inputMayHaveBeenSent === true ||
+        (error as { targetSearchFatal?: boolean })?.targetSearchFatal === true,
+      retry: (error, round) => {
+        clearHover(); lastClickPoint = undefined
+        ctx.setMethod?.(`Yöntemler yeniden deneniyor · tur ${round + 1}`)
+        log('warn', `YONTEM-TUR “${title}” tur=${round}: ${methodErrorText(error)}; güncel ekranla ilk açık yöntemden devam.`)
+      },
+    })
   }
 
 
@@ -1205,11 +1220,6 @@ export function createAgent(ctx: AgentContext) {
     checkStopped()
   }
 
-  async function dispatchVisualClick(node: AgentNode, point: Point, goal: string, mode: 'left' | 'double' | 'right', session?: VisualModelSession) {
-    const approved = await approveVisualPointer(node, point, goal, mode, session)
-    await sendApprovedVisualClick(approved, mode)
-    return approved
-  }
 
   async function approveWithMethodFallback(node: AgentNode, target: Resolved, stepNo: number, mode: 'left' | 'double' | 'right') {
     let t = target
@@ -1218,12 +1228,19 @@ export function createAgent(ctx: AgentContext) {
       try {
         approved = await approveVisualPointer(node, t, t.visualGoal, mode, t.visualSession)
       } catch (error) {
-        if (error instanceof StoppedError || error instanceof FatalApiError || stopped() || error instanceof VisualPointerError && !error.allowMethodFallback) throw error
+        if (error instanceof StoppedError || stopped() || (error as { inputMayHaveBeenSent?: boolean })?.inputMayHaveBeenSent === true) throw error
         const remaining = t.remainingMethods ?? []
         clearHover(); lastClickPoint = undefined
         log('warn', `[Yöntem geçişi] Görsel onay alınamadı; tıklama gönderilmedi. Kalan sıra: ${remaining.join(' → ') || 'yok'}. ${(error as Error).message}`)
-        if (!remaining.length) throw new TargetMethodsExhaustedError(`“${node.prompt || node.title}”: açık hedefleme yöntemleri tükendi; görsel onay alınamadı. ${(error as Error).message}`)
-        t = await resolveTarget(node, stepNo, false, false, { methods: remaining, fresh: true })
+        try {
+          if (!remaining.length) throw new TargetMethodsExhaustedError('Görsel onaydan sonra açık yöntem kalmadı.')
+          t = await resolveTarget(node, stepNo, true, false, { methods: remaining, fresh: true })
+        } catch (nextError) {
+          rethrowTerminalSearch(nextError)
+          log('warn', `YONTEM-TUR “${node.title}”: kalan yöntemler tükendi; ilk açık yöntemden yeni ekranla başlanacak. ${methodErrorText(nextError)}`)
+          await pause(REFRESH_RETRY_MS)
+          t = await withScreenRetry(node.title, () => findTarget(node, stepNo, true))
+        }
         continue
       }
       return { target: { ...t, x: approved.x, y: approved.y, memo: t.memo ? { ...t.memo, rx: (approved.x - approved.area.x) / approved.area.w, ry: (approved.y - approved.area.y) / approved.area.h, at: Date.now() } : undefined }, approved }
@@ -1460,7 +1477,7 @@ export function createAgent(ctx: AgentContext) {
       lastClickPoint = undefined
       guiReplace = false
       checkStopped()
-      await bridge.sendKeys(keys, getSettings().targetWindow || undefined)
+      await bridge.sendKeys(keys, getSettings().targetWindow || undefined, undefined, undefined, { onDispatched: () => { inputSent = true } })
       inputSent = true
       } catch (e) {
         if (inputSent) inputFailure(e, true)
@@ -1498,7 +1515,10 @@ export function createAgent(ctx: AgentContext) {
       if (!getSettings().apiKey && !localConfigured()) {
         throw new Error('Koşul artık her zaman metin modeline sorar; API anahtarı ya da yerel model gerekli.')
       }
-      for (const source of ['uia', 'ocr'] as const) {
+      return repeatMethodCycle(async () => {
+        let failed = false
+        for (const source of ['uia', 'ocr'] as const) {
+        try {
         ctx.setMethod?.(source === 'uia' ? 'Koşul: uygulama öğeleri (UIA)' : 'Koşul: Windows + ONNX OCR')
         const res = await scanCondition(source)
         if (source === 'ocr') noteCjk(res, node.id)
@@ -1516,8 +1536,19 @@ export function createAgent(ctx: AgentContext) {
         const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
         if (choice.satisfied === true) return found(`${source}: ${hit ? `“${hit.text}”` : 'model koşulu doğruladı'}${choice.reason ? ` — ${choice.reason}` : ''}`)
         log('info', `Koşul ${source}: açık kanıt yok${choice.reason ? ` — ${choice.reason}` : ''}.`)
-      }
-      return false
+        } catch (error) {
+          checkStopped(); checkObservation(signal)
+          failed = true
+          log('warn', `[Yöntem geçişi] Koşul ${source} karar veremedi; sıradaki yöntem: ${methodErrorText(error)}`)
+        }
+        }
+        if (failed) throw new Error('Koşul yöntemlerinden en az biri karar veremedi; yok sonucu üretilmedi.')
+        return false
+      }, {
+        check: () => { checkStopped(); checkObservation(signal) },
+        wait: () => observeWithin(pause(REFRESH_RETRY_MS), signal),
+        retry: (error, round) => log('warn', `YONTEM-TUR “${node.title}” tur=${round}: ${methodErrorText(error)} Yeni UIA → OCR gözlemi başlıyor.`),
+      })
     },
     captureFailure: async (label) => {
       if (!failDir) return

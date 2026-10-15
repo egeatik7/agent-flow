@@ -1084,10 +1084,6 @@ async function runFlow(
           })
         } catch (error) {
           if (stopRequested || error instanceof StoppedError) throw error
-          if (graph.edges.some(e => e.from === node.id && e.fromPort === 'fail')) {
-            log('warn', `Yap tamamlanamadı; eski başarısızlık bağlantısı kullanılıyor: ${(error as Error).message}`)
-            return false
-          }
           throw error
         } finally { recoveryAbort = () => false; pushMethod('') }
       },

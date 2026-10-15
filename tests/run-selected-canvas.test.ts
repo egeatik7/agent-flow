@@ -37,6 +37,7 @@ let onStep = (_p: unknown) => {}
 let onEdge = (_p: unknown) => {}
 let beforeAction: ((node: AgentNode) => Promise<void>) | undefined
 let onCloseRequested = (_id: unknown) => {}
+const activeTestRuns = new Set<{stop:boolean}>()
 let failPersistence = false
 const closeReplies: { id: number; allow: boolean }[] = []
 const executed: string[] = []
@@ -67,12 +68,13 @@ const api = {
   runAgent: async (graph: AgentGraph, startId?: string, packagePath?: string[], options?: { requireEnd?: boolean }) => {
     dispatched.push({ graph: structuredClone(graph), startId, packagePath: packagePath?.slice() })
     stopped = false
+    const currentRun={stop:false};activeTestRuns.add(currentRun)
     const record = async (node: AgentNode) => {
       executed.push(node.text ?? node.prompt ?? node.id)
       await beforeAction?.(node)
     }
     const ex: Executor = {
-      log: () => {}, step: (id, status) => onStep({ id, status }), edge: (id, from, to) => onEdge({ id, from, to }), shouldStop: () => stopped,
+      log: () => {}, step: (id, status) => onStep({ id, status }), edge: (id, from, to) => onEdge({ id, from, to }), shouldStop: () => stopped || currentRun.stop,
       click: record, type: record, key: record, exists: async () => true,
       patchNode: (id, patch) => onPatch({ id, patch }),
     }
@@ -102,6 +104,9 @@ beforeAll(async () => {
 })
 afterAll(() => vi.unstubAllGlobals())
 afterEach(() => {
+  for(const run of activeTestRuns)run.stop=true
+  activeTestRuns.clear()
+  vi.useRealTimers()
   if (mounted) act(() => mounted!.unmount())
   mounted = undefined
   executed.length = 0
@@ -421,15 +426,14 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(dispatched).toHaveLength(1)
     expect(r.root.findByType(Toolbar).props.running).toBe(false)
   })
-  it('an actual execution error does not launch the right canvas', async () => {
+  it('a technical error stays running on the same canvas without launching the right canvas', async () => {
     const s = scenario(), r = await mount()
     await select(r, s.path, s.selected.id)
     beforeAction = async () => { throw new Error('desktop action failed') }
     await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
     expect(executed).toEqual(['SELECTED {{öğe}}'])
     expect(dispatched).toHaveLength(1)
-    expect(logs(r)).toContain('desktop action failed')
-    expect(r.root.findByType(Toolbar).props.running).toBe(false)
+    expect(r.root.findByType(Toolbar).props.running).toBe(true)
   })
   it('keeps live and stopped highlights through three package views', async () => {
     const s = scenario(3), r = await mount()
@@ -473,18 +477,15 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(r.root.findByType(NodeCanvas).props.highlightedNodeIds).toEqual([s.selected.id])
     expect(r.root.findByType(NodeCanvas).props.running).toBe(false)
   })
-  it('automatically opens the failing leaf from the root without manual package navigation', async () => {
-    const s = scenario(3), r = await mount()
-    beforeAction = async node => { if (node.id === s.selected.id) throw new Error('nested desktop failure') }
-    await act(async () => { r.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
-    const canvas = r.root.findByType(NodeCanvas)
-    expect(canvas.props.runPhase).toBe('stopped')
-    expect(canvas.props.graph.nodes.some((n: AgentNode) => n.id === s.selected.id)).toBe(true)
-    expect(canvas.props.selectedNodeId).toBe(s.selected.id)
-    expect(canvas.props.focus.nodeId).toBe(s.selected.id)
+  it('a nested technical failure keeps the same run active instead of completing the canvas',async()=>{
+    const s=scenario(3),r=await mount()
+    beforeAction=async node=>{if(node.id===s.selected.id)throw Error('nested desktop failure')}
+    await act(async()=>{r.root.findByType(Toolbar).props.onRun();await Promise.resolve()})
+    expect(r.root.findByType(NodeCanvas).props.runPhase).toBe('running')
+    expect(r.root.findByType(Toolbar).props.running).toBe(true)
     expect(dispatched).toHaveLength(1)
   })
-  it('opens the actual failed loop member even if execution later reaches End', async () => {
+  it('retries the failed member on the same item before completing the next item and End', async () => {
     const start = createNode('start', 0, 0), write = task('loop member'), end = createNode('end', 900, 0)
     const loop = { ...createNode('loop', 200, 0), items: ['one', 'two'], members: [write.id] }
     book = withZipFixture(normalizeCanvasBook({ activeId: 'active', tabs: [{ id: 'active', name: 'Active', graph: {
@@ -492,16 +493,17 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     } }] }))
     persistedLibrary = structuredClone(book.zipLibrary!)
     const r = await mount()
+    vi.useFakeTimers()
     let actions = 0
     beforeAction = async () => { if (++actions === 1) throw new Error('first item failed') }
     await act(async () => { r.root.findByType(Toolbar).props.onRun(); await Promise.resolve() })
+    await act(async()=>{await vi.advanceTimersByTimeAsync(3100)})
     const canvas = r.root.findByType(NodeCanvas)
-    expect(actions).toBe(2)
+    expect(actions).toBe(3)
     expect(canvas.props.stepStatus[end.id]).toBe('done')
-    expect(canvas.props.runPhase).toBe('stopped')
-    expect(canvas.props.selectedNodeId).toBe(write.id)
-    expect(canvas.props.focus.nodeId).toBe(write.id)
-    expect(canvas.props.highlightedNodeIds).toEqual([loop.id, write.id])
+    expect(canvas.props.runPhase).toBe('idle')
+    expect(canvas.props.stepStatus[write.id]).toBe('done')
+    expect(canvas.props.highlightedNodeIds).toEqual([])
   })
   it('clears highlights after normal completion and resets arrows between canvases', async () => {
     const s = scenario(0), r = await mount()

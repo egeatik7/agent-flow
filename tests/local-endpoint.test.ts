@@ -70,7 +70,7 @@ describe('local OpenAI-compatible integration', () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
     const result = visionDescribe({ apiKey: '', model: ['local:vision', 'cloud/vision'], image }).catch(e => e.message)
     await vi.advanceTimersByTimeAsync(40_000)
-    expect(await result).toContain('Hiçbir model cevap vermedi')
+    expect(await result).toContain('anahtarı yok')
     expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chat/completions'))).toHaveLength(0) // hiç ÜRETİM isteği yok (tanılama sorguları olabilir)
   })
   it('reports a malformed models response instead of treating it as an empty success', async () => {

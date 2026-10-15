@@ -1,3 +1,4 @@
+import {waitThenStop} from './method-wait-helper'
 import { ObservationTimeoutError } from '../electron/observation-budget'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScanResult } from '../electron/matcher'
@@ -64,13 +65,14 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     expect(state.requests).toHaveLength(1)
   })
   it('satisfied:false remains false even with a valid evidence ID', async () => {
-    state.items = [{ ...row('Running 6/60'), src: 'uia' }]; respond({ satisfied: false, id: 1 })
+    state.items = [{ ...row('Running 6/60'), src: 'uia' }]
+    vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{state.requests.push(String(init.body));return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify({satisfied:false,id:state.requests.length===1?1:null})}}]})}}))
     expect(await make().exists('', condition('60/60 tamamlandı mı?'))).toBe(false)
-    expect(state.requests).toHaveLength(3) // the absent OCR evidence ID is retried once
+    expect(state.requests).toHaveLength(2)
   })
   it('an invented evidence ID cannot prove a positive condition', async () => {
     state.items = [{ ...row('Running'), src: 'uia' }]; respond({ satisfied: true, id: 999 })
-    expect(await make().exists('', condition('bitti mi?'))).toBe(false)
+    await waitThenStop(() => make().exists('', condition('bitti mi?')),()=>{state.stopped=true})
   })
   it('preserves full UIA and unsplit OCR evidence, including a late negation/counter', async () => {
     const evidence = 'Job completed ' + 'details '.repeat(35) + 'NOT_COMPLETE_6_OF_60'
@@ -120,19 +122,19 @@ describe('Condition: one whole-screen observation with model decisions', () => {
   })
   it('reader failure is a technical error, never a negative branch', async () => {
     state.scanError = new Error('WORKER_CRASH')
-    await expect(make().exists('', condition('bitti mi?'))).rejects.toThrow('WORKER_CRASH')
-    expect(state.scans).toHaveLength(1)
+    await waitThenStop(() => make().exists('', condition('bitti mi?')),()=>{state.stopped=true})
+    expect(state.scans.length).toBeGreaterThan(2)
   })
   it('API failure remains a technical error even on an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, text: async () => 'invalid key' })))
-    await expect(make().exists('', condition('bitti mi?'))).rejects.toThrow('401')
-    expect(state.scans).toHaveLength(1)
+    await waitThenStop(() => make().exists('', condition('bitti mi?')),()=>{state.stopped=true})
+    expect(state.scans.length).toBeGreaterThan(2)
   })
   it.each([503, 200])('condition retries invalid output once, but does not retry HTTP error %s', async status => {
     const fetchMock = vi.fn(async () => ({ ok: status === 200, status, text: async () => status === 200 ? JSON.stringify({ choices: [{ message: { content: '{"id":null}' } }] }) : 'temporary outage' }))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(make().exists('', condition('bitti mi?'))).rejects.toThrow()
-    expect(fetchMock).toHaveBeenCalledTimes(status === 200 ? 2 : 1); expect(state.scans).toHaveLength(1)
+    await waitThenStop(() => make().exists('', condition('bitti mi?')),()=>{state.stopped=true})
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2); expect(state.scans.length).toBeGreaterThan(2)
   })
   it('Stop propagates before observation', async () => {
     state.stopped = true

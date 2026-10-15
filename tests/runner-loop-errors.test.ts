@@ -7,7 +7,7 @@ import { runGraph, type Executor } from '../electron/runner'
 
 let edgeNo = 0
 const edge = (from: AgentNode, fromPort: string, to: AgentNode) => ({ id: `le${++edgeNo}`, from: from.id, fromPort, to: to.id })
-const opts = { maxSteps: 400, stepDelayMs: 0 }
+const opts = { debug: true, maxSteps: 400, stepDelayMs: 0 }
 const YOK = 'C:\\nubbo-kabul-yok-boyle-klasor'
 
 function exYap(olaylar: string[], loglar: string[]): Executor {

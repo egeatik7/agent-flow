@@ -24,7 +24,7 @@ function fakeExecutor(failOn: string[], sameMessage?: string) {
   return { ex, logs, clicked }
 }
 
-const opts = { maxSteps: 100, stepDelayMs: 0 }
+const opts = { debug: true, maxSteps: 100, stepDelayMs: 0 }
 let edgeNo = 0
 const edge = (from: AgentNode, fromPort: string, to: AgentNode) => ({ id: `e${++edgeNo}`, from: from.id, fromPort, to: to.id })
 

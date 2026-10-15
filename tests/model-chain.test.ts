@@ -13,7 +13,7 @@ describe('runModelChain: kalıcı ret sınırı', () => {
     const run = vi.fn(async (model: string) => {
       throw new ModelRejected(`${model}: OpenRouter 404`)
     })
-    await expect(runModelChain(['a', 'b'], run, 0)).rejects.toThrow(/Hiçbir model cevap vermedi: 8 tur üst üste/)
+    await expect(runModelChain(['a', 'b'], run, 0, {maxCycles:256})).rejects.toThrow(/Hiçbir model cevap vermedi: 8 tur üst üste/)
     expect(run).toHaveBeenCalledTimes(16)
   })
 
@@ -24,7 +24,7 @@ describe('runModelChain: kalıcı ret sınırı', () => {
       if (calls <= 40) throw new ModelFailed('OpenRouter 429')
       return 'tamam'
     }
-    await expect(runModelChain(['a', 'b'], run, 0)).resolves.toBe('tamam')
+    await expect(runModelChain(['a', 'b'], run, 0, {maxCycles:256})).resolves.toBe('tamam')
     expect(calls).toBe(41)
   })
 
@@ -37,7 +37,7 @@ describe('runModelChain: kalıcı ret sınırı', () => {
       if (model === 'a') throw new ModelRejected('a: 404')
       throw new ModelFailed('b: 429')
     }
-    await expect(runModelChain(['a', 'b'], run, 0)).resolves.toBe('tamam')
+    await expect(runModelChain(['a', 'b'], run, 0, {maxCycles:256})).resolves.toBe('tamam')
   })
 
   it('7 kalıcı tur, 1 geçici tur, 7 kalıcı tur: sayaç sıfırlandığı için durmaz', async () => {
@@ -49,21 +49,21 @@ describe('runModelChain: kalıcı ret sınırı', () => {
       if (calls === 8) throw new ModelFailed('429')
       throw new ModelRejected('404')
     }
-    await expect(runModelChain(['a'], run, 0)).resolves.toBe('tamam')
+    await expect(runModelChain(['a'], run, 0, {maxCycles:256})).resolves.toBe('tamam')
   })
 
-  it('anahtar/bakiye hatasında (FatalApiError) hemen durur', async () => {
+  it('anahtar/bakiye hatası sonlu model alternatiflerinden sonra yöntem sahibine döner', async () => {
     const run = vi.fn(async () => {
       throw new FatalApiError('401')
     })
     await expect(runModelChain(['a', 'b'], run, 0)).rejects.toBeInstanceOf(FatalApiError)
-    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(2)
   })
 
   it('kullanıcı durdurunca StoppedError verir', async () => {
     setStopCheck(() => true)
     const run = vi.fn(async () => 'x')
-    await expect(runModelChain(['a'], run, 0)).rejects.toBeInstanceOf(StoppedError)
+    await expect(runModelChain(['a'], run, 0, {maxCycles:256})).rejects.toBeInstanceOf(StoppedError)
     expect(run).not.toHaveBeenCalled()
   })
 })
@@ -91,20 +91,12 @@ describe('HTTP durum koduna göre sınıflandırma (sahte fetch, sahte saat)', (
       (e: Error) => e.message
     )
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(await result).toMatch(/Hiçbir model cevap vermedi/)
+    expect(await result).toMatch(/404/)
   })
 
-  it('429 (yoğunluk) 10 dakika sonra bile vazgeçmeden beklemeye devam eder', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 429, text: async () => 'rate limited' })))
-    let settled = false
-    ask().then(
-      () => (settled = true),
-      () => (settled = true)
-    )
-    await vi.advanceTimersByTimeAsync(10 * 60_000)
-    expect(settled).toBe(false)
-    setStopCheck(() => true) // arka planda dönen denemeyi bitir
-    await vi.advanceTimersByTimeAsync(10_000)
+  it('429 returns control to the method owner after one finite model pass',async()=>{
+    const fetch=vi.fn(async()=>({ok:false,status:429,text:async()=> 'rate limited'}));vi.stubGlobal('fetch',fetch)
+    await expect(ask()).rejects.toThrow('429');expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it('401 (geçersiz anahtar) hemen durur', async () => {

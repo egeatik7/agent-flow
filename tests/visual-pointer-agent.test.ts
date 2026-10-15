@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const h = vi.hoisted(() => ({ point: { x: 0, y: 0 }, moves: [] as any[], clicks: [] as any[], scans: [] as any[], requests: [] as any[], answers: [] as any[], stopped: false, drift: false, marker: true, locked: false, windowChanged: false }))
+const h = vi.hoisted(() => ({ point: { x: 0, y: 0 }, moves: [] as any[], clicks: [] as any[], scans: [] as any[], requests: [] as any[], answers: [] as any[], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false }))
 vi.mock('electron', () => ({ screen: { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 700 }, scaleFactor: 1 }) } }))
 vi.mock('../electron/a11y-bridge', () => ({
   isLocked: async () => h.locked,
@@ -12,14 +12,14 @@ vi.mock('../electron/a11y-bridge', () => ({
 }))
 vi.mock('../electron/browser', () => ({ userChromeItems: async () => null }))
 vi.mock('../electron/shots', () => ({ rememberShot: () => {} }))
-vi.mock('../electron/runner', async importOriginal => ({ ...await importOriginal<any>(), interruptibleSleep: async () => {} }))
+vi.mock('../electron/runner', async importOriginal => ({ ...await importOriginal<any>(), interruptibleSleep: async (ms: number) => { if (ms >= 3000 && h.stopOnRetry) h.stopped = true } }))
 import { createAgent } from '../electron/agent'
 import { createNode, DEFAULT_SETTINGS } from '../electron/graph-types'
 import { setLocalEndpoint, setStopCheck } from '../electron/openrouter'
 function executor(extra: Partial<typeof DEFAULT_SETTINGS> = {}) { return createAgent({ log: () => {}, send: () => {}, shouldStop: () => h.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey: 'fixture', model: 'vision', agentModel: 'vision', agentBackups: [], findOrder: ['tars'], findOff: [], screenCheck: 'off', stepDelayMs: 0, ...extra }) }).executor }
 const node = (mode: 'left' | 'double' | 'right' | 'move' = 'left') => ({ ...createNode('click', 0, 0), prompt: 'Masaüstündeki Blender', clickMode: mode })
 beforeEach(() => {
-  Object.assign(h, { point: { x: 0, y: 0 }, moves: [], clicks: [], scans: [], requests: [], answers: [], stopped: false, drift: false, marker: true, locked: false, windowChanged: false })
+  Object.assign(h, { point: { x: 0, y: 0 }, moves: [], clicks: [], scans: [], requests: [], answers: [], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false })
   setLocalEndpoint(''); setStopCheck(() => h.stopped)
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body); h.requests.push(body)
@@ -44,6 +44,7 @@ it('adjusts without clicking and confirms from another new image', async () => {
   expect(h.moves).toEqual([{ x: 300, y: 280 }, { x: 600, y: 350 }]); expect(h.clicks).toEqual([{ current: [600, 350, 42, undefined, 'double'] }])
 })
 it.each(['uncertain', 'drift', 'marker', 'windowChanged'])('does not click on %s', async scenario => {
+  h.stopOnRetry = true
   if (scenario === 'uncertain') h.answers = [{ decision: 'uncertain', reason: 'covered' }]
   if (scenario === 'drift') h.drift = true
   if (scenario === 'marker') h.marker = false

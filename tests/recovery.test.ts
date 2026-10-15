@@ -186,7 +186,7 @@ describe('inline recovery preserves the runner stack', () => {
     const ex: Executor = { log: () => {}, step: () => {}, shouldStop: () => false, type: async () => {}, key: async () => {}, exists: async () => true,
       click: async n => { actions.push(n.prompt!); throw new Error('missing') }, recover: async () => 'stop',
     }
-    await expect(runGraph({ nodes: [loop, click], edges: [] }, ex, { maxSteps: 100, stepDelayMs: 0 })).rejects.toThrow('toparlayamadı')
+    await expect(runGraph({ nodes: [loop, click], edges: [] }, ex, { maxSteps: 100, stepDelayMs: 0, debug: true })).rejects.toThrow('toparlayamadı')
     expect(actions).toEqual(['first']); expect(loop.loopIndex).toBe(0)
   })
 })

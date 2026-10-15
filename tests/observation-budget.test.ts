@@ -31,7 +31,7 @@ describe('condition observes once; repeated checking belongs to an explicit grap
   it('runner rejects old screen selections before calling any executor', async () => {
     const graph = fixture(); graph.nodes[0].locator = { name: 'Old', controlType: 'Button', path: '' }
     let calls = 0
-    await expect(runGraph(graph, executor(async () => { calls++; return true }), { maxSteps: 10, stepDelayMs: 0, startId: 'condition' })).rejects.toThrow('uyumsuz eski koşul')
+    await expect(runGraph(graph, executor(async () => { calls++; return true }), { maxSteps: 10, stepDelayMs: 0, startId: 'condition', debug:true })).rejects.toThrow('uyumsuz eski koşul')
     expect(calls).toBe(0)
   })
   it('an explicit Condition -> Timer -> Condition loop performs the next observation', async () => {

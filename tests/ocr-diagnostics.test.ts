@@ -17,8 +17,7 @@ it('records exact OCR IDs and the rejected candidate without changing the select
       items: [{ id: 185, text: 'View Marker Playback v', src: 'uia', type: 'Button', x: 20, y: 40, w: 200, h: 20 },
         { id: 137, text: 'User Perspective', src: 'ocr', type: 'Text', x: 77, y: 132, w: 124, h: 29 }],
     } as unknown as ScanResult
-    const result = await chooseScreenTarget({ apiKey: 'fake', model: 'valid', prompt: 'User Perspective', kind: 'click', stepTitle: 'Tıkla', scan, sendImage: false })
-    expect(result.id).toBeNull()
+    await expect(chooseScreenTarget({ apiKey: 'fake', model: 'valid', prompt: 'User Perspective', kind: 'click', stepTitle: 'Tıkla', scan, sendImage: false })).rejects.toThrow('MODEL_TARGET_REJECTED')
     const dir = path.join(root, fs.readdirSync(root)[0])
     const mapping = JSON.parse(fs.readFileSync(path.join(dir, 'ocr-esleme.json'), 'utf8'))
     const resolution = JSON.parse(fs.readFileSync(path.join(dir, 'id-cozumleme.json'), 'utf8'))

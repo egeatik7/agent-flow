@@ -47,6 +47,7 @@ export async function probeOnce(graph: AgentGraph, nodeId: string, ex: Executor,
 
   try {
     const summary = await runGraph(copy, executor, {
+      debug: true, // An explicit one-step diagnostic, never a normal persistent run.
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,
       startId: nodeId,

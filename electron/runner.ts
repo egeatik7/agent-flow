@@ -1,3 +1,4 @@
+import { repeatMethodCycle, methodErrorText, DeliberateStopError } from './method-cycle'
 import { type ObservationOptions } from './observation-budget'
 import {
   NODE_SPECS,
@@ -155,7 +156,7 @@ export function renderNode(node: AgentNode, vars: Record<string, string>): Agent
 const FAIL_PORTS = new Set(['timeout', 'fail'])
 
 function isFatal(e: unknown) {
-  return e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
+  return e instanceof DeliberateStopError || e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
 }
 
 export async function runGraph(
@@ -324,7 +325,7 @@ export async function runGraph(
         if (compatibility) throw new Error(compatibility)
         const text = (live.text ?? '').trim()
         if (!text) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
-        ex.log('info', `[${stepNo}] Koşul “${text}” bir kez değerlendiriliyor…`)
+        ex.log('info', `[${stepNo}] Koşul “${text}” yöntemlerle değerlendiriliyor…`)
         const exists = await ex.exists(text, live)
         if (ex.shouldStop()) throw new StoppedError()
         ex.log('info', `[${stepNo}] Koşul “${text}”: ${exists ? 'var' : 'yok'}`)
@@ -369,6 +370,54 @@ export async function runGraph(
     }
   }
 
+  // A technical failure belongs to the SAME node and loop item. Never replay a
+  // possibly dispatched action just because the surrounding method failed.
+  const persistentStep = async (node: AgentNode, live: AgentNode, stepNo: number, ahead: StepAhead): Promise<string> => {
+    let blocked: unknown
+    return repeatMethodCycle(async () => {
+      let error: unknown
+      if (blocked !== undefined) error = blocked
+      else {
+        try { return await execStep(node, live, stepNo, ahead) }
+        catch (caught) { if (isFatal(caught)) throw caught; error = caught }
+      }
+      const marked = (error && typeof error === 'object' ? error : {}) as {
+        inputAlreadySent?: boolean; inputMayHaveBeenSent?: boolean; inputDelivery?: DeliveryState; typeProgress?: TypeProgress
+      }
+      const progress = marked.typeProgress
+      const resumableType = node.kind === 'type' && !!progress && progress.focus === 'sent' &&
+        progress.text !== 'uncertain' && progress.enter === 'not_sent' &&
+        (progress.text === 'not_sent' || !!live.pressEnter)
+      if (resumableType) live.resumeTypeProgress = { ...progress! }
+      const unsafeReplay = !resumableType && (marked.inputAlreadySent === true || marked.inputMayHaveBeenSent === true || marked.inputDelivery === 'uncertain' || marked.inputDelivery === 'sent')
+      if (unsafeReplay) blocked = error
+      if (ex.recover && ['click', 'type', 'key', 'wait', 'ai'].includes(node.kind)) {
+        try {
+          const decision = await ex.recover({ graph: root, node, live, error: error instanceof Error ? error : new Error(String(error)), stepNo, ahead, vars: { ...vars },
+            inputAlreadySent: marked.inputAlreadySent === true, inputMayHaveBeenSent: marked.inputMayHaveBeenSent === true,
+            typeProgress: progress, inputDelivery: marked.inputDelivery })
+          if (ex.shouldStop()) throw new StoppedError()
+          if (decision === 'completed') { ex.recoveryFinished?.(node.id, true); return 'next' }
+          if (decision === 'stop') throw new DeliberateStopError(`Model bilinçli olarak vazgeçti: “${node.title}”. ${methodErrorText(error)}`)
+          // A retry is allowed only when it cannot duplicate a dispatched action.
+          if (decision === 'retry' && !unsafeReplay) blocked = undefined
+          ex.recoveryFinished?.(node.id, false, methodErrorText(error))
+        } catch (recoveryError) {
+          if (ex.shouldStop()) throw new StoppedError()
+          if (recoveryError instanceof DeliberateStopError) throw recoveryError
+          ex.log('warn', `Kurtarma karar veremedi; aynı adım korunuyor: ${methodErrorText(recoveryError)}`)
+        }
+      }
+      if (unsafeReplay) ex.log('warn', 'Girdi gönderilmiş olabilir; aynı komut yeniden gönderilmeden güncel durumun toparlanması bekleniyor.')
+      throw error
+    }, {
+      check: () => { if (ex.shouldStop()) throw new StoppedError() },
+      wait: () => interruptibleSleep(3000, ex.shouldStop),
+      terminal: isFatal,
+      retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`),
+    })
+  }
+
   /** Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes. */
   const topBudget: Budget = { used: 0 }
 
@@ -402,7 +451,8 @@ export async function runGraph(
         try {
           const live = renderNode(node, vars)
           const ahead = peekAhead(node, scope)
-          try {
+          if (!opts.debug) port = await persistentStep(node, live, tally.n, ahead)
+          else try {
             port = await execStep(node, live, tally.n, ahead)
           } catch (error) {
             if (isFatal(error) || !ex.recover || !['click', 'type', 'key', 'wait'].includes(node.kind)) throw error
@@ -501,25 +551,27 @@ export async function runGraph(
     const folderRaw = loop.folder?.trim() ?? ''
     let fromFolder: string[] | null = null
     if (hasTemplate(folderRaw)) {
-      const resolved = outsideFolder(root, loop)
-      if (!resolved) {
-        // Kutu kurulumundaki hata da bir adım hatasıdır: araç katmanı sayacı ve debug
-        // durması yalnız bu olayla çalışır (canlıda 115 hata "0 hata" görünüyordu).
-        ex.step(loop.id, 'error')
-        throw new Error(`“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
-      } else {
+      const readFolder = async () => {
+        const resolved = outsideFolder(root, loop)
+        if (!resolved) {
+          if (opts.debug) ex.step(loop.id, 'error')
+          throw new Error(`“${loop.title}”: dışarıdaki Her Öğe İçin’den klasör okunamadı (${folderRaw}).`)
+        }
         const found = listDirEntries(resolved)
         if (!found) {
-          // Kutu kurulumundaki hata da bir adım hatasıdır: araç katmanı sayacı ve debug
-          // durması yalnız bu olayla çalışır (canlıda 115 hata "0 hata" görünüyordu).
-          ex.step(loop.id, 'error')
+          if (opts.debug) ex.step(loop.id, 'error')
           throw new Error(`“${loop.title}”: klasör yok: ${resolved}`)
-        } else {
-          fromFolder = found
-          ex.log('info', `“${loop.title}”: ${resolved} içinde ${found.length} öğe.`)
-          patch(loop.id, { items: found })
         }
+        fromFolder = found
+        ex.log('info', `“${loop.title}”: ${resolved} içinde ${found.length} öğe.`)
+        patch(loop.id, { items: found })
       }
+      if (opts.debug) await readFolder()
+      else await repeatMethodCycle(readFolder, {
+        check: () => { if (ex.shouldStop()) throw new StoppedError() },
+        wait: () => interruptibleSleep(3000, ex.shouldStop),
+        retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${loop.title}” tur=${round}: ${methodErrorText(error)}`),
+      })
     }
     const keys = fromFolder ?? loopKeys(loop)
     const isList = fromFolder != null || listItems(loop).length > 0

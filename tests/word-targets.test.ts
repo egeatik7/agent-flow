@@ -56,7 +56,7 @@ describe('OCR words to model and exact selected word', () => {
  })
  it('rejects unlisted OCR parent IDs, hallucinated IDs, arrays, multiple-ID strings and null replies', async () => {
   for (const reply of [{ id: 7 }, { id: 9999 }, { id: [21] }, { id: [21, 22] }, { id: '21,22' }, null]) {
-   expect((await ask(reply)).result.id).toBeNull()
+   await expect(ask(reply)).rejects.toThrow()
   }
  })
  it('preserves UIA selection and explicit no-match', async () => {

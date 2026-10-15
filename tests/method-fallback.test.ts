@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScreenItem } from '../electron/matcher'
-const h = vi.hoisted(() => ({ items: [] as ScreenItem[], scans: [] as any[], point: { x: 0, y: 0 }, calls: [] as string[], logs: [] as string[], pointer: [] as any[], visual: [] as any[], failScan: 0, failChrome: false, failLocate: false, stopped: false, drift: false, failInputState: false, stopDuringPointer: false, nativeError: undefined as Error | undefined, listChoice: null as number | null, plan: null as any }))
+const h = vi.hoisted(() => ({ items: [] as ScreenItem[], scans: [] as any[], point: { x: 0, y: 0 }, calls: [] as string[], logs: [] as string[], pointer: [] as any[], visual: [] as any[], failScan: 0, failChrome: false, failLocate: false, stopped: false, stopOnRetry: false, drift: false, failInputState: false, stopDuringPointer: false, nativeError: undefined as Error | undefined, listChoice: null as number | null, plan: null as any }))
 vi.mock('electron', () => ({ screen: { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 700 }, scaleFactor: 1 }) } }))
 vi.mock('../electron/a11y-bridge', () => ({
   isLocked: async () => false,
@@ -22,7 +22,7 @@ vi.mock('../electron/a11y-bridge', () => ({
 }))
 vi.mock('../electron/browser', () => ({ userChromeItems: async () => { h.calls.push('chrome'); if (h.failChrome) throw Error('Chrome unavailable'); return null } }))
 vi.mock('../electron/shots', () => ({ rememberShot: () => {} }))
-vi.mock('../electron/runner', async original => ({ ...await original<any>(), interruptibleSleep: async () => {} }))
+vi.mock('../electron/runner', async original => ({ ...await original<any>(), interruptibleSleep: async (ms: number) => { if (ms >= 3000 && h.stopOnRetry) h.stopped = true } }))
 vi.mock('../electron/openrouter', async original => ({
   ...await original<any>(), localConfigured: () => false,
   chooseVisualTarget: async () => { h.calls.push('visual'); const value = h.visual.shift(); if (value instanceof Error) throw value; return value ?? { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [300, 400] }, reason: 'target', model: 'vision' } },
@@ -39,7 +39,7 @@ const uia: ScreenItem = { id: 1, src: 'uia', type: 'Button', text: 'İzlemeyi ba
 const ocr: ScreenItem = { id: 2, src: 'ocr', type: 'Text', text: 'İzlemeyi başlat', x: 700, y: 200, w: 120, h: 20 }
 const click = (mode: 'left' | 'double' | 'right' | 'move' = 'left') => ({ ...createNode('click', 0, 0), prompt: '“İzlemeyi başlat” düğmesine tıkla', clickMode: mode })
 const make = (extra: Partial<AppSettings> = {}) => createAgent({ settings: () => ({ ...DEFAULT_SETTINGS, model: 'vision', visionModel: 'vision', apiKey: 'fixture', findOrder: ['tars', 'uia', 'windows', 'list'], findOff: [], screenCheck: 'off', ...extra }), shouldStop: () => h.stopped, log: (_level, line) => h.logs.push(line), send: () => {} })
-beforeEach(() => Object.assign(h, { items: [], scans: [], point: { x: 0, y: 0 }, calls: [], logs: [], pointer: [], visual: [], failScan: 0, failChrome: false, failLocate: false, stopped: false, drift: false, failInputState: false, stopDuringPointer: false, nativeError: undefined, listChoice: null, plan: null }))
+beforeEach(() => Object.assign(h, { items: [], scans: [], point: { x: 0, y: 0 }, calls: [], logs: [], pointer: [], visual: [], failScan: 0, failChrome: false, failLocate: false, stopped: false, drift: false, failInputState: false, stopDuringPointer: false, nativeError: undefined, stopOnRetry: false, listChoice: null, plan: null }))
 afterEach(() => vi.restoreAllMocks())
 
 it.each(['left', 'double', 'right'] as const)('uncertain continues to UIA and sends exactly one %s input, without restarting visual', async mode => {
@@ -62,9 +62,10 @@ it('preserves priority: if the model list precedes direct OCR, it gets the fallb
   expect(h.calls.filter(c => c === 'list')).toEqual(['list'])
   expect(h.calls.filter(c => c === 'visual')).toEqual(['visual'])
 })
-it('disabled UIA and OCR stages are not implicitly reenabled after uncertain', async () => {
+it('disabled UIA and OCR stages stay disabled while a fresh cycle waits for Stop', async () => {
+  h.stopOnRetry = true
   h.items = [uia, ocr]
-  await expect(make({ findOff: ['uia', 'windows', 'list'] }).executor.click(click(), 1)).rejects.toMatchObject({ haltLoop: true })
+  await expect(make({ findOff: ['uia', 'windows', 'list'] }).executor.click(click(), 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
   expect(h.calls.filter(c => c === 'visual')).toHaveLength(1)
 })
@@ -107,9 +108,10 @@ it('Type visual targets use the same pointer gate, then write only after success
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(1)
   expect(h.calls.indexOf('write')).toBeGreaterThan(h.calls.findIndex(c => c.startsWith('direct:')))
 })
-it('Type sends no text when every allowed target method fails', async () => {
+it('Type keeps retrying without text when every allowed method fails', async () => {
+  h.stopOnRetry = true
   const n = { ...createNode('type', 0, 0), prompt: '“İzlemeyi başlat”', text: 'hello' }
-  await expect(make().executor.type(n, 1)).rejects.toMatchObject({ haltLoop: true })
+  await expect(make().executor.type(n, 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
   expect(h.calls).not.toContain('write')
 })
 it('a native click error cannot be caught as a safe unsent visual rejection', async () => {
@@ -118,12 +120,13 @@ it('a native click error cannot be caught as a safe unsent visual rejection', as
   expect(h.calls.filter(c => c.startsWith('current:'))).toHaveLength(1)
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
 })
-it('cursor drift and fatal API errors do not authorize fallback input', async () => {
-  h.items = [uia]; h.drift = true; h.pointer = [{ decision: 'confirm' }]
-  await expect(make().executor.click(click(), 1)).rejects.toThrow('fare hareket etti')
-  h.drift = false; h.pointer = [new FatalApiError('OpenRouter bakiye hatası')]
-  await expect(make().executor.click(click(), 2)).rejects.toThrow('bakiye')
-  expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
+it('cursor drift and model API failures proceed to a later independent method without using the rejected visual point', async () => {
+  h.items=[uia];h.drift=true;h.pointer=[{decision:'confirm'}]
+  await make().executor.click(click(),1)
+  expect(h.calls.filter(c=>c.startsWith('current:'))).toHaveLength(0)
+  h.calls=[];h.drift=false;h.pointer=[new FatalApiError('OpenRouter bakiye hatası')]
+  await make().executor.click(click(),2)
+  expect(h.calls.filter(c=>c.startsWith('direct:'))).toHaveLength(1)
 })
 it('move-only and read-only preview keep their existing no-click behavior', async () => {
   await make().executor.click(click('move'), 1)
@@ -133,25 +136,18 @@ it('move-only and read-only preview keep their existing no-click behavior', asyn
   await make().previewTarget(click())
   expect(h.calls).toEqual(['visual'])
 })
-it('method exhaustion keeps the loop on the failed item; Recovery can complete it before continuation', async () => {
-  const start = createNode('start', 0, 0), loop = createNode('loop', 0, 0), n = click()
-  loop.items = ['02', '03']; loop.members = [n.id]
-  const graph: AgentGraph = { nodes: [start, loop, n], edges: [{ id: 'a', from: start.id, fromPort: 'next', to: loop.id }] }
-  const agent = make().executor
-  await expect(runGraph(graph, agent, { maxSteps: 100, stepDelayMs: 0 })).rejects.toThrow()
-  expect(loop.startIndex).toBe(0)
-  expect(h.logs.some(l => l.includes('2/2: 03'))).toBe(false)
-  expect(h.logs.some(l => l.includes('Sonraki öğeye geçilmedi'))).toBe(true)
-  h.calls = []; h.logs = []
-  agent.recover = vi.fn(async () => 'completed' as const)
-  await runGraph(graph, agent, { maxSteps: 100, stepDelayMs: 0 })
-  expect(agent.recover).toHaveBeenCalledTimes(2)
-  expect(h.logs.some(l => l.includes('2/2: 03'))).toBe(true)
+it('method exhaustion starts a fresh pass on the same item, rather than skipping the item', async () => {
+  h.stopOnRetry = true
+  const start = createNode('start',0,0),loop=createNode('loop',0,0),n=click()
+  loop.items=['02','03'];loop.members=[n.id]
+  await expect(runGraph({nodes:[start,loop,n],edges:[{id:'a',from:start.id,fromPort:'next',to:loop.id}]},make().executor,{maxSteps:100,stepDelayMs:0})).rejects.toThrow('Kullanıcı tarafından durduruldu')
+  expect(loop.startIndex).toBe(0);expect(h.logs.some(l=>l.includes('2/2: 03'))).toBe(false)
 })
 it('legacy stall lookFor does not replace the original command or its constraints', async () => {
+  h.stopOnRetry = true
   h.plan = { action: 'continue', waitMs: 0, lookFor: 'Other target', reason: 'try other' }
   h.items = [{ ...ocr, text: 'Other target' }]
-  await expect(make({ findOrder: ['windows'] }).executor.click(click(), 1)).rejects.toMatchObject({ haltLoop: true })
+  await expect(make({ findOrder: ['windows'] }).executor.click(click(), 1)).rejects.toThrow('Kullanıcı tarafından durduruldu')
   expect(h.calls.filter(c => c.startsWith('direct:'))).toHaveLength(0)
 })
 
