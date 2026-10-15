@@ -661,10 +661,11 @@ function New-Bitmap24($bmp) {
 
 # $fit: a caller that wants coordinates from a model (İnisiyatif, UI-TARS) needs the picture at the size it asked for
 # (maxW, snapped to a multiple of $snap), even without boxes. Without it a plain picture stays full size for the scanner preview.
-function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0, [bool]$fit = $false) {
+function ConvertTo-JpegBase64($bmp, $items, $rect, [bool]$marks, [int]$maxW, [int]$snap = 0, [bool]$fit = $false, [int]$maxH = 0) {
   $scale = [Math]::Min(1.0, $maxW / [double]$bmp.Width)
-  $w = [int]($bmp.Width * $scale)
-  $h = [int]($bmp.Height * $scale)
+  if ($maxH -gt 0) { $scale = [Math]::Min($scale, $maxH / [double]$bmp.Height) }
+  $w = [Math]::Max(1, [int]($bmp.Width * $scale))
+  $h = [Math]::Max(1, [int]($bmp.Height * $scale))
   if ($snap -gt 1) {
     $w = [Math]::Max($snap, [int]([Math]::Round($w / [double]$snap)) * $snap)
     $h = [Math]::Max($snap, [int]([Math]::Round($h / [double]$snap)) * $snap)
@@ -852,7 +853,7 @@ function Invoke-Scan($P) {
       $snap = 0
       if ($P.snap) { $snap = [int]$P.snap }
       if ($P.cursorMarker -eq $true) { $markedCursor = Add-CursorMarker $shotBmp $rect }
-      $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true)
+      $img = ConvertTo-JpegBase64 $shotBmp $items $rect ($mode -eq 'marked') $maxW $snap ($P.fit -eq $true) ([int]$P.maxImageH)
       $shotBmp.Dispose()
     }
     $bmp.Dispose()

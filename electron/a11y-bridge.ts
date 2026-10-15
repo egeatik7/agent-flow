@@ -273,6 +273,8 @@ export async function scan(opts: {
   strictWindow?: 'exact' | 'contains'
   image?: 'none' | 'plain' | 'marked'
   maxImageW?: number
+  /** Optional height bound for aspect-preserving model screenshots. Never upscales. */
+  maxImageH?: number
   /** Set false to skip UI Automation / OCR when only the screenshot is needed. */
   uia?: boolean
   ocr?: boolean
@@ -315,6 +317,7 @@ export async function scan(opts: {
       strictWindow: opts.strictWindow || '',
       image: opts.image ?? 'none',
       maxImageW: opts.maxImageW ?? 1400,
+      maxImageH: opts.maxImageH ?? 0,
       ownPid: process.pid,
       uia: opts.uia !== false,
       ocr: opts.ocr !== false,

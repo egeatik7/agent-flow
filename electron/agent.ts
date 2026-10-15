@@ -753,8 +753,8 @@ export function createAgent(ctx: AgentContext) {
     const capture = () => bridge.scan({
       windowTitle: wide ? undefined : s.targetWindow || undefined,
       image: 'plain', uia: false, ocr: false, fresh: true,
-      maxImageW: isTarsModel(session.models[0] || '') ? 1288 : 1400,
-      snap: isTarsModel(session.models[0] || '') ? 28 : 0, fit: true, readOnly,
+      maxImageW: 1920, maxImageH: 1080,
+      snap: 0, fit: true, readOnly,
     })
     try {
       let res = await capture()
