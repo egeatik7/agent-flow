@@ -1,3 +1,4 @@
+import { assertRunStructure, structureSummary } from './run-structure'
 import { contextOf, findPlace } from './tool-context'
 import { runYap } from './yap'
 import { validateApiKey } from './openrouter'
@@ -1023,6 +1024,10 @@ async function runFlow(
   // runner'daki newTally()'dir; burada elle kopyalanmaz ki yeni bir alan sessizce düşmesin.
   const tally = newTally()
   try {
+    // Before normalization can silently discard a broken edge; before any input.
+    const structure = assertRunStructure(raw, { startId, packagePath, requireEnd: opts?.requireEnd })
+    const warnings = structure.filter(issue => issue.severity === 'warning')
+    if (warnings.length) log('warn', `Çalıştırma ön kontrolü:\n${structureSummary(warnings)}`)
     const graph = normalizeGraph(raw)
     // The desktop card resolves every step id in this run's own graph (packages included).
     hudRunGraph = graph

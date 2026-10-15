@@ -1,3 +1,4 @@
+import MissingPathsNote from '../src/components/MissingPathsNote'
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -378,14 +379,26 @@ describe('Seçiliden Çalıştır: real App → bridge arguments → runner → 
     expect(dispatched[0].graph.nodes.find(n => n.id === s.loop!.id)?.startIndex).toBe(1)
     expect(executed).toEqual(['SELECTED second', 'AFTER', 'BEFORE', 'SELECTED third', 'AFTER', 'RIGHT'])
   })
-  it('a package-local End cannot advance to the right canvas when the root End is disconnected', async () => {
-    const s = scenario(2, false, false), r = await mount()
-    await select(r, s.path, s.selected.id)
-    await act(async () => { r.root.findByType(Toolbar).props.onRunFromSelected(); await Promise.resolve() })
-    expect(executed).toEqual(['SELECTED {{öğe}}', 'AFTER'])
-    expect(dispatched).toHaveLength(1)
-    expect(logs(r)).toContain('Bitti node’una ulaşmadı')
+  it('a disconnected root End is reported before any selected action or canvas runs',async()=>{
+    const s=scenario(1,false,false),r=await mount()
+    await select(r,s.path,s.selected.id)
+    await act(async()=>{r.root.findByType(Toolbar).props.onRunFromSelected();await Promise.resolve()})
+    expect(executed).toEqual([]);expect(dispatched).toEqual([])
+    const report=r.root.findByType(MissingPathsNote)
+    expect(report.props.structure).toContainEqual(expect.objectContaining({code:'missing-end',severity:'error'}))
+    await act(async()=>{report.props.onAnswer('cancel');await Promise.resolve()})
+    expect(r.root.findByType(Toolbar).props.running).toBe(false)
   })
+  it('preflights a broken later canvas before the first canvas sends input',async()=>{
+    scenario(0);book.tabs[2].graph.edges=[]
+    const r=await mount()
+    await act(async()=>{r.root.findByType(CanvasTabs).props.onRunAll();await Promise.resolve()})
+    expect(dispatched).toEqual([]);expect(executed).toEqual([])
+    const report=r.root.findByType(MissingPathsNote)
+    expect(report.props.structure).toContainEqual(expect.objectContaining({canvas:'Right',code:'missing-end'}))
+    await act(async()=>{report.props.onAnswer('cancel');await Promise.resolve()})
+  })
+
   it('normal sequence Play still starts at the active canvas root and resets its loop marker', async () => {
     const s = scenario(1, true), r = await mount()
     await select(r, s.path, s.selected.id)

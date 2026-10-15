@@ -30,7 +30,8 @@ describe('#3 iç içe döngüden devam', () => {
     outer.title = 'Dış'
     outer.items = ['x', 'y']
     outer.members = [inner.id]
-    const graph: AgentGraph = { nodes: [start, outer, inner, click], edges: [edge(start, 'next', outer), edge(inner, 'next', click)] }
+    // Loop body entry is defined by members; loops have a done output, not next.
+    const graph: AgentGraph = { nodes: [start, outer, inner, click], edges: [edge(start, 'next', outer)] }
     return { graph, inner, click }
   }
 

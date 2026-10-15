@@ -1,3 +1,4 @@
+import { inspectRunStructure, type NamedStructureIssue, type StructureOptions } from '../electron/run-structure'
 import { SettingsWriter, settingsDelta } from './lib/settings-writer'
 import { mergeSettingsPatch, type SettingsPatch } from '../electron/settings-patch'
 import { exportCanvasFile, readCanvasFile } from '../electron/canvas-file'
@@ -196,7 +197,7 @@ export default function App() {
   const [sequenceLabel, setSequenceLabel] = useState('')
   const [confirmQuestion, setConfirmQuestion] = useState<string | null>(null)
   /** Koşu öncesi eksik döngü yolu raporu; açıkken koşu beklemede kalır. */
-  const [missingReport, setMissingReport] = useState<{ items: LoopPathReport[]; answer: (run: boolean) => void } | null>(null)
+  const [missingReport, setMissingReport] = useState<{ items: LoopPathReport[]; structure?: NamedStructureIssue[]; answer: (run: boolean) => void } | null>(null)
   const missingAnswer = useRef<((run: boolean) => void) | null>(null)
   const confirmAnswer = useRef<((yes: boolean) => void) | null>(null)
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' } | null>(null)
@@ -1202,23 +1203,28 @@ export default function App() {
   }
 
   /**
-   * Koşu başlamadan önce döngülerdeki dosya yollarını denetler. Diskte olmayan yol varsa rapor
-   * penceresini açar ve kullanıcının kararını bekler: "Yine de çalıştır" → true, "Vazgeç" → false.
-   * Hiçbir yol yoksa/denetim başarısızsa koşu eskisi gibi hemen başlar (kapı değil, rapor).
+   * İlk işlemden önce dosya yollarını ve çalıştırılacak bütün tuvallerin yapısını denetler.
+   * Yapısal hatalar engelleyicidir; uyarılar ve eksik yollar rapordan onaylanabilir.
+   * Dosya kontrolü kullanılamasa bile yapısal kontrol atlanmaz.
    */
-  const guardMissingPaths = async (tabs: { name: string; graph: AgentGraph }[]): Promise<boolean> => {
-    if (!api?.missingPaths || !tabs.length) return true
+  const guardMissingPaths = async (tabs: ({ name: string; graph: AgentGraph } & StructureOptions)[]): Promise<boolean> => {
+    const structure: NamedStructureIssue[] = tabs.flatMap(tab => inspectRunStructure(tab.graph, tab).map(issue => ({ ...issue, canvas: tab.name })))
     const candidates = collectLoopPaths(tabs)
-    if (!candidates.length) return true
     let missing: string[] = []
-    try { missing = await api.missingPaths(candidates.map((c) => c.path)) } catch { return true }
+    if (api?.missingPaths && candidates.length) {
+      try { missing = await api.missingPaths(candidates.map(c => c.path)) }
+      catch (error) { pushLog('warn', `Dosya yolları denetlenemedi: ${errText(error)}`) }
+    }
     if (stopRequested.current || closingRef.current) return false
     const items = missingLoopPaths(candidates, new Set(missing))
-    if (!items.length) return true
-    return await new Promise<boolean>((resolve) => {
-      const answer = (run: boolean) => { missingAnswer.current = null; setMissingReport(null); resolve(run) }
+    if (!items.length && !structure.length) return true
+    return await new Promise<boolean>(resolve => {
+      const answer = (run: boolean) => {
+        missingAnswer.current = null; setMissingReport(null)
+        resolve(run && !structure.some(issue => issue.severity === 'error'))
+      }
       missingAnswer.current = answer
-      setMissingReport({ items, answer })
+      setMissingReport({ items, structure, answer })
     })
   }
 
@@ -1236,7 +1242,7 @@ export default function App() {
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (!await flushSettings()) return
-      if (!(await guardMissingPaths([{ name, graph: full }])) || stopRequested.current || closingRef.current) return
+      if (!(await guardMissingPaths([{ name, graph: full, startId, packagePath: path }])) || stopRequested.current || closingRef.current) return
       if (!startId) { const reset = resetLoopTicks(full); full.nodes = reset.nodes; full.edges = reset.edges; writeCanvas(full) }
       setStepStatus({})
       setRunProgress(beginProgress(activeIdRef.current))
@@ -1290,7 +1296,7 @@ export default function App() {
     let failed = false
     try {
       if (!await flushSettings()) return
-      if (!(await guardMissingPaths(ordered.map(t => ({ name: t.name, graph: t.graph })))) || stopRequested.current || closingRef.current) return
+      if (!(await guardMissingPaths(ordered.map((t, i) => ({ name: t.name, graph: t.graph, requireEnd: true, ...(i === 0 ? { startId: startNodeId, packagePath: startPath } : {}) })))) || stopRequested.current || closingRef.current) return
       pushLog('info', startNodeId
         ? `Aktif tuval seçili adımdan başlatılıyor; bitince sağdaki tuvallerle devam edilecek (${ordered.length} tuval).`
         : `Aktif tuvalden sağa doğru oynatılıyor (${ordered.length} tuval).`)
@@ -1797,7 +1803,7 @@ export default function App() {
       )}
       {workspacePicker && <ZipWorkspacePicker kind={workspacePicker} library={zipLibrary} onCancel={() => setWorkspacePicker(null)} onOpen={id => workspacePicker === 'canvas' ? openZipLibraryCanvas(id) : loadZipGroup(id)} />}
 
-      {missingReport && <MissingPathsNote items={missingReport.items} onAnswer={(a) => missingReport.answer(a === 'run')} />}
+      {missingReport && <MissingPathsNote items={missingReport.items} structure={missingReport.structure} onAnswer={(a) => missingReport.answer(a === 'run')} />}
       {saveQuestion !== null && <SaveCanvasDialog name={saveQuestion.name} kind={saveQuestion.kind} onAnswer={answerCanvasSave} />}
       {nameQuestion && <WorkspaceNameDialog title={'Tuvali Farklı Kaydet'} initial={nameQuestion.initial} onAnswer={name => void answerName(name)} />}
       {scanner && (

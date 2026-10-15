@@ -1,3 +1,4 @@
+import {inspectRunStructure} from '../electron/run-structure'
 import { expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import ts from 'typescript'
@@ -24,10 +25,14 @@ function appRun(ctx:any){
  const js=ts.transpileModule(source.slice(from,to)+'\nreturn {run};',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText
  return new Function('ctx','with(ctx){'+js+'}')(ctx).run
 }
+function validRunGraph(items:string[]){
+ const l=loop(items),start=createNode('start',0,0),body=createNode('wait',200,0),end=createNode('end',400,0);l.members=[body.id]
+ return {nodes:[l,start,body,end],edges:[{id:'s',from:start.id,fromPort:'next',to:l.id},{id:'e',from:l.id,fromPort:'done',to:end.id}]}
+}
 function context(){
  const pending:Array<(p:string[])=>void>=[]
- const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:graph(['C:\\a.glb'])},stackRef:{current:[]},
- api:{missingPaths:vi.fn(()=>new Promise<string[]>(r=>pending.push(r))),runAgent:vi.fn(async()=>({ok:true}))},collectLoopPaths,missingLoopPaths:()=>[],canvasName:()=> 'T',rooted:(g:any)=>g,resetLoopTicks:(g:any)=>g,writeCanvas:vi.fn(),setRunning:vi.fn(),setStepStatus:vi.fn(),stopRequested:{current:false},setRunProgress:vi.fn(),beginProgress:()=>({}),pushLog:vi.fn(),bookRef:{current:{tabs:[{id:'tab'}]}},finishProgress:()=>({}),runIdle:{current:null},errText:String}
+ const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:validRunGraph(['C:\\a.glb'])},stackRef:{current:[]},
+ api:{missingPaths:vi.fn(()=>new Promise<string[]>(r=>pending.push(r))),runAgent:vi.fn(async()=>({ok:true}))},inspectRunStructure,collectLoopPaths,missingLoopPaths:()=>[],canvasName:()=> 'T',rooted:(g:any)=>g,resetLoopTicks:(g:any)=>g,writeCanvas:vi.fn(),setRunning:vi.fn(),setStepStatus:vi.fn(),stopRequested:{current:false},setRunProgress:vi.fn(),beginProgress:()=>({}),pushLog:vi.fn(),bookRef:{current:{tabs:[{id:'tab'}]}},finishProgress:()=>({}),runIdle:{current:null},errText:String}
  return {ctx,pending}
 }
 it('N1: actual App run handler locks before asynchronous preflight',async()=>{
@@ -68,4 +73,31 @@ it('N4: actual App keyboard handler protects the graph while missing-path dialog
  const handler=new Function('ctx','with(ctx){'+js+'}')(ctx)
  handler({key:'Delete',ctrlKey:false,metaKey:false,target:{tagName:'BUTTON',closest:()=>null}})
  expect(deleteSelection).not.toHaveBeenCalled()
+})
+
+it('actual App reports a broken structure before dispatch even when no file is missing',async()=>{
+ const {ctx,pending}=context();ctx.graphRef.current.edges.push({id:'broken',from:ctx.graphRef.current.nodes[1].id,fromPort:'next',to:'deleted'})
+ const promise=appRun(ctx)();await Promise.resolve();pending[0]([]);await Promise.resolve();await Promise.resolve()
+ const report=ctx.setMissingReport.mock.calls.find(([value]:any[])=>value?.structure?.length)?.[0]
+ expect(report.structure).toContainEqual(expect.objectContaining({code:'dangling-edge',canvas:'T'}))
+ expect(ctx.api.runAgent).not.toHaveBeenCalled();report.answer(true);await promise
+ expect(ctx.api.runAgent).not.toHaveBeenCalled() // structural errors cannot be overridden accidentally
+})
+it('actual App warns about an unconnected condition arm and can cancel before any dispatch',async()=>{
+ const {ctx,pending}=context(),condition=createNode('condition',500,0);ctx.graphRef.current=validRunGraph(['C:\\a.glb']);const end=ctx.graphRef.current.nodes.find((n:any)=>n.kind==='end')
+ ctx.graphRef.current.nodes.push(condition);ctx.graphRef.current.edges.find((e:any)=>e.to===end.id).to=condition.id
+ ctx.graphRef.current.edges.push({id:'yes',from:condition.id,fromPort:'true',to:end.id})
+ const promise=appRun(ctx)();await Promise.resolve();pending[0]([]);await Promise.resolve();await Promise.resolve()
+ const report=ctx.setMissingReport.mock.calls.find(([value]:any[])=>value?.structure?.length)?.[0]
+ expect(report.structure).toContainEqual(expect.objectContaining({code:'open-output',port:'false'}))
+ report.answer(false);await promise;expect(ctx.api.runAgent).not.toHaveBeenCalled()
+})
+
+it('file-check failure cannot bypass a structural error report',async()=>{
+ const {ctx}=context();ctx.graphRef.current.edges.push({id:'bad',from:ctx.graphRef.current.nodes[1].id,fromPort:'next',to:'missing'})
+ ctx.api.missingPaths=vi.fn(async()=>{throw Error('file check unavailable')})
+ const pending=appRun(ctx)();await Promise.resolve();await Promise.resolve();await Promise.resolve()
+ const report=ctx.setMissingReport.mock.calls.find(([value]:any[])=>value?.structure?.length)?.[0]
+ expect(report.structure.some((issue:any)=>issue.severity==='error')).toBe(true)
+ report.answer(false);await pending;expect(ctx.api.runAgent).not.toHaveBeenCalled()
 })

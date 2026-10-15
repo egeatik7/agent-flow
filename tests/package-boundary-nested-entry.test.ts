@@ -77,7 +77,7 @@ describe('boundary and first-lap corner cases',()=>{
   const {graph,c}=conditionGraph(),packed=packageSelection(graph,[c.id])!
   packed.graph.nodes.find(n=>n.id===packed.id)!.packageExit!.from='deleted'
   const snapshot=JSON.stringify(packed.graph),r=recorder();r.ex.exists=async()=>true
-  await runGraph(packed.graph,r.ex,opts)
+  await expect(runGraph(packed.graph,r.ex,opts)).rejects.toThrow('Paketin kayıtlı çıkış düğümü bulunamadı')
   expect(r.actions).toEqual([]);expect(JSON.stringify(packed.graph)).toBe(snapshot)
  })
  it('chosen B is first-lap-only through three nested loops and remaining files',async()=>{

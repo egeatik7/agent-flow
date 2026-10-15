@@ -1,3 +1,4 @@
+import { assertRunStructure } from './run-structure'
 import { repeatMethodCycle, methodErrorText, DeliberateStopError } from './method-cycle'
 import { type ObservationOptions } from './observation-budget'
 import {
@@ -189,6 +190,8 @@ export async function runGraph(
     vars?: Record<string, string>
   }
 ): Promise<RunSummary> {
+  // Non-UI/tool callers receive the same structural rejection before execution.
+  if (!opts.nested && !opts.afterNodeId) assertRunStructure(graph, { startId: opts.startId, packagePath: opts.packagePath })
   const resumeState = opts.resumeState ?? { identityUsed: false }
   if (opts.packagePath?.length) {
     const layers: { parent: AgentGraph; pkg: AgentNode }[] = []
