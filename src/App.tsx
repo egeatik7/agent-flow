@@ -166,6 +166,7 @@ export default function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const recoveryReports = useRecoveryReports(running)
+  const localCatalogRequest = useRef(0)
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
@@ -1705,11 +1706,13 @@ export default function App() {
             }}
             onBeforeLocalChat={flushSettings}
             onLoadLocalModels={async () => {
+              const request = ++localCatalogRequest.current
               try {
                 if (!await flushSettings()) throw new Error('Ayar kaydı tamamlanamadı.')
                 const base = (settingsRef.current.localBaseUrl ?? '').trim()
                 if (!api?.listLocalModels) throw new Error('Yerel bağlantı testi masaüstü uygulamasında kullanılabilir.')
                 const list = await api.listLocalModels(base)
+                if (request !== localCatalogRequest.current) return []
                 if (base !== (settingsRef.current.localBaseUrl ?? '').trim()) throw new Error('Sunucu adresi değişti. Yeni adres için listeyi tekrar getir.')
                 setLocalCatalogBase(base)
                 setModels((prev) => [...prev.filter((m) => !m.id.startsWith('local:')), ...list.map((m) => ({ id: `local:${m.id}`, vision: m.vision }))])

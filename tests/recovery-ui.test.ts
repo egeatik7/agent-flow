@@ -21,6 +21,7 @@ describe('recovery settings UI', () => {
     await act(async () => { mounted = create(createElement(Harness)) })
     const input = (id: string) => mounted!.root.findByProps({ id })
     act(() => input('recovery-model').props.onChange({ target: { value: 'fixture/smart-model' } }))
+    act(() => input('recovery-model').props.onBlur())
     act(() => input('recovery-task').props.onChange({ target: { value: 'Open Blender and process the current GLB.' } }))
     // Search the checkbox list through its rendered text rather than implementation state.
     const check = mounted!.root.findByProps({ className: 'recovery-node-list' }).findByType('input')

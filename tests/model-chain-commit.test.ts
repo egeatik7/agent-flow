@@ -24,10 +24,10 @@ it('reorder, delete and local selection commit immediately; adding an empty row 
   act(() => mounted!.root.findByProps({ 'aria-label': 'Yerel model ekle' }).props.onChange({ target: { value: 'local:fixture' } }))
   expect(commit).toHaveBeenLastCalledWith('B', ['local:fixture'])
 })
-it('typing saves immediately; Enter and blur remain explicit save gestures', () => {
+it('typing remains a draft; Enter and blur commit it', () => {
   const commit = mount()
   act(() => mounted!.root.findAllByType('input')[0].props.onChange({ target: { value: 'local:new-model' } }))
-  expect(commit).toHaveBeenLastCalledWith('local:new-model', ['B'])
+  expect(commit).not.toHaveBeenCalled()
   const preventDefault = vi.fn(), stopPropagation = vi.fn()
   act(() => mounted!.root.findAllByType('input')[0].props.onKeyDown({ key: 'Enter', preventDefault, stopPropagation }))
   expect(commit).toHaveBeenLastCalledWith('local:new-model', ['B'])

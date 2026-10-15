@@ -140,10 +140,8 @@ function visionModels(s: AppSettings): string[] {
 export function createAgent(ctx: AgentContext) {
   const { log, send } = ctx
   const readSettings = ctx.settings
-  // A running flow keeps the settings it started with. Standby edits stay live
-  // because this copy exists only between beginRun and releaseRunSettings.
-  let frozenSettings: AppSettings | null = null
-  const getSettings = () => frozenSettings ?? readSettings()
+  // Every new call reads the last saved settings; an in-flight call keeps its arguments.
+  const getSettings = readSettings
   const stopped = ctx.shouldStop
   let inputSent = false
   /** Her yeni LLM çağrısının hemen öncesi. Süren isteğe verilen dizi burada kopyalanmaz; çağrı kendi kopyasını alır. */
@@ -195,8 +193,6 @@ export function createAgent(ctx: AgentContext) {
 
   /** Called when a run starts: forget this run's memory copies. */
   function beginRun(logDir = '') {
-    try { frozenSettings = structuredClone(readSettings()) }
-    catch { frozenSettings = JSON.parse(JSON.stringify(readSettings())) as AppSettings }
     failDir = logDir
     clearHover()
     runMemo.clear()
@@ -207,7 +203,7 @@ export function createAgent(ctx: AgentContext) {
   }
 
   function releaseRunSettings() {
-    frozenSettings = null
+    // Kept for the run lifecycle API; no model/settings snapshot remains.
   }
 
   function warnMissingWindow(res: ScanResult) {

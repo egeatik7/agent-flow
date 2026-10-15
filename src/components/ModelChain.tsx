@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 export default function ModelChain(props: {
   localModels?: { id: string }[]
   primary: string
@@ -9,18 +9,20 @@ export default function ModelChain(props: {
   onChange: (primary: string, backups: string[]) => void
   onCommit?: (primary: string, backups: string[]) => void
 }) {
-  const rows = [props.primary, ...(props.backups ?? [])].slice(0, 5)
+  const [rows, updateRows] = useState(() => [props.primary, ...(props.backups ?? [])].slice(0, 5))
   const latestRows = useRef(rows)
   latestRows.current = rows
   const [draft, setDraft] = useState(false)
   const commit = (list = latestRows.current) => {
     setDraft(false)
+    props.onChange(list[0] ?? '', list.slice(1))
     props.onCommit?.(list[0] ?? '', list.slice(1))
   }
+  useEffect(() => { if (!draft) updateRows([props.primary, ...(props.backups ?? [])].slice(0, 5)) }, [props.primary, props.backups])
   const setRows = (next: string[], save = true) => {
     const list = next.length ? next.slice(0, 5) : ['']
     latestRows.current = list
-    props.onChange(list[0] ?? '', list.slice(1))
+    updateRows(list)
     if (save) commit(list)
   }
   const move = (i: number, dir: -1 | 1) => {
@@ -47,7 +49,7 @@ export default function ModelChain(props: {
             onChange={(e) => {
               const next = rows.slice()
               next[i] = e.target.value
-              setDraft(true); setRows(next)
+              setDraft(true); setRows(next, false)
             }}
             onBlur={() => { if (draft) commit() }}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commit() } }}
@@ -84,7 +86,7 @@ export default function ModelChain(props: {
         <option value="">+ Yerel model ekle…</option>
         {props.localModels.map(m => <option key={m.id} value={m.id} disabled={rows.includes(m.id)}>{m.id.replace(/^local:/, '')}</option>)}
       </select>}
-      {props.onCommit && <p className="hint" role="status">Model değişiklikleri otomatik kaydedilir.</p>}
+      {props.onCommit && <p className="hint" role="status">Model adı Enter veya alandan çıkınca kaydedilir; sıralama ve seçimler hemen uygulanır.</p>}
     </div>
   )
 }

@@ -207,6 +207,22 @@ export async function runGraph(
       layers.push({ parent: cursor, pkg })
       cursor = pkg.inner
     }
+    // Validate the outside cursor BEFORE a package-local node can send input.
+    if (opts.resume && opts.resumeItem && opts.resumeLoopId && !resumeState.identityUsed) {
+      const findLoop = (g: AgentGraph): AgentNode | undefined => {
+        for (const n of g.nodes) {
+          if (n.id === opts.resumeLoopId && n.kind === 'loop') return n
+          if (n.inner) { const found = findLoop(n.inner); if (found) return found }
+        }
+      }
+      const loop = findLoop(opts.root ?? graph)
+      if (!loop) throw new Error('Kayıtlı döngü bulunamadı; girdi gönderilmedi.')
+      const keys = loopKeys(loop)
+      const matches = keys.flatMap((item, index) => item === opts.resumeItem ? [index] : [])
+      if (matches.length !== 1) throw new Error(`“${loop.title}”: kayıtlı öğe (“${opts.resumeItem}”) ${matches.length ? 'birden fazla satırda; devam konumu belirsiz' : 'yeni listede yok'}; girdi gönderilmedi.`)
+      loop.startIndex = matches[0]
+      loop.loopIndex = matches[0]
+    }
     const shared = {
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,

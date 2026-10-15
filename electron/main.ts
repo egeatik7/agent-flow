@@ -133,13 +133,10 @@ try { pruneScreenFiles() } catch { /* Temp directory may be unavailable. */ }
 
 function getSettings(): AppSettings {
   const s = { ...DEFAULT_SETTINGS, ...store.get('settings') }
-  // Yerel (OpenAI uyumlu) adres tek yerden uygulanır: boşsa her istek OpenRouter'da kalır.
-  setLocalEndpoint(s.localBaseUrl, s.localTimeoutMs, s.localVision, s.localOff, s.localThink)
   s.ocrEngine = 'combined'
   const ramp = clampRamp(s.valueLo, s.valueHi)
   s.valueLo = ramp.lo
   s.valueHi = ramp.hi
-  bridge.setValueRamp(ramp.lo, ramp.hi)
   const find = normalizeFind(s.findOrder, s.findOff === undefined ? DEFAULT_FIND_OFF : s.findOff)
   s.findOrder = find.order
   s.findOff = find.off
@@ -153,7 +150,6 @@ function getSettings(): AppSettings {
   s.conditionModel = String(s.conditionModel ?? '').trim()
   s.conditionBackups = cleanBackups(s.conditionBackups)
   s.recovery = recoverySettings(s.recovery)
-  bridge.setOcrEngine(s.ocrEngine)
   return s
 }
 
@@ -1222,6 +1218,10 @@ async function runFlow(
 export async function startApp(report: (pct: number, line: string) => void, closeSplash: () => void) {
   reportBoot = report
   closeBoot = closeSplash
+  const initial = getSettings()
+  setLocalEndpoint(initial.localBaseUrl, initial.localTimeoutMs, initial.localVision, initial.localOff, initial.localThink)
+  bridge.setValueRamp(initial.valueLo, initial.valueHi)
+  bridge.setOcrEngine(initial.ocrEngine)
   const failsafe = setTimeout(revealApp, 20000)
   ipcMain.on('boot:ready', () => {
     closeGuard.ready = true
@@ -1275,7 +1275,6 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     const ramp = clampRamp(next.valueLo, next.valueHi)
     next.valueLo = ramp.lo
     next.valueHi = ramp.hi
-    bridge.setValueRamp(ramp.lo, ramp.hi)
     const find = normalizeFind(next.findOrder, next.findOff)
     next.findOrder = find.order
     next.findOff = find.off
@@ -1289,6 +1288,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     next.recovery = recoverySettings(next.recovery)
     next.modelRevision = nextModelRevision(onceki, next)
     store.set('settings', next)
+    setLocalEndpoint(next.localBaseUrl, next.localTimeoutMs, next.localVision, next.localOff, next.localThink)
+    bridge.setValueRamp(ramp.lo, ramp.hi)
     bridge.setOcrEngine(next.ocrEngine)
     void syncEndpoint()
     return next

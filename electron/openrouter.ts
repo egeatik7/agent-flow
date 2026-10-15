@@ -104,6 +104,7 @@ export async function recoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
 }
 
 async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
+  const runtime = localRuntime()
   const deadline = Date.now() + args.timeoutMs
   const chain = asModelChain(args.models)
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
@@ -113,14 +114,14 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
       if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
       try {
-        const target = args.allowLocal ? targetFor(model) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+        const target = args.allowLocal ? targetFor(model, runtime) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
         chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
         if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
-        if (target.local && args.messages.some(m => Array.isArray(m.content)) && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+        if (target.local && args.messages.some(m => Array.isArray(m.content)) && !runtime.vision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
           body: JSON.stringify({ model: target.model, messages: args.messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
-        }, Math.min(target.local && args.stage === 'yap' ? localTimeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+        }, Math.min(target.local && args.stage === 'yap' ? runtime.timeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
         if (args.shouldStop() || stopCheck()) throw new StoppedError()
         if (!res.ok) {
           chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
@@ -216,6 +217,8 @@ let localTimeoutMs = 180_000
 let localVision = false
 let localOff = false
 let localThink = ''
+type LocalRuntime = { base: string; timeoutMs: number; vision: boolean; off: boolean; think: string }
+const localRuntime = (): LocalRuntime => ({base:localBase, timeoutMs:localTimeoutMs, vision:localVision, off:localOff, think:localThink})
 /** Ollama'nın kabul ettiği düşünme seviyeleri; boş dize "otomatik" demektir. */
 const THINK_LEVELS = ['none', 'low', 'medium', 'high']
 export function setLocalEndpoint(url: string | undefined, timeoutMs?: number, vision?: boolean, off?: boolean, think?: string) {
@@ -237,18 +240,18 @@ export function localConfigured() { return !!localBase && !localOff }
  * Zincirdeki bir satırın nereye gideceğini söyler. `local:<model>` yerel tabana,
  * diğer her şey OpenRouter'a gider; böylece aynı listede ikisi birlikte durabilir.
  */
-function targetFor(model: string): { url: string; model: string; local: boolean } {
+function targetFor(model: string, runtime = localRuntime()): { url: string; model: string; local: boolean } {
   const openRouter = 'https://openrouter.ai/api/v1/chat/completions'
   if (!/^local:/i.test(model)) return { url: openRouter, model, local: false }
   // "Şimdilik OpenRouter'a dön" açıkken veya adres boşken yerel satır ATLANIR; zincir sıradakine geçer.
-  if (localOff || !localBase) throw new ModelRejected('Yerel model kapalı; satır atlandı (adres boş ya da "OpenRouter\'a dön" açık).')
+  if (runtime.off || !runtime.base) throw new ModelRejected('Yerel model kapalı; satır atlandı (adres boş ya da "OpenRouter\'a dön" açık).')
   try {
-    const url = new URL(localBase)
+    const url = new URL(runtime.base)
     if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash || url.username || url.password) throw new Error('invalid')
   } catch { throw new ModelRejected('Yerel sunucu adresi geçersiz. http:// veya https:// ile başlayan taban adresi yaz.') }
   const name = model.replace(/^local:/i, '').trim()
   if (!name) throw new ModelRejected('Yerel model adı boş.')
-  return { url: `${localBase}/chat/completions`, model: name, local: true }
+  return { url: `${runtime.base}/chat/completions`, model: name, local: true }
 }
 /**
  * Yerel adres bir Ollama sunucusu mu. Ollama'nın OpenAI uyumlu ucu düşünmeyi YALNIZCA
@@ -258,9 +261,9 @@ function targetFor(model: string): { url: string; model: string; local: boolean 
  * biz ekliyoruz. Başka yerel sunucular bilinmeyen alanı reddedebildiği için yalnız
  * Ollama adreslerine gönderilir; diğer yerel adreslerde gövde eskisi gibi kalır.
  */
-function localNeedsNoThinking(): boolean {
+function localNeedsNoThinking(base = localBase): boolean {
   try {
-    const u = new URL(localBase)
+    const u = new URL(base)
     return u.port === '11434' || /ollama/i.test(u.hostname) || /ollama/i.test(u.pathname)
   } catch { return false }
 }
@@ -271,9 +274,9 @@ function localNeedsNoThinking(): boolean {
  * Seçim yoksa (otomatik) yalnız Ollama adreslerinde kapatılır; başka yerel sunucular
  * bilinmeyen alanı reddedebildiği için gövde eskisi gibi kalır.
  */
-function localReasoningEffort(): string | null {
-  if (localThink) return localThink
-  return localNeedsNoThinking() ? 'none' : null
+function localReasoningEffort(runtime = localRuntime()): string | null {
+  if (runtime.think) return runtime.think
+  return localNeedsNoThinking(runtime.base) ? 'none' : null
 }
 
 /** Yerel sunucunun model listesi. Aynı zamanda "adres açık mı" sınaması olarak kullanılır. */
@@ -704,22 +707,23 @@ async function chatOnce(
   model: string,
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean; requestId?: string; stage?: string } = {}
+  opts: { json?: boolean; signal?: AbortSignal; reasoningOff?: boolean; requestId?: string; stage?: string; runtime?: LocalRuntime } = {}
 ): Promise<string> {
   // Zorunlu düşünme hatası görülünce yalnız bu çağrıda alan kalkar. Sonraki model kendi gövdesini kurar.
+  const runtime = opts.runtime ?? localRuntime()
   let dropReasoning = false
   const once = async (json: boolean) => {
     checkObservation(opts.signal)
-    const target = targetFor(model)
+    const target = targetFor(model, runtime)
     // Her deneme KENDİ istek kimliğini alır: zincirdeki ikinci model/eski deneme, yeni ölçümü ezmesin.
     const istekId = nextRequestId()
     if (!target.local) validateApiKey(apiKey)
     // Anahtar yoksa OpenRouter satırı atlanır; zincir varsa yerel satıra geçer (1.9.81).
     if (!target.local && !String(apiKey ?? '').trim()) throw new ModelRejected('OpenRouter anahtarı yok; satır atlandı.')
-    if (target.local && hasImage && !localVision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
+    if (target.local && hasImage && !runtime.vision) throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
     const where = target.local ? 'Yerel sunucu' : 'OpenRouter'
     // Düşünme tercihi tek yerde çözülür: sekmede seçilen seviye ya da otomatik (Ollama'da kapalı).
-    const effort = dropReasoning ? null : target.local ? opts.reasoningOff ? 'none' : localReasoningEffort() : null
+    const effort = dropReasoning ? null : target.local ? opts.reasoningOff ? 'none' : localReasoningEffort(runtime) : null
     const reasoningDisabled = !dropReasoning && !target.local && !!opts.reasoningOff
     reportOut(target.model, target.local, messages)
     // Bağlam baskısı: yalnız sayaç/boyut (içerik yazılmaz).
@@ -758,7 +762,7 @@ async function chatOnce(
       method: 'POST',
       headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(apiKey),
       body: JSON.stringify(istekGovdesi),
-    }, Math.min(target.local ? localTimeoutMs : REQUEST_TIMEOUT_MS, attemptCaps.length ? attemptCaps[attemptCaps.length - 1] : Number.POSITIVE_INFINITY), () => false, opts.signal)
+    }, Math.min(target.local ? runtime.timeoutMs : REQUEST_TIMEOUT_MS, attemptCaps.length ? attemptCaps[attemptCaps.length - 1] : Number.POSITIVE_INFINITY), () => false, opts.signal)
     checkObservation(opts.signal)
     if (!res.ok) {
       reportIn(target.local, `hata ${res.status}: ${res.text.slice(0, 2000)}`)
@@ -828,10 +832,11 @@ async function chat(
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
+  const requestOptions = {...opts, runtime:localRuntime()}
   return runModelChain(asModelChain(model), async (name) => {
     checkObservation(opts.signal)
     try {
-      const text = await chatOnce(apiKey, name, messages, hasImage, opts)
+      const text = await chatOnce(apiKey, name, messages, hasImage, requestOptions)
       if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
       try { opts.validate?.(text) }
       catch (error) {
@@ -846,7 +851,7 @@ async function chat(
       if (!(e instanceof ImageUnsupportedError)) throw e
       if (!withoutImage) throw new ModelRejected(`${name} ekran görüntüsü kabul etmiyor.`)
       chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
-      const text = await chatOnce(apiKey, name, withoutImage, false, opts)
+      const text = await chatOnce(apiKey, name, withoutImage, false, requestOptions)
       if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
       try { opts.validate?.(text) }
       catch (error) {
@@ -1589,6 +1594,7 @@ export async function guiStep(opts: {
   jsonPrompt?: string
   initiative?: boolean
 }): Promise<GuiAction> {
+  const runtime = localRuntime()
   const keep = Math.max(1, opts.keepImages ?? 4)
   const recent = opts.history.slice(-keep + 1)
   const older = opts.history.slice(0, Math.max(0, opts.history.length - recent.length))
@@ -1607,7 +1613,7 @@ export async function guiStep(opts: {
         if (t.note) messages.push({ role: 'user', content: t.note })
       }
       messages.push({ role: 'user', content: [...(opts.initiative ? [{ type: 'text', text: initiativeTurnInstruction(opts.goal, 'tars') }] : []), imagePart(opts.screen)] })
-      const content = await chatOnce(opts.apiKey, model, messages, true, { json: false })
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, runtime })
       if (!content.trim()) throw new ModelOutputRejected('boş yanıt')
       return parseTars(content, opts.screen.w, opts.screen.h, tarsAbsolute(model))
     }
@@ -1622,7 +1628,7 @@ ${opts.initiative ? initiativeTurnInstruction(opts.goal, 'screen') + '\n\n' : ''
       { role: 'system', content: opts.initiative && (!opts.jsonPrompt?.trim() || opts.jsonPrompt === SCREEN_PROMPT) ? INITIATIVE_SCREEN_PROMPT : opts.jsonPrompt?.trim() || SCREEN_PROMPT },
       { role: 'user', content: [{ type: 'text', text }, imagePart(opts.screen)] },
     ]
-    const content = await chatOnce(opts.apiKey, model, messages, true)
+    const content = await chatOnce(opts.apiKey, model, messages, true, { runtime })
     if (!content.trim()) throw new ModelOutputRejected('boş yanıt')
     try { return parseJsonAction(content) }
     catch (error) {
@@ -1688,6 +1694,7 @@ export async function chooseVisualTarget(opts: {
   dismissalRecord?: string; tarsPrompt?: string; jsonPrompt?: string
   revision?: number; chainSource?: string
 }): Promise<VisualTargetResult> {
+  const runtime = localRuntime()
   return runModelChain(asModelChain(opts.model), async model => {
     const native = isTarsModel(model)
     const custom = native ? opts.tarsPrompt : opts.jsonPrompt
@@ -1700,7 +1707,7 @@ export async function chooseVisualTarget(opts: {
     const messages: Message[] = native
       ? [{ role: 'user', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
       : [{ role: 'system', content: prompt }, { role: 'user', content: [imagePart(opts.screen)] }]
-    const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, stage: 'visual-target' })
+    const content = await chatOnce(opts.apiKey, model, messages, true, { json: false, stage: 'visual-target', runtime })
     const result = validateVisualTargetReply(content, model, opts.screen, opts.allowDismiss)
     chatLogger?.(`CEVAPLAYAN asama=visual-target model=${model}`)
     return { ...result, model }
@@ -1745,6 +1752,7 @@ export async function verifyVisualPointer(opts: {
   revision?: number; chainSource?: string
 }): Promise<VisualPointerDecision & { model?: string }> {
   if (!opts.screen.data) throw new ModelRejected('Görsel konum doğrulaması için yeni görüntü yok')
+  const runtime = localRuntime()
   return runModelChain(asModelChain(opts.model), async model => {
     const native = isTarsModel(model), absolute = native && tarsAbsolute(model)
     const px = (opts.pointer.x - opts.area.x) / opts.area.w, py = (opts.pointer.y - opts.area.y) / opts.area.h
@@ -1760,7 +1768,7 @@ export async function verifyVisualPointer(opts: {
     const summary = sendSummaryText({ id, node: opts.nodeId, stage: 'visual-pointer-check', model, revision: opts.revision, source: opts.chainSource, chain: asModelChain(opts.model).join(' > '), target: isLocalName(model) ? 'local' : 'api', image: { sent: true, w: opts.screen.w, h: opts.screen.h, bytes: image.buffer.length, mime: image.mime, marked: false }, candidates: { built: 0, sent: 0 }, promptChars: system.length + instruction.length })
     chatLogger?.(summary); saveRequestEvidence(id, { summary, system, instruction, image })
     try {
-      const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-pointer-check' })
+      const content = await chatOnce(opts.apiKey, model, messages, true, { json: !native, stage: 'visual-pointer-check', runtime })
       saveRequestEvidence(id, { response: content })
       const result = validateVisualPointerReply(content, model, opts.screen)
       chatLogger?.(`CEVAPLAYAN asama=visual-pointer-check model=${model}`)
