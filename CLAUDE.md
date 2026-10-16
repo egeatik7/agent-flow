@@ -194,7 +194,7 @@ Bir yardımcı araç gerekiyorsa açık bir kullanıcı işi yapmalı, yeniden k
 
 Repo: https://github.com/egeatik7/agent-flow
 
-İncelenen kaynak sürümü: **1.9.2** (bu belge ilk kez 1.7.85 üzerine yazıldı; aşağıdaki sürüm notları o tarihten kalan yerlerdir). Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
+İncelenen kaynak sürümü: **1.9.150** (17 Ekim 2026'da güncellendi; bu belge ilk kez 1.7.85 üzerine yazıldı). Aşağıdaki "Ajan araç katmanı" ve "branch" paragrafları 1.9.2–1.9.6 döneminin anlatımıdır: arayüz tarafı 7 Ekim 2026 kararıyla kaldırıldı, araçlar yalnız test profilinde çalışır (bkz. "Kullanıcı kararı — 7 Ekim 2026"). README de bu konuda eskidir; çelişkide bu belge geçerlidir. Ana teknoloji Electron, TypeScript, React/Vite; Windows tarafında PowerShell worker ve native çağrılar. Model tarafında OpenRouter, tarayıcı tarafında Playwright/CDP, ekran okumada Windows OCR ve ONNX bulunur.
 
 | Dosya/bölüm | Rol |
 | --- | --- |
@@ -299,7 +299,7 @@ Bu bölüm, ürünü geliştirirken kullanılan **kendi kendini denetleyen döng
 - `run.from { fast: true }` koşuyu ekran aşamalarında tutar (model çağrısı yok); `run.wait { timeoutMs }` koşu bitene kadar bekler ve resmî sonucu gözlenen adımlarla birlikte döndürür.
 - `target.preview` hedef **aramayan** node'lar için (tuş/bekleme/bitir/kutu) "bulamadım" demez; ne yaptığını söyler.
 
-**Kurallar.** Motor (runner/agent/worker) değiştirilmez; düzeltmeler araç ve arayüz katmanında yapılır. Kullanıcının gerçek akışı ve açık tuvali test için **değiştirilmez** — öneri dalı + geçici klasör kullanılır. Bir sürüm yeniden açıldığında **eski jeton kullanılmaz** (yukarıdaki başlatıcı bunu garanti eder). `main`'e otomatik merge **yok**; değişiklik dalda, kanıtıyla birlikte PR olarak bırakılır.
+**Kurallar.** Bu dalın kapsamında motor (runner/agent/worker) değiştirilmez; düzeltmeler araç ve arayüz katmanında yapılır (kararlılık çalışması için §20 bu kısıtı dar biçimde gevşetir). Kullanıcının gerçek akışı ve açık tuvali test için **değiştirilmez** — öneri dalı + geçici klasör kullanılır. Bir sürüm yeniden açıldığında **eski jeton kullanılmaz** (yukarıdaki başlatıcı bunu garanti eder). `main`'e otomatik merge **yok**; değişiklik dalda, kanıtıyla birlikte PR olarak bırakılır.
 
 **Masaüstü güvenliği (şart).** Her koşu gerçek fareyi ve klavyeyi kullanır. Bu yüzden masaüstüne dokunan her komut **tek kapıdan** geçer: `node scripts/dev-safe.cjs -- <komut>`. Kapı, son girdiden bu yana geçen süreyi (`GetLastInputInfo`) ölçer ve insan son 60 saniyede bir şeye dokunduysa **koşuyu başlatmaz** (çıkış 4). Senaryo koşucusu da aynı denetimi kendi içinde yapar. Bu kural, bir koşunun kullanıcının odağını ve tıklamasını çalmasından sonra eklendi; `--yes` yalnız insan açıkça istediğinde kullanılır.
 
@@ -313,7 +313,7 @@ Bu bölüm, ürünü geliştirirken kullanılan **kendi kendini denetleyen döng
 
 Bu karar, önceki öneri/inceleme/merge arayüzü hedeflerinin yerine geçer. Nubbo'nun amacı, basit node komutlarıyla güvenilir otomasyondur. Kullanıcı arayüzünde Ajan sekmesi kalır; Ajan tavsiyeleri paneli, öneri inceleme tuvali, değişiklik işaretleri, merge/undo paneli ve CLI araç/jeton/izin arayüzü kaldırılır. Yeniden ekleme.
 
-Mevcut node'lar, kullanıcı akışları, OCR/hedef bulma, tuş/yazma motoru ve döngü hata politikası değiştirilmez. Kayıtlı eski branch verileri topluca silinmez. Branch'in bellek/düzenleme kodu, mevcut test senaryolarını bozmamak için test katmanında kalabilir; kullanıcı tuvalini gösterme/merge transportu yoktur ve eski çağrılar açık ret alır.
+Mevcut node'lar, kullanıcı akışları, OCR/hedef bulma, tuş/yazma motoru ve döngü hata politikası talep edilmeden değiştirilmez (§20'deki dar kararlılık değişiklikleri talep edilmiştir). Kayıtlı eski branch verileri topluca silinmez. Branch'in bellek/düzenleme kodu, mevcut test senaryolarını bozmamak için test katmanında kalabilir; kullanıcı tuvalini gösterme/merge transportu yoktur ve eski çağrılar açık ret alır.
 
 CLI/HTTP araçları yalnız `NUBBO_PROFILE` ile ayrı profil açılmış VE `NUBBO_TEST_TOOLS=1` verilmiş oturumda kullanılabilir. Normal kullanıcı oturumunda eski `agentEndpoint=true` ayarı kapıyı açamaz. Test araçlarının mevcut izin, token, durdurma ve odak korumaları korunur. `scripts/dev-start-test.cjs` gerekli test bayrağını verir. Kapsamlı sağlamlaştırma testleri sonraki iştir; bu değişikliğe otomatik onarım yöneticisi veya yeni node mimarisi ekleme.
 
@@ -334,4 +334,23 @@ CLI/HTTP araçları yalnız `NUBBO_PROFILE` ile ayrı profil açılmış VE `NUB
 - **Ölçüt yeşil test değildir (8 Ekim 2026, kullanıcının sözü):** "tam yeşil" veya "kırmızı" bir teslim ölçütü değildir ✗. Ölçüt, **gerçek koşuda işin ilerlemesi**dir ✓ (uygulama açıldı mı, alana yazıldı mı, dosya oluştu mu). Testler yalnızca *"iş yapıldı mı"* sorusunu sorar ✓; *"kapı fırladı mı"* ✗ sorusu test sayılmaz. Kırmızı test **durma sebebi değil** ✗, **not**tur ✓.
 - **Rapor kalıbı (üç satır)**: *neyi değiştirdim · ne ölçtüm · ne hâlâ bozuk*. Uzun özet ilerleme değildir.
 - **OTOMATİK YAYIN KURALI (10 Ekim 2026, kullanıcının açık talimatı: "her patch'i otomatik pushla"):** Bir patch/istek işlendiğinde **her seferinde, sorulmadan** şu zincir uygulanır ✓: (1) **`git apply --reverse --check`** (zaten uygulanmış mı ✓) → (2) **`git apply --check`** (uygulanabilir mi ✓) → (3) **zorlamadan** uygula ✓ (asla `--force`, `--reject`, `reset --hard`, `checkout -- .`, toplu dosya kopyalama ✗) → (4) `git diff --check` ✓ → (5) **paketin kaynak kopyasıyla içerik karşılaştırması** ✓ (satır sonu farkını **fark** sayma ✗) → (6) **tam geçit** ✓ (typecheck, `npm test`, beş `test:*` paketi, sekiz Node regresyon dosyası, Windows PowerShell 5.1 harness'leri) → (7) **sürüm artışı + sürüm notu** ✓ (`docs/surum-notu-<sürüm>.md`) → (8) **commit** ✓ (mesaj **dosyadan** verilir ✗ — tırnak tuzağı) → (9) **etiket** ✓ (`v<sürüm>`) → (10) **`git push github main` + `git push github <etiket>`** ✓ → (11) `npm run pack:win` ✓ → (12) exe'yi **masaüstüne** kopyala ✓, hash ile doğrula ✓, **eski exe'leri sil** ✗ (kilitliyse bildir ✓). **Ağ hatasında**: `git fetch` + **tekrar dene** ✓ (push asla force edilmez ✗); başarısızsa **açıkça** bildir ✓. Paket `package.json` sürümünü kendi numarasına çekiyorsa **kullanıcının numaralandırması korunur** ✓ (o iki dosya hariç tutulur ✗, tek farkın **sürüm satırı** olduğu ölçülüp yazılır ✓). Geçit **kırmızıysa yayın yapılmaz** ✗ — önce hata anlaşılır ve düzeltilir ✓.
+
+## 20. Kararlılık çalışması — kullanıcının açık izni (17 Ekim 2026)
+
+Kullanıcı bu belgenin kusurlu olduğunu ve değiştirilebileceğini söyledi; programın gittiği yön §1, §17 ve §19'daki kararlardır. Bu bölüm onların yerine geçmez, onlarla çelişmez. Çalışma planı: `docs/kararlilik-eylem-plani.md`.
+
+**Neden:** kullanıcının sık yaşadığı sorunlar: zamanlamaların tutmaması, aynı bilginin farklı kaynaklardan gelmesi (koordinat/alan), akışın uç durumlarda durması, GUI-Owl ile hedefleme, yavaşlık. Orta seviye modelin düzeltme döngüsünü yürütebilmesi için geliştirme süreci (§18) de buna dahildir.
+
+**Bu çalışma kapsamında İZİNLİ dar motor değişiklikleri** (§18 ve 7 Ekim kararındaki "motor değişmez" kısıtının istisnası):
+- Yalnız günlük/ölçüm ekleyen değişiklikler (davranış değişmez).
+- Mevcut davranışı birebir koruyan saf fonksiyona çıkarma ve sabit adlandırma.
+- Testle gösterilmiş, dar kapsamlı düzeltmeler (ör. Windows `rename` EPERM yeniden denemesi, koordinat dönüşümü).
+- §19'daki "belirsizlik kapısı → uyarı" dönüşümü yalnız `docs/durma-kapilari-katalogu.md` içinde kullanıcı tarafından onaylanmış satırlar için, her biri ayrı patch ve "iş ilerledi mi" senaryosuyla.
+
+**Hâlâ yasak** (talep yok): node türü/şema değişikliği, yeni node, Windows XP görünümünün değişmesi, eylem başına model yargısı, İnisiyatif bitiş kontrolü, ürün içinde otomatik onarım yöneticisi, kullanıcının gerçek profiline dokunmak, varsayılan bekleme/zaman davranışını onaysız değiştirmek.
+
+**Depo ve yayın notu:**
+- Çalışılan depo `agent-flow/agent-flow` (1.9.150, uzak adı `origin`). Üstündeki `agent-flow` klasörü ayrı ve eski bir checkout'tur (1.9.130, uzak adı `github`); orada çalışma.
+- §19 yayın zinciri `git push github …` der. Çalışılan depoda uzak adı `origin`: önce `git remote -v` ile gerçek adı doğrula ve onu kullan. Yeni uzak ekleme, force push yok.
+- README'nin branch/merge ve "Dışarı açık" anlatımı eskidir; bu belge geçerlidir. README düzeltmesi ayrı iştir.
 
