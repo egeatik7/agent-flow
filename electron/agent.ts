@@ -51,7 +51,7 @@ import {
   type ReactionVerdict,
 } from './openrouter'
 import { localConfigured } from './openrouter'
-import { interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
+import { ConditionUndecidedError, interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { type Point } from './input-policy'
 import { rememberShot } from './shots'
 import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
@@ -1537,7 +1537,7 @@ export function createAgent(ctx: AgentContext) {
           log('warn', `[Yöntem geçişi] Koşul ${source} karar veremedi; sıradaki yöntem: ${methodErrorText(error)}`)
         }
         }
-        if (failed) throw new Error('Koşul yöntemlerinden en az biri karar veremedi; yok sonucu üretilmedi.')
+        if (failed) throw new ConditionUndecidedError('Koşul yöntemlerinden en az biri karar veremedi; yok sonucu üretilmedi.')
         return false
       }, {
         check: () => { checkStopped(); checkObservation(signal) },

@@ -48,6 +48,15 @@ function tool(name: string, description: string, properties: Record<string, unkn
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required, additionalProperties: false } } }
 }
 
+/** Condition mode: the agent may only look at the screen and answer yes/no. It never clicks or types. */
+export function conditionRecoveryTools(): ModelTool[] {
+  return [
+    tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku.', { windowTitle: str }),
+    tool('recovery_condition', 'Güncel ekrana bakarak koşulun gerçekten sağlanıp sağlanmadığını bildir. "var" yalnız ekranda açık kanıt varsa; emin değilsen "yok".', { answer: { type: 'string', enum: ['var', 'yok'] }, probableCause: str, evidence: str, summary: str }, ['answer', 'evidence', 'summary']),
+    tool('recovery_stop', 'Koşulu güvenle karara bağlayamadığını açık bir nedenle raporla.', { probableCause: str, evidence: str, summary: str }, ['probableCause', 'evidence', 'summary']),
+  ]
+}
+
 export function recoveryTools(settings: RecoverySettings): ModelTool[] {
   const tools = [
     tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku.', { windowTitle: str }),
@@ -92,7 +101,7 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const deadline = startedAt + settings.timeoutMs
   const stopped = () => deps.shouldStop() || Date.now() >= deadline
   const check = () => { if (stopped()) throw new StoppedError() }
-  const tools = recoveryTools(settings)
+  const tools = request.node.kind === 'condition' ? conditionRecoveryTools() : recoveryTools(settings)
   const allowedTools = new Set(tools.map(t => t.function.name))
   const execute = deps.makeExecute(stopped)
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
@@ -119,6 +128,7 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
     allowedNodeIds: settings.allowNodes ? [...allowedNodes] : [], recentLog: deps.recentLog, previousRecoveryReports: deps.previousReports ?? [],
     canvasJson: JSON.parse(recoveryGraphJson(request.graph)),
   }, (key, value) => key === 'icon' || key === 'patch' || key === 'sig' ? undefined : value) }]
+  if (request.node.kind === 'condition') messages.push({ role: 'system', content: `Bu bir Koşul sorusu. Koşul: "${request.node.text ?? request.node.title}". Önce screen_read ile güncel ekranı gör, sonra recovery_condition ile answer "var" veya "yok" olarak bildir. Yalnız ekranda açık kanıt görüyorsan "var" de; emin değilsen "yok" de. Tıklama, yazma veya tuş gönderme yoktur.` })
   deps.log('warn', `Kurtarma ajanı devrede: “${request.node.title}”. Mevcut döngü öğesi korunuyor.`)
   try {
     for (let calls = 0, turns = 0; calls < settings.maxCalls && turns < settings.maxCalls + 3; turns++) {
@@ -162,7 +172,18 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
             if ((spec.type === 'integer' && (typeof value !== 'number' || !Number.isInteger(value))) ||
               (spec.type !== 'integer' && typeof value !== spec.type) || (spec.enum && !spec.enum.includes(String(value)))) throw new Error(`Geçersiz araç alanı: ${key}`)
           }
-          if (name === 'recovery_retry' || name === 'recovery_complete' || name === 'recovery_stop') {
+          if (name === 'recovery_retry' || name === 'recovery_complete' || name === 'recovery_stop' || name === 'recovery_condition') {
+            if (name === 'recovery_condition') {
+              if (request.node.kind !== 'condition') throw new Error('recovery_condition yalnız Koşul node’u için kullanılır.')
+              if (!freshScreen) throw new Error('Koşulu bildirmeden önce güncel ekranı screen_read ile gör.')
+              report.probableCause = String(args.probableCause ?? '').slice(0, 6000)
+              report.evidence = String(args.evidence ?? '').slice(0, 6000)
+              report.summary = String(args.summary ?? '').slice(0, 6000)
+              const yes = args.answer === 'var'
+              report.result = yes ? 'completed' : 'failed'
+              if (yes) report.completionBasis = 'model-observed'
+              return { decision: yes ? 'var' : 'yok', report }
+            }
             if (name === 'recovery_complete' && !freshScreen) throw new Error('Hedefin tamamlandığını bildirmeden önce son eylemden sonraki güncel ekranı screen_read ile gör.')
             if (name === 'recovery_retry' && failedNodeSent) throw new Error('Hata veren node girdisi zaten gönderildi; körlemesine tekrar edilmez. Güncel ekranı oku, gerekirse koordinatla düzelt, hedefi gördükten sonra recovery_complete kullan veya recovery_stop ile raporla.')
             report.probableCause = String(args.probableCause ?? '').slice(0, 6000)

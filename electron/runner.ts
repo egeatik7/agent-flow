@@ -43,7 +43,7 @@ export type RecoveryRequest = {
   inputDelivery?: DeliveryState
 }
 
-export type RecoveryDecision = 'retry' | 'completed' | 'stop' | 'disabled' | 'failed' | undefined
+export type RecoveryDecision = 'retry' | 'completed' | 'stop' | 'disabled' | 'failed' | 'var' | 'yok' | undefined
 
 export type LoopProgress = { id: string; title: string; index: number; total: number; item: string }
 
@@ -85,6 +85,12 @@ export class StepFailedError extends Error {}
 
 /** The loop stopped on this item. The tick stays here. */
 export class LoopHalted extends Error {}
+
+/** The condition could not decide (no reader gave a clear answer). Routed by the runner, never shown as "yok". */
+export class ConditionUndecidedError extends Error {}
+
+/** A condition answered no (or stayed undecided) and nothing downstream or in recovery can continue the flow. Stops the whole run. */
+export class ConditionHaltError extends Error {}
 
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
@@ -160,7 +166,7 @@ export function renderNode(node: AgentNode, vars: Record<string, string>): Agent
 const FAIL_PORTS = new Set(['timeout', 'fail'])
 
 function isFatal(e: unknown) {
-  return e instanceof RecoveryFailedError || e instanceof DeliberateStopError || e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
+  return e instanceof ConditionHaltError || e instanceof RecoveryFailedError || e instanceof DeliberateStopError || e instanceof StoppedError || e instanceof EndFlow || e instanceof StepLimitError || e instanceof LapLimitError || e instanceof LoopHalted
 }
 
 export async function runGraph(
@@ -322,6 +328,8 @@ export async function runGraph(
 
   const settle = () => interruptibleSleep(opts.stepDelayMs, ex.shouldStop)
 
+  /** Last condition answer that was "no" or undecided; runChain decides its route. */
+  let pendingCondition: { nodeId: string; title: string; text: string; live: AgentNode; ahead: StepAhead; stepNo: number; undecided: boolean } | undefined
   const execStep = async (node: AgentNode, live: AgentNode, stepNo: number, ahead: StepAhead): Promise<string> => {
     switch (node.kind) {
       case 'start':
@@ -354,10 +362,15 @@ export async function runGraph(
         const text = (live.text ?? '').trim()
         if (!text) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
         ex.log('info', `[${stepNo}] Koşul “${text}” yöntemlerle değerlendiriliyor…`)
-        const exists = await ex.exists(text, live)
+        let answer: boolean | undefined
+        try { answer = await ex.exists(text, live) }
+        catch (error) { if (!(error instanceof ConditionUndecidedError)) throw error }
         if (ex.shouldStop()) throw new StoppedError()
-        ex.log('info', `[${stepNo}] Koşul “${text}”: ${exists ? 'var' : 'yok'}`)
-        return exists ? 'true' : 'false'
+        if (answer === true) { ex.log('info', `[${stepNo}] Koşul “${text}”: var`); return 'true' }
+        ex.log('info', `[${stepNo}] Koşul “${text}”: ${answer === false ? 'yok' : 'karar verilemedi'}`)
+        // "No" or undecided: the route is chosen in runChain, where this scope's edges are known.
+        pendingCondition = { nodeId: node.id, title: node.title, text, live, ahead, stepNo, undecided: answer === undefined }
+        return 'false'
       }
       case 'ai': {
         if (!live.prompt?.trim()) throw new Error(`“${live.title}”: Yap için hedefi yaz.`)
@@ -532,6 +545,24 @@ export async function runGraph(
       }
 
       if (NODE_SPECS[node.kind].outputs.length === 0) return
+      // A condition said "no" (or could not decide) with nothing connected to its "no" output.
+      const packageExitNo = opts.packageExit?.from === node.id && opts.packageExit.fromPort === 'false'
+      if (node.kind === 'condition' && port === 'false' && !scope && !opts.nested && !stopAt && !packageExitNo && pendingCondition?.nodeId === node.id && !graph.edges.some((e) => e.from === node.id && e.fromPort === 'false')) {
+        const pending = pendingCondition
+        pendingCondition = undefined
+        const why = pending.undecided ? 'karar veremedi' : 'yok dedi'
+        if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” ${why} ve “yok” çıkışı bağlı değil; kurtarma ajanı kapalı. Akış durduruldu.`)
+        const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: {} })
+        if (ex.shouldStop()) throw new StoppedError()
+        if (decision === 'var') {
+          ex.log('success', `[${pending.stepNo}] Kurtarma ajanı koşulu doğruladı: “${pending.text}”: var`)
+          ex.recoveryFinished?.(node.id, true)
+          port = 'true'
+        } else {
+          ex.recoveryFinished?.(node.id, false, 'Kurtarma ajanı koşulu “yok” olarak bildirdi.')
+          throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” yok; “yok” çıkışı bağlı değil ve kurtarma ajanı da doğrulayamadı. Akış durduruldu.`)
+        }
+      }
       observeExit(node, port, scope)
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {

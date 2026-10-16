@@ -1123,7 +1123,7 @@ async function runFlow(
             },
           })
           if (result.report) pendingReports.set(request.node.id, result.report)
-          recoveryStatus(false, request.node.title, result.decision === 'retry' || result.decision === 'completed'
+          recoveryStatus(false, request.node.title, result.decision === 'retry' || result.decision === 'completed' || result.decision === 'var'
             ? 'Kurtarma tamamlandı; aynı öğede devam sonucu bekleniyor.'
             : result.report?.summary || 'Kurtarma ajanı sorunu çözemedi.')
           return result.decision

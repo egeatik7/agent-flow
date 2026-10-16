@@ -65,15 +65,16 @@ describe('independent code audit reproductions',()=>{
     await expect(runGraph({nodes:[s,l,c],edges:[edge(s,'next',l),edge(l,'done',l)]},f.ex,opts)).rejects.toThrow('adım/kutu çağrısı')
     expect(f.actions.length).toBe(2)
   })
-  it('B4: unconnected instant false is incomplete without inventing action failures',async()=>{
+  it('B4 (1.9.154): unconnected instant "no" with recovery off stops the run; no action is invented',async()=>{
     const s=createNode('start',0,0),c=createNode('condition',100,0);c.text='Ready';c.timeoutMs=0
-    const f=fake();const r=await runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})
-    expect(r.failed).toBe(0);expect(r.reachedEnd).toBe(false);expect(r.incomplete).toBe(true);expect(f.logs.at(-1)?.level).toBe('warn')
+    const f=fake()
+    await expect(runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})).rejects.toThrow('kurtarma ajanı kapalı')
+    expect(f.actions).toEqual([])
   })
-  it('B4: legacy condition timeout is ignored; one unconnected false remains incomplete',async()=>{
+  it('B4 (1.9.154): legacy condition timeout is ignored; one unconnected "no" with recovery off stops the run',async()=>{
     const s=createNode('start',0,0),c=createNode('condition',100,0);c.text='Ready';c.timeoutMs=1
-    const f=fake();const r=await runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})
-    expect(r.failed).toBe(0);expect(r.incomplete).toBe(true)
+    const f=fake()
+    await expect(runGraph({nodes:[s,c],edges:[edge(s,'next',c)]},f.ex,{...opts,reportEnd:true})).rejects.toThrow('kurtarma ajanı kapalı')
   })
   it('B5: captureFailure rejection is logged and the original item result is preserved',async()=>{
     const s=createNode('start',0,0),l=createNode('loop',100,0),c=createNode('click',200,0)

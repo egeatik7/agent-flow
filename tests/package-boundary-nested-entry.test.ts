@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createNode } from '../electron/graph-types'
-import { runGraph } from '../electron/runner'
+import { runGraph, ConditionHaltError } from '../electron/runner'
 import { packageSelection } from '../src/lib/graph-ops'
 let seq=0
 const edge=(a:any,b:any,port='next')=>({id:String(++seq),from:a.id,fromPort:port,to:b.id})
@@ -18,7 +18,8 @@ describe('Package exit semantics and nested selected entry',()=>{
   c.text='“Ready”';c.timeoutMs=0;a.prompt='TRUE ONLY'
   const graph={nodes:[s,c,a],edges:[edge(s,c),edge(c,a,'true')]}
   const before=recorder();before.ex.exists=async()=>false
-  await runGraph(graph,before.ex,{maxSteps:100,stepDelayMs:0});expect(before.actions).toEqual([])
+  // Top level, no connected "no" output, no recovery: the run stops (1.9.154 rule).
+  await expect(runGraph(graph,before.ex,{maxSteps:100,stepDelayMs:0})).rejects.toBeInstanceOf(ConditionHaltError);expect(before.actions).toEqual([])
   const packed=packageSelection(graph,[c.id])!;expect(packed).not.toBeNull()
   const after=recorder();after.ex.exists=async()=>false
   await runGraph(packed.graph,after.ex,{maxSteps:100,stepDelayMs:0});expect(after.actions).toEqual([])
@@ -35,7 +36,9 @@ describe('boundary and first-lap corner cases',()=>{
   for(const port of ['true','false']){
    const {graph,c}=conditionGraph(port),before=recorder(),after=recorder()
    before.ex.exists=after.ex.exists=async()=>present
-   await runGraph(structuredClone(graph),before.ex,opts)
+   // Top level with an unconnected "no" output halts (1.9.154); the packaged run keeps its exit semantics.
+   if(port==='true'&&!present) await expect(runGraph(structuredClone(graph),before.ex,opts)).rejects.toBeInstanceOf(ConditionHaltError)
+   else await runGraph(structuredClone(graph),before.ex,opts)
    await runGraph(packageSelection(graph,[c.id])!.graph,after.ex,opts)
    expect(after.actions).toEqual(before.actions)
   }
