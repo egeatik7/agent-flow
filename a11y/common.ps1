@@ -8,6 +8,8 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Drawing
 
+if (-not ('XpKeyboardGuard' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'keyboard.cs') }
+
 if (-not ('XpNative' -as [type])) {
   Add-Type -TypeDefinition @"
 using System;

@@ -8,7 +8,7 @@ function visit(n:ts.Node){if(ts.isFunctionDeclaration(n)&&n.name&&['pushHud','hi
 const code=ts.transpileModule(declarations.join('\n')+'\n({pushHud,hideHudSoon})',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
 it('relays the exact desktop card text/level and clears phone detail lines when desktop hides',()=>{
  const events=vi.fn(),deliverHud=vi.fn(),send=vi.fn(),hide=vi.fn();let scheduled!:()=>void
- const api=vm.runInNewContext(code,{running:true,hudWindow:{isDestroyed:()=>false,hide,webContents:{send}},hudHideTimer:null,viewerState:{event:events},deliverHud,clearTimeout:vi.fn(),setTimeout:(f:()=>void)=>{scheduled=f;return 1}}) as {pushHud(l:string,t:string):void;hideHudSoon():void}
+ const api=vm.runInNewContext(code,{running:true,hudController:{hide},hudWindow:{isDestroyed:()=>false,hide,webContents:{send}},hudHideTimer:null,viewerState:{event:events},deliverHud,clearTimeout:vi.fn(),setTimeout:(f:()=>void)=>{scheduled=f;return 1}}) as {pushHud(l:string,t:string):void;hideHudSoon():void}
  api.pushHud('warn','A '.repeat(200));const [channel,payload]=events.mock.calls[0];expect(channel).toBe('hud:status');expect(payload.text.length).toBeLessThanOrEqual(220);expect(payload.text.endsWith('…')).toBe(true);expect(deliverHud).toHaveBeenCalledExactlyOnceWith('hud:status',payload,true)
  api.hideHudSoon();scheduled();expect(events.mock.calls.slice(1)).toEqual([['hud:loop',{text:''}],['hud:method',{text:''}],['hud:countdown',{text:''}]]);expect(hide).toHaveBeenCalledTimes(1)
 })

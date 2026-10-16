@@ -30,7 +30,7 @@ function friendly(msg: string): string {
   return msg
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; proc: ChildProcessWithoutNullStreams }
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; proc: ChildProcessWithoutNullStreams; finishCapture?: () => void }
 
 class Worker {
   private proc: ChildProcessWithoutNullStreams | null = null
@@ -76,6 +76,18 @@ class Worker {
         if (line === 'READY') {
           clearTimeout(boot)
           resolve()
+          return
+        }
+        if (line.startsWith('HUD_CAPTURED\t')) {
+          const p = this.pending.get(line.slice('HUD_CAPTURED\t'.length))
+          if (p?.proc === proc) p.finishCapture?.()
+          return
+        }
+        if (line.startsWith('INPUT_STATE\t')) {
+          try {
+            const state = JSON.parse(Buffer.from(line.slice('INPUT_STATE\t'.length), 'base64').toString('utf8')) as InputKeyState
+            if (this.pending.get(state.id)?.proc === proc) inputLogger(state)
+          } catch { /* Diagnostics must not fail a dispatched action. */ }
           return
         }
         const tab = line.indexOf('\t')
@@ -159,7 +171,11 @@ class Worker {
     const proc = this.proc
     if (!proc) throw new Error('Otomasyon işçisi çalışmıyor.')
     const id = String(++this.seq)
-    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
+    // Resolve the HWND at dispatch, not while this request waits behind another operation.
+    const capture = (payload as { hudCapture?: boolean }).hudCapture === true && !!captureHud
+    const wire = capture ? { ...payload, hudHwnd: hudHandle(), hudCaptureManaged: true } : payload
+    const b64 = Buffer.from(JSON.stringify(wire), 'utf8').toString('base64')
+    let finishCapture: (() => void) | undefined
     let abort: (() => void) | undefined
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -184,9 +200,28 @@ class Worker {
         reject(new Error('Durduruldu; komut worker’a yazılmadı.'))
         return
       }
-      hooks?.onDispatched?.()
-      proc.stdin.write(`${id}\t${op}\t${b64}\n`)
-    }).finally(() => { if (abort) signal?.removeEventListener('abort', abort) })
+      try {
+        if (capture) {
+          const finish = captureHud!()
+          let done = false
+          finishCapture = () => {
+            if (done) return
+            done = true
+            try { finish() } catch { /* A card restore failure must not discard a captured frame. */ }
+          }
+          this.pending.get(id)!.finishCapture = finishCapture
+        }
+        hooks?.onDispatched?.()
+        proc.stdin.write(`${id}\t${op}\t${b64}\n`)
+      } catch (error) {
+        this.pending.delete(id)
+        clearTimeout(timer)
+        reject(error)
+      }
+    }).finally(() => {
+      if (abort) signal?.removeEventListener('abort', abort)
+      finishCapture?.()
+    })
   }
 
   kill() {
@@ -205,14 +240,20 @@ const worker = new Worker()
 
 let hudHandle: () => string = () => ''
 
+let captureHud: (() => () => void) | undefined
+export function setHudCapture(begin: () => () => void) { captureHud = begin }
+export type InputKeyState = { id: string; op: string; phase: string; available: boolean; down: number[]; repaired: string; context: string }
+let inputLogger: (state: InputKeyState) => void = () => {}
+export function setInputLogger(logger: (state: InputKeyState) => void) { inputLogger = logger }
+
 /** HWND of the on-screen status card, so a grab can hide it for that instant. */
 export function setHudHandle(get: () => string) {
   hudHandle = get
 }
 
-function withHud<T extends object>(payload: T): T & { hudHwnd?: string } {
-  const hudHwnd = hudHandle()
-  return hudHwnd ? { ...payload, hudHwnd } : payload
+function withHud<T extends object>(payload: T): T & { hudCapture: boolean; hudHwnd?: string } {
+  // Legacy standalone callers still receive a native hide/restore handle.
+  return { ...payload, hudCapture: true, hudHwnd: captureHud ? undefined : hudHandle() }
 }
 
 let ocrEngine: OcrEngine = 'combined'

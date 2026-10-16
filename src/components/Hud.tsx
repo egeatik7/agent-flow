@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import nubbo from '../assets/nubbo.png'
 import still from '../assets/nubbo-still.png'
-import type { BaglamKarti } from '../../electron/hud-context'
-import type { BellekKarti } from '../../electron/memory-meter'
+import { hudContext, hudMemory, hudText, type HudContext, type HudMemory } from './hud-payload'
 import type { LogLevel } from '../types'
 
 type Status = { level: LogLevel; text: string }
@@ -20,9 +19,9 @@ export default function Hud() {
   /** Son üç aşama ve süreleri (1.9.119): OCR + liste → Model → Kelime seçimi. */
   const [stages, setStages] = useState('')
   /** Bağlam ölçümü (1.9.129): main'den NESNE olarak gelir; günlük metni ayrıştırılmaz. */
-  const [baglam, setBaglam] = useState<BaglamKarti | undefined>(undefined)
+  const [baglam, setBaglam] = useState<HudContext | undefined>(undefined)
   /** Canlı bellek göstergesi (1.9.130): main'den NESNE olarak gelir; günlük metni ayrıştırılmaz. */
-  const [bellek, setBellek] = useState<BellekKarti | undefined>(undefined)
+  const [bellek, setBellek] = useState<HudMemory | undefined>(undefined)
   const [recovering, setRecovering] = useState(false)
   const [playing, setPlaying] = useState(() => !document.hidden)
 
@@ -36,39 +35,42 @@ export default function Hud() {
     document.documentElement.classList.add('hud-root')
     document.title = ''
     const off = window.xpAgent?.onHud?.((payload) => {
-      const p = payload as Partial<Status>
+      const p = (payload ?? {}) as Partial<Status>
       const text = typeof p.text === 'string' ? p.text.trim() : ''
       if (!text) return
       const level = p.level === 'warn' || p.level === 'error' || p.level === 'success' || p.level === 'info' ? p.level : 'info'
       setStatus({ level, text })
     })
     const offLoop = window.xpAgent?.onHudLoop?.((payload) => {
-      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      const text = hudText(payload)
       setLoop(text)
     })
     const offMethod = window.xpAgent?.onHudMethod?.((payload) => {
-      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      const text = hudText(payload)
       setMethod(text)
     })
     const offRecovery = window.xpAgent?.onRecoveryStatus?.(payload => {
-      setRecovering(payload.active)
-      setStatus({ level: payload.active ? 'warn' : 'info', text: `${payload.nodeTitle}: ${payload.message}` })
+      if (!payload || typeof payload !== 'object') return
+      setRecovering(payload.active === true)
+      setStatus({ level: payload.active ? 'warn' : 'info', text: `${typeof payload.nodeTitle === 'string' ? payload.nodeTitle : ''}: ${typeof payload.message === 'string' ? payload.message : ''}` })
     })
     const offCountdown = window.xpAgent?.onHudCountdown?.((payload) => {
-      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      const text = hudText(payload)
       setCountdown(text)
     })
     const offStages = window.xpAgent?.onHudStages?.((payload) => {
-      const text = typeof (payload as { text?: unknown }).text === 'string' ? (payload as { text: string }).text.trim() : ''
+      const text = hudText(payload)
       setStages(text)
     })
     const offBaglam = window.xpAgent?.onHudContext?.((payload) => {
-      const kart = (payload as { kart?: BaglamKarti | null } | null)?.kart
-      setBaglam(kart && typeof kart === 'object' ? kart : undefined)
+      const kart = (payload as { kart?: unknown } | null)?.kart
+      if (kart === null) setBaglam(undefined)
+      else { const parsed = hudContext(kart); if (parsed) setBaglam(parsed) }
     })
     const offBellek = window.xpAgent?.onHudMemory?.((payload) => {
-      const kart = (payload as { kart?: BellekKarti | null } | null)?.kart
-      setBellek(kart && typeof kart === 'object' ? kart : undefined)
+      const kart = (payload as { kart?: unknown } | null)?.kart
+      if (kart === null) setBellek(undefined)
+      else { const parsed = hudMemory(kart); if (parsed) setBellek(parsed) }
     })
     return () => {
       document.documentElement.classList.remove('hud-root')

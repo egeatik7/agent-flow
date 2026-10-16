@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const h=vi.hoisted(()=>({ stop:false, stopOnRetry:false, logs:[] as string[], scans:[] as any[], keys:[] as string[], failKey:false, visible:false, inputs:[] as string[] }))
+const h=vi.hoisted(()=>({ stop:false, stopOnRetry:false, logs:[] as string[], scans:[] as any[], keys:[] as string[], failKey:false, keyFailure:'', visible:false, inputs:[] as string[] }))
 vi.mock('electron',()=>({ screen:{getPrimaryDisplay:()=>({bounds:{x:0,y:0,width:1000,height:700},scaleFactor:1})} }))
 vi.mock('../electron/a11y-bridge',()=>({
  isLocked:async()=>false, discardShot:()=>{}, foreground:async()=>({title:'Fixture',pid:1,hwnd:'42',proc:'fixture'}),
  scan:async(o:any)=>{h.scans.push(o);return {area:{x:0,y:0,w:1000,h:700},window:'Fixture',image:{data:'AA==',w:1000,h:700},items:[{id:1,src:'ocr',type:'Text',text:h.visible?'Run':'Unrelated obstruction',x:100,y:100,w:100,h:30}],ocr:true,uiaCount:0,ocrCount:1}},
- sendKeys:async(keys:string)=>{ if(h.failKey){h.failKey=false;throw Error('worker unavailable before dispatch')} h.keys.push(keys) },
+ sendKeys:async(keys:string)=>{ if(h.keyFailure){const message=h.keyFailure;h.keyFailure='';throw Error(message)} if(h.failKey){h.failKey=false;throw Error('worker unavailable before dispatch')} h.keys.push(keys) },
  clickAt:async()=>{h.inputs.push('click')}, clickCurrentAt:async()=>{h.inputs.push('visual')},
 }))
 vi.mock('../electron/browser',()=>({ userChromeItems:async()=>null }))
@@ -24,7 +24,7 @@ const agent=(extra={})=>createAgent({settings:()=>({...settings(),...extra}), sh
 const reply=(content:any)=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify(content)}}]})})
 const target=()=>({...createNode('click',0,0),prompt:'CustomRemesh panelindeki “Run Remesh for multiple objects” düğmesine BİR KEZ tıkla.'})
 const opts={maxSteps:10,stepDelayMs:0}
-beforeEach(()=>{Object.assign(h,{stop:false,stopOnRetry:false,logs:[],scans:[],keys:[],failKey:false,visible:false,inputs:[]});vi.useFakeTimers();setStopCheck(()=>h.stop);setLocalEndpoint('')})
+beforeEach(()=>{Object.assign(h,{stop:false,stopOnRetry:false,logs:[],scans:[],keys:[],failKey:false,keyFailure:'',visible:false,inputs:[]});vi.useFakeTimers();setStopCheck(()=>h.stop);setLocalEndpoint('')})
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();setStopCheck(()=>false);setLocalEndpoint('')})
 it('visual terminate plus ordinary OCR null reaches Recovery and completes without sending the original click',async()=>{
  let calls=0;vi.stubGlobal('fetch',vi.fn(async()=>reply(++calls===1?{name:'computer_use',arguments:{action:'terminate',status:'failure'}}:{id:null,text:'',reason:'CustomRemesh is not visible in the current screenshot'})))
@@ -37,6 +37,14 @@ it('control: an ordinary pre-dispatch key error reaches enabled recovery',async(
  const ex=agent(),recover=vi.fn(async()=> 'completed' as const);ex.recover=recover
  await expect(runGraph({nodes:[node],edges:[]},ex,opts)).resolves.toMatchObject({failed:0})
  expect(recover).toHaveBeenCalledOnce();expect(h.keys).toEqual([])
+})
+it.each(['INPUT_MODIFIERS_HELD','INPUT_DESKTOP_UNAVAILABLE'])('%s reaches existing recovery without becoming deliberate give-up',async code=>{
+ const node={...createNode('key',0,0),keys:'alt+tab'};h.keyFailure=code
+ const ex=agent(),recover=vi.fn(async(_request: RecoveryRequest)=> 'completed' as const);ex.recover=recover
+ await expect(runGraph({nodes:[node],edges:[]},ex,opts)).resolves.toMatchObject({failed:0})
+ expect(recover).toHaveBeenCalledOnce();expect(h.keys).toEqual([])
+ expect(recover.mock.calls[0][0].error).not.toBeInstanceOf(DeliberateStopError)
+ expect(String(recover.mock.calls[0][0].error)).toContain(code)
 })
 it('ordinary null-only missing target reaches Recovery instead of being trapped in an inner retry loop',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>reply({id:null,text:'',reason:'target temporarily covered'})))

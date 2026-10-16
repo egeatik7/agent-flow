@@ -31,6 +31,12 @@ public class XpWin {
  public static bool Selected = false;
  public static bool SelectAll(IntPtr h){ SelectAllCalls++; if (SelectAllResult) Selected = true; return SelectAllResult; }
 }
+// Fake OS boundary: the actual guard policy is exercised separately in test-keyboard-safety.ps1.
+public static class XpKeyboardGuard {
+ public static string Repaired = "";
+ public static void Before() {}
+ public static void After() {}
+}
 public static class XpText { public static bool CanType(string t){ return true; } public static bool ClipboardHas(string t){ return true; } }
 namespace System.Windows.Forms {
  // Records keys instead of sending them, so the test never types into a real window.

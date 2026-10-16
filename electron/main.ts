@@ -1,3 +1,4 @@
+import { HudWindowController } from './hud-window'
 import { assertRunStructure, structureSummary } from './run-structure'
 import { contextOf, findPlace } from './tool-context'
 import { runYap } from './yap'
@@ -522,6 +523,7 @@ function forceClose(reason: string): void {
 }
 
 function destroyHud() {
+  hudController.reset()
   const w = hudWindow
   if (!w || w.isDestroyed()) {
     hudWindow = null
@@ -557,6 +559,7 @@ function placeHud() {
 }
 
 function createHud() {
+  hudController.reset()
   hudWindow = new BrowserWindow({
     width: HUD_W,
     height: HUD_H,
@@ -590,8 +593,10 @@ function createHud() {
   const dev = process.env.VITE_DEV_SERVER_URL
   if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
   else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
+  const w = hudWindow
   hudWindow.on('closed', () => {
-    if (hudWindow && !hudWindow.isDestroyed()) return
+    if (hudWindow !== w) return
+    hudController.reset()
     hudWindow = null
   })
 }
@@ -616,31 +621,17 @@ function hudNativeHandle(): string {
 
 bridge.setHudHandle(hudNativeHandle)
 
-function raiseHud() {
-  if (!hudWindow || hudWindow.isDestroyed()) return
-  hudWindow.setAlwaysOnTop(true)
-  hudWindow.moveTop()
-}
+const hudController = new HudWindowController(() => hudWindow, () => running, placeHud)
+bridge.setHudCapture(() => hudController.capture())
+bridge.setInputLogger(state => log('chat',
+  `KLAVYE id=${state.id} islem=${state.op} asama=${state.phase} masaustu=${state.available ? 'etkin' : 'bilinmiyor'} basili=${state.down.join(',') || '-'} birakma-denemesi=${state.repaired || '-'} ${state.context}`))
 
 function revealHud() {
-  if (!hudWindow || hudWindow.isDestroyed()) return
-  placeHud()
-  hudWindow.showInactive()
-  raiseHud()
-  if (!hudWindow.isVisible()) hudWindow.show()
-  raiseHud()
+  hudController.show()
 }
 
 function deliverHud(channel: string, payload: unknown, show: boolean) {
-  if (!hudWindow || hudWindow.isDestroyed()) return
-  const deliver = () => {
-    if (!hudWindow || hudWindow.isDestroyed()) return
-    placeHud()
-    hudWindow.webContents.send(channel, payload)
-    if (show) revealHud()
-  }
-  if (hudWindow.webContents.isLoading()) hudWindow.webContents.once('did-finish-load', deliver)
-  else deliver()
+  hudController.send(channel, payload, show)
 }
 
 function pushLoop(text: string) {
@@ -925,7 +916,7 @@ function hideHudSoon() {
     viewerState.event('hud:method', { text: '' })
     viewerState.event('hud:countdown', { text: '' })
     if (hudWindow && !hudWindow.isDestroyed()) {
-      hudWindow.hide()
+      hudController.hide()
       hudWindow.webContents.send('hud:loop', { text: '' })
       hudWindow.webContents.send('hud:method', { text: '' })
       hudWindow.webContents.send('hud:countdown', { text: '' })

@@ -78,9 +78,12 @@ function Get-CaptureRect($win) {
 }
 
 $script:HudHwnd = [IntPtr]::Zero
+$script:HudCaptureManaged = $false
+$script:CaptureRequestId = ''
 
 function Set-HudHandle($P) {
   $script:HudHwnd = [IntPtr]::Zero
+  $script:HudCaptureManaged = $null -ne $P -and $P.hudCaptureManaged -eq $true
   if ($null -eq $P) { return }
   $raw = ''
   try { $raw = [string]$P.hudHwnd } catch { return }
@@ -92,7 +95,12 @@ function Set-HudHandle($P) {
 function Copy-Screen($rect) {
   $hwnd = $script:HudHwnd
   $hidden = $false
-  if ($null -ne $hwnd -and $hwnd -ne [IntPtr]::Zero) {
+  if ($script:HudCaptureManaged) {
+    # Main has already hidden the card and holds its visibility lease. Keep the DWM settling
+    # period, but never restore a window from this process (Stop may have hidden it meanwhile).
+    try { [void][XpNative]::DwmFlush() } catch {}
+    Start-Sleep -Milliseconds 80
+  } elseif ($null -ne $hwnd -and $hwnd -ne [IntPtr]::Zero) {
     try {
       if ([XpNative]::IsWindowVisible($hwnd)) {
         [void][XpNative]::ShowWindow($hwnd, 0)
@@ -115,6 +123,10 @@ function Copy-Screen($rect) {
   } finally {
     if ($hidden) {
       try { [void][XpNative]::ShowWindow($hwnd, 4) } catch {}
+    }
+    if ($script:HudCaptureManaged -and $script:CaptureRequestId) {
+      [Console]::Out.WriteLine("HUD_CAPTURED`t$script:CaptureRequestId")
+      [Console]::Out.Flush()
     }
   }
 }

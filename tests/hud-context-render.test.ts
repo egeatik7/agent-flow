@@ -119,6 +119,41 @@ describe('mevcut kronometre ve aşama şeridi korunur', () => {
   })
 })
 
+describe('malformed card events cannot unmount the HUD', () => {
+  it('partial context numbers stay unknown and the next valid update still renders', async () => {
+    const t = await mount()
+    act(() => kanal['hud:context']({ kart: { yukluMetin: 'Yüklü bağlam: bilinmiyor' } }))
+    expect(text(t.root)).toContain('Azami bilinmiyor')
+    expect(text(t.root)).not.toContain('undefined')
+    act(() => kanal['hud:context']({ kart: kartFixture() }))
+    expect(text(t.root)).toContain('Azami 262.144')
+    expect(document.documentElement.classList.contains('hud-root')).toBe(true)
+  })
+  it('missing or non-array memory details cannot crash the card', async () => {
+    const t = await mount()
+    act(() => kanal['hud:memory']({ kart: { ramVram: 'RAM bilinmiyor', gpuSatirlari: null, surecSatirlari: [null, 'Blender'], aciklamalar: {} } }))
+    expect(text(t.root)).toContain('RAM bilinmiyor')
+    expect(text(t.root)).toContain('Blender')
+    act(() => kanal['hud:status']({ text: 'Canlı', level: 'info' }))
+    act(() => kanal['hud:method']({ text: 'Tıkla · yeni node' }))
+    expect(text(t.root)).toContain('Tıkla · yeni node')
+  })
+  it('null events do not destroy subscriptions or the transparent HUD root', async () => {
+    const t = await mount()
+    act(() => { for (const cb of Object.values(kanal)) cb(null) })
+    act(() => kanal['hud:countdown']({ text: '1 sn' }))
+    expect(text(t.root)).toContain('1 sn')
+    expect(Object.keys(kanal)).toHaveLength(8)
+    expect(document.documentElement.classList.contains('hud-root')).toBe(true)
+  })
+  it('invalid numbers are not displayed as measured tokens', async () => {
+    const t = await mount()
+    act(() => kanal['hud:context']({ kart: { yukluMetin: 'Yüklü bağlam: bilinmiyor', azamiToken: '32768', girisToken: {}, tahminiToken: Infinity } }))
+    expect(text(t.root)).toContain('Azami bilinmiyor')
+    expect(text(t.root)).toContain('Giriş bilinmiyor · tahmini bilinmiyor')
+  })
+})
+
 describe('kart taşmaz (sabit HUD penceresi)', () => {
 // jsdom ortamında `new URL(..., import.meta.url)` file şeması vermez; yol doğrudan kurulur.
 const css = readFileSync(join(process.cwd(), 'src', 'styles', 'xp.css'), 'utf8')

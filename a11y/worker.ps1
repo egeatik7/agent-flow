@@ -5,6 +5,25 @@
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'screen.ps1')
 
+# Every SendKeys path, including selection, readback, paste and per-character typing.
+function Send-CheckedKeys([string]$keys) {
+  [XpKeyboardGuard]::Before()
+  if ([XpKeyboardGuard]::Repaired) { Write-InputState 'sendkeys-before-repair' $script:CaptureRequestId $script:CurrentOp }
+  try { [System.Windows.Forms.SendKeys]::SendWait($keys) }
+  finally {
+    [XpKeyboardGuard]::After()
+    if ([XpKeyboardGuard]::Repaired) { Write-InputState 'sendkeys-after-repair' $script:CaptureRequestId $script:CurrentOp }
+  }
+}
+
+function Write-InputState([string]$phase, [string]$id, [string]$op) {
+  # No typed text or clipboard contents: only state and window/layout identity.
+  $data = [ordered]@{ id = $id; op = $op; phase = $phase; available = [XpKeyboardGuard]::Available(); down = @([XpKeyboardGuard]::Down()); repaired = [XpKeyboardGuard]::Repaired; context = [XpKeyboardNative]::Context() }
+  $json = ConvertTo-Json -InputObject $data -Compress -Depth 4
+  [Console]::Out.WriteLine("INPUT_STATE`t" + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json)))
+  [Console]::Out.Flush()
+}
+
 function ConvertTo-SendKeysText([string]$t) {
   return ($t -replace '([\+\^%~\(\)\{\}\[\]])', '{$1}')
 }
@@ -33,7 +52,7 @@ function Send-TextPaced([string]$t, [int]$gapMs, [scriptblock]$checkFocus = $nul
   foreach ($ch in $t.ToCharArray()) {
     if ($null -ne $checkFocus) { & $checkFocus }
     $out = if ($caps) { Switch-TextCase ([string]$ch) } else { [string]$ch }
-    [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $out))
+    Send-CheckedKeys ((ConvertTo-SendKeysText $out))
     if ($gapMs -gt 0) { Start-Sleep -Milliseconds $gapMs }
   }
 }
@@ -329,7 +348,7 @@ function Send-KeyString([string]$keys) {
     return
   }
   if (-not (Test-SendKeysHasWin $keys)) {
-    [System.Windows.Forms.SendKeys]::SendWait([string]$keys)
+    Send-CheckedKeys ([string]$keys)
     return
   }
   $steps = Get-SendKeysSteps $keys ([int[]]@())
@@ -994,9 +1013,9 @@ function Read-VisualInput($field, $guard, [string]$nativeFocus) {
   try {
     [System.Windows.Forms.Clipboard]::SetText($marker)
     Assert-TypeFocus $field $guard $nativeFocus
-    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    Send-CheckedKeys ('^a')
     Assert-TypeFocus $field $guard $nativeFocus
-    [System.Windows.Forms.SendKeys]::SendWait('^c')
+    Send-CheckedKeys ('^c')
     for ($i = 0; $i -lt 5; $i++) {
       Start-Sleep -Milliseconds 80
       Assert-TypeFocus $field $guard $nativeFocus
@@ -1185,10 +1204,10 @@ function Invoke-Op([string]$op, $P) {
         }
         if ($P.clearFirst) {
           Start-Sleep -Milliseconds 120
-          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          Send-CheckedKeys ('^a')
           $out.writeSent = $true
           Start-Sleep -Milliseconds 280
-          [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+          Send-CheckedKeys ('{DEL}')
           Start-Sleep -Milliseconds 200
           $out.cleared = $true
         }
@@ -1197,7 +1216,7 @@ function Invoke-Op([string]$op, $P) {
             Send-TextPaced $text 20
           } else {
             try {
-              [System.Windows.Forms.SendKeys]::SendWait('^v')
+              Send-CheckedKeys ('^v')
               Start-Sleep -Milliseconds 250
             } finally { [XpText]::RestoreClipboard($oldClip) }
             $out.pasted = $true
@@ -1206,7 +1225,7 @@ function Invoke-Op([string]$op, $P) {
         }
         if ($P.pressEnter) {
           Start-Sleep -Milliseconds 240
-          [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+          Send-CheckedKeys ('{ENTER}')
           $out.writeSent = $true
         }
         return [pscustomobject]$out
@@ -1273,7 +1292,7 @@ function Invoke-Op([string]$op, $P) {
           if ($P.pressEnter) {
             Start-Sleep -Milliseconds 200
             if ($P.guard) { Assert-LastTypeFocus $P.guard.window $out.focusHwnd }
-            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+            Send-CheckedKeys ('{ENTER}')
           }
           return [pscustomobject]$out
         }
@@ -1320,11 +1339,11 @@ function Invoke-Op([string]$op, $P) {
         if ((Test-TextLike $focus) -or $visual) {
           Start-Sleep -Milliseconds 120
           if ($P.guard) { & $check }
-          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          Send-CheckedKeys ('^a')
           Start-Sleep -Milliseconds 280
           if ($P.guard) { & $check }
           $out.writeSent = $true
-          [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+          Send-CheckedKeys ('{DEL}')
           Start-Sleep -Milliseconds 200
           # Some classic edit boxes ignore Ctrl+A. If the box still holds text, select it with EM_SETSEL and delete again.
           # Only a box whose text can be read is touched, so where Ctrl+A works nothing changes.
@@ -1336,7 +1355,7 @@ function Invoke-Op([string]$op, $P) {
             if ([XpWin]::SelectAll($hwnd)) {
               Start-Sleep -Milliseconds 120
               if ($P.guard) { & $check }
-              [System.Windows.Forms.SendKeys]::SendWait('{DEL}')
+              Send-CheckedKeys ('{DEL}')
               Start-Sleep -Milliseconds 200
             }
           }
@@ -1363,7 +1382,7 @@ function Invoke-Op([string]$op, $P) {
               throw 'CLIPBOARD_SET_FAILED: Pano ayarlanamadi; yanlis metin yapistirilmamasi icin yapistirma yapilmadi.'
             }
             if ($P.guard) { & $check }
-            [System.Windows.Forms.SendKeys]::SendWait('^v')
+            Send-CheckedKeys ('^v')
             Start-Sleep -Milliseconds 250
           } finally {
             if ($visual) { [System.Windows.Forms.Clipboard]::SetDataObject($old, $true) }
@@ -1389,7 +1408,7 @@ function Invoke-Op([string]$op, $P) {
       if ($P.pressEnter) {
         Start-Sleep -Milliseconds 240
         if ($P.guard) { & $check }
-        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+        Send-CheckedKeys ('{ENTER}')
       }
       return [pscustomobject]$out
     }
@@ -1548,7 +1567,24 @@ while ($true) {
     if ($parts.Length -gt 2 -and $parts[2].Length -gt 0) {
       $P = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[2])) | ConvertFrom-Json
     }
-    $data = Invoke-Op $parts[1] $P
+    $script:CaptureRequestId = $id
+    $script:CurrentOp = $parts[1]
+    $inputOp = @('keys','hotkey','typeText','clickAt','clickCurrentAt','drag','scroll') -contains $parts[1]
+    $inputStarted = $false
+    try {
+      if ($inputOp) {
+        Write-InputState 'before' $id $parts[1]
+        [XpKeyboardGuard]::Before()
+        $inputStarted = $true
+        Write-InputState 'ready' $id $parts[1]
+      }
+      $data = Invoke-Op $parts[1] $P
+    } finally {
+      if ($inputStarted) {
+        try { [XpKeyboardGuard]::After() }
+        finally { Write-InputState 'after' $id $parts[1] }
+      }
+    }
     Send-Response $id ([pscustomobject]@{ ok = $true; data = $data })
   } catch {
     Send-Response $id ([pscustomobject]@{ ok = $false; error = [string]$_.Exception.Message })
