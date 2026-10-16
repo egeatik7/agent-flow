@@ -460,7 +460,8 @@ export function createAgent(ctx: AgentContext) {
     trace(node, { kind: 'request', node, order, readOnly, windowTitle: win, modelEnabled: !!s.apiKey || localConfigured(), memory: memoFor(node) })
     const resolved = (target: Resolved, source: FindStageId, rect?: TargetRect, item?: ScreenItem): Resolved => {
       if (asksDesktopShortcut(prompt) && winScan && taskbarItem(winScan, { x: target.x, y: target.y, w: 0, h: 0 })) {
-        throw new NotFoundError('Masaüstü kısayolu istendi, ancak hedef görev çubuğunda bulundu; tıklama gönderilmedi.')
+        // Warning only: the same program is usually reachable from the taskbar, so the flow continues.
+        log('warn', 'Masaüstü kısayolu istendi, ancak hedef görev çubuğunda bulundu; görev çubuğundaki öğe kullanılıyor.')
       }
       checkStopped()
       trace(node, { kind: 'resolved', source, target: { x: target.x, y: target.y, label: target.label }, rect, item })
