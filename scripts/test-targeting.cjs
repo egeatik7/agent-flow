@@ -109,18 +109,27 @@ test('trace files can reproduce selection; retention and overlay respect screens
 test('incomplete recordings are reported, rather than inventing OS observations',async()=>{
   const b=bundle(['windows'],[]); b.events.pop(); await assert.rejects(replayTrace(b),/incomplete/);
 });
-test('recorded picture was searched and not found: the recorded position is not clicked',async()=>{
+// Since 1.9.141 the recorded window-relative position is the LAST resort (docs/method-fallback-139.md):
+// it is used when the picture search and the other methods found nothing, and it is labelled as such.
+// Window (100,100) + recorded offset (10,20) = (110,120). Replay sends no input, so inputCalls must be 0.
+test('recorded picture not found: the recorded position is used as the last resort, labelled as such',async()=>{
   const b=bundle(['icon','offset'],[],{node:{locator:{icon:'fixture-png',windowTitle:'Fixture',offsetX:10,offsetY:20}},events:[
     {kind:'observation',source:'icon',value:{hit:null,again:null}},
     {kind:'observation',source:'offset',value:{x:100,y:100,w:800,h:600}},
   ]});
-  await assert.rejects(replayTrace(b),/bulunamadı/);
+  const r=await replayTrace(b);
+  assert.equal(r.result.x,110); assert.equal(r.result.y,120);
+  assert.match(r.result.label,/son çare/);
+  assert.equal(r.inputCalls,0);
 });
-test('no recorded picture either: the recorded position is still not clicked',async()=>{
+test('no recorded picture: the recorded position is still the last resort with the same coordinates',async()=>{
   const b=bundle(['offset'],[],{node:{locator:{windowTitle:'Fixture',offsetX:10,offsetY:20}},events:[
     {kind:'observation',source:'offset',value:{x:100,y:100,w:800,h:600}},
   ]});
-  await assert.rejects(replayTrace(b),/bulunamadı/);
+  const r=await replayTrace(b);
+  assert.equal(r.result.x,110); assert.equal(r.result.y,120);
+  assert.match(r.result.label,/son çare/);
+  assert.equal(r.inputCalls,0);
 });
 
 test('word-level model choice clicks the selected real word, not the phrase midpoint or returned text', async()=>{

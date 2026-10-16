@@ -1,5 +1,6 @@
 import { repeatMethodCycle, methodErrorText } from './method-cycle'
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
+import { beginStepTiming, endStepTiming, recordTiming } from './step-timing'
 import { shouldRefineWord, wordCandidates, refineWordTarget  } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
@@ -150,7 +151,10 @@ export function createAgent(ctx: AgentContext) {
     const resolved = resolveStage(s, stage)
     return { s, chain: resolved.chain, revision: s.modelRevision ?? 0, source: resolved.source }
   }
-  const pause = (ms: number) => interruptibleSleep(ms, stopped)
+  const pause = async (ms: number) => {
+    const startedAt = Date.now()
+    try { await interruptibleSleep(ms, stopped) } finally { recordTiming('wait', Date.now() - startedAt) }
+  }
 
   function trace(node: AgentNode, data: TargetTraceData) {
     if (!ctx.onTargetTrace) return
@@ -1570,5 +1574,18 @@ export function createAgent(ctx: AgentContext) {
 
   /** Same resolver, one read-only pass. No click, typing, recovery actions or memory write. */
   const previewTarget = (node: AgentNode) => resolveTarget(node, 0, false, true)
-  return { executor, beginRun, releaseRunSettings, previewTarget }
+  // One log line per executor step (log only). The wrapper never changes arguments or results.
+  const timed = <A extends unknown[], R>(nodeAt: number, fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const timing = beginStepTiming((args[nodeAt] as AgentNode).title)
+      try { return await fn(...args) } finally { log('info', endStepTiming(timing)) }
+    }
+  const timedExecutor: Executor = {
+    ...executor,
+    click: timed(0, executor.click),
+    type: timed(0, executor.type),
+    key: timed(0, executor.key),
+    exists: timed(1, executor.exists),
+  }
+  return { executor: timedExecutor, beginRun, releaseRunSettings, previewTarget }
 }

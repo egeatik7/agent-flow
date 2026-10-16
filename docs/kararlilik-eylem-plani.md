@@ -139,3 +139,28 @@ README, kaldırılan branch/merge arayüzünü ve "Dışarı açık" ayarını h
 - **F2 KAPATILDI (kullanıcı kararı: seçenek 2, "kişisel program, önemli değil").** Yeniden deneme kodu geri alındı; testler yalnız dokümante edildi. Plan varsayımı yanlış çıktı: `zip-library-storage.ts` içinde `renameSync` EPERM'i, 5 denemede (en fazla 160 ms) ve 10 denemede (en fazla 500 ms, toplam ~2,6 sn) düzelmedi.
   - Ölçüm, 20 ardışık `zip-library-storage` + `zip-rename-retry` koşusu: 5 deneme → **6/20 başarısız**; 10 deneme → **3/20 başarısız**.
   - Yığında hata `renameRetrying` yeniden denemeleri bittikten sonra yüzeye çıkıyor. Kodda açık tutamaç yok (`readBuffer` ve `publish` fd'leri kapatıyor). Olası neden: Windows Defender veya indeksleyici hedef/geçici dosyayı tutuyor. Hipotez, doğrulanmadı.
+- **F3 kodu yazıldı, yayın YAPILMADI (geçit kırmızı).** Değişiklik (commit yok, çalışma ağacında): `electron/step-timing.ts` (saf sayaç, sahte saatle test), `electron/a11y-bridge.ts` (`scan` zamanlanıyor, eski gövde `scanImpl`), `electron/openrouter.ts` (`guardedFetch` HTTP süresi), `electron/agent.ts` (`pause` bekleme süresi; yürütücünün `click/type/key/exists` sarmalayıcıları adım başına tek `Süre:` satırı yazar). Davranış değişmedi: sarmalayıcılar argüman ve sonucu olduğu gibi geçirir.
+  - Kanıt: `tests/step-timing.test.ts` 5/5; tam vitest 1307/1307; typecheck temiz.
+  - Geçit (CLAUDE.md §19 adım 6): `test:keys` 3/3, `test:input` 7/7, `test:recovery` 27/27, `test:lock` 1/1 geçti. **`test:targeting` 2 kırmızı, `test:stability` 7 kırmızı.** Aynı iki paket temiz HEAD'de (`c28c266`'dan beri değişiklik yok) aynı sayılarla kırmızı: yani F3'ün yan etkisi değil, önceden var olan kırmızılar.
+    - targeting: "recorded picture … not clicked" testleri `Missing expected rejection` veriyor (beklenen hata gelmiyor).
+    - stability: `agent.releaseRunSettings is not a function` ve "kurtarma ajanı bağlı değil" hataları; testler mevcut `createAgent` dönüş şekliyle uyuşmuyor görünüyor (hipotez, doğrulanmadı).
+  - Yayın kararı kullanıcıya bırakıldı: (a) bu kırmızı testleri düzeltmek (hangi davranışın doğru olduğuna karar gerekir), (b) geçidi bu iki paket için atlayıp F3'ü yayınlamak (CLAUDE.md §19 ihlali olur, onay gerekir).
+  - Kabul kalemi "gerçek koşuda Süre satırı görünüyor" henüz yapılmadı: exe build ve masaüstü koşusu gerektiriyor; yayın kararından sonra.
+
+## 8. Kırmızı testlerin son durumu (17 Ekim 2026, kullanıcı kararlarıyla)
+
+Kararlar: kayıtlı konum son çare olarak tıklansın; eski testler güncellensin; testler sağlam olsun (kolay geçen test yok).
+
+- **Hedefleme (`scripts/test-targeting.cjs`, 2 test) → GÜNCELLENDİ.** Eski test "tıklanmasın" diyordu; kod 1.9.141'den beri bilerek son çare tıklıyor. Yeni testler gerçek sonucu kontrol ediyor: koordinat (110,120), etiket "son çare", girdi gönderimi 0. Sonuç: 20/20 geçti.
+- **GUI model yanıtı (`scripts/test-stability-graph.cjs`, 1 test) → GÜNCELLENDİ.** Bozuk yanıtta aynı model bir kez daha denenir, sonra yedek. Bu, `tests/model-output-retry.test.ts` ile de belgeli. Yeni beklenen sıra: invalid, invalid, valid. Sonuç geçti.
+- **Kararlılık harness'i (`scripts/test-stability-main.cjs`) → KISMEN DÜZELTİLDİ.** Sahte bağımlılık listesi eksikti (`releaseRunSettings`, `assertRunStructure`, `structureSummary`). Eksikler artık gerçek derlenmiş modüllerden (`dist-electron`) geliyor. 5 testten 4'ü geçiyor.
+  - **Kalan 1 kırmızı = GERÇEK HATA (test eski değil):** Kurtarma sonrası tekrar denenen adım başarılı olunca bile arayüz "Kurtarma sonrası devam başarısız: missing target" gösteriyor ve rapor `resumed: false` kalıyor. Sebep: `runner.ts:436` yeniden deneme kararında `recoveryFinished(false)` çağırıyor; rapor silindiği için başarılı sonuç (`runner.ts:515`) kaydedilmiyor. Düzeltme küçük (satır 436'daki çağrıyı kaldırmak), ama davranış değişikliği olduğu için **onay bekliyor**.
+- **Öğe hatası politikası (`scripts/test-stability-graph.cjs`, 1 test) → KARAR BEKLİYOR.** Test: bir öğe hata verince kalan öğeler devam etsin. Kod (1.9.146, `runner.ts:442-444`): kurtarma ajanı bağlı değilse tıklama/yazma/tuş/bekleme/AI adımı hatasında koşu tamamen durur. Bu bilinçli bir değişiklik olabilir, ama test ismi "değişmemeli" diyor. Hangisinin istendiği senin kararın.
+
+Sonuç: vitest 1307/1307, typecheck temiz, test:keys/input/recovery/targeting/lock geçti. test:stability: 38 geçti, 2 kırmızı (yukarıdaki iki gerçek karar). F3 hâlâ yayınlanmadı; çalışma ağacında. Commit yok.
+
+### 8b. Kurtarma raporu düzeltmesi (17 Ekim 2026, kullanıcı onayıyla)
+- Hata: yeniden denenen adım başarılı olunca bile "Kurtarma sonrası devam başarısız" görünüyor, rapor `resumed: false` kalıyordu.
+- Düzeltme (`electron/runner.ts`, `persistentStep`): yeniden deneme kararı bir bayrakla işaretleniyor; adımın son sonucu bu bayrağa göre bildiriliyor (başarı → `recoveryFinished(true)`, son hata → `false`). Eski erken `false` çağrısı kaldırıldı.
+- Test (`scripts/test-stability-main.cjs`): `resumed === true`, "Kurtarma başarılı" mesajı var, "devam başarısız" mesajı yok.
+- Sonuç: test:stability 39 geçti, 1 kırmızı (öğe hatası politikası — karar bekliyor). vitest 1307/1307, typecheck temiz.

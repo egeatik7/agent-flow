@@ -8,6 +8,7 @@ const { normalizeGraph, createNode } = require('../dist-electron/graph-types.js'
 const { StoppedError, runGraph, newTally } = require('../dist-electron/runner.js');
 const { recoverySettings } = require('../dist-electron/recovery-settings.js');
 const { runRecovery } = require('../dist-electron/recovery.js');
+const { assertRunStructure, structureSummary } = require('../dist-electron/run-structure.js');
 
 // Extract the real run path; its dependencies are test doubles. We do not boot
 // Electron, patch the desktop, or rewrite a second copy of the runner.
@@ -27,7 +28,7 @@ function harness(overrides = {}) {
   const events = [];
   const context = {
     running: false, stopRequested: false, runLog: 'old', recoveryActive: false, StoppedError, newTally,
-    recoverySettings, runRecovery, modelChain: (primary, backups) => [primary, ...backups],
+    recoverySettings, runRecovery, assertRunStructure, structureSummary, modelChain: (primary, backups) => [primary, ...backups],
     recoveryStatus: (active, title, message) => events.push({ active, title, message }),
     pushMethod: () => {}, recentLogLines: () => [], readRecoveryReports: () => [],
     saveRecoveryReport: () => {}, recoveryToolContext: {}, recoveryAbort: () => false,
@@ -38,7 +39,7 @@ function harness(overrides = {}) {
     normalizeGraph, store: { set: () => events.push('saved') },
     getSettings: () => ({ hideWhileRunning: false, maxSteps: 2000, stepDelayMs: 0 }),
     ensureLogsDir: () => '', openRunLog: () => {},
-    agent: { beginRun: () => {}, executor: {} },
+    agent: { beginRun: () => {}, releaseRunSettings: () => events.push('agent-released'), executor: {} },
     // The tool layer's own run record, fed from the same handler: it must be released too.
     beginRun: () => events.push('run-begin'),
     endRun: () => events.push('run-end'),
@@ -101,7 +102,7 @@ test('normal action failure waits for recovery, uses its own key, and only then 
       click: async () => { attempts++; if (attempts === 1) throw new Error('missing target'); },
       type: async () => {}, key: async () => {}, exists: async () => true };
     const h = harness({
-      agent: { beginRun: () => {}, executor: ex }, runGraph,
+      agent: { beginRun: () => {}, releaseRunSettings: () => {}, executor: ex }, runGraph,
       getSettings: () => ({ apiKey: 'general-fixture', hideWhileRunning: false, maxSteps: 20, stepDelayMs: 0,
         recovery: recoverySettings({ enabled: mode !== 'disabled', apiKey: 'dedicated-fixture', model: 'fixture/model' }) }),
       recoveryToolTurn: async args => {
@@ -119,6 +120,9 @@ test('normal action failure waits for recovery, uses its own key, and only then 
       assert.deepEqual(order.slice(-4), ['running', 'recover', 'done', 'ui-return']);
       assert.equal(attempts, 2); assert.equal(reports.at(-1).resumed, true);
       assert.equal(reports.at(-1).canvasId, 'saved');
+      // The retried step succeeded: the operator must see success, not the first failure reported as a resume failure.
+      assert(h.events.some(e => e?.message === 'Kurtarma başarılı; akış aynı öğede devam ediyor.'));
+      assert(!h.events.some(e => e?.message?.startsWith('Kurtarma sonrası devam başarısız')));
     } else {
       await assert.rejects(h.run({ nodes: [action], edges: [] }), /missing target/);
       assert.equal(attempts, 1);
@@ -134,7 +138,7 @@ test('store or run preparation failure cannot leave the agent permanently busy',
   for (const overrides of [
     { store: { set: () => { throw new Error('store failed'); } } },
     { getSettings: () => { throw new Error('settings failed'); } },
-    { agent: { beginRun: () => { throw new Error('prepare failed'); } } },
+    { agent: { beginRun: () => { throw new Error('prepare failed'); }, releaseRunSettings: () => {} } },
     { powerSaveBlocker: { start: () => { throw new Error('awake failed'); }, isStarted: () => true, stop: () => {} } },
   ]) {
     const h = harness(overrides);

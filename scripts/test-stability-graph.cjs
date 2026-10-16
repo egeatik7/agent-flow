@@ -162,7 +162,9 @@ test('invalid generic GUI coordinates use the next model instead of producing a 
         return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
       };
       const result = await guiStep({ apiKey: 'test', model: ['invalid', 'valid'], goal: 'click Save', history: [], screen: { data: 'mock', w: 1920, h: 1080 } });
-      assert.deepEqual(asked, ['invalid', 'valid']);
+      // The same model gets one more answer on a rejected output before the backup (runModelChain,
+      // covered by tests/model-output-retry.test.ts). A second bad answer moves on to the backup.
+      assert.deepEqual(asked, ['invalid', 'invalid', 'valid']);
       assert.deepEqual([result.kind, result.x, result.y], ['click', 0.5, 0.25]);
     }
   } finally { global.fetch = oldFetch; setStopCheck(() => false); }
@@ -200,13 +202,18 @@ test('a wait lap reaching its step limit never starts the next item', async () =
   assert.equal(loop.startIndex, 0);
 });
 
-test('normal item-error policy and successful per-lap step budgets stay unchanged', async () => {
+test('item error without a recovery agent stops the run at that item; later items do not run', async () => {
   const start = n('start'), loop = n('loop'), click = n('click');
   loop.items = ['A', 'B', 'C']; loop.members = [click.id]; click.prompt = '{{öğe}}';
   const actions = [];
   const ex = { log: () => {}, step: () => {}, shouldStop: () => false, click: async x => { actions.push(x.prompt); if (x.prompt === 'B') throw Error('item-specific error'); }, type: async () => {}, key: async () => {}, exists: async () => false };
   // 1.9.86: kutu çağrısı artık zincirin bütçesinden 1 adım yer (A5 düzeltmesi): start + kutu = 2 adım.
-  const summary = await runGraph({ nodes: [start, loop, click], edges: [e(start, loop)] }, ex, { maxSteps: 2, stepDelayMs: 0 });
-  assert.deepEqual(actions, ['A', 'B', 'C']);
-  assert.equal(summary.failed, 1);
+  // 1.9.146: with no recovery agent connected, a failed click stops the run at that item. The later
+  // items must not run on a screen that is no longer known to be right. (Decision recorded in
+  // docs/kararlilik-eylem-plani.md, section 8.)
+  await assert.rejects(
+    runGraph({ nodes: [start, loop, click], edges: [e(start, loop)] }, ex, { maxSteps: 2, stepDelayMs: 0 }),
+    /kurtarma ajanı bağlı değil.*“Tıkla 1”/,
+  );
+  assert.deepEqual(actions, ['A', 'B']);
 });

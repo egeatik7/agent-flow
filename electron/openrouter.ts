@@ -6,6 +6,7 @@ import { olcumEskiMi, pencereKaynagi, type BaglamOlcumu } from './local-context'
 import { baglamKartiOzet, baglamKartiYap, sunucuEtiketi } from './hud-context'
 import { contextErrorKind, contextPressureText, responseUsageText, sendSummaryText, responseSummaryText, saveRequestEvidence, imageBytes, imageFromMessages, nextRequestId, countSentCandidates } from './send-log'
 import { checkObservation } from './observation-budget'
+import { recordTiming } from './step-timing'
 import { spatialContext } from './spatial-context'
 import { wordCandidates, describeWordCandidates, WORD_TARGET_RULES, OCR_READER_RULES, CONDITION_TARGET_RULES, WORD_CANDIDATE_LIMIT } from './word-targets'
 import type { NodeKind } from './graph-types'
@@ -35,6 +36,7 @@ class TransientError extends Error { readonly serviceFailure = true }
 async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS, localStop: () => boolean = () => false, signal?: AbortSignal): Promise<{ ok: boolean; status: number; text: string }> {
   checkObservation(signal)
   if (stopCheck() || localStop()) throw new StoppedError()
+  const startedAt = Date.now()
   const ctrl = new AbortController()
   const abort = () => ctrl.abort()
   signal?.addEventListener('abort', abort, { once: true })
@@ -59,6 +61,7 @@ async function guardedFetch(url: string, init: RequestInit, timeoutMs = REQUEST_
     clearTimeout(timer)
     clearInterval(poll)
     signal?.removeEventListener('abort', abort)
+    recordTiming('model', Date.now() - startedAt)
   }
 }
 

@@ -402,7 +402,9 @@ export async function runGraph(
   // possibly dispatched action just because the surrounding method failed.
   const persistentStep = async (node: AgentNode, live: AgentNode, stepNo: number, ahead: StepAhead): Promise<string> => {
     let blocked: unknown
-    return repeatMethodCycle(async () => {
+    // Set when recovery asked for a retry; the report is then closed by the final outcome of this step.
+    let retriedAfterRecovery = false
+    const outcome = repeatMethodCycle(async () => {
       let error: unknown
       if (blocked !== undefined) error = blocked
       else {
@@ -432,8 +434,8 @@ export async function runGraph(
             ? `Kurtarma başarısız oldu; “${node.title}” adımında koşu durduruldu. ${methodErrorText(error)}`
             : `Kurtarma aşamasına ulaşıldı ancak kurtarma ajanı kapalı veya kullanılamıyor; “${node.title}” adımında koşu durduruldu. ${methodErrorText(error)}`)
           // A retry is allowed only when it cannot duplicate a dispatched action.
+          if (decision === 'retry') retriedAfterRecovery = true
           if (decision === 'retry' && !unsafeReplay) blocked = undefined
-          ex.recoveryFinished?.(node.id, false, methodErrorText(error))
         } catch (recoveryError) {
           if (ex.shouldStop()) throw new StoppedError()
           if (recoveryError instanceof DeliberateStopError || recoveryError instanceof RecoveryFailedError) throw recoveryError
@@ -451,6 +453,14 @@ export async function runGraph(
       terminal: isFatal,
       retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`),
     })
+    try {
+      const port = await outcome
+      if (retriedAfterRecovery) ex.recoveryFinished?.(node.id, true)
+      return port
+    } catch (error) {
+      if (retriedAfterRecovery) ex.recoveryFinished?.(node.id, false, methodErrorText(error))
+      throw error
+    }
   }
 
   /** Runs from `start` until the flow leaves `scope` (or ends). `stopAt` ends the chain before entering those nodes. */

@@ -308,7 +308,15 @@ function readPreview(file: string, w: number, h: number, mime?: string, marked?:
   return { data, w, h, mime: mime || 'image/jpeg', ...(marked ? { marked: true } : {}) } as ScanResult['image']
 }
 
-export async function scan(opts: {
+import { recordTiming } from './step-timing'
+
+/** Screen read, timed for the step log. Behaviour is that of scanImpl. */
+export async function scan(opts: Parameters<typeof scanImpl>[0]): ReturnType<typeof scanImpl> {
+  const startedAt = Date.now()
+  try { return await scanImpl(opts) } finally { recordTiming('scan', Date.now() - startedAt) }
+}
+
+async function scanImpl(opts: {
   signal?: AbortSignal
   windowTitle?: string
   strictWindow?: 'exact' | 'contains'
