@@ -1,6 +1,8 @@
 import { repeatMethodCycle, methodErrorText } from './method-cycle'
 import { checkObservation, observeWithin, type ObservationOptions } from './observation-budget'
 import { beginStepTiming, endStepTiming, recordTiming } from './step-timing'
+import { gridPointToScreen } from './visual-geometry'
+import { FOCUS_SETTLE_MS, REACTION_SETTLE_MS, LOADING_RECHECK_MS, NEXT_ITEM_WAIT_MS, ENTER_GAP_MS, LOCK_POLL_MS, UNLOCK_SETTLE_MS, REFRESH_RETRY_MS } from './timing-constants'
 import { shouldRefineWord, wordCandidates, refineWordTarget  } from './word-targets'
 import { asksDesktopShortcut, taskbarItem } from './spatial-context'
 import { screen as electronScreen } from 'electron'
@@ -95,10 +97,6 @@ function inputFailure(error: unknown, knownSent = false): never {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-/** After a click, before keys: lets the field take focus. */
-const FOCUS_MS = 420
-/** Built-in: if a target is missing, wait, rescan the whole screen, try once more. */
-const REFRESH_RETRY_MS = 3000
 /** Mean grey difference (0–255) of two 32x18 signatures below which the screen counts as unchanged. */
 const STILL_DIFF = 1.5
 /** Above this, a replayed step no longer sees the screen it was recorded on. */
@@ -784,8 +782,9 @@ export function createAgent(ctx: AgentContext) {
         if (!action.dismiss) break
         if (!canDismiss || didDismiss) throw new VisualTargetRecoveryError('Bu aramada ikinci bir popup kapatma veya salt okunur aramada tıklama gönderilmedi.')
         if (!validVisualPoint(action) || action.arguments.action !== 'mouse_move') throw new VisualTargetRecoveryError('Popup kapatma yanıtında geçerli nokta yok; tıklama gönderilmedi.')
-        let x = res.area.x + action.arguments.coordinate[0] / 1000 * res.area.w
-        let y = res.area.y + action.arguments.coordinate[1] / 1000 * res.area.h
+        const grid = gridPointToScreen(action.arguments.coordinate, res.area)
+        let x = grid.x
+        let y = grid.y
         await waitUnlocked()
         checkStopped()
         clearHover()
@@ -805,7 +804,7 @@ export function createAgent(ctx: AgentContext) {
         trace(node, { kind: 'input', point: { x: Math.round(x), y: Math.round(y) }, mode: 'popup-dismiss', phase: 'sent' })
         log('info', `Popup kapatma tıklaması gönderildi @${Math.round(x)},${Math.round(y)}; node tamamlanmadı, asıl hedef yeni görüntüde aranacak.`)
         dismissalRecord = `One LEFT click was dispatched at screen (${Math.round(x)},${Math.round(y)}) to dismiss an unrelated popup. No click on the requested target has been sent. The popup's disappearance is NOT verified. Do not reuse that point; find the original requested target in this new image.`
-        await pause(FOCUS_MS)
+        await pause(FOCUS_SETTLE_MS)
         res = await capture()
       }
       let pointed = !action.dismiss && validVisualPoint(action)
@@ -878,8 +877,7 @@ export function createAgent(ctx: AgentContext) {
         throw new NotFoundError(message)
       }
       if (action.arguments.action !== 'mouse_move') throw new NotFoundError('Görsel model hedef koordinatı vermedi.')
-      const x = a.x + action.arguments.coordinate[0] / 1000 * a.w
-      const y = a.y + action.arguments.coordinate[1] / 1000 * a.h
+      const { x, y } = gridPointToScreen(action.arguments.coordinate, a)
       trace(node, { kind: 'resolved', source: 'tars', target: { x, y, label: '[Görsel model] ekran görüntüsü' } })
       log('info', `[Görsel model] ${thought || action.arguments.action}`)
       return {
@@ -1051,13 +1049,13 @@ export function createAgent(ctx: AgentContext) {
     const before = await snap(`${node.title} önce`)
     await act()
 
-    await pause(900)
+    await pause(REACTION_SETTLE_MS)
     const after = await snap(`${node.title} sonra`)
     let verdict = judgeScreen(before.texts, after.texts, expected)
     if (verdict.kind === 'loading') {
       log('info', `Sayfa henüz oturmadı (${verdict.reason}). Basılmadan beklenecek.`)
       for (let i = 0; i < 3 && verdict.kind === 'loading'; i++) {
-        await pause(2000)
+        await pause(LOADING_RECHECK_MS)
         const later = await snap(`${node.title} yükleniyor`)
         verdict = judgeScreen(before.texts, later.texts, expected)
       }
@@ -1086,7 +1084,7 @@ export function createAgent(ctx: AgentContext) {
     if (await aheadIsReady(ahead)) return false
 
     log('info', 'Sıradaki öğe henüz yok. Karar vermeden önce beklenecek.')
-    await pause(2500)
+    await pause(NEXT_ITEM_WAIT_MS)
     if (await aheadIsReady(ahead)) return false
 
     const plan = await askPlan(node, ahead, verdict.reason)
@@ -1188,7 +1186,7 @@ export function createAgent(ctx: AgentContext) {
         return result
       },
       capture: () => bridge.scan({ image: 'plain', cursorMarker: true, fresh: true, readOnly: true, uia: false, ocr: false, maxImageW: isTarsModel((session?.models ?? resolveStage(settings, 'visual').chain)[0] || '') ? 1288 : 1400, fit: true, snap: isTarsModel((session?.models ?? resolveStage(settings, 'visual').chain)[0] || '') ? 28 : 0 }),
-      position: () => bridge.cursorPos(), checkStopped, settle: () => pause(FOCUS_MS),
+      position: () => bridge.cursorPos(), checkStopped, settle: () => pause(FOCUS_SETTLE_MS),
       stage: text => ctx.setMethod?.(text),
       decide: async (scan, pointer) => {
         trace(node, { kind: 'observation', source: 'tars', scan })
@@ -1291,7 +1289,7 @@ export function createAgent(ctx: AgentContext) {
       log('info', clear ? 'Ctrl+A → Delete → yazma gönderildi; alan içeriği okunmadı.' : 'Yazma gönderildi; alan içeriği okunmadı.')
     }
     if (enter && progress.enter === 'not_sent') {
-      await pause(240)
+      await pause(ENTER_GAP_MS)
       checkStopped()
       try { await bridge.sendKeys('{ENTER}', getSettings().targetWindow || undefined, undefined, undefined, { onDispatched: () => { progress.enter = 'uncertain' } }) }
       catch (error) { inputFailure(error) }
@@ -1306,9 +1304,9 @@ export function createAgent(ctx: AgentContext) {
   async function waitUnlocked(signal?: AbortSignal) {
     if (!(await observeWithin(bridge.isLocked(), signal))) return
     log('warn', 'Ekran kilitli ya da güvenlik ekranı açık; kilit açılana kadar bekleniyor (Ctrl+Shift+Q durdurur).')
-    while (await observeWithin(bridge.isLocked(), signal)) await observeWithin(pause(5000), signal)
+    while (await observeWithin(bridge.isLocked(), signal)) await observeWithin(pause(LOCK_POLL_MS), signal)
     log('info', 'Kilit açıldı, devam ediliyor.')
-    await pause(1500)
+    await pause(UNLOCK_SETTLE_MS)
   }
 
   let lastClickPoint: { x: number; y: number } | undefined
@@ -1447,7 +1445,7 @@ export function createAgent(ctx: AgentContext) {
         progress.focus = 'sent'
         progress.focusPoint = { x: (t ?? lastClickPoint)!.x, y: (t ?? lastClickPoint)!.y }
         lastClickPoint = { ...progress.focusPoint }
-        await sleep(FOCUS_MS)
+        await sleep(FOCUS_SETTLE_MS)
         log('info', `Alan seçildi: ${t?.label ?? 'odak'}`)
       }
       if (progress.text === 'sent' && progress.enter === 'not_sent' && enter) {
