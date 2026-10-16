@@ -131,3 +131,11 @@ README, kaldırılan branch/merge arayüzünü ve "Dışarı açık" ayarını h
 - Kullanıcı Haiku'ya geçişi kendisi yapar.
 
 (Eski sorular: yayın zinciri, boş saat, GUI-Owl günlüğü. Hepsi cevaplandı. Not: §19 `git push github` der, çalışma deposunda uzak adı `origin`; `git remote -v` ile doğrula.)
+
+## 7. Durum notları (Haiku, 17 Ekim 2026)
+
+- **F0 tamam**, push edildi (`2ae0122`). `docs/kararlilik-temel-cizgi.md`.
+- **F1 tamam**, push edildi (`6e4183a`). `docs/gelistirme-dongusu.md`.
+- **F2 KAPATILDI (kullanıcı kararı: seçenek 2, "kişisel program, önemli değil").** Yeniden deneme kodu geri alındı; testler yalnız dokümante edildi. Plan varsayımı yanlış çıktı: `zip-library-storage.ts` içinde `renameSync` EPERM'i, 5 denemede (en fazla 160 ms) ve 10 denemede (en fazla 500 ms, toplam ~2,6 sn) düzelmedi.
+  - Ölçüm, 20 ardışık `zip-library-storage` + `zip-rename-retry` koşusu: 5 deneme → **6/20 başarısız**; 10 deneme → **3/20 başarısız**.
+  - Yığında hata `renameRetrying` yeniden denemeleri bittikten sonra yüzeye çıkıyor. Kodda açık tutamaç yok (`readBuffer` ve `publish` fd'leri kapatıyor). Olası neden: Windows Defender veya indeksleyici hedef/geçici dosyayı tutuyor. Hipotez, doğrulanmadı.
