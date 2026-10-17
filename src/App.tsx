@@ -204,6 +204,7 @@ export default function App() {
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' } | null>(null)
   const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas'; tabId: string; initial: string } | null>(null)
   const saveAnswer = useRef<((answer: SaveDecision) => void) | null>(null)
+  const agentGraphHandler = useRef<((p: { tabId: string; graph: AgentGraph }) => Promise<{ ok: boolean; error?: string }>) | null>(null)
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const runIdle = useRef<(() => void) | null>(null)
@@ -454,11 +455,16 @@ export default function App() {
       const p = payload as { id: string; patch: Partial<AgentNode> }
       patchNode(p.id, p.patch)
     })
+    const offGraph = api.onAgentGraph?.((payload) => {
+      const p = payload as { tabId: string; graph: AgentGraph }
+      void (agentGraphHandler.current?.(p) ?? Promise.resolve({ ok: false, error: 'Tuval hazır değil.' })).then(answer => api.replyAgentGraph?.(answer))
+    })
     return () => {
       offLog()
       offStep()
       offEdge?.()
       offPatch()
+      offGraph?.()
     }
   }, [pushLog, patchNode, recordStep, recordEdge])
 
@@ -690,6 +696,18 @@ export default function App() {
     try { const owner = zipLibraryOf(bookRef.current).groups.find(g => g.canvases.some(c => c.canvasId === tab.savedId)); return await saveZipTabInternal(tab, group, !!group && !!owner && group.id !== owner.id) }
     catch (error) { pushLog('error', errText(error)); return false }
     finally { libraryBusyRef.current = false; setLibraryBusy(false) }
+  }
+  // Test sessions only: a merged graph from the agent's branch replaces the active canvas and is saved to its ZIP.
+  agentGraphHandler.current = async (p) => {
+    if (p.tabId !== activeIdRef.current) return { ok: false, error: 'Uygulanacak tuval şu an açık değil; tuval değiştirilmedi.' }
+    if (runningRef.current) return { ok: false, error: 'Koşu sürerken tuval değiştirilmez.' }
+    const projected = projectView(p.graph, [])
+    graphRef.current = projected.view
+    stackRef.current = projected.stack
+    setGraph(projected.view)
+    setStack(projected.stack)
+    const saved = await saveCurrentCanvas()
+    return saved ? { ok: true } : { ok: false, error: 'Tuval ZIP’e kaydedilemedi.' }
   }
   const saveAllWorkspace = async () => {
     if (runningRef.current || libraryBusyRef.current) return false

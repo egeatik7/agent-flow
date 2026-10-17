@@ -444,6 +444,23 @@ function hardenContents(contents: Electron.WebContents, label: string) {
  * Not: `img-src` içinde `blob:` var. Ekran Tarayıcı kareyi `URL.createObjectURL` ile çiziyor
  * (`src/components/ScreenScanner.tsx`), `blob:` olmadan o önizleme paketlenmiş sürümde boş kalırdı.
  */
+/**
+ * Applies a merged graph in the window (test sessions only). The window owns the canvas book, so the
+ * change goes there and the window answers once it has been saved. No answer within the time limit is
+ * reported as a failure and nothing is written.
+ */
+function applyMergeInWindow(payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' }): Promise<{ ok: boolean; error?: string }> {
+  if (!testToolsEnabled(process.env.NUBBO_PROFILE, process.env.NUBBO_TEST_TOOLS)) return Promise.resolve({ ok: false, error: 'Öneri merge arayüzü kaldırıldı; hiçbir akış değiştirilmedi.' })
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'Pencere açık değil; tuval değiştirilmedi.' })
+  return new Promise((resolve) => {
+    const onDone = (_event: unknown, answer: { ok: boolean; error?: string }) => { clearTimeout(timer); resolve(answer) }
+    const timer = setTimeout(() => { ipcMain.removeListener('agent:graph-applied', onDone); resolve({ ok: false, error: 'Pencere uygulamayı onaylamadı; tuval değiştirilmedi.' }) }, 20000)
+    ipcMain.once('agent:graph-applied', onDone)
+    win.webContents.send('agent:graph', payload)
+  })
+}
+
 function applyContentSecurityPolicy() {
   if (process.env.VITE_DEV_SERVER_URL) return
   const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -1350,7 +1367,8 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     },
     // Suggestions are no longer displayed or merged through the user window.
     // Keep explicit failure replies so legacy test callers do not hang or report success.
-    applyMerge: async () => ({ ok: false, error: 'Öneri merge arayüzü kaldırıldı; hiçbir akış değiştirilmedi.' }),
+    autoApply: testToolsEnabled(process.env.NUBBO_PROFILE, process.env.NUBBO_TEST_TOOLS),
+    applyMerge: (payload: Parameters<typeof applyMergeInWindow>[0]) => applyMergeInWindow(payload),
     showBranch: async () => ({ ok: false, error: 'Öneri inceleme arayüzü kaldırıldı; tuval değiştirilmedi.' }),
     // One action at a time may step aside from the desktop, exactly like a run does.
     hideApp: () => hideSelf(),

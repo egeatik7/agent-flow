@@ -132,6 +132,8 @@ export type ToolContext = {
    * change — so the merge is handed to it and this resolves with its answer instead of writing
    * the book from here, where a pending save from the window could undo it.
    */
+  /** Test sessions only: a merge may be applied without a click in the window (1.9.155). */
+  autoApply?: boolean
   applyMerge: (
     payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
     opts?: { snapshot?: boolean }
@@ -660,7 +662,7 @@ const branchMerge: ToolDef = {
     const wanted = args.apply === true
     // Trying a merge writes nothing, so anyone may ask for it; applying it does, so that is the
     // user's own move from the window.
-    if (wanted && source !== 'panel') {
+    if (wanted && source !== 'panel' && !ctx.autoApply) {
       return failed(branchMerge.name, 'Merge’ü uygulamak için Nubbo penceresini kullan (Ajan sekmesi · Mergele · Uygula). Deneme için apply göndermeden çağırabilirsin.')
     }
     const notes: string[] = []

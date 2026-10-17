@@ -354,3 +354,11 @@ Kullanıcı bu belgenin kusurlu olduğunu ve değiştirilebileceğini söyledi; 
 - §19 yayın zinciri `git push github …` der. Çalışılan depoda uzak adı `origin`: önce `git remote -v` ile gerçek adı doğrula ve onu kullan. Yeni uzak ekleme, force push yok.
 - README'nin branch/merge ve "Dışarı açık" anlatımı eskidir; bu belge geçerlidir. README düzeltmesi ayrı iştir.
 
+
+## 21. Test profilinde otomatik merge (17 Ekim 2026, kullanıcının açık kararı)
+
+7 Ekim 2026 kararı ("merge yalnız Nubbo penceresinden, insan tıklamasıyla") **yalnızca gerçek profil için** geçerli olmaya devam eder.
+
+- `NUBBO_PROFILE=test` **ve** `NUBBO_TEST_TOOLS=1` olan oturumda `branch.merge apply` araç çağrısı, insan tıklaması olmadan uygulanır. Pencere tuvali değiştirir ve ZIP'e kaydeder; bu, dal tarifini tuvale yazmanın tek yoludur.
+- Uygulama yalnız **aktif** tuvalde yapılır. Koşu sürerken ya da 20 saniye içinde pencere cevap vermezse hiçbir şey yazılmaz ve başarısızlık açıkça bildirilir.
+- Gerçek profilde bu yol kapalıdır (`applyMergeInWindow` reddeder). Gerçek profil için otomatik uygulama ayrı bir karar gerektirir.

@@ -102,6 +102,8 @@ export type XpAgentApi = {
   onAgentStep: (cb: (payload: unknown) => void) => () => void
   onAgentEdge?: (cb: (payload: unknown) => void) => () => void
   onAgentPatch: (cb: (payload: unknown) => void) => () => void
+  onAgentGraph?: (cb: (payload: unknown) => void) => () => void
+  replyAgentGraph?: (answer: { ok: boolean; error?: string }) => void
   onHud?: (cb: (payload: unknown) => void) => () => void
   onHudLoop?: (cb: (payload: unknown) => void) => () => void
   onHudMethod?: (cb: (payload: unknown) => void) => () => void
