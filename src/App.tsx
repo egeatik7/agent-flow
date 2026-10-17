@@ -701,10 +701,23 @@ export default function App() {
   agentGraphHandler.current = async (p) => {
     if (p.tabId !== activeIdRef.current) return { ok: false, error: 'Uygulanacak tuval şu an açık değil; tuval değiştirilmedi.' }
     if (runningRef.current) return { ok: false, error: 'Koşu sürerken tuval değiştirilmez.' }
-    // Only canvases that live in the AI group may be changed automatically. Anything else stays untouched.
-    const tab = commitActive().tabs.find(t => t.id === activeIdRef.current)
-    const owner = tab?.savedId ? zipLibraryOf(bookRef.current).groups.find(g => g.canvases.some(c => c.canvasId === tab.savedId)) : undefined
-    if (owner?.name !== 'AI') return { ok: false, error: 'Otomatik değişiklik yalnız AI grubundaki tuvallerde yapılır; bu tuval AI grubunda değil, tuval değiştirilmedi.' }
+    // Only canvases in the AI group are changed automatically. Any other canvas is first saved as a copy
+    // into AI (Farklı kaydet): the open tab then points at the copy and the original ZIP is left as it was.
+    const ownerOf = () => {
+      const tab = commitActive().tabs.find(t => t.id === activeIdRef.current)
+      const group = tab?.savedId ? zipLibraryOf(bookRef.current).groups.find(g => g.canvases.some(c => c.canvasId === tab.savedId)) : undefined
+      return { tab, group }
+    }
+    let { tab, group } = ownerOf()
+    if (!tab) return { ok: false, error: 'Açık tuval bulunamadı; tuval değiştirilmedi.' }
+    if (group?.name !== 'AI') {
+      const ai = zipLibraryOf(bookRef.current).groups.find(g => g.name === 'AI')
+      if (!ai) return { ok: false, error: 'AI grubu yok; önce AI.zip oluşturulmalı. Tuval değiştirilmedi.' }
+      const copied = await saveZipTabInternal(tab, ai, true, `${tab.name} · AI kopya`)
+      if (!copied) return { ok: false, error: 'Tuval AI grubuna kopyalanamadı; orijinal değişmedi.' }
+      ;({ tab, group } = ownerOf())
+      if (group?.name !== 'AI') return { ok: false, error: 'Kopya AI grubunda görünmüyor; tuval değiştirilmedi.' }
+    }
     const projected = projectView(p.graph, [])
     graphRef.current = projected.view
     stackRef.current = projected.stack
