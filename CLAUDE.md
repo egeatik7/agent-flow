@@ -362,3 +362,4 @@ Kullanıcı bu belgenin kusurlu olduğunu ve değiştirilebileceğini söyledi; 
 - `NUBBO_PROFILE=test` **ve** `NUBBO_TEST_TOOLS=1` olan oturumda `branch.merge apply` araç çağrısı, insan tıklaması olmadan uygulanır. Pencere tuvali değiştirir ve ZIP'e kaydeder; bu, dal tarifini tuvale yazmanın tek yoludur.
 - Uygulama yalnız **aktif** tuvalde yapılır. Koşu sürerken ya da 20 saniye içinde pencere cevap vermezse hiçbir şey yazılmaz ve başarısızlık açıkça bildirilir.
 - Gerçek profilde bu yol kapalıdır (`applyMergeInWindow` reddeder). Gerçek profil için otomatik uygulama ayrı bir karar gerektirir.
+- Otomatik değişiklik yalnız **AI** grubundaki tuvallerde yapılır (ortak kütüphanedeki `AI.zip`). Başka bir gruptaki tuval otomatik değiştirilmez; pencere reddeder. Kopyalayıp AI'de çalışma adımı ayrı bir iştir.

@@ -701,6 +701,10 @@ export default function App() {
   agentGraphHandler.current = async (p) => {
     if (p.tabId !== activeIdRef.current) return { ok: false, error: 'Uygulanacak tuval şu an açık değil; tuval değiştirilmedi.' }
     if (runningRef.current) return { ok: false, error: 'Koşu sürerken tuval değiştirilmez.' }
+    // Only canvases that live in the AI group may be changed automatically. Anything else stays untouched.
+    const tab = commitActive().tabs.find(t => t.id === activeIdRef.current)
+    const owner = tab?.savedId ? zipLibraryOf(bookRef.current).groups.find(g => g.canvases.some(c => c.canvasId === tab.savedId)) : undefined
+    if (owner?.name !== 'AI') return { ok: false, error: 'Otomatik değişiklik yalnız AI grubundaki tuvallerde yapılır; bu tuval AI grubunda değil, tuval değiştirilmedi.' }
     const projected = projectView(p.graph, [])
     graphRef.current = projected.view
     stackRef.current = projected.stack
