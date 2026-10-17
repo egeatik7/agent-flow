@@ -5,6 +5,31 @@ import { withLibraryLock } from './library-lock'
 import { readJsonZip, writeJsonZip, ZIP_LIMITS } from './zip-container'
 import { zipCanvasDocument, copyZipCanvas, type ZipCanvasDocument } from './zip-canvas-document'
 
+/**
+ * Windows antivirus scanning can keep a freshly written temporary ZIP open for a moment, and a rename
+ * over or from such a file fails with EPERM/EBUSY. Retry only those codes, only on win32, with a short
+ * growing pause. The hash check happens before this call, so a retry never overwrites a changed file.
+ */
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+const RENAME_ATTEMPTS = 12
+const RENAME_MAX_PAUSE_MS = 400
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+export function renameRetrying(
+  from: string,
+  to: string,
+  deps: { platform: string; rename: (a: string, b: string) => void; pause: (ms: number) => void } = { platform: process.platform, rename: (a, b) => fs.renameSync(a, b), pause: sleepSync },
+): void {
+  for (let attempt = 1; ; attempt++) {
+    try { deps.rename(from, to); return } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (deps.platform !== 'win32' || !RENAME_RETRY_CODES.has(code) || attempt >= RENAME_ATTEMPTS) throw error
+      deps.pause(Math.min(30 * 2 ** (attempt - 1), RENAME_MAX_PAUSE_MS))
+    }
+  }
+}
+
 export type ZipCanvasGroup = {
   /** Relative ZIP path, not a separate catalog identity. */
   id: string
@@ -142,7 +167,7 @@ export class ZipLibraryStorage {
         let current: Buffer
         try { current = this.readBuffer(file) } catch { throw new ZipLibraryConflictError() }
         if (hash(current) !== expected) throw new ZipLibraryConflictError()
-        fs.renameSync(temporary, file)
+        renameRetrying(temporary, file)
       } else {
         // link is an atomic no-replace publication: a concurrent creator is never overwritten.
         try { fs.linkSync(temporary, file) } catch (error) {
