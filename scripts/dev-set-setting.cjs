@@ -41,11 +41,16 @@ if (!veri.settings) {
   console.error('✗ Dosyada settings bölümü yok')
   process.exit(1)
 }
-const eski = veri.settings[anahtar]
+// Some keys live at the top level of the store (zipLibraryPath, zipCanvases, canvases). The app reads them there,
+// so writing them under 'settings' would be silently ignored.
+const UST_DUZEY = ['zipLibraryPath', 'zipCanvases', 'canvases', 'graph', 'viewerEnabled', 'viewerSecret', 'viewerOrigin']
+const ustte = UST_DUZEY.includes(anahtar) || (!(veri.settings && anahtar in veri.settings) && anahtar in veri)
+const kapsayici = ustte ? veri : (veri.settings || (veri.settings = {}))
+const eski = kapsayici[anahtar]
 let yeni = deger
 if (deger === 'true' || deger === 'false') yeni = deger === 'true'
-else if (/^-?\d+$/.test(deger)) yeni = Number(deger)
-veri.settings[anahtar] = yeni
+else if (/^-?d+$/.test(deger)) yeni = Number(deger)
+kapsayici[anahtar] = yeni
 fs.writeFileSync(bulunan, JSON.stringify(veri, null, 2), 'utf8')
 console.log(`✓ ${anahtar}: ${JSON.stringify(eski)} → ${JSON.stringify(yeni)}`)
 console.log(`  dosya: ${bulunan}`)
