@@ -1047,11 +1047,23 @@ export function createAgent(ctx: AgentContext) {
     }
 
     const expected = expectation(ahead)
-    const before = await snap(`${node.title} önce`)
+    // Tarama bir GÖZLEM aracıdır; başarısız olması eylemi engellemez (CLAUDE.md §19). Öncesi
+    // okunamazsa eylem yine yapılır, tepki "doğrulanamadı" sayılır; sonrası okunamazsa adım hata
+    // olmaz (belirsiz sonuç, başarı da değil). Eski hal tıklamayı hiç göndermiyor ya da başarılı
+    // tıklamayı haltLoop'lu hataya çeviriyordu.
+    let before: Awaited<ReturnType<typeof snap>> | undefined
+    try { before = await snap(`${node.title} önce`) }
+    catch (error) { log('warn', `“${node.title}” öncesi tarama yapılamadı; eylem yine de yapılacak: ${(error as Error).message}`) }
     await act()
+    if (!before) return false
 
     await pause(REACTION_SETTLE_MS)
-    const after = await snap(`${node.title} sonra`)
+    let after: Awaited<ReturnType<typeof snap>>
+    try { after = await snap(`${node.title} sonra`) }
+    catch (error) {
+      log('warn', `“${node.title}” sonrası tarama yapılamadı; tepki doğrulanamadı (adım hata sayılmadı): ${(error as Error).message}`)
+      return false
+    }
     let verdict = judgeScreen(before.texts, after.texts, expected)
     if (verdict.kind === 'loading') {
       log('info', `Sayfa henüz oturmadı (${verdict.reason}). Basılmadan beklenecek.`)

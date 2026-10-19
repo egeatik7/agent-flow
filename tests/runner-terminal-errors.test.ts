@@ -8,7 +8,7 @@ const ex = (overrides: Partial<Executor> = {}): Executor => ({
   click: async () => {}, type: async () => {}, key: async () => {}, exists: async () => false,
   ...overrides,
 })
-const opts = { maxSteps: 20, stepDelayMs: 0 }
+const opts = { maxSteps: 20, stepDelayMs: 0, reportEnd: true }
 
 describe('eylem dışı node hataları kalıcıdır (sonsuz tur yok)', () => {
   it('boş koşul metni koşuyu kilitlmez: açık hatayla biter', async () => {
@@ -35,6 +35,19 @@ describe('eylem dışı node hataları kalıcıdır (sonsuz tur yok)', () => {
     // oynatılmaz, hata tek kez yukarı çıkar.
     await expect(runGraph(graph, ex({ click, recover: async () => 'failed' }), opts)).rejects.toThrow('pencere kapandı')
     expect(click).toHaveBeenCalledTimes(1)
+  })
+
+  it('paket içinde yarım kalan koşul, Bitir’e gidilse de "tamamlandı" sayılmaz', async () => {
+    const start = createNode('start', 0, 0), end = createNode('end', 0, 0), pkg = createNode('package', 0, 0)
+    const inner = createNode('condition', 0, 0); inner.text = 'Hazır mı?'
+    pkg.inner = { nodes: [inner], edges: [] }
+    const graph: AgentGraph = {
+      nodes: [start, pkg, end],
+      edges: [{ id: 'e1', from: start.id, fromPort: 'next', to: pkg.id }, { id: 'e2', from: pkg.id, fromPort: 'next', to: end.id }],
+    }
+    const summary = await runGraph(graph, ex({ exists: async () => false }), opts)
+    expect(summary.reachedEnd).toBe(true)
+    expect(summary.incomplete).toBe(true)
   })
 
   it('yonlem turu maxRounds verilince sınırda hatayı yukarı verir', async () => {

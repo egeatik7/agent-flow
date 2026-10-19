@@ -1203,6 +1203,33 @@ function Invoke-Op([string]$op, $P) {
         if ($P.ownPid -and [XpWin]::ProcessOf([XpWin]::GetForegroundWindow()) -eq [int]$P.ownPid) { throw 'INPUT_SELF_TARGET: Nubbo kendi penceresine yazmaz.' }
         $out = [ordered]@{ cleared = $false; skippedClear = $false; pasted = $false; writeSent = $false; focusType = ''; focusHwnd = ''; via = 'keyboard'; value = $null }
         $text = [string]$P.text
+        # H1: tıklanan nokta bir ETİKETSE (klasik Win32 formunda Static) klavye odağı komşu alana
+        # geçmez; araya giren başka bir alana yazılırdı. Tıklama noktası verildiyse ve odak yazı
+        # alanı değilse, o noktanın komşuluğundaki TEK yazı alanını bul ve odakla. Bu bir ön ret
+        # değil, eylemdir; birden çok aday varsa mevcut davranış korunur.
+        $atX = 0
+        $atY = 0
+        if ($P.x) { $atX = [int]$P.x }
+        if ($P.y) { $atY = [int]$P.y }
+        $ownPid = 0
+        if ($P.ownPid) { $ownPid = [int]$P.ownPid }
+        if ($atX -ne 0 -or $atY -ne 0) {
+          $focusNow = $null
+          try { $focusNow = Get-InputFocus } catch {}
+          if (-not (Test-TextLike $focusNow)) {
+            try {
+              $aday = @(Get-TypeChoices $ownPid $atX $atY | Where-Object { $_.clicked -or $_.related })
+              if ($aday.Count -eq 1) {
+                if (Focus-Input $aday[0].el $null) {
+                  $out.focusType = [string]$aday[0].type
+                  $out.focusHwnd = [string][XpWin]::FocusHandle()
+                  $out.where = [string]$aday[0].window
+                }
+              }
+              $script:TypeChoiceCache.Clear()
+            } catch { }
+          }
+        }
         $usePaste = $text.Length -gt 0 -and -not [XpText]::CanType($text)
         $oldClip = $null
         if ($usePaste) {
@@ -1219,7 +1246,25 @@ function Invoke-Op([string]$op, $P) {
           Start-Sleep -Milliseconds 280
           Send-CheckedKeys ('{DEL}')
           Start-Sleep -Milliseconds 200
-          $out.cleared = $true
+          # H2: bazı klasik Edit kutuları Ctrl+A'yı YOK SAYAR (FolderBatcher). Metin kaldıysa
+          # EM_SETSEL ile seç ve sil; sonucu okuyup `cleared` alanını gerçek duruma göre yaz.
+          $left = $null
+          try {
+            $focusNow = Get-InputFocus
+            $left = Get-NativeEditText $focusNow
+            if ($null -ne $left -and $left.Length -gt 0) {
+              $hwnd = [IntPtr]0
+              try { $hwnd = [IntPtr]$focusNow.Current.NativeWindowHandle } catch {}
+              if ($hwnd -ne [IntPtr]::Zero -and [XpWin]::SelectAll($hwnd)) {
+                Start-Sleep -Milliseconds 120
+                Send-CheckedKeys ('{DEL}')
+                Start-Sleep -Milliseconds 200
+                $left = Get-NativeEditText $focusNow
+              }
+            }
+          } catch { $left = $null }
+          # Okunamıyorsa "temizlendi" sayılır (bilinmiyor ≠ kaldı); okunup metin kaldıysa false.
+          $out.cleared = ($null -eq $left) -or ($left.Length -eq 0)
         }
         if ($text.Length -gt 0) {
           if (-not $usePaste) {

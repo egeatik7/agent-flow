@@ -1354,7 +1354,7 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
   // this action short. A stop that arrives from here on is honoured.
   ctx.clearStop?.()
   const s = ctx.getSettings()
-  const timeoutMs = num(args.timeoutMs) ?? (spec.kind === 'wait' ? 60_000 : 90_000)
+  const timeoutMs = num(args.timeoutMs) ?? (spec.kind === 'wait' ? Math.max(60_000, (Number(args.ms) || 0) + 30_000) : 90_000)
   const logs: string[] = []
   const traces: TargetTrace[] = []
   let timedOut = false

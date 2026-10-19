@@ -1097,10 +1097,13 @@ async function runFlow(
       runLog = ''
     }
     agent.beginRun(shotDir)
-    globalShortcut.register(STOP_HOTKEY, () => {
+    if (!globalShortcut.register(STOP_HOTKEY, () => {
       if (running) noteUserStop()
       stopRequested = true
-    })
+    })) {
+      // Kısayol başka uygulamada kayıtlıysa sessiz kalma: pencere gizliyken tek durdurma yolu budur.
+      log('warn', `Durdur kısayolu (${STOP_HOTKEY}) kaydedilemedi; başka bir uygulama kullanıyor olabilir. Durdurmak için Nubbo penceresine dön.`)
+    }
     awake = powerSaveBlocker.start('prevent-display-sleep')
     if (runLog) log('info', `Günlük dosyası: ${runLog}`)
     // Koşu başlangıcı: bellek ölçümünün son örneği (ve ölçüm başladıysa ilk kayıt) günlüğe girer.
@@ -1268,6 +1271,8 @@ async function runFlow(
     if (runId && !derivedRun) viewerState.finish(outcome)
     hudRunGraph = null
     stopHudCountdown()
+    // Koşu bitti: model kronometresi de durur; kart koşu sonrası canlı sayaç göstermez.
+    durdurHudStopwatch()
     // Koşu bitti: bağlam kartı da temizlenir, eski ölçüm bir sonraki koşuya taşınmaz.
     baglamKartiniTemizle()
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')

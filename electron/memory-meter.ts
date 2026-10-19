@@ -456,10 +456,13 @@ export function varsayilanOlcum(zamanAsimiMs = BELLEK_ZAMAN_ASIMI_MS): BellekOlc
   return async () => {
     const basi = Date.now()
     const [ps, gpu] = await Promise.all([psCalistir(OLCUM_BETIGI, zamanAsimiMs), gpuOlc(2500)])
-    let ham: Record<string, unknown> = {}
+    let ham: Record<string, unknown>
     try {
-      const metin = ps.cikti.slice(ps.cikti.indexOf('{'))
-      if (metin) ham = JSON.parse(metin) as Record<string, unknown>
+      // Boş/timeout çıktısı "başarılı boş ölçüm" sayılmaz: indexOf('{') -1 iken slice(-1) son
+      // karakteri veriyordu ve ham={} ile dönülüp son geçerli örnek yok ediliyordu.
+      const baslangic = ps.cikti.indexOf('{')
+      if (baslangic < 0) throw new Error('sayaç çıktısı boş')
+      ham = JSON.parse(ps.cikti.slice(baslangic)) as Record<string, unknown>
     } catch {
       // Bozuk/eksik çıktı = ölçüm başarısız: son geçerli değer "eski" olarak işaretlenir.
       throw new Error('Bellek ölçümü okunamadı (sayaç çıktısı çözümlenemedi).')

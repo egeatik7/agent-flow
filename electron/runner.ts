@@ -915,7 +915,7 @@ export async function runGraph(
       }
     }
   } catch (e) {
-    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed + tally.stepFailures, ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
+    if (e instanceof EndFlow) return { steps: tally.n, failed: tally.failed + tally.stepFailures, ...(incomplete ? { incomplete: true } : {}), ...(opts.packageExit ? { packageExitReached: false } : {}), ...(opts.reportEnd ? { reachedEnd: true } : {}) }
     // Döngü DIŞINDA kalan bir adım hatası: hata yine yukarı çıkar (davranış aynı), ama sayaç
     // doğruyu söyler. Ölçülen kusur: sayaç yalnız öğe hatasında artıyordu, bu yüzden koşu
     // "hata: …" ile biterken "hatalı öğe yok" yazıyordu.
