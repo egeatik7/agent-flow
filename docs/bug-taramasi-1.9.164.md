@@ -129,3 +129,17 @@ library-path korumalı yol, zip retry kapsamı, runnerSaydi çift sayım, koşul
 aktarımı, screen.ps1 imleç doğrulaması ve simge dx/dy telafisi.
 
 Bu liste bir sonraki sürümün girdisidir; hiçbiri 1.9.165'te kapatıldı diye işaretlenmedi.
+
+## 7. 1.9.166 durumu
+
+**Kapatıldı:** merge hedefinin tıklama anında sabitlenmesi + `libraryBusy` kilidi, `act.*` Durdur
+semantiği (durduruldu / eylem-belirsiz + sent), `target.preview` eski durdurma bayrağı, paket içi
+hatanın iki kez sayılması + koşul kurtarmasına `vars`, kurtarma taslaklarının sınırsız birikmesi
+(tek kayıt + 20 sınır), viewer Origin denetimi, HUD `keepOnTop` interval temizliği, `memo.win`
+gerçek pencere adı, ZIP link/unlink retry kapsamı, `library-path` korumalı+silinmiş yol,
+`dev-start-test` işaret dosyası kuralı.
+
+**Hâlâ açık:** `tool-state` çift sayaç, tek eylem sonrası pencere minimize, `graph-ops` Bitir araya
+ekleme, SidePanel Yap süre alanı, yazı yolunda doğrulanmamış memo, 400'lük aday kırpması günlüğü,
+checkpoint bayat devam işareti, `screen.ps1` imleç doğrulaması ve simge dx/dy telafisi,
+`send-log` 200 klasör/yaş dengesi, `zip-library-storage` EPERM flaky testi (kullanıcı kararı: F2 kapalı).
