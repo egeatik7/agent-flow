@@ -154,3 +154,16 @@ tıkla/yaz promptunda, tanılama kanıtı 200 → 1000 istek, işaretçinin hede
 **Hâlâ açık (küçük):** tek eylem sürerken Durdur kısayolunun kayıtlı olmaması (uygulama gizliyken),
 yazı yolunda doğrulanmamış hedefin hafızaya yazılması, checkpoint'in "bayat devam" işareti,
 `screen.ps1` simge dx/dy telafisi, `zip-library-storage` EPERM flaky testi (kullanıcı kararı: F2 kapalı).
+
+## 9. 1.9.168 durumu
+
+**Kapatıldı:** Durdur kısayolunun tek eylem sırasında da çalışması (uygulama ömrü boyunca kayıt),
+yazı yolunda hafızaya yalnız kanıtlı hedef yazılması (geri okuma eşleşmesi veya seçili locator),
+checkpoint yazım kesintisinin panelde `.resume-unreliable` uyarısı olarak görünmesi, merge işleyici
+hatasının anında bildirilmesi, `loadURL`/`loadFile` reddinin günlüğe yazılması, viewer 12 soket
+sınırının jetondan sonra uygulanması.
+
+**Bilinçli istisnalar (düzeltilmedi):** `screen.ps1` simge dx/dy telafisi (locator şemasına alan
+eklemek gerekir; §13 şema değişikliği yasağı), `zip-library-storage` EPERM flaky testi (kullanıcı
+kararı: F2 kapalı), `checkpoint-output-watch` dolu klasör gezmesinin tek yazıcı kuyruğunda olması
+(tasarım).
