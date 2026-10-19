@@ -143,3 +143,14 @@ gerçek pencere adı, ZIP link/unlink retry kapsamı, `library-path` korumalı+s
 ekleme, SidePanel Yap süre alanı, yazı yolunda doğrulanmamış memo, 400'lük aday kırpması günlüğü,
 checkpoint bayat devam işareti, `screen.ps1` imleç doğrulaması ve simge dx/dy telafisi,
 `send-log` 200 klasör/yaş dengesi, `zip-library-storage` EPERM flaky testi (kullanıcı kararı: F2 kapalı).
+
+## 8. 1.9.167 durumu
+
+**Kapatıldı:** `run.state` sayaç dili (gözlenen adım olayları ≠ hatalı öğe), "Bitir" araya ekleme
+koruması (sessiz bağlantı kaybı yok), Yap "Süre sınırı" taslak değer, 400'lük aday kırpması notu
+tıkla/yaz promptunda, tanılama kanıtı 200 → 1000 istek, işaretçinin hedefe vardığının doğrulanması
+(ClipCursor/sanal masaüstü kırpmasında tıklama gönderilmez, `INPUT_CLICK_STALE`).
+
+**Hâlâ açık (küçük):** tek eylem sürerken Durdur kısayolunun kayıtlı olmaması (uygulama gizliyken),
+yazı yolunda doğrulanmamış hedefin hafızaya yazılması, checkpoint'in "bayat devam" işareti,
+`screen.ps1` simge dx/dy telafisi, `zip-library-storage` EPERM flaky testi (kullanıcı kararı: F2 kapalı).
