@@ -20,6 +20,18 @@ const sec = (configured: string, exists: (c: string) => boolean) =>
   chooseLibraryDirectory({ configured, documents: BELGELER, home: EV, exists, protectedRoots: KORUMALI })
 
 describe('kütüphane klasörü seçimi (korumalı klasör oluşturmadan)', () => {
+  it('korumalı kökteki kayıtlı yol artık YOKSA korumasız profile düşer (açılış donması yok)', () => {
+    const hedef = `${BELGELER}\\Nubbo\\Kütüphane`
+    const r = sec(hedef, () => false)
+    expect(r.fallback).toBe(true)
+    expect(r.directory).toBe(`${EV}\\NubboKutuphane`)
+  })
+
+  it('korumalı kökteki kayıtlı yol VARSA korunur (okumak güvenli)', () => {
+    const hedef = `${BELGELER}\\Nubbo\\Kütüphane`
+    expect(sec(hedef, (c) => c === hedef)).toEqual({ directory: hedef, fallback: false })
+  })
+
   it('kayıtlı ayar varsa tartışmasız onu kullanır', () => {
     const r = sec('D:\\NubboKutuphane', () => false)
     expect(r).toEqual({ directory: 'D:\\NubboKutuphane', fallback: false })

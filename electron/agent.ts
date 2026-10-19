@@ -294,7 +294,7 @@ export function createAgent(ctx: AgentContext) {
     const recordedText = loc?.text || loc?.name || ''
     // A target that contains {{öğe}} changes every lap; last lap's spot would point at last lap's item.
     const mem = node.templated ? undefined : memoFor(node)
-    const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, area, win)) : undefined
+    const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, area, scan.window || win)) : undefined
     const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
     const useLlm = allowLlm && (!!s.apiKey || localConfigured()) && !!prompt
     // Eşit adaylar (aynı yazıdan birden fazla): model varsa ayırt edici yoksa SEÇİM YAPILMAZ ve
@@ -379,7 +379,7 @@ export function createAgent(ctx: AgentContext) {
     }
     if (!hit) return null
 
-    let memo = memoOf(hit.item, area, win)
+    let memo = memoOf(hit.item, area, scan.window || win)
     const why = exact ? null : conflict(mem, memo)
     if (why) {
       log('warn', `Bu tur farklı: ${why}. Tıklamadan önce bir kez daha bakılıyor.`)
@@ -411,7 +411,7 @@ export function createAgent(ctx: AgentContext) {
             const refined = second.wordIndex !== undefined ? refineWordTarget(item, second.wordIndex) : refineTarget(item, second.text)
             if (!refined) return null
             hit = refined
-            memo = memoOf(item, area, win)
+            memo = memoOf(item, area, scan.window || win)
             how = 'ikinci bakış'
           } else if (item) {
             log('info', `İkinci bakış aynı öğeyi onayladı${second.reason ? `: ${second.reason}` : ''}.`)
@@ -515,14 +515,14 @@ export function createAgent(ctx: AgentContext) {
     let esitAdayNotu = ''
     const quoteOnScreen = (scan: ScanResult, text: string, where: string): TargetPick | null => {
       const mem = node.templated ? undefined : memoFor(node)
-      const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, where)) : undefined
+      const prefer = mem?.length ? (it: ScreenItem) => likeness(mem, memoOf(it, scan.area, scan.window || where)) : undefined
       const anchor = mem?.length ? undefined : node.anchor ?? (loc?.x !== undefined && loc?.y !== undefined ? { x: loc.x, y: loc.y } : undefined)
       const items = asksDesktopShortcut(prompt) ? scan.items.filter(i => !taskbarItem(scan, i)) : scan.items
       // Birebir tırnaklı hedefte de iki aday eşit olabilir: model varsa seçim modele bırakılır.
       const tie: TiePolicy = s.apiKey || localConfigured() ? 'ask' : 'first'
       const hit = matchText(items, text, { anchor, minScore: 100, prefer, tie, note: (m) => { esitAdayNotu = m; log('warn', m) } })
       if (!hit) return null
-      return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, where), how: 'yazı' }
+      return { item: hit.item, target: hit, memo: memoOf(hit.item, scan.area, scan.window || where), how: 'yazı' }
     }
 
     const methodErrors: string[] = []

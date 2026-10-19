@@ -704,7 +704,8 @@ export default function App() {
   }
   // Test sessions only: a merged graph from the agent's branch replaces the active canvas and is saved to its ZIP.
   agentGraphHandler.current = async (p) => {
-    if (p.tabId !== activeIdRef.current) return { ok: false, error: 'Uygulanacak tuval şu an açık değil; tuval değiştirilmedi.' }
+    const targetTabId = p.tabId
+    if (targetTabId !== activeIdRef.current) return { ok: false, error: 'Uygulanacak tuval şu an açık değil; tuval değiştirilmedi.' }
     if (runningRef.current) return { ok: false, error: 'Koşu sürerken tuval değiştirilmez.' }
     // Only canvases in the AI group are changed automatically. Any other canvas is first saved as a copy
     // into AI (Farklı kaydet): the open tab then points at the copy and the original ZIP is left as it was.
@@ -723,14 +724,23 @@ export default function App() {
       ;({ tab, group } = ownerOf())
       if (group?.name !== 'AI') return { ok: false, error: 'Kopya AI grubunda görünmüyor; tuval değiştirilmedi.' }
     }
-    const projected = projectView(p.graph, [])
-    graphRef.current = projected.view
-    stackRef.current = projected.stack
-    setGraph(projected.view)
-    setStack(projected.stack)
-    const saved = await saveCurrentCanvas()
-    // Tuval BELLEKTE değişti; ZIP yazımı başarısız olsa da "hiçbir şey yazılmadı" denemez.
-    return saved ? { ok: true } : { ok: false, ambiguous: true, error: 'Tuval bellekte değişti ama ZIP’e kaydedilemedi; değişiklik uygulanmış olabilir.' }
+    // Beklemelerden (AI kopyası, ZIP) SONRA hedefin hâlâ açık tuval olduğunu doğrula: kullanıcı
+    // bu arada sekme değiştirdiyse merge YANLIŞ tuvale yazılmamalı.
+    if (activeIdRef.current !== targetTabId) return { ok: false, error: 'Sekme değişti; tuval değiştirilmedi.' }
+    libraryBusyRef.current = true
+    try {
+      const projected = projectView(p.graph, [])
+      graphRef.current = projected.view
+      stackRef.current = projected.stack
+      setGraph(projected.view)
+      setStack(projected.stack)
+      if (activeIdRef.current !== targetTabId) return { ok: false, error: 'Sekme değişti; tuval değiştirilmedi.' }
+      const saved = await saveCurrentCanvas()
+      // Tuval BELLEKTE değişti; ZIP yazımı başarısız olsa da "hiçbir şey yazılmadı" denemez.
+      return saved ? { ok: true } : { ok: false, ambiguous: true, error: 'Tuval bellekte değişti ama ZIP’e kaydedilemedi; değişiklik uygulanmış olabilir.' }
+    } finally {
+      libraryBusyRef.current = false
+    }
   }
   const saveAllWorkspace = async () => {
     if (runningRef.current || libraryBusyRef.current) return false

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createNode, type AgentGraph } from '../electron/graph-types'
-import { runGraph, type Executor } from '../electron/runner'
+import { runGraph, ConditionUndecidedError, newTally, type Executor } from '../electron/runner'
 import { repeatMethodCycle } from '../electron/method-cycle'
 
 const ex = (overrides: Partial<Executor> = {}): Executor => ({
@@ -48,6 +48,21 @@ describe('eylem dışı node hataları kalıcıdır (sonsuz tur yok)', () => {
     const summary = await runGraph(graph, ex({ exists: async () => false }), opts)
     expect(summary.reachedEnd).toBe(true)
     expect(summary.incomplete).toBe(true)
+  })
+
+  it('paket içi hata her katmanda yeniden sayılmaz (failed=1)', async () => {
+    const start = createNode('start', 0, 0), end = createNode('end', 0, 0), pkg = createNode('package', 0, 0)
+    const ai = createNode('ai', 0, 0); ai.prompt = 'bir şey yap'
+    pkg.inner = { nodes: [ai], edges: [] }
+    const graph: AgentGraph = {
+      nodes: [start, pkg, end],
+      edges: [{ id: 'e1', from: start.id, fromPort: 'next', to: pkg.id }, { id: 'e2', from: pkg.id, fromPort: 'next', to: end.id }],
+    }
+    const tally = newTally()
+    // Yap "başarısız" derse 'fail' çıkışı bağlı değildir → paket içi StepFailedError (ölümcül değil).
+    await expect(runGraph(graph, ex({ initiative: async () => false }), { ...opts, tally })).rejects.toThrow()
+    expect(tally.stepFailures).toBe(1)
+    expect(tally.failed).toBe(0)
   })
 
   it('yonlem turu maxRounds verilince sınırda hatayı yukarı verir', async () => {

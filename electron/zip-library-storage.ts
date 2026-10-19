@@ -30,6 +30,17 @@ export function renameRetrying(
   }
 }
 
+/** Link/unlink de aynı Windows kilidine takılır; yalnız EPERM/EBUSY/EACCES'ta sınırlı denenir. */
+function retrySync(fn: () => void, attempts = 12): void {
+  for (let attempt = 1; ; attempt++) {
+    try { fn(); return } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (process.platform !== 'win32' || !RENAME_RETRY_CODES.has(code) || attempt >= attempts) throw error
+      sleepSync(Math.min(30 * 2 ** (attempt - 1), RENAME_MAX_PAUSE_MS))
+    }
+  }
+}
+
 export type ZipCanvasGroup = {
   /** Relative ZIP path, not a separate catalog identity. */
   id: string
@@ -225,8 +236,8 @@ export class ZipLibraryStorage {
         if (hash(this.readBuffer(from)) !== revision) throw new ZipLibraryConflictError()
         if (process.platform === 'win32' && fileKey(from) === fileKey(to)) fs.renameSync(from, to)
         else {
-          fs.linkSync(from, to)
-          try { fs.unlinkSync(from) } catch (error) { fs.unlinkSync(to); throw error }
+          retrySync(() => fs.linkSync(from, to))
+          try { retrySync(() => fs.unlinkSync(from)) } catch (error) { try { retrySync(() => fs.unlinkSync(to)) } catch { /* rollback da kilitli */ } throw error }
         }
       }
       return this.readSnapshot()
@@ -236,7 +247,7 @@ export class ZipLibraryStorage {
     return withLibraryLock(this.directory, () => {
       const snapshot = this.readSnapshot(), group = this.freshGroup(snapshot, id, revision, true), file = this.groupPath(group)
       if (hash(this.readBuffer(file)) !== revision) throw new ZipLibraryConflictError()
-      fs.unlinkSync(file)
+      retrySync(() => fs.unlinkSync(file))
       return this.readSnapshot()
     })
   }

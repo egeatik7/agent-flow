@@ -913,9 +913,9 @@ const targetPreview: ToolDef = {
       }
     }
     const fast = args.fast === true
-    // The engine is loaded only when a tool actually needs it, so the tool layer stays light
-    // and testable. A separate, silent agent: a preview writes no memory, sends no patch and
-    // keeps no log of its own.
+    // Önceki debug/sınırlı koşudan kalan durdurma bayrağı önizlemeyi "durduruldu" diye
+    // kesmesin; bu yalnız bakış, eylem yok (step.run ile aynı kural).
+    ctx.clearStop?.()
     const { createAgent } = await import('./agent')
     const traces: TargetTrace[] = []
     const agent = createAgent({
@@ -1415,6 +1415,14 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
       }
     }
     const where = `${t.text}${spec.kind === 'wait' ? '' : ` Seçilen: ${t.stage ?? '—'}${t.candidates !== undefined ? ` · ${t.candidates} aday` : ''}.`}`
+    if (r.interrupted) {
+      // Durdur, "eylem-belirsiz" değildir: girdi gönderilmiş olabilir de olmayabilir de. Ajanın
+      // aynı tıklamayı körlemesine yinelemesini önlemek için bunu AYRI söyle.
+      const sent = r.acted
+      const message = `${spec.title} kullanıcı tarafından durduruldu; ${sent ? 'girdi gönderilmiş olabilir, tekrar gönderme' : 'girdi gönderilmedi'} (${r.ms} ms). ${where}`
+      ctx.log('warn', `Ajan · eylem · ${message}`)
+      return { ok: false, tool: name, outcome: sent ? 'eylem-belirsiz' : 'durduruldu', message, action: { kind: spec.kind, sent }, data: { logs: logs.slice(-16), status: 'stopped', ms: r.ms, stages: t.stages } }
+    }
     if (timedOut) {
       const message = `${spec.title} zaman aşımına uğradı (${Math.round(timeoutMs / 1000)} sn). ${where}`
       ctx.log('warn', `Ajan · eylem · ${message}`)

@@ -11,17 +11,27 @@ export function emptyCanvasSession(book: CanvasBook): CanvasBook {
   return { ...book, activeId: '', tabs: [] }
 }
 
+/** Aynı tuvalin taslağı kimliğiyle (kayıtlıysa savedId, değilse adı) tanınır. */
+const draftKey = (tab: CanvasTab): string => tab.savedId || tab.name
+
+/** Kurtarma taslakları: aynı tuval için tek kayıt, en yeni 20 taslak (sınırsız birikme yok). */
+export const MAX_RECOVERY_DRAFTS = 20
+
 /** Start with no open editor. Recovery never silently publishes a working copy. */
 export function startCanvasSession(book: CanvasBook): CanvasBook {
   const recovery = [...(book.recovery ?? [])]
   for (const tab of book.tabs) {
     if (!canvasDirty(book, tab)) continue
     const record = { ...structuredClone(tab), recoveredAt: Date.now() }
-    const found = recovery.findIndex(r => r.id === tab.id)
+    // Her açılışta yeni tab id'si üretildiği için aynı tuvalin kopyaları birikiyordu.
+    const found = recovery.findIndex(r => r.id === tab.id || draftKey(r) === draftKey(tab))
     if (found < 0) recovery.push(record)
     else recovery[found] = record
   }
-  return emptyCanvasSession({ ...book, recovery })
+  const kept = recovery
+    .sort((a, b) => (b.recoveredAt ?? 0) - (a.recoveredAt ?? 0))
+    .slice(0, MAX_RECOVERY_DRAFTS)
+  return emptyCanvasSession({ ...book, recovery: kept })
 }
 
 export function restoreCanvasDraft(book: CanvasBook, id: string): CanvasBook {

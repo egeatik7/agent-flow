@@ -22,7 +22,14 @@ export async function startViewerServer(state:ViewerState,directory:string,token
   fs.readFile(file,(error,data)=>{if(error){res.writeHead(404);res.end();return}res.writeHead(200,{'Content-Type':mime[path.extname(file)]??'application/octet-stream'});res.end(data)})
  })
  const sockets=new WebSocketServer({noServer:true,maxPayload:2048,perMessageDeflate:false})
- server.on('upgrade',(req,socket,head)=>{if(req.url!=='/viewer/events'||sockets.clients.size>=12){socket.destroy();return}sockets.handleUpgrade(req,socket,head,ws=>sockets.emit('connection',ws))})
+ server.on('upgrade',(req,socket,head)=>{
+  // Tarayıcı sayfaları yalnız kendi Origin'iyle bağlanır; başka bir site 12 yuvayı tutup gerçek
+  // tablet izleyicisini kapıdan çeviremesin (Origin yoksa yerel istemci sayılır).
+  const origin=req.headers.origin
+  if(origin&&!/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(String(origin))){socket.destroy();return}
+  if(req.url!=='/viewer/events'||sockets.clients.size>=12){socket.destroy();return}
+  sockets.handleUpgrade(req,socket,head,ws=>sockets.emit('connection',ws))
+ })
  sockets.on('connection',ws=>{
   let off:(()=>void)|undefined
   const timeout=setTimeout(()=>ws.close(1008,'Eşleştirme gerekli'),5000)

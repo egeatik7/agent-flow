@@ -444,7 +444,14 @@ export async function runGraph(
           if (isFatal(error)) throw error
           // Paket içinde kalan bir hata paketi BAŞTAN oynatmayı hak etmez: içerideki tıklama/yazma
           // ikinci kez gönderilirdi. Kalıcı hata olarak yukarı verilir; öğe hatası olarak raporlanır.
-          throw new PermanentStepError(`“${node.title}” paketi hata verdi: ${(error as Error).message}`)
+          const wrapped = new PermanentStepError(`“${node.title}” paketi hata verdi: ${(error as Error).message}`)
+          // İşaretleri koru: aksi hâlde aynı hata her paket katmanında yeniden sayılıyor (failed=2).
+          if (error && typeof error === 'object') Object.assign(wrapped, {
+            runnerSaydi: (error as { runnerSaydi?: boolean }).runnerSaydi,
+            haltLoop: (error as { haltLoop?: boolean }).haltLoop,
+            serviceFailure: (error as { serviceFailure?: boolean }).serviceFailure,
+          })
+          throw wrapped
         }
         if (result.incomplete) incomplete = true
         if (node.packageExit && !result.packageExitReached) {
@@ -609,7 +616,7 @@ export async function runGraph(
         pendingCondition = undefined
         const why = pending.undecided ? 'karar veremedi' : 'yok dedi'
         if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” ${why} ve “yok” çıkışı bağlı değil; kurtarma ajanı kapalı. Akış durduruldu.`)
-        const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: {} })
+        const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: { ...vars } })
         if (ex.shouldStop()) throw new StoppedError()
         if (decision === 'var') {
           ex.log('success', `[${pending.stepNo}] Kurtarma ajanı koşulu doğruladı: “${pending.text}”: var`)

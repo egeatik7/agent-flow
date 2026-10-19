@@ -98,6 +98,7 @@ function portableTempSupur() {
         return false
       }
     })
+    const marker = require(path.join(root, 'dist-electron', 'instance-marker.js'))
     const girdiler = kural.geciciGirdileriTopla({
       tempDir: dir,
       adlar,
@@ -109,6 +110,8 @@ function portableTempSupur() {
           return Date.now()
         }
       },
+      // ÜRÜNLE AYNI kural: çalışan örneğin klasörü yaş tahminiyle silinmez.
+      canliMi: (y) => marker.instanceMarkerAlive(y),
     })
     const secilen = kural.bayatCikarmaKlasorleri(girdiler, { now: Date.now(), ownDir: path.dirname(exe) })
     let mb = 0

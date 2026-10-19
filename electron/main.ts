@@ -116,6 +116,9 @@ async function viewerInfo():Promise<ViewerInfo>{
 let mainWindow: BrowserWindow | null = null
 const closeGuard = new WindowCloseGuard()
 let hudWindow: BrowserWindow | null = null
+// Kartın "hep üstte" tazeleme sayacı: pencere destroy edilirken 'closed' dinleyicisi kaldırıldığı
+// için clearInterval hiç çalışmıyordu ve sayaç süreç sonuna kadar dönüyordu.
+let hudKeepOnTop: ReturnType<typeof setInterval> | null = null
 let reportBoot: (pct: number, line: string) => void = () => {}
 let closeBoot: () => void = () => {}
 let appRevealed = false
@@ -567,6 +570,7 @@ function forceClose(reason: string): void {
 
 function destroyHud() {
   hudController.reset()
+  if (hudKeepOnTop) { clearInterval(hudKeepOnTop); hudKeepOnTop = null }
   const w = hudWindow
   if (!w || w.isDestroyed()) {
     hudWindow = null
@@ -636,7 +640,7 @@ function createHud() {
   // Windows lets other windows take the topmost position when focus moves, and this window never takes
   // focus, so nothing raises it again. Re-assert the topmost state once a second while it is shown.
   // Deliberately NOT moveTop(): that could push the card over the Alt+Tab switcher.
-  const keepOnTop = setInterval(() => {
+  hudKeepOnTop = setInterval(() => {
     if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) hudWindow.setAlwaysOnTop(true, 'floating')
   }, 1000)
   const dev = process.env.VITE_DEV_SERVER_URL
@@ -644,7 +648,7 @@ function createHud() {
   else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
   const w = hudWindow
   hudWindow.on('closed', () => {
-    clearInterval(keepOnTop)
+    if (hudKeepOnTop) { clearInterval(hudKeepOnTop); hudKeepOnTop = null }
     if (hudWindow !== w) return
     hudController.reset()
     hudWindow = null
