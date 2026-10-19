@@ -39,8 +39,12 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   captureAfter: (ms: number) => ipcRenderer.invoke('capture:afterDelay', ms),
 
-  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean }) =>
+  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }) =>
     ipcRenderer.invoke('agent:run', graph, startId, packagePath, opts),
+  listCheckpoints: () => ipcRenderer.invoke('checkpoints:list'),
+  checkpointDetail: (id: string) => ipcRenderer.invoke('checkpoints:detail', id),
+  checkpointSnapshot: (id: string) => ipcRenderer.invoke('checkpoints:snapshot', id),
+  checkpointMonitoring: () => ipcRenderer.invoke('checkpoints:monitoring'),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
   callTool: (name: string, args?: unknown) => ipcRenderer.invoke('tools:call', name, args, 'panel'),
   toolList: () => ipcRenderer.invoke('tools:list'),

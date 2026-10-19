@@ -1,4 +1,6 @@
 import { yapProgressText, type YapProgress } from './yap-context'
+import { Checkpoints } from './checkpoints'
+import type { CheckpointCursor } from './checkpoint-types'
 import { HudWindowController } from './hud-window'
 import { assertRunStructure, structureSummary } from './run-structure'
 import { contextOf, findPlace } from './tool-context'
@@ -117,6 +119,10 @@ let reportBoot: (pct: number, line: string) => void = () => {}
 let closeBoot: () => void = () => {}
 let appRevealed = false
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
+const checkpoints = new Checkpoints(path.join(app.getPath('userData'), 'checkpoints'), message => log('warn', message), {
+  discover: () => bridge.checkpointDrives(),
+  exclude: [app.getPath('userData'), process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter((p): p is string => !!p),
+})
 let running = false
 /**
  * The graph the current run walks (packages included). The desktop card names the node that is
@@ -1017,7 +1023,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean; canvasId?: string }
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string; reachedEnd?: boolean }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -1032,11 +1038,20 @@ async function runFlow(
   let hidden = false
   let outcome: { ok: boolean; failed?: number; steps?: number; stopped?: boolean; error?: string; reachedEnd?: boolean } | undefined
   let runId = ''
+  let checkpointCursor: CheckpointCursor | undefined
+  let checkpointStarted = false
   // Koşunun sayaçları burada tutulur: hata ile biten bir koşuda runGraph sonuç nesnesini
   // döndüremez (hata yukarı çıkar), sayaç yine de çağırana ulaşmalı. Şeklin tek tanımı
   // runner'daki newTally()'dir; burada elle kopyalanmaz ki yeni bir alan sessizce düşmesin.
   const tally = newTally()
   try {
+    if (opts?.checkpointId) {
+      const snapshot = await checkpoints.snapshot(opts.checkpointId)
+      raw = snapshot.graph
+      checkpointCursor = snapshot.cursor
+      startId = checkpointCursor.startId
+      packagePath = checkpointCursor.packagePath
+    }
     // Before normalization can silently discard a broken edge; before any input.
     const structure = assertRunStructure(raw, { startId, packagePath, requireEnd: opts?.requireEnd })
     const warnings = structure.filter(issue => issue.severity === 'warning')
@@ -1051,6 +1066,11 @@ async function runFlow(
     runId = beginRun(graph, startId)
     if (!opts?.derived) viewerState.begin(runId, opts?.canvasId ?? '', graph)
     const s = getSettings()
+    if (!opts?.derived) {
+      await checkpoints.begin(runId, opts?.canvasId ?? '', opts?.canvasName ?? 'Tuval', opts?.checkpointId)
+      checkpointStarted = true
+      await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } })
+    }
     let shotDir = ''
     try {
       shotDir = ensureLogsDir()
@@ -1080,6 +1100,9 @@ async function runFlow(
     let recoveries = 0
     const pendingReports = new Map<string, RecoveryReport>()
     const executor = { ...agent.executor,
+      checkpoint: opts?.derived ? undefined : async (label: string, cursor: CheckpointCursor) => {
+        await checkpoints.mark(label, { graph: structuredClone(graph), cursor })
+      },
       initiative: async (node: import('./graph-types').AgentNode, stepNo: number, ahead: import('./runner').StepAhead = {}, vars: Record<string, string> = {}) => {
         if (opts?.fast || opts?.debug) throw new Error('Yap model gerektirir; hızlı/hata ayıklama koşusunda çalıştırılamaz.')
         const settings = getSettings()
@@ -1182,7 +1205,8 @@ async function runFlow(
       ...(opts?.requireEnd ? { reportEnd: true } : {}),
       stepDelayMs: Math.max(0, s.stepDelayMs),
       startId,
-      resume: !!startId,
+      resume: !!startId || !!checkpointCursor,
+      checkpointResume: checkpointCursor,
       // Debug koşusu runner'a da bildirilir: aynı hata kümesi tekrarında durma koruması
       // yalnız debug'da çalışır (normal kullanıcı akışlarının davranışı değişmez).
       ...(opts?.debug ? { debug: true } : {}),
@@ -1215,6 +1239,10 @@ async function runFlow(
     // Reset the run state even when preparation failed before a resource
     // was created, or a later OS cleanup call throws. The outcome is kept so a caller can
     // still ask how the run ended after it is over.
+    if (checkpointStarted) {
+      try { await checkpoints.finish(outcome?.stopped ? 'stopped' : outcome?.ok ? 'completed' : 'failed') }
+      catch (e) { log('warn', `Checkpoint son kaydı yazılamadı: ${(e as Error).message}`) }
+    }
     agent.releaseRunSettings()
     endRun(outcome)
     if (runId && !derivedRun) viewerState.finish(outcome)
@@ -1673,7 +1701,11 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     return bridge.captureAtCursor()
   })
 
-  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean }) =>
+  ipcMain.handle('checkpoints:list', () => checkpoints.list())
+  ipcMain.handle('checkpoints:detail', (_e, id: string) => checkpoints.detail(id))
+  ipcMain.handle('checkpoints:snapshot', (_e, id: string) => checkpoints.snapshot(id))
+  ipcMain.handle('checkpoints:monitoring', () => checkpoints.monitoring())
+  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }) =>
     runFlow(raw, startId, packagePath, opts)
   )
   // Döngü listesindeki bir öğe için: "Yolu aç" (bulunduğu klasör + seçim) ve çift tık (öğeyi aç).

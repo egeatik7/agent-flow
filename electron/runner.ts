@@ -1,3 +1,4 @@
+import { checkpointGraphPath, type CheckpointCursor, type CheckpointLoop, type CheckpointScope } from './checkpoint-types'
 import { assertRunStructure } from './run-structure'
 import { repeatMethodCycle, methodErrorText, DeliberateStopError, RecoveryFailedError } from './method-cycle'
 import { type ObservationOptions } from './observation-budget'
@@ -48,6 +49,7 @@ export type RecoveryDecision = 'retry' | 'completed' | 'stop' | 'disabled' | 'fa
 export type LoopProgress = { id: string; title: string; index: number; total: number; item: string }
 
 export type Executor = {
+  checkpoint?: (label: string, cursor: CheckpointCursor) => Promise<void>
   /** Runs only at a failed action boundary; the existing loop stack remains paused. */
   recover?: (request: RecoveryRequest) => Promise<RecoveryDecision>
   recoveryFinished?: (nodeId: string, ok: boolean, error?: string) => void
@@ -175,6 +177,10 @@ export async function runGraph(
   opts: {
     maxSteps: number
     stepDelayMs: number
+    checkpointResume?: CheckpointCursor
+    checkpointUsed?: Set<string>
+    checkpointLoops?: CheckpointLoop[]
+    checkpointScopes?: CheckpointScope[]
     /** Opt-in evidence for canvas sequencing; normal runs keep their existing result shape. */
     reportEnd?: boolean
     startId?: string
@@ -203,6 +209,7 @@ export async function runGraph(
 ): Promise<RunSummary> {
   // Non-UI/tool callers receive the same structural rejection before execution.
   if (!opts.nested && !opts.afterNodeId) assertRunStructure(graph, { startId: opts.startId, packagePath: opts.packagePath })
+  const checkpointUsed = opts.checkpointUsed ?? new Set<string>()
   const resumeState = opts.resumeState ?? { identityUsed: false }
   if (opts.packagePath?.length) {
     const layers: { parent: AgentGraph; pkg: AgentNode }[] = []
@@ -230,6 +237,7 @@ export async function runGraph(
       loop.loopIndex = matches[0]
     }
     const shared = {
+      checkpointResume: opts.checkpointResume, checkpointUsed,
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,
       root: opts.root ?? graph,
@@ -241,11 +249,24 @@ export async function runGraph(
       resumeState,
       tally: opts.tally ?? newTally(),
     }
-    let summary = await runGraph(cursor, ex, { ...shared, startId: opts.startId, nested: true, packageExit: layers[layers.length - 1].pkg.packageExit })
+    // Manual package entry has no live callers. Carry the frozen ancestor frames/scopes
+    // into newly captured checkpoints until those callers are rebuilt on the way out.
+    const inheritedCheckpoint = (home: AgentGraph) => {
+      const path = checkpointGraphPath(opts.root ?? graph, home)
+      const scopes = opts.checkpointResume?.scopes.filter(s => s.path.length < path.length && s.path.every((id, i) => path[i] === id)) ?? []
+      const ancestorIds = new Set<string>()
+      let ancestor = opts.root ?? graph
+      for (const id of path) {
+        for (const n of ancestor.nodes) ancestorIds.add(n.id)
+        ancestor = ancestor.nodes.find(n => n.id === id)!.inner!
+      }
+      return { checkpointLoops: opts.checkpointResume?.loops.filter(f => ancestorIds.has(f.id)) ?? [], checkpointScopes: scopes }
+    }
+    let summary = await runGraph(cursor, ex, { ...shared, ...inheritedCheckpoint(cursor), startId: opts.startId, nested: true, packageExit: layers[layers.length - 1].pkg.packageExit })
     for (let i = layers.length - 1; i >= 0; i--) {
       if (ex.shouldStop()) throw new StoppedError()
       const { parent, pkg } = layers[i]
-      summary = await runGraph(parent, ex, { ...shared, nested: !!opts.nested || i > 0, afterNodeId: pkg.id,
+      summary = await runGraph(parent, ex, { ...shared, ...inheritedCheckpoint(parent), nested: !!opts.nested || i > 0, afterNodeId: pkg.id,
         afterNodePort: pkg.packageExit && !summary.packageExitReached ? 'blocked' : 'next',
         packageExit: i > 0 ? layers[i - 1].pkg.packageExit : opts.packageExit })
     }
@@ -270,7 +291,11 @@ export async function runGraph(
   // A run that starts inside a package, or climbs back out through one, has no caller handing it variables.
   // Take them from the loop outside that package: its ticked row, or the lap the run was on.
   const host = !opts.vars && graph !== root ? packageHost(root, graph) : undefined
-  let vars: Record<string, string> = opts.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
+  const scopePath = checkpointGraphPath(root, graph)
+  const savedScope = opts.checkpointResume?.scopes.find(s => JSON.stringify(s.path) === JSON.stringify(scopePath))
+  let vars: Record<string, string> = opts.vars ?? savedScope?.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
+  const checkpointScopes = [...(opts.checkpointScopes ?? []), { path: scopePath, vars: { ...vars } }]
+  const checkpointFrames: CheckpointLoop[] = []
   const inheritedLoops = opts.loopProgress ?? []
   const liveLoops: LoopProgress[] = []
   const publishLoops = () => ex.setLoopProgress?.([...inheritedLoops, ...liveLoops].map(loop => ({ ...loop })))
@@ -397,7 +422,7 @@ export async function runGraph(
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        const result = await runGraph(inner, ex, { packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
+        const result = await runGraph(inner, ex, { checkpointResume: opts.checkpointResume, checkpointUsed, checkpointLoops: [...(opts.checkpointLoops ?? []), ...checkpointFrames], checkpointScopes, packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
         if (result.incomplete) incomplete = true
         if (node.packageExit && !result.packageExitReached) {
           incomplete = true
@@ -624,9 +649,11 @@ export async function runGraph(
         ex.log('warn', `“${loop.title}” içinde bağlı olmayan node var: ${orphans.join(', ')}. Tur “${first.title}”dan başlar, oklarla gidilmeyen node’lar çalışmaz.`)
       }
     }
+    const savedLoop = !checkpointUsed.has(loop.id) ? opts.checkpointResume?.loops.find(f => f.id === loop.id) : undefined
+    if (savedLoop) checkpointUsed.add(loop.id)
     const folderRaw = loop.folder?.trim() ?? ''
     let fromFolder: string[] | null = null
-    if (hasTemplate(folderRaw)) {
+    if (!savedLoop && hasTemplate(folderRaw)) {
       const readFolder = async () => {
         const resolved = outsideFolder(root, loop)
         if (!resolved) {
@@ -649,9 +676,9 @@ export async function runGraph(
         retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${loop.title}” tur=${round}: ${methodErrorText(error)}`),
       })
     }
-    const keys = fromFolder ?? loopKeys(loop)
-    const isList = fromFolder != null || listItems(loop).length > 0
-    const fromBase = loopStartIndex(loop, keys.length, !!opts.resume)
+    const keys = savedLoop?.keys ?? fromFolder ?? loopKeys(loop)
+    const isList = savedLoop?.isList ?? (fromFolder != null || listItems(loop).length > 0)
+    const fromBase = savedLoop?.index ?? loopStartIndex(loop, keys.length, !!opts.resume)
     let from = skipItem ? Math.min(keys.length, fromBase + 1) : fromBase
     // Devam KİMLİKLE yapılır: klasör/liste yeniden okununca indeks başka dosyayı gösterir.
     // Ölçüldü: kayıtlı öğe "b.glb" iken liste başına "a.glb" eklenince koşu a.glb ile başlıyordu.
@@ -676,7 +703,7 @@ export async function runGraph(
       ex.log('info', `“${loop.title}”: ${keys.length} ${noun} çalışacak.`)
     }
 
-    const outer = vars
+    const outer = savedLoop?.outerVars ?? vars
     let entry: AgentNode | undefined = startAt
     let lastFail = ''
     let succeeded = 0
@@ -686,8 +713,10 @@ export async function runGraph(
     // Bir tur açıkken adım hataları ÖĞE hatası olarak sayılır (aşağıdaki catch): aynı hata
     // runGraph'un çıkışında bir kez daha "adım hatası" diye sayılmasın.
     tally.loopDepth++
+    checkpointFrames.push({ id: loop.id, keys, index: from, isList, outerVars: { ...outer } })
     try {
       for (let idx = from; idx < keys.length; idx++) {
+        checkpointFrames[checkpointFrames.length - 1].index = idx
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
         vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
@@ -699,6 +728,20 @@ export async function runGraph(
         // " › " iç içe geçişi gösterir: "Grup 3/12 · Image Folder › Öğe 7/20 · kedi.png".
         ex.setLoop?.(loopNotes.join(' › '))
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
+        if (ex.shouldStop()) throw new StoppedError()
+        await ex.checkpoint?.(`${loop.title} · ${idx + 1}/${keys.length} · ${label}`, {
+          startId: entry && firstLapPath?.length ? firstLapPath[firstLapPath.length - 1].id : (entry ?? first).id,
+          packagePath: scopePath,
+          loops: structuredClone([
+            ...(opts.checkpointLoops ?? []), ...checkpointFrames,
+            // Starting from a nested selected node opens outer boxes first. Keep the
+            // still-pending inner frozen lists in checkpoints captured on that descent.
+            ...(opts.checkpointResume?.loops.filter(f => !checkpointUsed.has(f.id) &&
+              ![...(opts.checkpointLoops ?? []), ...checkpointFrames].some(live => live.id === f.id)) ?? []),
+          ]),
+          scopes: structuredClone(checkpointScopes),
+        })
+        if (ex.shouldStop()) throw new StoppedError()
         try {
           await runChain(entry ?? first, loop, undefined, { used: 0 }, entry ? firstLapPath : undefined)
           succeeded++
@@ -732,6 +775,7 @@ export async function runGraph(
         entry = undefined
       }
     } finally {
+      checkpointFrames.pop()
       liveLoops.pop()
       publishLoops()
       loopNotes.pop()

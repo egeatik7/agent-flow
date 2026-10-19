@@ -69,8 +69,12 @@ export type XpAgentApi = {
     startId?: string,
     packagePath?: string[],
     /** `derived`: this graph is a branch being tried, not the saved flow; do not store it. */
-    opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string }
+    opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }
   ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number; reachedEnd?: boolean }>
+  listCheckpoints?: () => Promise<import('../electron/checkpoint-types').CheckpointInfo[]>
+  checkpointDetail?: (id: string) => Promise<import('../electron/checkpoint-types').CheckpointDetail>
+  checkpointSnapshot?: (id: string) => Promise<import('../electron/checkpoint-types').CheckpointSnapshot>
+  checkpointMonitoring?: () => Promise<import('../electron/checkpoint-types').CheckpointMonitoring>
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
   toolList: () => Promise<ToolSpec[]>

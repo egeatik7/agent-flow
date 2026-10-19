@@ -1,3 +1,6 @@
+import { restoreCheckpointTab } from './lib/checkpoint-resume'
+import CheckpointsPanel from './components/CheckpointsPanel'
+import type { CheckpointInfo, CheckpointSnapshot } from '../electron/checkpoint-types'
 import { inspectRunStructure, type NamedStructureIssue, type StructureOptions } from '../electron/run-structure'
 import { SettingsWriter, settingsDelta } from './lib/settings-writer'
 import { mergeSettingsPatch, type SettingsPatch } from '../electron/settings-patch'
@@ -186,6 +189,7 @@ export default function App() {
   const [fileOpen, setFileOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [tabletDialog,setTabletDialog]=useState(false)
+  const [checkpointsOpen, setCheckpointsOpen] = useState(false)
   const [libraryDirectory, setLibraryDirectory] = useState('')
   const [zipLibrary, setZipLibrary] = useState(() => zipLibraryOf(book0))
   const [recovery, setRecovery] = useState<RecoveredCanvas[]>([])
@@ -899,6 +903,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (checkpointsOpen) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (mod && key === 's') {
@@ -1119,7 +1124,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!loaded || !api?.listDir) return
+    if (!loaded || !api?.listDir || runningRef.current) return
     const gen = ++templateFillGen.current
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -1130,7 +1135,7 @@ export default function App() {
           const sig = `${loop.id}\n${resolved}`
           if (templateSeen.current.get(loop.id) === sig) continue
           const files = resolved ? await api.listDir(resolved) : []
-          if (gen !== templateFillGen.current) return
+          if (gen !== templateFillGen.current || runningRef.current) return
           templateSeen.current.set(loop.id, sig)
           const next = files ?? []
           const cur = listItems(loop)
@@ -1283,7 +1288,7 @@ export default function App() {
       setStepStatus({})
       setRunProgress(beginProgress(activeIdRef.current))
       if (api) {
-        const result = await api.runAgent(full, startId, path, { canvasId })
+        const result = await api.runAgent(full, startId, path, { canvasId, canvasName: name })
         halted = !!result.stopped || !result.ok
         failed = !result.ok && !result.stopped
         // The agent log already explains each error; this one line says the run did not end clean.
@@ -1316,13 +1321,18 @@ export default function App() {
   // Kullanıcı isteği: üstteki oynatma tuşu AKTİF tuvalden başlar ve SAĞA doğru devam eder.
   // "Seçiliden Çalıştır" ise aktif tuvali seçili ADIMDAN başlatır; o tuval Bitti'ye ulaşınca
   // sıra sağındaki tuvallerle devam eder (soldakiler çalıştırılmaz).
-  const runAllCanvases = async (startNodeId?: string) => {
+  const runAllCanvases = async (startNodeId?: string, checkpoint?: { info: CheckpointInfo; snapshot: CheckpointSnapshot }) => {
     if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || capturing || confirmAnswer.current || missingReport) return
     // showCanvas clears the open package view. Capture its path before switching;
     // the selected node belongs to that package, not to the root canvas.
-    const startPath = startNodeId ? stackRef.current.map(c => c.id) : []
-    const book = commitActive()
-    const from = book.tabs.findIndex(t => t.id === activeId)
+    const startPath = checkpoint?.snapshot.cursor.packagePath ?? (startNodeId ? stackRef.current.map(c => c.id) : [])
+    let book = commitActive()
+    if (checkpoint) {
+      book = restoreCheckpointTab(book, checkpoint.info, checkpoint.snapshot)
+      showCanvas(book, book.activeId, false)
+      startNodeId = checkpoint.snapshot.cursor.startId
+    }
+    const from = book.tabs.findIndex(t => t.id === book.activeId)
     const ordered = structuredClone(from <= 0 ? book.tabs : book.tabs.slice(from))
     if (!ordered.length) { pushLog('warn', 'Oynatılacak tuval yok.'); return }
     runningRef.current = true
@@ -1339,7 +1349,7 @@ export default function App() {
       const outcome = await sequenceRef.current.run(ordered, async (tab, index, total) => {
         // Selected-node runs resume the marked item. Only fresh canvases restart
         // their loops from the beginning, including every subsequent canvas.
-        const prepared = { ...tab, graph: index === 0 && startNodeId ? tab.graph : resetLoopTicks(tab.graph) }
+        const prepared = { ...tab, graph: index === 0 && (startNodeId || checkpoint) ? tab.graph : resetLoopTicks(tab.graph) }
         const committed = commitActive()
         const next = activateCanvasSnapshot(committed, prepared)
         showCanvas(next, tab.id, false)
@@ -1350,7 +1360,7 @@ export default function App() {
         pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId ?? `tab:${tab.id}` })
+        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId ?? `tab:${tab.id}`, canvasName: tab.name, ...(index === 0 && checkpoint ? { checkpointId: checkpoint.info.id } : {}) })
           : await runDemo(prepared.graph, settingsRef.current, pushLog, recordStep, ilk, patchNode, path, true, recordEdge)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
@@ -1602,6 +1612,13 @@ export default function App() {
           onResetLoops={() => void resetLoops()}
 
         />
+        <div style={{ padding: '3px 8px' }}><button className="xp-btn" disabled={!loaded || editorLocked} onClick={() => setCheckpointsOpen(true)}>Checkpoint’ler ve çıktılar</button></div>
+        {checkpointsOpen && <CheckpointsPanel api={api} running={running} busy={editorLocked || capturing > 0} onClose={() => setCheckpointsOpen(false)} onRun={async info => {
+          if (!api?.checkpointSnapshot) return
+          const snapshot = await api.checkpointSnapshot(info.id)
+          setCheckpointsOpen(false)
+          await runAllCanvases(snapshot.cursor.startId, { info, snapshot })
+        }} />}
         <CanvasTabs
           onRegisterRenameFlush={registerCanvasRenameFlush}
           tabs={tabList.map(tab => {

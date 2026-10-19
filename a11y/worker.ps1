@@ -1053,6 +1053,16 @@ function Invoke-Op([string]$op, $P) {
     'ping' {
       return [pscustomobject]@{ ocr = (Initialize-Ocr); ps = $PSVersionTable.PSVersion.ToString() }
     }
+    'checkpointDrives' {
+      # Read-only metadata. Do not call IsReady: disconnected network media can block it.
+      $roots = @([System.IO.DriveInfo]::GetDrives() | Where-Object {
+        $_.DriveType -eq [System.IO.DriveType]::Fixed -or
+        $_.DriveType -eq [System.IO.DriveType]::Removable -or
+        $_.DriveType -eq [System.IO.DriveType]::Network -or
+        $_.DriveType -eq [System.IO.DriveType]::Ram
+      } | ForEach-Object { [string]$_.Name })
+      return [pscustomobject]@{ roots = $roots }
+    }
     'listWindows' {
       $own = 0
       if ($P.ownPid) { $own = [int]$P.ownPid }

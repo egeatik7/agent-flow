@@ -293,6 +293,13 @@ const DEMO_ITEMS: ScreenItem[] = [
   { id: 5, text: 'Opera', type: 'Text', src: 'ocr', x: 40, y: 1040, w: 44, h: 16 },
 ]
 
+/** Read-only drive discovery through the existing Windows worker; no new helper process. */
+export async function checkpointDrives(): Promise<string[]> {
+  if (!IS_WIN) return []
+  const result = await worker.call('checkpointDrives', {}, 10000) as { roots?: unknown }
+  return Array.isArray(result?.roots) ? result.roots.filter((root): root is string => typeof root === 'string') : []
+}
+
 export async function listWindows(): Promise<{ title: string; handle: string; pid?: number }[]> {
   if (!IS_WIN) return [{ title: 'Demo Uygulama', handle: '0' }]
   return worker.call('listWindows', { ownPid: process.pid })
