@@ -3,8 +3,23 @@ import path from 'node:path'
 import os from 'node:os'
 import type { CheckpointDetail, CheckpointMonitoring, CheckpointOutput } from './checkpoint-types'
 
+/**
+ * DOSYA OLAYI İZLEYİCİSİ — kapsamı ÇAĞIRAN belirler.
+ *
+ * Kökler tüm diskler değil, akışın yazdığı klasörlerdir (`checkpoint-roots.ts`). Tüm disk izleme
+ * isteğe bağlıdır: `deps.wide()` true ise keşfedilen disk kökleri de eklenir.
+ *
+ * Kurallar (patch'in koruduğu davranış):
+ *  · Yalnız gelen olay yollarının bilgisi okunur; tüm diskin envanteri/taraması YAPILMAZ.
+ *  · Olay ALINDIĞI ANDA checkpoint'e bağlanır; `stat` sonradan tamamlanır.
+ *  · Yeniden adlandırılmış/yeni dolu klasörün yalnız ÇOCUKLARI gezilir.
+ *  · İzleme başlatılamazsa koşu DURMAZ: sorun `issues` içinde görünür, çıktı listesi sınırlı kalır.
+ */
 export type OutputWatchDeps = {
+  /** Tüm disk izleme AÇIKKEN kullanılan disk kökleri (kapalıyken çağrılmaz). */
   discover: () => Promise<string[]>
+  /** Tüm disk izleme açık mı (opt-in). Verilmezse kapalı sayılır. */
+  wide?: () => boolean
   exclude?: string[]
   watch?: typeof fs.watch
 }
@@ -14,7 +29,21 @@ export function insidePath(parent: string, target: string) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
 }
 
-/** Event paths, not full-drive polling. Observation time fixes the checkpoint before any async stat. */
+/** Bir kökün izlenebilir karşılığı: kendisi varsa kendisi, yoksa (en çok 2 üst) var olan atası. */
+function izlenecekKok(intended: string): string | null {
+  let dir = intended
+  for (let i = 0; i < 3; i++) {
+    try {
+      if (fs.statSync(dir).isDirectory()) return dir
+      return null // aynı yolda dosya var: klasör değil
+    } catch { /* yok: üste çık */ }
+    const up = path.dirname(dir)
+    if (up === dir || /^[A-Za-z]:[\\/]?$/.test(up)) return null // disk köküne kadar çıkmayız
+    dir = up
+  }
+  return null
+}
+
 export class CheckpointOutputWatch {
   private watchers = new Map<string, fs.FSWatcher>()
   private current?: CheckpointDetail
@@ -23,8 +52,31 @@ export class CheckpointOutputWatch {
   private problems: string[] = []
   private enabled = false
   private indexes = new WeakMap<CheckpointDetail, Map<string, CheckpointOutput>>()
+  /** Akışın bildirdiği kökler. */
+  private requested: string[] = []
+  /** Tüm disk izleme açıkken keşfedilen kökler. */
+  private wideRoots: string[] = []
+  /** Henüz oluşmamış kökler: oluşunca izlemeye alınır. */
+  private waiting: string[] = []
+  private skippedPaths = 0
   constructor(private deps: OutputWatchDeps) {}
-  monitoring(): CheckpointMonitoring { return { automatic: true, active: this.enabled, roots: [...this.watchers.keys()], issues: [...this.problems] } }
+
+  /** Tüm disk izleme açık mı. */
+  wide() { return !!this.deps.wide?.() }
+  monitoring(): CheckpointMonitoring {
+    const roots = [...this.watchers.keys()]
+    const wide = this.wide()
+    // 'disk' = tüm diskler izleniyor; 'karisik' = tüm disk açık ama disk bulunamadı, akış köklerine
+    // düşüldü; 'akis' = yalnız akış kökleri; 'yok' = hiçbir kök yok.
+    const source: CheckpointMonitoring['source'] = !roots.length ? 'yok'
+      : wide ? (this.wideRoots.length ? 'disk' : 'karisik')
+      : 'akis'
+    return {
+      automatic: true, active: this.enabled, roots, issues: [...this.problems],
+      flowRoots: [...this.requested], pendingRoots: [...this.waiting], wideWatch: wide, source,
+      skippedPaths: this.skippedPaths,
+    }
+  }
   private issue(message: string, cp = this.current) {
     if (!this.problems.includes(message) && this.problems.length < 30) this.problems.push(message)
     if (cp && !cp.issues.includes(message) && cp.issues.length < 30) { cp.issues.push(message); this.dirty.add(cp) }
@@ -34,50 +86,92 @@ export class CheckpointOutputWatch {
     if (insidePath(os.tmpdir(), p) && /^(?:xpas-(?:ocr|preview|onnx)-[a-f0-9]{32}\.(?:png|jpg|raw)|nubbo-screen-[0-9T_:.Z-]+-[0-9a-f-]+\.(?:png|jpg))$/i.test(path.basename(p))) return true
     return /(?:^|[\\/])(?:\$Recycle\.Bin|System Volume Information)(?:[\\/]|$)/i.test(p)
   }
+
+  /**
+   * İzlemeyi başlatır. KÖK YOKSA HATA ATMAZ: akışta izlenecek klasör olmaması normaldir ve
+   * otomasyonu durdurmak için gerekçe değildir (yalnız çıktı listesi sınırlı kalır).
+   */
   async start() {
-    this.enabled = true; this.problems = []
-    try {
-      await this.refresh()
-      if (!this.watchers.size) throw new Error(this.problems.join('; ') || 'İzlenebilecek disk bulunamadı.')
-    } catch (e) { this.stop(); throw new Error(`Otomatik çıktı izleme başlatılamadı: ${(e as Error).message}`) }
+    this.enabled = true; this.problems = []; this.requested = []; this.wideRoots = []; this.waiting = []; this.skippedPaths = 0
+    if (this.wide()) await this.refresh()
   }
+
+  /** Akıştan gelen kökleri uygular (her checkpoint'te yeniden hesaplanır). */
+  async setFlowRoots(roots: string[], skipped = 0) {
+    this.requested = [...new Set(roots.filter(r => typeof r === 'string' && path.isAbsolute(r)).map(r => path.resolve(r)))]
+    this.skippedPaths = Math.max(0, skipped)
+    await this.sync()
+  }
+
+  /** Tüm disk izleme açıksa diskleri yeniden keşfeder; her durumda kökleri tazeler. */
   async refresh() {
     if (!this.enabled) return
-    let roots: string[]
-    try { roots = await this.deps.discover() }
-    catch (e) { this.issue(`Diskler algılanamadı: ${(e as Error).message}`); return }
+    if (this.wide()) {
+      try { this.wideRoots = await this.deps.discover() }
+      catch (e) { this.issue(`Diskler algılanamadı: ${(e as Error).message}`); this.wideRoots = [] }
+      if (!this.enabled) return
+    } else this.wideRoots = []
+    await this.sync()
+  }
+
+  /** İstenen kökleri gerçek izleyicilere çevirir: kapananları kapatır, yenileri açar. */
+  private async sync() {
     if (!this.enabled) return
-    const normalized = [...new Set(roots.filter(root => typeof root === 'string' && path.isAbsolute(root)).map(root => path.resolve(root)))]
-    for (const [root, watcher] of this.watchers) if (!normalized.some(p => p.toLowerCase() === root.toLowerCase())) { watcher.close(); this.watchers.delete(root); this.issue(`Disk izleme sona erdi: ${root}`) }
-    for (const root of normalized) {
-      if ([...this.watchers.keys()].some(p => p.toLowerCase() === root.toLowerCase())) continue
-      try {
-        const watcher = (this.deps.watch ?? fs.watch)(root, { recursive: true }, (event, filename) => {
-          if (!this.enabled || this.watchers.get(root) !== watcher) return
-          if (!filename) { this.issue(`Dosya izleyici bir olayın yolunu bildirmedi (${root}); çıktı kaydı eksik olabilir.`); return }
-          const full = path.resolve(root, String(filename))
-          if (full.toLowerCase() === root.toLowerCase()) { this.issue(`Dosya izleyici yalnız disk kökünü bildirdi (${root}); çıktı kaydı eksik olabilir.`); return }
-          if (!insidePath(root, full) || this.excluded(full) || !this.current) return
-          const key = `${this.current.id}\0${full.toLowerCase()}`
-          const old = this.pending.get(key)
-          if (!old && this.pending.size >= 100000) { this.issue('100.000 bekleyen dosya olayı sınırı: çıktı kaydı eksik olabilir.'); return }
-          this.pending.set(key, { cp: this.current, path: full, rename: event === 'rename' || !!old?.rename, at: old?.at ?? Date.now(), lastAt: Date.now() })
-        })
-        watcher.on('error', error => {
-          if (this.watchers.get(root) !== watcher) return
-          this.issue(`Disk izleyici hatası (${root}): ${error.message}; çıktı kaydı eksik olabilir.`)
-          watcher.close(); this.watchers.delete(root)
-        })
-        this.watchers.set(root, watcher)
-      } catch (e) { this.issue(`Disk izlenemedi (${root}): ${(e as Error).message}`) }
+    const wide = this.wide()
+    // Tüm disk izleme açıksa disk kökleri yeterlidir; kapalıyken YALNIZ akış kökleri izlenir.
+    const istenen = wide && this.wideRoots.length ? this.wideRoots : this.requested
+    const hedefler = new Map<string, string>()
+    const waiting: string[] = []
+    for (const raw of istenen) {
+      if (typeof raw !== 'string' || !path.isAbsolute(raw)) continue
+      const intended = path.resolve(raw)
+      const target = izlenecekKok(intended)
+      if (!target) { if (!wide) waiting.push(intended); continue }
+      // Henüz var olmayan klasör: üst klasör izlenir, yol "oluşunca izlenecek" listesine girer.
+      if (!wide && target !== intended) waiting.push(intended)
+      hedefler.set(target.toLowerCase(), target)
     }
+    for (const [root, watcher] of this.watchers) {
+      if (hedefler.has(root.toLowerCase())) continue
+      watcher.close(); this.watchers.delete(root)
+      this.issue(`İzleme sona erdi: ${root}`)
+    }
+    for (const root of hedefler.values()) {
+      if ([...this.watchers.keys()].some(p => p.toLowerCase() === root.toLowerCase())) continue
+      this.ac(root)
+    }
+    this.waiting = waiting
     if (this.current) this.current.roots = [...this.watchers.keys()]
   }
+
+  private ac(root: string) {
+    try {
+      const watcher = (this.deps.watch ?? fs.watch)(root, { recursive: true }, (event, filename) => {
+        if (!this.enabled || this.watchers.get(root) !== watcher) return
+        if (!filename) { this.issue(`Dosya izleyici bir olayın yolunu bildirmedi (${root}); çıktı kaydı eksik olabilir.`); return }
+        const full = path.resolve(root, String(filename))
+        if (full.toLowerCase() === root.toLowerCase()) { this.issue(`Dosya izleyici yalnız izlenen kökü bildirdi (${root}); çıktı kaydı eksik olabilir.`); return }
+        if (!insidePath(root, full) || this.excluded(full) || !this.current) return
+        const key = `${this.current.id}\0${full.toLowerCase()}`
+        const old = this.pending.get(key)
+        if (!old && this.pending.size >= 100000) { this.issue('100.000 bekleyen dosya olayı sınırı: çıktı kaydı eksik olabilir.'); return }
+        this.pending.set(key, { cp: this.current, path: full, rename: event === 'rename' || !!old?.rename, at: old?.at ?? Date.now(), lastAt: Date.now() })
+      })
+      watcher.on('error', error => {
+        if (this.watchers.get(root) !== watcher) return
+        this.issue(`Dosya izleyici hatası (${root}): ${error.message}; çıktı kaydı eksik olabilir.`)
+        watcher.close(); this.watchers.delete(root)
+      })
+      this.watchers.set(root, watcher)
+    } catch (e) { this.issue(`Klasör izlenemedi (${root}): ${(e as Error).message}`) }
+  }
+
   bind(cp?: CheckpointDetail) { this.current = cp }
   stop() {
     this.enabled = false; this.current = undefined
     for (const watcher of this.watchers.values()) watcher.close()
     this.watchers.clear()
+    this.requested = []; this.wideRoots = []; this.waiting = []
   }
   private record(event: Pending, kind: CheckpointOutput['kind'], size: number, present: boolean) {
     let index = this.indexes.get(event.cp)

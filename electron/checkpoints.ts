@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { CheckpointOutputWatch, type OutputWatchDeps } from './checkpoint-output-watch'
+import { flowRoots } from './checkpoint-roots'
 import type { CheckpointDetail, CheckpointInfo, CheckpointSnapshot } from './checkpoint-types'
 
 const json = async <T>(file: string): Promise<T> => JSON.parse(await fs.promises.readFile(file, 'utf8'))
@@ -12,7 +13,7 @@ async function write(file: string, value: unknown) {
   await fs.promises.rename(tmp, file)
 }
 
-/** Automatic volume event tracking; no user-selected output directories. */
+/** Otomatik çıktı takibi — kökler AKIŞTAN gelir; tüm disk izleme isteğe bağlıdır (opt-in). */
 export class Checkpoints {
   private active?: { runId: string; canvasId: string; canvasName: string; ordinal: number; parentId?: string }
   private current?: CheckpointDetail
@@ -20,9 +21,11 @@ export class Checkpoints {
   private queue: Promise<unknown> = Promise.resolve()
   private pollPending = false
   private lastDiscovery = 0
+  private exclude: string[]
   private outputs: CheckpointOutputWatch
   constructor(private dir: string, private warn: (message: string) => void = () => {}, deps?: OutputWatchDeps) {
-    this.outputs = new CheckpointOutputWatch({ discover: deps?.discover ?? (async () => []), ...deps, exclude: [dir, ...(deps?.exclude ?? [])] })
+    this.exclude = [dir, ...(deps?.exclude ?? [])]
+    this.outputs = new CheckpointOutputWatch({ discover: deps?.discover ?? (async () => []), ...deps, exclude: this.exclude })
   }
   monitoring() { return this.outputs.monitoring() }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -41,11 +44,14 @@ export class Checkpoints {
     void this.serial(async () => {
       if (!this.active) return
       await this.persistChanges()
+      // 10 sn'de bir kökleri tazele: yeni oluşan klasör izlemeye alınır (tüm disk izleme açıksa
+      // takılan/sökülen diskler de burada yakalanır).
       if (Date.now() - this.lastDiscovery >= 10000) { this.lastDiscovery = Date.now(); await this.outputs.refresh() }
     }).catch(e => this.warn(`Checkpoint çıktı izlemesi: ${(e as Error).message}`)).finally(() => { this.pollPending = false })
   }
   async begin(runId: string, canvasId: string, canvasName: string, parentId?: string) {
     if (this.active) throw new Error('Checkpoint izlemesi zaten çalışıyor.')
+    // Kök yoksa HATA ATMAZ: izlenecek klasör bulunamaması otomasyonu durdurmaz (bkz. KULLANIM).
     await this.outputs.start()
     this.active = { runId, canvasId, canvasName, ordinal: 0, parentId }
     this.lastDiscovery = Date.now()
@@ -57,6 +63,11 @@ export class Checkpoints {
   async mark(label: string, snapshot: CheckpointSnapshot) {
     return this.serial(async () => {
       if (!this.active) throw new Error('Checkpoint oturumu başlamadı.')
+      // KAPSAM: izlenecek kökler bu checkpoint'in grafından ve imlecinden hesaplanır. Döngü bir
+      // sonraki klasöre geçince izleme de oraya taşınır; tüm disk izleme kapalıyken başka
+      // programların dosyaları listeye dolmaz.
+      const kapsam = flowRoots(snapshot.graph, snapshot.cursor, { exclude: this.exclude })
+      await this.outputs.setFlowRoots(kapsam.roots, kapsam.skipped)
       const now = Date.now(), old = this.current
       const { runId, canvasId, canvasName, parentId } = this.active
       const monitoring = this.outputs.monitoring()

@@ -17,7 +17,26 @@ export type CheckpointInfo = {
   roots: string[]; issues: string[]; parentId?: string
 }
 export type CheckpointDetail = CheckpointInfo & { outputs: CheckpointOutput[] }
-export type CheckpointMonitoring = { automatic: true; active: boolean; roots: string[]; issues: string[] }
+/**
+ * İzleme durumu. Kökler ARTIK AKIŞTAN gelir (`flowRoots`); tüm disk izleme isteğe bağlıdır.
+ * `source`: köklerin nereden geldiğini söyler — 'akis' yalnız akış klasörleri, 'disk' tüm diskler,
+ * 'karisik' ikisi, 'yok' hiçbiri (bu durum koşuyu DURDURMAZ; yalnız çıktı listesi sınırlı kalır).
+ */
+export type CheckpointMonitoring = {
+  automatic: true
+  active: boolean
+  roots: string[]
+  issues: string[]
+  /** Akışta yazılı olduğu için izlenen klasörler. */
+  flowRoots: string[]
+  /** Henüz oluşmamış klasörler; oluşunca izlemeye alınır. */
+  pendingRoots: string[]
+  /** Tüm disk izleme açık mı (opt-in, varsayılan kapalı). */
+  wideWatch: boolean
+  source: 'akis' | 'disk' | 'karisik' | 'yok'
+  /** Akışta yol bulundu ama kullanılamadı (göreli, sistem klasörü vb.) sayısı. */
+  skippedPaths: number
+}
 
 /** Node IDs are unique within a canvas; resolve the exact package graph by identity. */
 export function checkpointGraphPath(root: AgentGraph, graph: AgentGraph, path: string[] = []): string[] {

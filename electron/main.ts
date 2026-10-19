@@ -121,6 +121,9 @@ let appRevealed = false
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 const checkpoints = new Checkpoints(path.join(app.getPath('userData'), 'checkpoints'), message => log('warn', message), {
   discover: () => bridge.checkpointDrives(),
+  // TÜM DİSK İZLEME İSTEĞE BAĞLI (varsayılan KAPALI). Doğrudan store'dan okunur: getSettings()
+  // yan etkileri var ve bu closure 10 sn'de bir çağrılabilir.
+  wide: () => (store.get('settings') as { checkpointWideWatch?: boolean } | undefined)?.checkpointWideWatch === true,
   exclude: [app.getPath('userData'), process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter((p): p is string => !!p),
 })
 let running = false
@@ -1705,6 +1708,20 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   ipcMain.handle('checkpoints:detail', (_e, id: string) => checkpoints.detail(id))
   ipcMain.handle('checkpoints:snapshot', (_e, id: string) => checkpoints.snapshot(id))
   ipcMain.handle('checkpoints:monitoring', () => checkpoints.monitoring())
+  /**
+   * Tüm disk izleme AÇ/KAPAT. Varsayılan KAPALI: yalnız akışta yazılı klasörler izlenir.
+   * Açıkken başka programların dosya hareketleri de listelenir ve disk yükü artar; kullanıcıya
+   * panelde bu açıkça yazılır. Ayar store'a yazılır (getSettings ile aynı anahtar).
+   */
+  ipcMain.handle('checkpoints:setWideWatch', (_e, on: boolean) => {
+    const settings = { ...((store.get('settings') as Record<string, unknown> | undefined) ?? {}) }
+    settings.checkpointWideWatch = on === true
+    store.set('settings', settings)
+    log('info', on === true
+      ? 'Checkpoint: tüm disk izleme AÇILDI (başka programların dosyaları da listelenebilir).'
+      : 'Checkpoint: tüm disk izleme kapatıldı; yalnız akıştaki klasörler izleniyor.')
+    return checkpoints.monitoring()
+  })
   ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }) =>
     runFlow(raw, startId, packagePath, opts)
   )

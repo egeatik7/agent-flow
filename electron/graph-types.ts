@@ -181,6 +181,12 @@ export type CanvasBook = {
 
 export type AppSettings = {
   recovery?: import('./recovery-settings').RecoverySettings
+  /**
+   * Checkpoint çıktı takibi: TÜM DİSKLERİ de izle. Varsayılan kapalıdır; kapalıyken yalnız akışta
+   * yazılı klasörler (döngünün `folder`'ı, öğe yolları, yazı alanlarındaki yollar) izlenir.
+   * Açıkken başka programların dosya hareketleri de listeye girer. Eski ayar dosyasında yoktur → kapalı.
+   */
+  checkpointWideWatch?: boolean
   apiKey: string
   model: string
   /** Tried, in order, when `model` cannot be reached. At most four; five names in total. */
@@ -288,6 +294,7 @@ export function clampRamp(lo: unknown, hi: unknown): { lo: number; hi: number } 
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
+  checkpointWideWatch: false,
   model: 'openai/gpt-4o-mini',
   modelBackups: [],
   wordChoiceModel: '',

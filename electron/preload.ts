@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   checkpointDetail: (id: string) => ipcRenderer.invoke('checkpoints:detail', id),
   checkpointSnapshot: (id: string) => ipcRenderer.invoke('checkpoints:snapshot', id),
   checkpointMonitoring: () => ipcRenderer.invoke('checkpoints:monitoring'),
+  setCheckpointWideWatch: (on: boolean) => ipcRenderer.invoke('checkpoints:setWideWatch', on === true),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
   callTool: (name: string, args?: unknown) => ipcRenderer.invoke('tools:call', name, args, 'panel'),
   toolList: () => ipcRenderer.invoke('tools:list'),

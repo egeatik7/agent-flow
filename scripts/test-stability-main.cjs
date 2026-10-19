@@ -73,6 +73,16 @@ function harness(overrides = {}) {
     // runFlow un kullandigi yuzeyin aynisi: main.ts bunu gercek olcum dongusuyle yapar.
     bellekGunlukBaslangic: () => events.push('memory-start'),
     bellekGunlukHatasi: (mesaj) => events.push({ memoryError: mesaj }),
+    // 1.9.160: runFlow artik checkpoint oturumu da acar/kapatir. Testte gercek disk izleyici
+    // ACILMAZ (ag ve zamanlayici yok); yalniz runFlow un cagirdigi yuzey taklit edilir.
+    checkpoints: {
+      begin: async () => { events.push('checkpoint-begin') },
+      mark: async () => 'test-checkpoint',
+      finish: async () => { events.push('checkpoint-finish') },
+      snapshot: async () => ({ graph: { nodes: [], edges: [] }, cursor: { packagePath: [], loops: [], scopes: [] } }),
+    },
+    // checkpoint yolu structuredClone kullanir; vm baglaminda bulunmayabilir.
+    structuredClone: (value) => JSON.parse(JSON.stringify(value)),
     showSelf: () => {}, runGraph: async () => ({ failed: 0 }),
     ...overrides,
   };

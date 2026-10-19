@@ -9,11 +9,12 @@ const when = (at: number) => new Date(at).toLocaleString('tr-TR')
 const statuses = { running: 'Sürüyor', closed: 'Aralık kapandı', completed: 'Koşu tamamlandı', stopped: 'Durduruldu', failed: 'Hata', interrupted: 'Kesildi' }
 export default function CheckpointsPanel({ api, running, busy, onClose, onRun }: Props) {
   const [rows, setRows] = useState<CheckpointInfo[]>([])
-  const [monitoring, setMonitoring] = useState<CheckpointMonitoring>({ automatic: true, active: false, roots: [], issues: [] })
+  const [monitoring, setMonitoring] = useState<CheckpointMonitoring>({ automatic: true, active: false, roots: [], issues: [], flowRoots: [], pendingRoots: [], wideWatch: false, source: 'yok', skippedPaths: 0 })
   const [selected, setSelected] = useState('')
   const [detail, setDetail] = useState<CheckpointDetail>()
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
+  const [wideBusy, setWideBusy] = useState(false)
   const panel = useRef<HTMLElement>(null)
   const selection = useRef('')
   useEffect(() => {
@@ -61,13 +62,35 @@ export default function CheckpointsPanel({ api, running, busy, onClose, onRun }:
     setWorking(true); setError('')
     try { await fn() } catch (e) { setError(String(e)) } finally { setWorking(false) }
   }
+  /** Tüm disk izleme opt-in: varsayılan kapalı, açıkken başka programların dosyaları da listelenir. */
+  const toggleWide = async (on: boolean) => {
+    if (!api?.setCheckpointWideWatch || wideBusy) return
+    setWideBusy(true); setError('')
+    try { setMonitoring(await api.setCheckpointWideWatch(on)) }
+    catch (e) { setError(String(e)) }
+    finally { setWideBusy(false) }
+  }
+  const akisKokleri = monitoring.flowRoots ?? []
+  const bekleyen = monitoring.pendingRoots ?? []
   return createPortal(<div className="checkpoint-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !working) onClose() }}>
     <section ref={panel} tabIndex={-1} className="checkpoint-window" role="dialog" aria-modal="true" aria-labelledby="checkpoint-title">
       <header><strong id="checkpoint-title">Checkpoint’ler ve çıktılar</strong><button className="xp-btn" disabled={working} onClick={onClose} aria-label="Kapat">×</button></header>
       <div className="checkpoint-config">
-        <b>Otomatik çıktı takibi</b>
-        <p>{monitoring.active ? `İzlenen diskler: ${monitoring.roots.join(' · ')}` : 'Çalıştırma başladığında diskler otomatik algılanır; klasör seçmen gerekmez.'}</p>
-        <small>Nubbo’nun kendi kayıtları ve sistem/kurulum klasörleri hariç dosya hareketleri izlenir. Aynı aralıkta başka programların değiştirdiği dosyalar da görünebilir.</small>
+        <b>Çıktı takibi</b>
+        <p>{monitoring.roots.length
+          ? `İzlenen klasörler: ${monitoring.roots.join(' · ')}`
+          : 'Çalıştırma başladığında AKIŞTA yazılı klasörler izlenir; klasör seçmen gerekmez.'}</p>
+        {bekleyen.length > 0 && <p><small>Henüz oluşmadı, oluşunca izlenecek: {bekleyen.join(' · ')}</small></p>}
+        {akisKokleri.length > 0 && <p><small>Akıştan gelen {akisKokleri.length} klasör esas alınır.</small></p>}
+        <label className="checkpoint-wide">
+          <input type="checkbox" checked={monitoring.wideWatch === true} disabled={wideBusy || !api?.setCheckpointWideWatch} onChange={e => void toggleWide(e.target.checked)} />
+          {' '}Tüm diskleri de izle {monitoring.wideWatch ? '(açık)' : '(kapalı)'}
+        </label>
+        <small>{monitoring.wideWatch
+          ? 'Tüm disk izleme AÇIK: başka programların dosya hareketleri de listeye girer ve disk yükü artar.'
+          : 'Yalnız akışta yazılı klasörler izlenir (döngünün klasörü, öğe yolları, yazı alanlarındaki yollar). Tüm diskleri izlemek için yukarıdaki kutuyu işaretle.'}
+          {' '}Nubbo’nun kendi kayıtları ve sistem/kurulum klasörleri her durumda hariçtir.</small>
+        {(monitoring.skippedPaths ?? 0) > 0 && <small>{monitoring.skippedPaths} yol kullanılamadığı için atlandı (göreli yol veya sistem klasörü).</small>}
         {monitoring.issues.map((issue, i) => <p key={i} className="checkpoint-error">{issue}</p>)}
       </div>
       {!api?.listCheckpoints && <p className="checkpoint-error">Checkpoint kaydı masaüstü uygulamasında kullanılabilir.</p>}

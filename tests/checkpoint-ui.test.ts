@@ -49,12 +49,30 @@ describe('checkpoint UI', () => {
   it('requires no folder selection and keeps missing outputs visibly unavailable', async () => {
     const missing = info('one'); missing.outputs[0].present = false
     const { onClose } = await mount(false, { checkpointDetail: vi.fn(async () => missing) })
-    expect(document.body.textContent).toContain('klasör seçmen gerekmez')
+    // Klasör seçme denetimi YOK; yerine "akıştaki klasörler izlenir + tüm disk izleme anahtarı" var.
+    expect(document.body.textContent).toContain('Tüm diskleri de izle')
+    expect(document.body.textContent).toContain('Yalnız akışta yazılı klasörler izlenir')
     expect(document.body.textContent).not.toContain('Klasör ekle')
     await click(document.querySelector('.checkpoint-row')!)
     expect(document.body.textContent).toContain('Artık bu yolda yok')
     expect((button('Aç') as HTMLButtonElement).disabled).toBe(true)
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('tüm disk izleme anahtarı opt-in: işaretlenince çağrılır ve yeni durum gösterilir', async () => {
+    let wide = false
+    const setCheckpointWideWatch = vi.fn(async (on: boolean) => {
+      wide = on
+      return { automatic: true as const, active: false, roots: on ? ['C:\\'] : [], issues: [], flowRoots: [], pendingRoots: [], wideWatch: on, source: on ? 'disk' as const : 'yok' as const, skippedPaths: 0 }
+    })
+    await mount(false, { setCheckpointWideWatch })
+    const box = document.querySelector('.checkpoint-wide input') as HTMLInputElement
+    expect(box).toBeTruthy()
+    expect(box.checked).toBe(false) // varsayılan KAPALI
+    await act(async () => { box.click(); await Promise.resolve() })
+    expect(setCheckpointWideWatch).toHaveBeenCalledWith(true)
+    expect(wide).toBe(true)
+    expect(document.body.textContent).toContain('Tüm disk izleme AÇIK')
   })
 })

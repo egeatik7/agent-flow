@@ -75,6 +75,8 @@ export type XpAgentApi = {
   checkpointDetail?: (id: string) => Promise<import('../electron/checkpoint-types').CheckpointDetail>
   checkpointSnapshot?: (id: string) => Promise<import('../electron/checkpoint-types').CheckpointSnapshot>
   checkpointMonitoring?: () => Promise<import('../electron/checkpoint-types').CheckpointMonitoring>
+  /** Tüm disk izleme (opt-in, varsayılan kapalı). Ayarı yazar ve yeni izleme durumunu döner. */
+  setCheckpointWideWatch?: (on: boolean) => Promise<import('../electron/checkpoint-types').CheckpointMonitoring>
   stopAgent: () => Promise<boolean>
   callTool: (name: string, args?: unknown) => Promise<ToolResult>
   toolList: () => Promise<ToolSpec[]>
