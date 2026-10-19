@@ -18,6 +18,9 @@ type Props = {
   onLayout: () => void
   onForget: () => void
   onResetLoops: () => void
+  /** Checkpoint panelini açar. Sağ üstte, durum çubuğunun altındaki araç çubuğunun ucunda durur. */
+  onOpenCheckpoints?: () => void
+  checkpointsDisabled?: boolean
 }
 
 export default function Toolbar(p: Props) {
@@ -128,7 +131,18 @@ export default function Toolbar(p: Props) {
         Döngüleri Sıfırla
       </button>
 
-
+      {/* Sağ üst: durum çubuğunun (hedef: …) ALTINDAKİ barın sağ ucu. */}
+      {p.onOpenCheckpoints && (
+        <button
+          type="button"
+          className="xp-btn tb-right"
+          onClick={p.onOpenCheckpoints}
+          disabled={p.checkpointsDisabled}
+          title="Döngü turlarının checkpoint’lerini, aralık başına dosya hareketlerini ve seçiliden yeniden başlatmayı açar."
+        >
+          Checkpoint’ler ve çıktılar
+        </button>
+      )}
     </div>
   )
 }

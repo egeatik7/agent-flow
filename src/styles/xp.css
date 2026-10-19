@@ -184,6 +184,11 @@ body {
   margin: 0 3px;
 }
 
+/* Sağ uca yaslanan araç çubuğu düğmesi (checkpoint’ler). Sarma olursa kendi satırında sağda kalır. */
+.toolbar .tb-right {
+  margin-left: auto;
+}
+
 /* ---------- Buttons ---------- */
 
 .xp-btn {

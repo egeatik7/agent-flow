@@ -1610,9 +1610,10 @@ export default function App() {
           onLayout={() => setGraph((g) => autoLayout(g))}
           onForget={forgetAll}
           onResetLoops={() => void resetLoops()}
+          onOpenCheckpoints={() => setCheckpointsOpen(true)}
+          checkpointsDisabled={!loaded || editorLocked}
 
         />
-        <div style={{ padding: '3px 8px' }}><button className="xp-btn" disabled={!loaded || editorLocked} onClick={() => setCheckpointsOpen(true)}>Checkpoint’ler ve çıktılar</button></div>
         {checkpointsOpen && <CheckpointsPanel api={api} running={running} busy={editorLocked || capturing > 0} onClose={() => setCheckpointsOpen(false)} onRun={async info => {
           if (!api?.checkpointSnapshot) return
           const snapshot = await api.checkpointSnapshot(info.id)
