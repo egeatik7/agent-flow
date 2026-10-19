@@ -1786,16 +1786,17 @@ const runStop: ToolDef = {
     // hiçbir koşunun durdurulmadığı açıkça söylenir (istek yine kaydedilir, bir sonraki koşu onu
     // beginRun ile temizler).
     const kosuyor = ctx.isRunning()
+    // Tek adım da masaüstüne dokunur ve Durdur onu da keser; "koşu yok" demek yanıltıcıydı.
+    const adim = probing()
     ctx.requestStop()
-    // Said out loud so a stop by the person is never read as a debug failure or a finished region.
-    // Yalnız GERÇEKTEN durdurulan bir koşu için: koşu yokken bu çağrı önceki koşunun durma
-    // nedenini ("hata sonrası durdu") "kullanıcı durdurdu" diye değiştiriyordu.
-    if (kosuyor) noteUserStop()
+    if (kosuyor || adim) noteUserStop()
     const message = kosuyor
       ? 'Durdurma istendi; koşu bir sonraki adımın başında durur.'
-      : 'Şu an koşu yok; durdurulacak bir koşu bulunmadı. İstek yine de kaydedildi (bir sonraki koşu temiz başlar).'
+      : adim
+        ? 'Durdurma istendi; süren tek adım iptal edildi.'
+        : 'Şu an koşu yok; durdurulacak bir koşu bulunmadı. İstek yine de kaydedildi (bir sonraki koşu temiz başlar).'
     ctx.log(kosuyor ? 'warn' : 'info', `Ajan · durdur · ${message}`)
-    return { ok: true, tool: runStop.name, outcome: 'tamam', message, observed: { note: kosuyor ? 'Koşu sürüyordu.' : 'Koşu yoktu.' } }
+    return { ok: true, tool: runStop.name, outcome: 'tamam', message, observed: { note: kosuyor ? 'Koşu sürüyordu.' : adim ? 'Tek adım sürüyordu.' : 'Koşu yoktu.' } }
   },
 }
 

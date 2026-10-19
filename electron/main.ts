@@ -810,6 +810,13 @@ function bellekKartiniGonder(kart: BellekKarti) {
   if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart }, false)
 }
 
+/** Koşu bitince bellek kartı da temizlenir: saatler önceki ölçüm "az önce" görünmesin. */
+function bellekKartiniTemizle() {
+  bellekSonKart = ''
+  viewerState.event('hud:memory', { kart: null })
+  if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart: null }, false)
+}
+
 /**
  * Geri sayımı durdurur ve karttaki satırı temizler. `sil=false` yalnız zamanlayıcıyı bırakır
  * (yeni bir geri sayım hemen ardından satırı zaten yeniden yazar).
@@ -1280,6 +1287,7 @@ async function runFlow(
     durdurHudStopwatch()
     // Koşu bitti: bağlam kartı da temizlenir, eski ölçüm bir sonraki koşuya taşınmaz.
     baglamKartiniTemizle()
+    bellekKartiniTemizle()
     if (recoveryActive) recoveryStatus(false, '', 'Kurtarma durduruldu.')
     recoveryActive = false
     running = false

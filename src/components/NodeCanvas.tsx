@@ -993,7 +993,8 @@ export default function NodeCanvas(p: Props) {
         {menu && !p.running && !p.readOnly && (
           <div
             className="ctx-menu"
-            style={{ left: menu.x, top: menu.y }}
+            // Menü canvas'ın scale() katmanı içinde: karşı ölçekle yazı %25–50 zoom'da da okunur kalır.
+            style={{ left: menu.x, top: menu.y, transform: `scale(${1 / Math.max(0.05, view.z)})`, transformOrigin: 'top left' }}
             onMouseDown={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >

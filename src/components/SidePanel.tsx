@@ -173,12 +173,13 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   // The run drops blank rows (listItems). The tick index has to be that list, not the raw textarea.
   const filledCount = items.reduce((n0, row) => n0 + (row.trim() ? 1 : 0), 0)
   const mark = loopStartIndex(n, filledCount, true)
-  const filledIndex = (raw: number) => {
-    if (!items[raw]?.trim()) return -1
-    let k = 0
-    for (let j = 0; j < raw; j++) if (items[j]?.trim()) k++
-    return k
+  // Dolu satırların sırası BİR KEZ hesaplanır: satır başına O(n) tarama O(n²) yapıyordu.
+  const filledPositions: number[] = []
+  {
+    let seen = 0
+    for (const item of items) filledPositions.push(item?.trim() ? seen++ : -1)
   }
+  const filledIndex = (raw: number) => filledPositions[raw] ?? -1
   const folder = n.folder ?? ''
   const folderIsTemplate = /\{\{/.test(folder)
   const setItem = (index: number, value: string) => {
