@@ -325,14 +325,30 @@ function AiEditor(p: Props & { n: AgentNode }) {
       <label className="check"><input type="checkbox" checked={n.allowFlowRead === true} onChange={e => upd({ allowFlowRead: e.target.checked })} />Tuval yapısını okuyabilir</label>
       <p className="hint">Yalnız akışın kendisini inceleyen görevlerde aç. Normal masaüstü görevine diğer node’lar gönderilmez.</p>
       <div className="field"><label>En fazla eylem</label><input className="xp-input" type="number" min={1} max={60} value={n.maxActions ?? 25} onChange={e => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })} /></div>
-      <div className="field"><label>Süre sınırı (saniye)</label><input className="xp-input" type="number" min={10} max={900} value={(n.timeoutMs || 300000) / 1000} onChange={e => upd({ timeoutMs: Math.min(900, Math.max(10, Number(e.target.value) || 300)) * 1000 })} /></div>
+      <div className="field"><label>Süre sınırı (saniye)</label><TimeoutField n={n} upd={upd} /></div>
     </details>
     <p className="hint">Görevi ekran ve araçlarla gerçekleştirir; tamamlanınca sonraki adıma geçer. Eski hareket kayıtları oynatılmaz.</p>
   </>
 }
 
-function flowRank(graph: AgentGraph): Map<string, number> {
-  const order: string[] = []
+/**
+ * Süre alanı: her tuş vuruşunda 10–900'e kırpılırsa "120" yazmak "900" kaydediyordu. Taslak
+ * değer yazılır, sınır yalnız odaktan çıkınca/Enter'da uygulanır.
+ */
+function TimeoutField({ n, upd }: { n: AgentNode; upd: (patch: Partial<AgentNode>) => void }) {
+  const [draft, setDraft] = useState(String((n.timeoutMs || 300000) / 1000))
+  useEffect(() => { setDraft(String((n.timeoutMs || 300000) / 1000)) }, [n.id, n.timeoutMs])
+  const commit = () => {
+    const value = Math.min(900, Math.max(10, Math.round(Number(draft) || 300)))
+    setDraft(String(value))
+    if (value * 1000 !== (n.timeoutMs || 300000)) upd({ timeoutMs: value * 1000 })
+  }
+  return <input className="xp-input" type="number" min={10} max={900} value={draft}
+    onChange={e => setDraft(e.target.value)} onBlur={commit}
+    onKeyDown={e => { if (e.key === 'Enter') commit() }} />
+}
+
+function flowRank(graph: AgentGraph): Map<string, number> {  const order: string[] = []
   const seen = new Set<string>()
   const visit = (id?: string) => {
     if (!id || seen.has(id)) return

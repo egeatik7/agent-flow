@@ -971,8 +971,22 @@ function Get-TextNear([int]$px, [int]$py) {
 
 function Invoke-MouseAt([int]$x, [int]$y, [string]$button, [bool]$currentOnly = $false, [long]$expectedHwnd = 0) {
   if (-not $currentOnly) {
+    # İmlecin hedefe GERÇEKTEN vardığını doğrula: ClipCursor/sanal masaüstü sınırı SetCursorPos'u
+    # kırpıyor olabilir; kırpılmış noktaya tıklamak "tıklandı" diye raporlanmamalı (§19: sonuca bak).
     [void][XpNative]::SetCursorPos($x, $y)
     Start-Sleep -Milliseconds 50
+    $cp = Get-CursorPoint
+    $dist = [Math]::Sqrt([Math]::Pow([double]$cp.X - $x, 2) + [Math]::Pow([double]$cp.Y - $y, 2))
+    if ($dist -gt 3) {
+      [void][XpNative]::SetCursorPos($x, $y)
+      Start-Sleep -Milliseconds 60
+      $cp = Get-CursorPoint
+      $dist = [Math]::Sqrt([Math]::Pow([double]$cp.X - $x, 2) + [Math]::Pow([double]$cp.Y - $y, 2))
+      if ($dist -gt 3) { throw 'INPUT_CLICK_STALE: Pointer could not reach the requested point; click not sent' }
+    }
+    if ($expectedHwnd -gt 0 -and [XpWin]::RootAt([int]$cp.X, [int]$cp.Y) -ne [IntPtr]$expectedHwnd) {
+      throw 'INPUT_CLICK_STALE: Pointer window changed before button press; click not sent'
+    }
   }
   $checkCurrent = {
     if (-not $currentOnly) { return }

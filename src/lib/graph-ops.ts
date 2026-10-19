@@ -76,6 +76,11 @@ export function addAfter(
   next = withMember(next, ownerOf(graph, from.id)?.id, node.id)
   next = connect(next, fromId, port, node.id)
   const firstOut = NODE_SPECS[kind].outputs[0]
+  if (existing && !firstOut) {
+    // Bitir gibi ÇIKIŞSIZ bir node araya girerse aşağıdaki adımlar sessizce erişilemez kalırdı.
+    // Ekleme yapılmaz; çağıran kullanıcıya nedenini söyler (boş id).
+    return { graph, id: '' }
+  }
   if (existing && firstOut && existing.to !== node.id) {
     next = connect(next, node.id, firstOut.key, existing.to)
   }

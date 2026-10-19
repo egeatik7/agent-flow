@@ -1814,7 +1814,9 @@ const runState: ToolDef = {
     else parts.push('Şu an koşu yok.')
     if (chain.length) parts.push(`Kutular: ${chain.join(' › ')}.`)
     if (s.packagePath.length) parts.push(`Paket: ${s.packagePath.length} katman derinde.`)
-    if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adımlar: ${s.observed.done} tamam, ${s.observed.errors} hata/${s.stopped ?? 0} durduruldu.`)
+    // Sayaç ADIM OLAYI sayar; bir öğe hatası hem adım hem kutu için 'error' üretebilir. resmî
+    // sonuç (Son koşu satırı) öğe/tur sayısını ayrıca söyler; ikisi çelişmesin.
+    if (s.observed.done || s.observed.errors) parts.push(`Gözlenen adım olayları: ${s.observed.done} tamam, ${s.observed.errors} hata olayı/${s.stopped ?? 0} durduruldu (bir öğe hatası iki olay üretebilir).`)
     if (ctx.userStop()) parts.push('Durdurma isteği açık.')
     // Sınır istendi ama sınıra ulaşılmadan bittiyse run.wait ile aynı şeyi söyler: iki durum
     // aracı çelişmemeli (ölçüldü: biri "tamamlandı" derken öbürü sınırın kaçtığını söylüyordu).

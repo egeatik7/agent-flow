@@ -867,6 +867,7 @@ export default function App() {
     if (sel && selPort) res = addAfter(g, sel.id, selPort, kind)
     else if (tail && kind !== 'start') res = addAfter(g, tail.node.id, tail.port, kind)
     else res = addAt(g, kind, 60 + g.nodes.length * 20, 260 + g.nodes.length * 16)
+    if (!res.id) { pushLog('warn', '“Bitir” araya eklenemez: aşağıdaki adımlar korunur. Bitir’i akışın sonuna ekle.'); return }
     setGraph(res.graph)
     selectNode(res.id)
   }
@@ -1718,6 +1719,7 @@ export default function App() {
               }}
               onAddAfter={(fromId, port, kind) => {
                 const r = addAfter(graphRef.current, fromId, port, kind)
+                if (!r.id) { pushLog('warn', '“Bitir” araya eklenemez: aşağıdaki adımlar korunur. Bitir’i akışın sonuna ekle.'); return }
                 setGraph(r.graph)
                 selectNode(r.id)
               }}

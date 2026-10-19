@@ -201,7 +201,8 @@ export function imageFromMessages(messages: { content?: unknown }[], mimeFromObj
  * AYNISI (yeniden ekran görüntüsü alınmaz; istekteki veri kullanılır) ve modelin ham yanıtı.
  */
 /** Tanılama kanıtı saklama sınırı: her istek kalıcı bir klasör bırakıyordu, hiçbiri silinmiyordu. */
-export const EVIDENCE_KEEP = 200
+/** Uzun koşuda erken öğelerin kanıtı silinmesin: yoğun saatte ~109 istek → 1000 klasör ≈ 9 saat. */
+export const EVIDENCE_KEEP = 1000
 export const EVIDENCE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 let lastPrune = 0
 

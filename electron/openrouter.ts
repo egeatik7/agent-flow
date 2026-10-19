@@ -984,10 +984,14 @@ export async function chooseScreenTarget(opts: {
   // Eylem cumlesi + yerlesik/kayitli secim tek yerde (saf, test edilir): listPromptFor.
   const system = listPromptFor(opts.kind, opts.system)
 
+  // Kırpma bilgisi tıkla/yaz promptunda da görünsün: model "listede yok"u "ekranda yok" sanmasın.
+  const limitNotes: string[] = []
+  const described = describeWordCandidates(scan, candidates, (m) => { if (!limitNotes.includes(m)) limitNotes.push(m) }, { fullText: opts.kind === 'condition' })
+
   const listText = `Screen area: ${scan.area.w}x${scan.area.h} (top-left ${scan.area.x},${scan.area.y})${scan.window ? `, window: ${scan.window}` : ''}
 ${opts.kind === 'condition' ? `Reader coverage: ${candidates.length} candidate(s) observed; ${Math.min(candidates.length, WORD_CANDIDATE_LIMIT)} supplied below. ${candidates.length > WORD_CANDIDATE_LIMIT ? 'PARTIAL candidate list: omitted items cannot be assumed absent.' : 'All candidates from this reader result are listed; this does not prove the reader captured every screen element.'}` : ''}
 Items (#number type "text" @x,y widthxheight):
-${describeWordCandidates(scan, candidates, undefined, { fullText: opts.kind === 'condition' })}
+${described}${limitNotes.length ? `\n${limitNotes.join('\n')}` : ''}
 
 ${spatialContext(scan)}
 
