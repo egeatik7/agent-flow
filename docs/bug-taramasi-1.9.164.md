@@ -110,3 +110,22 @@ Checkpoint O(n²) yazımı (NDJSON) ve panel sanallaştırması · paket içi he
 `screen.ps1` piksel döngülerinin native'e indirilmesi · `unlinkRetrying`/`pruneEvidence` blokajı ·
 `instance-marker` PID geri dönüşümü + `dev-start-test` işareti · paket `runnerSaydi` çift sayımı ·
 `act.*` Durdur semantiği · merge hedefinin tıklama anında sabitlenmesi · §3'teki diğer orta/düşükler.
+
+## 6. 1.9.165 durumu
+
+**Kapatıldı:** checkpoint O(n²) yazımı (append-only NDJSON + meta JSON), panelin 100.000 satır
+render'ı (ilk 300 + 'Daha fazla göster'), paket içi hedef seçici (iç node'a yazar), 1080p piksel
+döngüleri (opak çekim + GDI+ 32→24; ölçüm ~2,8 sn → ~4 ms, ~9,2 sn → ~8 ms), kilit unlink blokajı
+(~3,25 sn → ~0,6 sn), tanılama budamasının isteği bekletmesi, 24 saatten eski portable işareti,
+act.wait doğrulama/30 dk sınırı, ZIP geçici dosya temizliği, startEndpoint çift dinleyici,
+yakalama sürerken koşu başlatma.
+
+**Hâlâ açık (orta/düşük):** merge hedefinin tıklama anında sabitlenmesi (App.tsx:706/720/730),
+act.* Durdur semantiği ("eylem-belirsiz" + sent:false), tools.ts tek eylem sonrası minimize
+kalma, target.preview durdurma bayrağı, tool-state çift sayaç, canvas taslak birikmesi, viewer
+Origin/12 soket, HUD keepOnTop interval temizliği, graph-ops Bitir araya ekleme, SidePanel Yap
+süre alanı, yazı yolunda doğrulanmamış memo, memory.win alanı, 400'lük aday kırpması günlüğü,
+library-path korumalı yol, zip retry kapsamı, runnerSaydi çift sayım, koşul kurtarmasına vars
+aktarımı, screen.ps1 imleç doğrulaması ve simge dx/dy telafisi.
+
+Bu liste bir sonraki sürümün girdisidir; hiçbiri 1.9.165'te kapatıldı diye işaretlenmedi.
