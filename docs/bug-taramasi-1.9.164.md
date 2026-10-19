@@ -167,3 +167,19 @@ sınırının jetondan sonra uygulanması.
 eklemek gerekir; §13 şema değişikliği yasağı), `zip-library-storage` EPERM flaky testi (kullanıcı
 kararı: F2 kapalı), `checkpoint-output-watch` dolu klasör gezmesinin tek yazıcı kuyruğunda olması
 (tasarım).
+
+## 10. Kapanış özeti (1.9.162 – 1.9.169)
+
+8 sürümde 1.9.161 taramasının kritik + 15 yüksek bulgusunun tamamı ve orta/düşük bulguların
+işlenebilir kısmı kapatıldı. Her sürüm: typecheck + tam vitest + altı Node paketi + (ilgiliyse)
+PowerShell harness'leri yeşil, sürüm notu, commit, etiket, push, `pack:win` ve masaüstü EXE.
+
+Kapanışta bilinçli olarak AÇIK bırakılan üç satır ve gerekçesi:
+
+1. `screen.ps1` simge dx/dy telafisi — `locator` şemasına alan eklemek gerekir; CLAUDE.md §13
+   şema değişikliğini yasaklıyor. Şema açılırsa ayrı bir sürümde yapılmalı.
+2. `zip-library-storage` "unchanged explicit save" EPERM flaky testi — kullanıcı 7 Ekim
+   kararıyla (F2) kapattı; ürün tarafında 12 denemeli retry var, tek başına test 27/27 geçiyor.
+3. `checkpoint-output-watch` dolu klasör gezmesinin tek yazıcı kuyruğunda olması — checkpoint
+   tasarımının bilinçli sınırı (tek yazıcı, sıralı dosya olayları); değiştirmek yeni bir eşzamanlı
+   yazıcı mimarisi gerektirir.
