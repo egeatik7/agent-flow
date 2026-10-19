@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   close: () => ipcRenderer.invoke('window:close'),
   onCloseRequested: on('window:close-requested'),
   finishClose: (id: number, allow: boolean) => ipcRenderer.invoke('window:finish-close', id, allow),
+  closeProgress: (id: number) => ipcRenderer.send('window:close-progress', id),
   bootReady: () => ipcRenderer.send('boot:ready'),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),

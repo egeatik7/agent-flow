@@ -48,6 +48,7 @@ import { contextOf, countEdges, findPlace, walkGraph } from './tool-context'
 import { actionGraph, runAction, type ActSpec } from './tool-act'
 import { getStopCheck, setStopCheck } from './openrouter'
 import { beginProbe, endProbe, frozenReport, isDebugRun, noteUserStop, probing, recentReports, recentSteps, reviewCount, lastReviewLine, setStopAt, snapshot, stopReason, boundaryPending, actPointWithin, noteActPoint } from './tool-state'
+import { assertModelKeysAllowed } from './key-guard'
 
 export type ToolOutcome = 'tamam' | 'hedef-yok' | 'eylem-belirsiz' | 'hata' | 'durduruldu' | 'plan-gecersiz'
 
@@ -137,7 +138,7 @@ export type ToolContext = {
   applyMerge: (
     payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' },
     opts?: { snapshot?: boolean }
-  ) => Promise<{ ok: boolean; error?: string }>
+  ) => Promise<{ ok: boolean; error?: string; ambiguous?: boolean }>
   /**
    * Takes the flow as it was just before the last merge, and puts the branch recipe back. One
    * use only, and it lives in memory: after a restart there is nothing to go back to.
@@ -717,7 +718,9 @@ const branchMerge: ToolDef = {
 
     const answer = await ctx.applyMerge({ tabId: branch.baseTabId, graph: pruned.graph, branchId: branch.id, branchName: branch.name })
     if (!answer.ok) {
-      const belirsiz = /yanıt vermedi|zaman aşım|timeout|uygulanmış olabilir/i.test(String(answer.error ?? ''))
+      // Belirsizlik metinden TAHMİN EDİLMEZ: pencere "uygulamış olabilirim" derse (zaman aşımı)
+      // `ambiguous` bayrağı gelir. Regex yalnız eski/başka metinler için yedek.
+      const belirsiz = answer.ambiguous === true || /yanıt vermedi|zaman aşım|timeout|uygulanmış olabilir/i.test(String(answer.error ?? ''))
       const message = belirsiz
         ? `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Bu bir ZAMAN AŞIMI: değişiklik uygulanmış OLABİLİR, durum bilinmiyor. Nubbo penceresinden kontrol et; kesinleşmeden yeniden uygulama.`
         : `Merge uygulanamadı: ${answer.error ?? 'pencere yanıt vermedi'}. Kullanıcının akışına hiçbir şey yazılmadı.`
@@ -1172,6 +1175,18 @@ const stepRun: ToolDef = {
   },
 }
 
+/**
+ * Hatadan devam ederken kayıtlı öğe hâlâ aynı yerde mi? Liste koşu anında dolduruluyorsa (klasör
+ * kutusu, `Klasör={{öğe}}`) tool-context öğeyi BİLMEZ; o durumda engelleme yoktur, kimlikle devam
+ * motorun kendi denetimine bırakılır. Yalnız iki taraf da biliniyorken karşılaştırılır.
+ */
+export function resumeItemMismatch(box: { title: string; index?: number; item?: string }, currentItem: string | undefined): string | undefined {
+  const kayitli = String(box.item ?? '')
+  const simdi = String(currentItem ?? '').trim()
+  if (!kayitli || !simdi || simdi === kayitli) return undefined
+  return `Liste değişmiş: “${box.title}” kutusunun ${(box.index ?? 0) + 1}. öğesi artık “${simdi}”, kayıtlı öğe “${kayitli}”. Yanlış öğeden devam etmemek için duruyorum.`
+}
+
 const runFrom: ToolDef = {
   name: 'run.from',
   summary: 'Belirtilen node’dan akışı sürdürür. Koşu başlar ve hemen döner.',
@@ -1241,12 +1256,8 @@ const runFrom: ToolDef = {
         const member = (at as { members?: string[] }).members?.[0]
         if (member && typeof box.item === 'string' && box.item) {
           const now = contextOf(graph, member)?.loops?.find((l) => l.id === box.id)
-          if (now && String(now.item ?? '') !== String(box.item)) {
-            return failed(
-              runFrom.name,
-              `Liste değişmiş: “${box.title}” kutusunun ${idx + 1}. öğesi artık “${now.item ?? ''}”, kayıtlı öğe “${box.item}”. Yanlış öğeden devam etmemek için duruyorum.`
-            )
-          }
+          const problem = resumeItemMismatch(box, now?.item)
+          if (problem) return failed(runFrom.name, problem)
         }
       }
       if (missing.length) return failed(runFrom.name, `Bazı kutular bu branch’te yok: ${missing.join(', ')}. Devam edilemez.`)
@@ -1273,6 +1284,7 @@ const runFrom: ToolDef = {
     const asked = Array.isArray(args.packagePath) ? (args.packagePath as string[]) : []
     const packagePath = asked.length ? asked : place?.packagePath ?? []
     const from = nodeId ? `“${place?.node.title ?? nodeId}”` : 'baştan'
+    let startError: Error | undefined
     void ctx
       .startRun(graph, nodeId || undefined, packagePath.length ? packagePath : undefined, {
         ...(derived ? { derived: true } : {}),
@@ -1281,12 +1293,17 @@ const runFrom: ToolDef = {
         // Kimlikle devam: kayıtlı öğe yeni listede bulunup ondan devam edilir.
         ...(devamKimlik.item ? { resumeLoopId: devamKimlik.loopId, resumeItem: devamKimlik.item } : {})
       })
-      .catch((e: Error) => ctx.log('error', `Koşu hatası: ${e.message}`))
+      .catch((e: Error) => { startError = e; ctx.log('error', `Koşu hatası: ${e.message}`) })
+    // runId koşunun SENKRON başlangıcında kurulur (beginRun). Hazırlık hatası (yapı denetimi,
+    // depo) bu tick içinde promise'i reddeder; bir tick bekleyip hatayı görürüz ki ajan
+    // "Koşu başladı" sanıp ÖNCEKİ koşunun sonucunu okumasın.
+    await new Promise((resolve) => setImmediate(resolve))
+    if (startError) return failed(runFrom.name, `Koşu başlamadı: ${startError.message}. Hiçbir adım çalıştırılmadı.`)
+    const runId = snapshot().runId
     // The boundary is set after the run starts, because beginRun clears it: it belongs to this run.
     setStopAt(untilId || null)
     // The run begins synchronously, so its id is already known: this answer means the run
     // started, never that it finished.
-    const runId = snapshot().runId
     const untilNote = untilId ? ` · “${untilPlace?.node.title ?? untilId}” bitince duracak (sınırlı bölge testi)` : ''
     const message = `Koşu başladı (${from})${branchNote}${runId ? ` · ${runId}` : ''}${untilNote}${resumeNote}; sonucu run.state ile oku, durdurmak için run.stop.${derived ? ' Bu bir branch koşusu: kayıtlı akışa yazılmaz.' : ''}${args.debug === true ? ' Debug: ilk hatalı adımda durur ve o anın bağlamını saklar (run.report).' : ''}`
     ctx.log('info', `Ajan · buradan devam · ${message}`)
@@ -1511,6 +1528,7 @@ const actKey: ToolDef = {
     if (denied) return failed(actKey.name, denied)
     const keys = text(args.keys)?.trim()
     if (!keys) return failed(actKey.name, 'Hangi tuş: { keys: "win+r" }.')
+    try { assertModelKeysAllowed(keys) } catch (error) { return failed(actKey.name, (error as Error).message) }
     return runOneAction(actKey.name, { kind: 'key', title: `Tuş: ${keys}`, fields: { keys } }, args, ctx)
   },
 }

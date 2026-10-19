@@ -36,7 +36,9 @@ function live(pid: number): boolean {
 }
 function mayRecover(s: Snapshot): void {
   const o = parsed(s)
-  if (Number.isInteger(o?.pid) && o!.pid! > 0 && live(o!.pid!)) throw busy()
+  // KENDİ PID'imiz canlı görünse de bizim olmayan bir kayıt (çökme/yarım kalmış bırakma) kilitli
+  // kalmamalı: aynı süreçte ikinci bir sahip yoktur, `held` bunu zaten yönetir.
+  if (Number.isInteger(o?.pid) && o!.pid! > 0 && o!.pid! !== process.pid && live(o!.pid!)) throw busy()
   if (!ownerOf(s) && Date.now() - s.stat.mtimeMs < CORRUPT_GRACE_MS) {
     throw Error('Kütüphane kilidi henüz yazılıyor olabilir. Bir dakika sonra tekrar dene; mevcut dosyalar korunuyor.')
   }
@@ -71,9 +73,28 @@ function publish(file: string, owner: Owner): void {
     try { fs.unlinkSync(temp) } catch (e) { if (code(e) !== 'ENOENT' && !published) throw e }
   }
 }
-function removeOwned(file: string, owner: Owner): void {
+function removeOwned(file: string, owner: Owner): boolean {
   const current = snapshot(file)
-  if (current && ownerOf(current)?.nonce === owner.nonce && ownerOf(current)?.pid === owner.pid) fs.unlinkSync(file)
+  if (!(current && ownerOf(current)?.nonce === owner.nonce && ownerOf(current)?.pid === owner.pid)) return false
+  return unlinkRetrying(file)
+}
+
+/**
+ * Windows'ta taze kilit dosyasını Defender/indeksleyici kısa süre tutabiliyor; unlink EPERM/EBUSY
+ * veriyor. Sınırlı, artan beklemeli deneme. Başarısız olursa kilit dosyası BIRAKILMAZ: kendi
+ * PID'imizle diskte kalan kayıt sonraki açılışta 'başka bir Nubbo kullanıyor' sanılıyordu.
+ */
+const UNLINK_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+function unlinkRetrying(file: string): boolean {
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    try { fs.unlinkSync(file); return true } catch (e) {
+      const c = code(e)
+      if (c === 'ENOENT') return true
+      if (process.platform !== 'win32' || !UNLINK_RETRY_CODES.has(c ?? '') || attempt === 12) return false
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(30 * 2 ** (attempt - 1), 400))
+    }
+  }
+  return false
 }
 
 /**
@@ -167,8 +188,9 @@ function releaseHeld(file: string, owned: Held, isReleased: () => boolean, markR
   if (isReleased()) return
   markReleased(true)
   if (--owned.refs > 0) return
-  if (held.get(file) === owned) held.delete(file)
-  removeOwned(file, owned.owner)
+  // Bırakma hatası (dosya başka programca tutuluyor) KOŞUYU/çağrıyı hataya çevirmez: kayıt
+  // `held`'de kalır, sonraki sahiplenme kendi kaydımızı doğrulanmış sayıp yeniden kullanır.
+  if (removeOwned(file, owned.owner) && held.get(file) === owned) held.delete(file)
 }
 export function withLibraryLock<T>(directory: string, fn: () => T): T {
   const file = lockFile(directory), record = held.get(file)

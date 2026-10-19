@@ -46,6 +46,8 @@ export type XpAgentApi = {
   close: () => Promise<void>
   onCloseRequested?: (cb: (id: unknown) => void) => () => void
   finishClose?: (id: number, allow: boolean) => Promise<void>
+  /** Kapanış isteği beklerken "hâlâ çalışıyorum" işareti: süre yalnız arayüz sessizse dolar. */
+  closeProgress?: (id: number) => void
   bootReady?: () => void
   getSettings: () => Promise<AppSettings>
   saveSettings: (partial: SettingsPatch) => Promise<AppSettings>

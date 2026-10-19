@@ -23,6 +23,8 @@ export type GeciciGirdi = {
   yukVar: boolean
   /** Klasörün son değişim zamanı (ms). */
   mtimeMs: number
+  /** İçindeki örneğin süreci hâlâ yaşıyor mu (işaret dosyası). Canlıysa asla silinmez. */
+  canli?: boolean
 }
 
 /** Varsayılan koruma süresi: yeni açılmış bir örneğin klasörü 10 dakika korunur. */
@@ -45,6 +47,8 @@ export function bayatCikarmaKlasorleri(
     // yüzden tek başına ölçüt değildir. Yarım kalmış çıkarmalar da (yalnız exe) temizlenir.
     if (!g.exeVar) return false
     if (!/^[A-Za-z0-9]{20,40}$/.test(g.ad)) return false
+    // ÇALIŞAN bir örnek sahipleniyorsa yaş tahmini yeterli değildir: klasör silinmez.
+    if (g.canli) return false
     if (kendi && g.yol.replace(/[\\/]+$/, '').toLowerCase() === kendi) return false
     if (opts.now - g.mtimeMs < koruma) return false
     return true
@@ -60,6 +64,7 @@ export function geciciGirdileriTopla(opts: {
   adlar: string[]
   varMi: (yol: string) => boolean
   mtimeMs: (yol: string) => number
+  canliMi?: (yol: string) => boolean
 }): GeciciGirdi[] {
   const birlestir = (a: string, b: string) => `${a.replace(/[\\/]+$/, '')}\\${b}`
   return opts.adlar.map((ad) => {
@@ -70,6 +75,7 @@ export function geciciGirdileriTopla(opts: {
       exeVar: opts.varMi(birlestir(yol, 'Nubbo Agent Studio.exe')),
       yukVar: opts.varMi(birlestir(yol, 'resources.pak')) || opts.varMi(birlestir(yol, 'app-64.7z')),
       mtimeMs: opts.mtimeMs(yol),
+      ...(opts.canliMi ? { canli: opts.canliMi(yol) } : {}),
     }
   })
 }

@@ -17,6 +17,7 @@ import { createAgent } from './agent'
 import { windowEventAllowed } from './run-events'
 import { isTestProfile, storeCwd, testToolsEnabled } from './profile'
 import { bayatCikarmaKlasorleri, geciciGirdileriTopla } from './temp-sweep'
+import { clearInstanceMarker, instanceMarkerAlive, writeInstanceMarker } from './instance-marker'
 import { withFastFind } from './tools'
 import { callTool, toolList, type ToolSource, type ToolContext } from './tools'
 import { recoverySettings } from './recovery-settings'
@@ -303,6 +304,8 @@ function sweepStaleExtractions() {
           return Date.now()
         }
       },
+      // Çalışan bir örneğin klasörü yaş tahminiyle silinmez (işaret dosyasındaki PID canlı mı).
+      canliMi: (y) => instanceMarkerAlive(y),
     })
     const secilen = bayatCikarmaKlasorleri(girdiler, { now: Date.now(), ownDir: path.dirname(process.execPath) })
     let mb = 0
@@ -459,13 +462,13 @@ function hardenContents(contents: Electron.WebContents, label: string) {
  * change goes there and the window answers once it has been saved. No answer within the time limit is
  * reported as a failure and nothing is written.
  */
-function applyMergeInWindow(payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' }): Promise<{ ok: boolean; error?: string }> {
+function applyMergeInWindow(payload: { tabId: string; graph: AgentGraph; branchId: string; branchName: string; reason?: 'merge' | 'undo' }): Promise<{ ok: boolean; error?: string; ambiguous?: boolean }> {
   if (!testToolsEnabled(process.env.NUBBO_PROFILE, process.env.NUBBO_TEST_TOOLS)) return Promise.resolve({ ok: false, error: 'Öneri merge arayüzü kaldırıldı; hiçbir akış değiştirilmedi.' })
   const win = mainWindow
   if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'Pencere açık değil; tuval değiştirilmedi.' })
   return new Promise((resolve) => {
     const onDone = (_event: unknown, answer: { ok: boolean; error?: string }) => { clearTimeout(timer); resolve(answer) }
-    const timer = setTimeout(() => { ipcMain.removeListener('agent:graph-applied', onDone); resolve({ ok: false, error: 'Pencere uygulamayı onaylamadı; tuval değiştirilmedi.' }) }, 20000)
+    const timer = setTimeout(() => { ipcMain.removeListener('agent:graph-applied', onDone); resolve({ ok: false, ambiguous: true, error: 'Pencere 20 sn içinde uygulamayı onaylamadı; tuval değişmiş olabilir.' }) }, 20000)
     ipcMain.once('agent:graph-applied', onDone)
     win.webContents.send('agent:graph', payload)
   })
@@ -522,6 +525,12 @@ function createWindow() {
       return
     }
     destroyHud()
+  })
+  // Arayüz kapanış isteğini işlerken (kaydetme sorusu açıkken) "hâlâ çalışıyorum" der. Süre yalnız
+  // arayüz SESSİZ kaldığında dolar; kullanıcının "Kaydet" kararı 10 sn sonra çöpe atılmaz.
+  ipcMain.on('window:close-progress', (event, id: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return
+    closeGuard.touchFor(id, CLOSE_REPLY_TIMEOUT_MS, () => forceClose('Kapanış onayı gelmedi'))
   })
   // A renderer that crashed or stopped answering must not keep the app (and the session) open:
   // the same forced path closes the window after writing down why.
@@ -1070,9 +1079,15 @@ async function runFlow(
     if (!opts?.derived) viewerState.begin(runId, opts?.canvasId ?? '', graph)
     const s = getSettings()
     if (!opts?.derived) {
-      await checkpoints.begin(runId, opts?.canvasId ?? '', opts?.canvasName ?? 'Tuval', opts?.checkpointId)
-      checkpointStarted = true
-      await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } })
+      // Checkpoint bir gözlem kaydıdır; başlatılamaması koşuyu başlamadan durdurmaz (CLAUDE.md §19).
+      // Kök yoksa/disk doluysa uyarı yazılır, otomasyon checkpoint'siz sürer.
+      try {
+        await checkpoints.begin(runId, opts?.canvasId ?? '', opts?.canvasName ?? 'Tuval', opts?.checkpointId)
+        checkpointStarted = true
+        await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } })
+      } catch (error) {
+        log('warn', `Checkpoint başlatılamadı; koşu checkpoint olmadan sürüyor: ${(error as Error).message}`)
+      }
     }
     let shotDir = ''
     try {
@@ -1224,7 +1239,9 @@ async function runFlow(
   } catch (e) {
     if (e instanceof StoppedError) {
       log('warn', 'Ajan durduruldu.')
-      outcome = { ok: false, stopped: true }
+      // Sayaçlar kaybolmaz: 210 adım koşup durdurulan iş "0 adım · hatalı öğe yok" görünmemeli.
+      const hatali = tally.failed + tally.stepFailures
+      outcome = { ok: false, stopped: true, steps: tally.n, ...(hatali > 0 ? { failed: hatali } : {}) }
       return { ...outcome, runId }
     }
     // A failure of the run itself, with no failed step to hang it on: a broken output, a thrown
@@ -1267,6 +1284,9 @@ async function runFlow(
 }
 
 export async function startApp(report: (pct: number, line: string) => void, closeSplash: () => void) {
+  // Portable örnek kendi çıkarma klasörünü sahiplenir: başka bir Nubbo açılışta onu "bayat" sanıp
+  // silmesin (saatlerce süren koşu düşüyordu). Normal çıkışta işaret silinir.
+  writeInstanceMarker(path.dirname(process.execPath))
   reportBoot = report
   closeBoot = closeSplash
   const initial = getSettings()
@@ -1837,6 +1857,7 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  clearInstanceMarker(path.dirname(process.execPath))
   // Bellek ölçümü kapanışta bırakılır: timer temizlenir, bekleyen ölçüm karta yazmaz.
   bellekDurumu.dur()
   void viewerServer?.close()

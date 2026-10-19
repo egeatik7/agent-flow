@@ -4,6 +4,8 @@ export async function repeatMethodCycle<T>(attempt: (round: number) => Promise<T
   wait: () => Promise<void>
   retry: (error: unknown, round: number) => void
   terminal?: (error: unknown) => boolean
+  /** Bu turdan sonra hata yukarı verilir. Verilmezse döngü yalnız Stop/terminal ile biter. */
+  maxRounds?: number
 }): Promise<T> {
   for (let round = 1; ; round++) {
     deps.check()
@@ -14,6 +16,9 @@ export async function repeatMethodCycle<T>(attempt: (round: number) => Promise<T
     } catch (error) {
       deps.check()
       if (deps.terminal?.(error)) throw error
+      // Sınırlı tur: kalıcı okuyucu/model hatasında sonsuz 3 sn'lik döngü yerine karar sahibine
+      // (runner/kurtarma) devret. Davranış bu sınırı vermeyen çağıranlarda aynı kalır.
+      if (deps.maxRounds !== undefined && round >= deps.maxRounds) throw error
       deps.retry(error, round)
       await deps.wait()
     }

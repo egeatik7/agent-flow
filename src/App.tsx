@@ -1508,7 +1508,10 @@ export default function App() {
   const closeProgramRef = useRef(closeProgram)
   closeProgramRef.current = closeProgram
   useEffect(() => api?.onCloseRequested?.(id => {
-    if (typeof id === 'number') void closeProgramRef.current(id)
+    if (typeof id !== 'number') return
+    // Kaydetme sorusu açıkken main'in 10 sn sayacı dönmesin: arayüz yaşıyorsa süre tazelenir.
+    const beat = setInterval(() => api.closeProgress?.(id), 2000)
+    void closeProgramRef.current(id).finally(() => clearInterval(beat))
   }), [])
 
   useEffect(() => {

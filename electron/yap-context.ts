@@ -140,8 +140,17 @@ export function yapInputEstimate(messages: ToolMessage[], tools: ModelTool[]): n
   return textBytes + imageAllowance
 }
 
-export function yapFailureKind(error: unknown): 'context' | 'permanent' | 'transient' {
-  const text = error instanceof Error ? error.message : String(error)
+/**
+ * BAYT tahminini TOKEN penceresiyle karşılaştırır. Önceki kapı `bayt + 2048 > token penceresi`
+ * yapıyordu: ≤8192 pencereli yerel modelde istek hiç gönderilmiyordu (birim hatası). Burada bayt,
+ * muhafazakâr 2 bayt/token varsayımıyla token'a çevrilir.
+ */
+export function yapBudgetCheck(estimateBytes: number, windowTokens: number, reserveTokens = 2048): { ok: boolean; tokens: number; window: number } {
+  const tokens = Math.ceil(Math.max(0, estimateBytes) / 2)
+  return { ok: tokens + reserveTokens <= windowTokens, tokens, window: windowTokens }
+}
+
+export function yapFailureKind(error: unknown): 'context' | 'permanent' | 'transient' {  const text = error instanceof Error ? error.message : String(error)
   if (/context.{0,35}(?:exceed|size|length)|exceeds.{0,35}context|too many tokens|prompt is too long|context_length_exceeded|Yap giriş bütçesi/i.test(text)) return 'context'
   if (/\b(?:400|401|403|404|422)\b|API anahtarı|bakiye yetersiz|geçersiz araç|geçersiz alan/i.test(text)) return 'permanent'
   return 'transient'

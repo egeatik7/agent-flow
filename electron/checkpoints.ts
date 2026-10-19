@@ -6,11 +6,74 @@ import { flowRoots } from './checkpoint-roots'
 import type { CheckpointDetail, CheckpointInfo, CheckpointSnapshot } from './checkpoint-types'
 
 const json = async <T>(file: string): Promise<T> => JSON.parse(await fs.promises.readFile(file, 'utf8'))
+
+/**
+ * Windows'ta taze dosyayı Defender/indeksleyici kısa süre tutabiliyor; rename EPERM/EBUSY veriyor.
+ * ZIP kütüphanesinde ölçülen aynı sınıf hata (bkz. zip-library-storage.ts). Sınırlı ve artan
+ * beklemeli deneme; başka hata kodu ve win32 dışı hemen yüzeye çıkar.
+ */
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+const RENAME_ATTEMPTS = 12
+const RENAME_MAX_PAUSE_MS = 400
+export async function renameWithRetry(
+  from: string,
+  to: string,
+  deps: { platform: string; rename: (a: string, b: string) => Promise<void>; pause: (ms: number) => Promise<void> } =
+    { platform: process.platform, rename: (a, b) => fs.promises.rename(a, b), pause: (ms) => new Promise(r => setTimeout(r, ms)) },
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try { await deps.rename(from, to); return } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (deps.platform !== 'win32' || !RENAME_RETRY_CODES.has(code) || attempt >= RENAME_ATTEMPTS) throw error
+      await deps.pause(Math.min(30 * 2 ** (attempt - 1), RENAME_MAX_PAUSE_MS))
+    }
+  }
+}
+
 async function write(file: string, value: unknown) {
   await fs.promises.mkdir(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
   await fs.promises.writeFile(tmp, JSON.stringify(value))
-  await fs.promises.rename(tmp, file)
+  try { await renameWithRetry(tmp, file) }
+  catch (error) { try { await fs.promises.unlink(tmp) } catch { /* geçici dosya zaten yok */ } throw error }
+}
+
+/** Saklama: en yeni bu kadar checkpoint çifti tutulur; daha eskiler ve bayat .tmp'ler silinir. */
+export const CHECKPOINT_KEEP = 400
+export const CHECKPOINT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const STALE_TMP_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Checkpoint geçmişini budar: dosya sayısı sınırsız büyümesin (her döngü öğesi iki dosya yazar).
+ * Grup = bir checkpoint (detail + snapshot + yarım kalmış .tmp); çift birlikte silinir ki
+ * `detail()` yarım kayıtla karşılaşmasın.
+ */
+export async function pruneCheckpoints(dir: string, now = Date.now(), keep = CHECKPOINT_KEEP): Promise<{ removed: number }> {
+  let names: string[]
+  try { names = await fs.promises.readdir(dir) } catch { return { removed: 0 } }
+  const groups = new Map<string, { files: string[]; at: number; tmpOnly: boolean }>()
+  for (const name of names) {
+    const m = name.match(/^([a-f0-9-]{36})(\.snapshot)?\.json(\.tmp)?$/)
+    if (!m) continue
+    const id = m[1], file = path.join(dir, name)
+    let at = now
+    try { at = (await fs.promises.stat(file)).mtimeMs } catch { continue }
+    const group = groups.get(id) ?? { files: [], at, tmpOnly: !!m[3] }
+    group.files.push(file)
+    group.at = Math.max(group.at, at)
+    group.tmpOnly = group.tmpOnly && !!m[3]
+    groups.set(id, group)
+  }
+  const ordered = [...groups.values()].sort((a, b) => b.at - a.at)
+  let removed = 0
+  for (const [index, group] of ordered.entries()) {
+    const staleTmp = group.tmpOnly && now - group.at > STALE_TMP_MS
+    if (index < keep && !staleTmp && now - group.at <= CHECKPOINT_MAX_AGE_MS) continue
+    for (const file of group.files) {
+      try { await fs.promises.unlink(file); removed++ } catch { /* başka süreç tutuyor: sonraki turda */ }
+    }
+  }
+  return { removed }
 }
 
 /** Otomatik çıktı takibi — kökler AKIŞTAN gelir; tüm disk izleme isteğe bağlıdır (opt-in). */
@@ -90,27 +153,45 @@ export class Checkpoints {
     // Stop observation at the run boundary, then persist every already-received event.
     this.outputs.stop()
     const endedAt = Date.now()
-    return this.serial(async () => {
+    const result = await this.serial(async () => {
       try {
         await this.persistChanges()
         if (this.current) { this.current.endedAt = endedAt; this.current.status = status; await write(this.file(this.current.id), this.current) }
       } finally { this.active = undefined; this.current = undefined }
     })
+    // Saklama: koşu bittikten sonra eski kayıtları buda. Koşuyu beklemez; kilit/izin hatası yutulur.
+    void pruneCheckpoints(this.dir).catch(() => {})
+    return result
   }
   async list(): Promise<CheckpointInfo[]> {
     let names: string[]
     try { names = await fs.promises.readdir(this.dir) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw e }
     const rows: CheckpointInfo[] = []
     for (const name of names.filter(n => /^[a-f0-9-]{36}\.json$/.test(n))) {
-      const cp = await json<CheckpointDetail>(path.join(this.dir, name))
-      const { outputs: _outputs, ...info } = cp
-      if (info.status === 'running' && info.id !== this.current?.id) info.status = 'interrupted'
-      rows.push(info)
+      // Tek bozuk/kilitli dosya bütün geçmişi görünmez kılmaz: satır atlanır, bir kez uyarılır.
+      try {
+        const cp = await json<CheckpointDetail>(path.join(this.dir, name))
+        const { outputs: _outputs, ...info } = cp
+        if (info.status === 'running' && info.id !== this.current?.id) info.status = 'interrupted'
+        rows.push(info)
+      } catch (e) {
+        this.warnOnce(name, `Checkpoint okunamadı (${name}); liste bu kayıt olmadan gösteriliyor: ${(e as Error).message}`)
+      }
     }
     return rows.sort((a, b) => a.at - b.at || a.ordinal - b.ordinal)
   }
+  private warned = new Set<string>()
+  private warnOnce(key: string, message: string) {
+    if (this.warned.has(key)) return
+    this.warned.add(key)
+    this.warn(message)
+  }
+  private async read<T>(file: string): Promise<T> {
+    try { return await json<T>(file) }
+    catch (e) { throw new Error(`Checkpoint dosyası okunamadı (bozuk ya da başka bir program tutuyor): ${path.basename(file)} — ${(e as Error).message}`) }
+  }
   async detail(id: string): Promise<CheckpointDetail> {
-    const cp = await json<CheckpointDetail>(this.file(id))
+    const cp = await this.read<CheckpointDetail>(this.file(id))
     if (cp.status === 'running' && cp.id !== this.current?.id) cp.status = 'interrupted'
     cp.outputs = await Promise.all(cp.outputs.map(async output => {
       try { await fs.promises.access(output.path); return { ...output, present: true } }
@@ -122,5 +203,5 @@ export class Checkpoints {
     }))
     return cp
   }
-  async snapshot(id: string) { return json<CheckpointSnapshot>(this.file(id, true)) }
+  async snapshot(id: string) { return this.read<CheckpointSnapshot>(this.file(id, true)) }
 }

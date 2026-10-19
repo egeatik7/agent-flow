@@ -76,6 +76,15 @@ describe('bug bataryası: bilinmeyen kimlikler dürüstçe reddedilir, çökmez'
     }
   })
 
+  it('run.from hazırlık hatasında "Koşu başladı" demez (önceki koşunun sonucu okunmaz)', async () => {
+    const h = ctx(fixture().graph, { startRun: async () => { throw new Error('Akış yapısı bozuk') } })
+    const r = await callTool('run.from', { fromStart: true }, h.ctx)
+    expect(r.ok).toBe(false)
+    expect(String(r.message)).toContain('Koşu başlamadı')
+    expect(String(r.message)).toContain('Akış yapısı bozuk')
+    expect(r.data?.started).toBeUndefined()
+  })
+
   it('run.report bilinmeyen koşu kimliğinde uydurmaz', async () => {
     const h = ctx(fixture().graph)
     const r = await callTool('run.report', { runId: 'yok-boyle-kosu' }, h.ctx)

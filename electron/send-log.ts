@@ -200,6 +200,29 @@ export function imageFromMessages(messages: { content?: unknown }[], mimeFromObj
  * İsteğin kanıtını diske yazar: özet, tam sistem promptu, talimat, gönderilen aday listesi, görüntünün
  * AYNISI (yeniden ekran görüntüsü alınmaz; istekteki veri kullanılır) ve modelin ham yanıtı.
  */
+/** Tanılama kanıtı saklama sınırı: her istek kalıcı bir klasör bırakıyordu, hiçbiri silinmiyordu. */
+export const EVIDENCE_KEEP = 200
+export const EVIDENCE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+let lastPrune = 0
+
+/** Eski istek kanıtı klasörlerini budar. Hata (kilit/izin) tanılamayı ve koşuyu durdurmaz. */
+export function pruneEvidence(dir: string, now = Date.now(), keep = EVIDENCE_KEEP): number {
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return 0 }
+  const rows: { name: string; at: number }[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    try { rows.push({ name: entry.name, at: fs.statSync(path.join(dir, entry.name)).mtimeMs }) } catch { /* silinmiş */ }
+  }
+  rows.sort((a, b) => b.at - a.at)
+  let removed = 0
+  for (const [index, row] of rows.entries()) {
+    if (index < keep && now - row.at <= EVIDENCE_MAX_AGE_MS) continue
+    try { fs.rmSync(path.join(dir, row.name), { recursive: true, force: true }); removed++ } catch { /* sonraki turda */ }
+  }
+  return removed
+}
+
 export function saveRequestEvidence(id: string, files: { summary?: string; system?: string; instruction?: string; candidates?: string; image?: { buffer: Buffer; mime: string }; response?: string; mapping?: unknown; resolution?: unknown }): string {
   if (!root) return ''
   try {
@@ -217,6 +240,8 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
       const uzanti = files.image.mime.includes('png') ? 'png' : 'jpg'
       try { fs.writeFileSync(path.join(dir, `gonderilen-goruntu.${uzanti}`), files.image.buffer) } catch { /* aynı */ }
     }
+    // Sınırsız büyümeyi önle: dakikada en çok bir kez, en yeni N klasör tutulur.
+    if (Date.now() - lastPrune > 60_000) { lastPrune = Date.now(); pruneEvidence(root) }
     return dir
   } catch { return '' }
 }

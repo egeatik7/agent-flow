@@ -74,3 +74,14 @@ describe('portable geÃ§ici klasÃ¶r sÃ¼pÃ¼rme kuralÄ±', () => {
     expect(seÃ§ilen.map((x) => x.ad)).toEqual([A])
   })
 })
+
+describe('çalýþan örnek korunur (iþaret dosyasý)', () => {
+  it('canli=true olan klasör yaþlý olsa da silinmez', async () => {
+    const { bayatCikarmaKlasorleri } = await import('../electron/temp-sweep')
+    const secilen = bayatCikarmaKlasorleri(
+      [{ ad: 'AbCdEfGhIjKlMnOpQrSt', yol: 'C:\\Temp\\AbCdEfGhIjKlMnOpQrSt', exeVar: true, yukVar: true, mtimeMs: 0, canli: true }],
+      { now: 10 * 60_000 * 10 }
+    )
+    expect(secilen).toEqual([])
+  })
+})

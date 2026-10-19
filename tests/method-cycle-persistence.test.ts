@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { repeatMethodCycle } from '../electron/method-cycle'
-import { runGraph, StoppedError, type Executor } from '../electron/runner'
+import { runGraph, ConditionUndecidedError, StoppedError, type Executor } from '../electron/runner'
 import { createNode, type AgentGraph } from '../electron/graph-types'
 
 beforeEach(() => vi.useFakeTimers())
@@ -39,13 +39,13 @@ it('confirmed focus-only type progress resumes without dropping the progress che
  const pending=runGraph({nodes:[n],edges:[]},ex,{maxSteps:3,stepDelayMs:0})
  await vi.advanceTimersByTimeAsync(3000);expect((await pending).failed).toBe(0);expect(calls).toBe(2)
 })
-it('an undecided condition never takes its false port; Stop interrupts retry on the same node',async()=>{
- const n=createNode('condition',0,0);n.text='BİTTİ?';let stop=false
- const ex=base();ex.shouldStop=()=>stop;ex.exists=vi.fn(async()=>{throw Error('reader failed')})
- const pending=runGraph({nodes:[n],edges:[]},ex,{maxSteps:2,stepDelayMs:0})
- const checked=expect(pending).rejects.toBeInstanceOf(StoppedError)
- await vi.advanceTimersByTimeAsync(6100);expect(ex.exists).toHaveBeenCalledTimes(3);stop=true
- await vi.advanceTimersByTimeAsync(100);await checked
+it('an undecided condition never takes its false port; undecided ends the flow instead of looping',async()=>{
+ const n=createNode('condition',0,0);n.text='BİTTİ?'
+ const ex=base();ex.exists=vi.fn(async()=>{throw new ConditionUndecidedError('reader failed')})
+ // Sınıflandırılmış "karar verilemedi" sinyali tur döngüsüne girmez: runner onu kendi
+ // kurtarma yolunda ele alır; kurtarma yoksa açık hatayla durur (sonsuz 3 sn'lik tur yok).
+ await expect(runGraph({nodes:[n],edges:[]},ex,{maxSteps:2,stepDelayMs:0})).rejects.toThrow('yok')
+ expect(ex.exists).toHaveBeenCalledTimes(1)
 })
 it('the shared method cycle retries a complete pass after arbitrary rejection values',async()=>{
  let calls=0; const retry=vi.fn()

@@ -1211,7 +1211,11 @@ export function createAgent(ctx: AgentContext) {
     if (await bridge.isLocked()) throw new VisualPointerError('Ekran kilitlendi; tıklama gönderilmedi.')
     checkStopped()
     // Never catch this native dispatch as a method rejection: it may have sent input.
-    try { await bridge.clickCurrentAt(approved.x, approved.y, approved.hwnd, undefined, mode) }
+    try {
+      const result = await bridge.clickCurrentAt(approved.x, approved.y, approved.hwnd, undefined, mode)
+      // Worker "pencere değişti / nokta örtülü" durumunda da tıklar; tek kanıtı günlüğe yazılır.
+      if (result?.warning) log('warn', `Tıklama uyarısı: ${result.warning}`)
+    }
     catch (error) { inputFailure(error) }
     checkStopped()
   }
@@ -1543,6 +1547,9 @@ export function createAgent(ctx: AgentContext) {
         check: () => { checkStopped(); checkObservation(signal) },
         wait: () => observeWithin(pause(REFRESH_RETRY_MS), signal),
         retry: (error, round) => log('warn', `YONTEM-TUR “${node.title}” tur=${round}: ${methodErrorText(error)} Yeni UIA → OCR gözlemi başlıyor.`),
+        // Kalıcı okuyucu/model hatasında sonsuz tur yok: birkaç taze gözlemden sonra karar
+        // runner'a (kurtarma) devredilir; 'hayır' dalı da böylece erişilebilir kalır.
+        maxRounds: 4,
       })
     },
     captureFailure: async (label) => {

@@ -6,6 +6,7 @@ import { findPlace } from './tool-context'
 import { renderTemplate, type AgentNode, type AppSettings } from './graph-types'
 import { RECOVERY_ACTION_KINDS, type RecoveryToolResult } from './recovery'
 import { recoverySettings } from './recovery-settings'
+import { assertModelKeysAllowed } from './key-guard'
 import { yapDetailPage } from './yap-context'
 
 /** An internal session owns the paused run; public tools still see `running:true`. */
@@ -106,6 +107,8 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
         ...(kind === 'wait' ? { ms: Math.max(0, Math.min(10_000, Number(args.ms) || 0)) } : {}),
       }
       if (kind === 'click' && !node.prompt?.trim() || kind === 'type' && !node.text?.trim() || kind === 'key' && !node.keys?.trim()) throw new Error('Kurtarma eyleminin hedefi/metni/tuşu boş.')
+      // Modelin canlı tuş seçimi kapatma/silme kombinasyonlarını kullanamaz (key-guard).
+      if (kind === 'key') assertModelKeysAllowed(node.keys)
     }
     if (name === 'step.run' && !recoverySettings(base.getSettings().recovery).allowNodes) throw new Error('Node çağırma kapalı.')
     check()

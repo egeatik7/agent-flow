@@ -94,6 +94,9 @@ export class ConditionUndecidedError extends Error {}
 /** A condition answered no (or stayed undecided) and nothing downstream or in recovery can continue the flow. Stops the whole run. */
 export class ConditionHaltError extends Error {}
 
+/** A step that cannot succeed by retrying (boş koşul, kaldırılmış tür, paket içi hata). */
+export class PermanentStepError extends Error {}
+
 class EndFlow extends Error {}
 class StepLimitError extends Error {}
 /** A single lap went over the step budget. Keep this item; do not start the next job. */
@@ -296,6 +299,18 @@ export async function runGraph(
   let vars: Record<string, string> = opts.vars ?? savedScope?.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
   const checkpointScopes = [...(opts.checkpointScopes ?? []), { path: scopePath, vars: { ...vars } }]
   const checkpointFrames: CheckpointLoop[] = []
+  // Gözlemlenebilirlik yazımı otomasyonu durdurmaz (CLAUDE.md §19): checkpoint diske yazılamazsa
+  // (EPERM/EBUSY/ENOSPC) koşu checkpoint'siz sürer. İlk hatada bir kez uyarılır; sonra her öğede
+  // aynı hatayı yinelemek günlüğü doldurmaktan başka işe yaramaz.
+  let checkpointBroken = false
+  const captureCheckpoint = async (label: string, cursor: CheckpointCursor) => {
+    if (!ex.checkpoint || checkpointBroken) return
+    try { await ex.checkpoint(label, cursor) }
+    catch (e) {
+      checkpointBroken = true
+      ex.log('warn', `Checkpoint yazılamadı; koşu checkpoint olmadan sürüyor (bu koşuda hatadan devam kullanılamaz): ${(e as Error).message}`)
+    }
+  }
   const inheritedLoops = opts.loopProgress ?? []
   const liveLoops: LoopProgress[] = []
   const publishLoops = () => ex.setLoopProgress?.([...inheritedLoops, ...liveLoops].map(loop => ({ ...loop })))
@@ -383,9 +398,9 @@ export async function runGraph(
       }
       case 'condition': {
         const compatibility = conditionCompatibilityError(live)
-        if (compatibility) throw new Error(compatibility)
+        if (compatibility) throw new PermanentStepError(compatibility)
         const text = (live.text ?? '').trim()
-        if (!text) throw new Error(`“${live.title}”: koşul için ne aradığını yaz.`)
+        if (!text) throw new PermanentStepError(`“${live.title}”: koşul için ne aradığını yaz.`)
         ex.log('info', `[${stepNo}] Koşul “${text}” yöntemlerle değerlendiriliyor…`)
         let answer: boolean | undefined
         try { answer = await ex.exists(text, live) }
@@ -398,8 +413,8 @@ export async function runGraph(
         return 'false'
       }
       case 'ai': {
-        if (!live.prompt?.trim()) throw new Error(`“${live.title}”: Yap için hedefi yaz.`)
-        if (!ex.initiative) throw new Error('Yap bu ortamda çalışmıyor.')
+        if (!live.prompt?.trim()) throw new PermanentStepError(`“${live.title}”: Yap için hedefi yaz.`)
+        if (!ex.initiative) throw new PermanentStepError('Yap bu ortamda çalışmıyor.')
         ex.log('info', `[${stepNo}] Yap: ${live.prompt.trim()}`)
         const ok = await ex.initiative(live, stepNo, ahead, vars)
         await settle()
@@ -409,7 +424,7 @@ export async function runGraph(
       case 'waitFile':
       case 'moveFile':
         // Skipping would let the next step run as if this one had happened (a file that never arrived).
-        throw new Error(`“${node.title}”: Bu node türü artık desteklenmiyor, akışı güncelleyin.`)
+        throw new PermanentStepError(`“${node.title}”: Bu node türü artık desteklenmiyor, akışı güncelleyin.`)
       case 'end':
         return 'end'
       case 'loop':
@@ -422,7 +437,15 @@ export async function runGraph(
         }
         ex.log('info', `“${node.title}” paketi çalışıyor.`)
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
-        const result = await runGraph(inner, ex, { checkpointResume: opts.checkpointResume, checkpointUsed, checkpointLoops: [...(opts.checkpointLoops ?? []), ...checkpointFrames], checkpointScopes, packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
+        let result: Awaited<ReturnType<typeof runGraph>>
+        try {
+          result = await runGraph(inner, ex, { checkpointResume: opts.checkpointResume, checkpointUsed, checkpointLoops: [...(opts.checkpointLoops ?? []), ...checkpointFrames], checkpointScopes, packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
+        } catch (error) {
+          if (isFatal(error)) throw error
+          // Paket içinde kalan bir hata paketi BAŞTAN oynatmayı hak etmez: içerideki tıklama/yazma
+          // ikinci kez gönderilirdi. Kalıcı hata olarak yukarı verilir; öğe hatası olarak raporlanır.
+          throw new PermanentStepError(`“${node.title}” paketi hata verdi: ${(error as Error).message}`)
+        }
         if (result.incomplete) incomplete = true
         if (node.packageExit && !result.packageExitReached) {
           incomplete = true
@@ -442,6 +465,10 @@ export async function runGraph(
     let blocked: unknown
     // Set when recovery asked for a retry; the report is then closed by the final outcome of this step.
     let retriedAfterRecovery = false
+    // Eylem türü olmayan node'da (Koşul/Paket/kaldırılmış tür) bazı hatalar KALICIDIR: boş koşul
+    // metni, uyumsuz hedef, "artık desteklenmiyor" ya da paket iç grafının hatası. Yeniden denemek
+    // paketin tamamını (tıklama/yazma dâhil) yeniden oynatır ve hatayı gizler; bu yüzden tur
+    // döngüsüne hiç girilmez (CLAUDE.md §19). Gözlem/okuyucu hataları ise yeniden denenebilir kalır.
     const outcome = repeatMethodCycle(async () => {
       let error: unknown
       if (blocked !== undefined) error = blocked
@@ -488,7 +515,7 @@ export async function runGraph(
     }, {
       check: () => { if (ex.shouldStop()) throw new StoppedError() },
       wait: () => interruptibleSleep(3000, ex.shouldStop),
-      terminal: isFatal,
+      terminal: (error) => isFatal(error) || error instanceof PermanentStepError,
       retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`),
     })
     try {
@@ -729,7 +756,7 @@ export async function runGraph(
         ex.setLoop?.(loopNotes.join(' › '))
         ex.log('info', `— “${loop.title}” ${idx + 1}/${keys.length}: ${label}`)
         if (ex.shouldStop()) throw new StoppedError()
-        await ex.checkpoint?.(`${loop.title} · ${idx + 1}/${keys.length} · ${label}`, {
+        await captureCheckpoint(`${loop.title} · ${idx + 1}/${keys.length} · ${label}`, {
           startId: entry && firstLapPath?.length ? firstLapPath[firstLapPath.length - 1].id : (entry ?? first).id,
           packagePath: scopePath,
           loops: structuredClone([

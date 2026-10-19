@@ -59,6 +59,27 @@ export class WindowCloseGuard {
     this.approved = true
   }
 
+  /**
+   * Arayüz "hâlâ çalışıyorum" derse süreyi tazele. Kullanıcıya kaydetme sorusu gösterilirken arayüz
+   * canlıdır ama cevap insandan gelir; sabit süre dolunca pencereyi kapatmak kararı çöpe atıyordu.
+   * Arayüz çökerse/asalarsa mesaj gelmez ve süre normal şekilde dolar.
+   */
+  touch(timeoutMs: number = CLOSE_REPLY_TIMEOUT_MS, onTimeout?: (id: number) => void): void {
+    if (this.pending === null) return
+    const ms = Math.max(0, timeoutMs)
+    if (ms === 0) return
+    this.clearTimer()
+    this.timer = setTimeout(() => this.expire(onTimeout), ms)
+    const handle = this.timer as unknown as { unref?: () => void }
+    if (typeof handle.unref === 'function') handle.unref()
+  }
+
+  /** Yalnızca hâlâ bekleyen istek için süre tazeler; eski bir kimlik yenisini uzatamaz. */
+  touchFor(id: unknown, timeoutMs: number = CLOSE_REPLY_TIMEOUT_MS, onTimeout?: (id: number) => void): void {
+    if (this.pending === null || id !== this.pending) return
+    this.touch(timeoutMs, onTimeout)
+  }
+
   reply(id: unknown, allow: unknown): boolean {
     if (this.pending === null || id !== this.pending || typeof allow !== 'boolean') return false
     this.clearTimer()

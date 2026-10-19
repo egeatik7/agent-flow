@@ -56,11 +56,16 @@ describe('checkpoints preserve the exact execution suffix', () => {
       }
     }
   })
-  it('checkpoint write failure prevents the first desktop action of that lap', async () => {
+  it('checkpoint write failure warns once and the lap still acts', async () => {
+    // Gözlemlenebilirlik yazımı otomasyonu durdurmaz (CLAUDE.md §19): disk dolu/EPERM olsa da
+    // koşu checkpoint'siz sürer. İlk hatada bir kez uyarılır, her öğede yinelenmez.
     let actions = 0
-    const ex: Executor = { log: () => {}, step: () => {}, shouldStop: () => false, click: async () => {}, key: async () => {}, exists: async () => true, type: async () => { actions++ }, checkpoint: async () => { throw new Error('disk full') } }
-    await expect(runGraph(scenario(0, false), ex, opts)).rejects.toThrow('disk full')
-    expect(actions).toBe(0)
+    const warnings: string[] = []
+    const ex: Executor = { log: (level, message) => { if (level === 'warn') warnings.push(String(message)) }, step: () => {}, shouldStop: () => false, click: async () => {}, key: async () => {}, exists: async () => true, type: async () => { actions++ }, checkpoint: async () => { throw new Error('disk full') } }
+    const summary = await runGraph(scenario(0, false), ex, opts)
+    expect(actions).toBeGreaterThan(0)
+    expect(warnings.filter(m => m.includes('Checkpoint yazılamadı')).length).toBe(1)
+    expect(summary.reachedEnd).toBe(true)
   })
   it('Stop arriving during checkpoint capture sends no input', async () => {
     let stop = false, actions = 0

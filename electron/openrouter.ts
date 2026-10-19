@@ -1,4 +1,4 @@
-import { yapInputEstimate } from './yap-context'
+import { yapBudgetCheck, yapInputEstimate } from './yap-context'
 import { visualToolCall, type VisualToolCall } from './visual-tool-call'
 import { spawnSync } from 'node:child_process'
 import { visualReplyJson } from './visual-reply-json'
@@ -141,7 +141,10 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
           const measured = olcumFor(target.model, target.url)
           const window = !olcumEskiMi(measured, Date.now()) ? pencereTokenFor(target.model, target.url) : null
           const estimate = yapInputEstimate(messages, args.tools)
-          if (window && estimate + 2048 > window) throw new Error(`Yap giriş bütçesi: tahmin ${estimate} + cevap payı 2048, ölçülen/yapılandırılmış pencere ${window}. İstek gönderilmedi.`)
+          // Birim: tahmin BAYT, pencere TOKEN. Kapı token karşılığıyla kıyaslanır (eskiden bayt
+          // doğrudan token penceresiyle kıyaslanıyor ve istek hiç gönderilmiyordu).
+          const budget = yapBudgetCheck(estimate, window ?? 0)
+          if (window && !budget.ok) throw new Error(`Yap giriş bütçesi: ~${budget.tokens} token (${estimate} bayt) + cevap payı 2048, ölçülen/yapılandırılmış pencere ${window}. İstek gönderilmedi.`)
         }
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
