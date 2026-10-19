@@ -1,3 +1,4 @@
+import { yapInputEstimate } from './yap-context'
 import { visualToolCall, type VisualToolCall } from './visual-tool-call'
 import { spawnSync } from 'node:child_process'
 import { visualReplyJson } from './visual-reply-json'
@@ -108,6 +109,7 @@ export async function recoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
 
 async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
   const runtime = localRuntime()
+  const label = args.stage === 'yap' ? 'Yap' : 'Kurtarma'
   const deadline = Date.now() + args.timeoutMs
   const chain = asModelChain(args.models)
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
@@ -121,7 +123,7 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
       try {
         const target = args.allowLocal ? targetFor(model, runtime) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
         if (args.stage === 'yap' && !target.local && rejectedRemoteAccount) throw rejectedRemoteAccount
-        chatLogger?.(`Kurtarma ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
+        chatLogger?.(`${label} ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
         if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
         const hasImages = args.messages.some(m => Array.isArray(m.content) && m.content.some(p => (p as {type?:string}|null)?.type === 'image_url'))
         let messages = args.messages
@@ -131,9 +133,15 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
           messages = args.messages.map(message => {
             if (!Array.isArray(message.content)) return message
             const parts = message.content.filter(p => (p as {type?:string}|null)?.type !== 'image_url')
-            return {...message,content:parts.length ? parts : 'Görüntü yerel model ayarı nedeniyle gönderilmedi; ekran okumasının metin sonucunu kullan.'}
+            return {...message,content:parts.length ? [...parts, { type: 'text', text: 'Görüntü bu yerel modele gönderilmedi. Görsel kanıt varsayma; ekran yazıları gerekiyorsa screen_read details:true iste.' }] : 'Görüntü yerel model ayarı nedeniyle gönderilmedi; ekran okumasının metin sonucunu kullan.'}
           })
           chatLogger?.(`YAP-MODALITE model=${model} goruntu=0 neden=yerel-goruntu-kapali metin=korundu`)
+        }
+        if (args.stage === 'yap' && target.local) {
+          const measured = olcumFor(target.model, target.url)
+          const window = !olcumEskiMi(measured, Date.now()) ? pencereTokenFor(target.model, target.url) : null
+          const estimate = yapInputEstimate(messages, args.tools)
+          if (window && estimate + 2048 > window) throw new Error(`Yap giriş bütçesi: tahmin ${estimate} + cevap payı 2048, ölçülen/yapılandırılmış pencere ${window}. İstek gönderilmedi.`)
         }
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
@@ -142,8 +150,8 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
         if (args.shouldStop() || stopCheck()) throw new StoppedError()
         if (!res.ok) {
           chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
-          if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`OpenRouter kurtarma çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
-          throw new Error(`OpenRouter kurtarma çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
+          if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`${label} uzak model çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
+          throw new Error(`${label} ${target.local ? 'yerel' : 'uzak'} model çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
         }
         const data = JSON.parse(res.text)
         if (data.error) throw new ModelRejected(`OpenRouter: ${providerError(data.error).slice(0, 300)}`)
@@ -180,7 +188,7 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
         const billed = data.usage && typeof data.usage === 'object' ? { prompt_tokens: data.usage.prompt_tokens, completion_tokens: data.usage.completion_tokens, total_tokens: data.usage.total_tokens, cost: typeof data.usage.cost === 'number' ? data.usage.cost : undefined } : undefined
         const answered = typeof data.model === 'string' && data.model ? data.model : model
         chatLogger?.(`CEVAPLAYAN asama=${args.stage ?? 'recovery'} model=${answered}`)
-        chatLogger?.(`Kurtarma ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
+        chatLogger?.(`${label} ${targetTag(target.local)} ← ${answered}${billed?.total_tokens ? ` · ${billed.total_tokens} token` : ''}${typeof billed?.cost === 'number' ? ` · $${billed.cost.toFixed(4)}` : ''}`)
         return { role: 'assistant', content: text,
           ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
           ...(m.reasoning_details ? { reasoning_details: m.reasoning_details } : {}),
@@ -195,7 +203,7 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
         }
         last = error
         chatLogger?.(`ATLANDI asama=${args.stage ?? 'recovery'} model=${model} neden=${brief(error)}`)
-        chatLogger?.(`Kurtarma modeli ${model} yanıtlayamadı: ${brief(error)}`)
+        chatLogger?.(`${label} modeli ${model} yanıtlayamadı: ${brief(error)}`)
         break
       }
     }

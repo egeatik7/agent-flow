@@ -128,11 +128,11 @@ export function isApiDown(message: string): boolean {
   return /^(?:OpenRouter\b.*(?:\b(?:401|402|429|5\d\d)\b|anahtar.*geçersiz|bakiy.*yetersiz|insufficient credits|rate limit)|(?:API|Model|Yerel sunucu|Sunucu|Bağlantı hatası)\b.*(?:\((?:401|402|429)\)|rate limit|too many requests|quota exceeded|resourceexhausted|upstream error|cevap vermedi|bağlantı))|^resourceexhausted\b|^rate limit\b|^too many requests\b|^upstream error\b/i.test(message)
 }
 
-export async function interruptibleSleep(ms: number, shouldStop: () => boolean) {
-  const end = Date.now() + ms
-  while (Date.now() < end) {
+export async function interruptibleSleep(ms: number, shouldStop: () => boolean, clock: () => number = () => Date.now()) {
+  const end = clock() + ms
+  while (clock() < end) {
     if (shouldStop()) throw new StoppedError()
-    await new Promise((r) => setTimeout(r, Math.min(100, end - Date.now())))
+    await new Promise((r) => setTimeout(r, Math.min(100, end - clock())))
   }
 }
 

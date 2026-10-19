@@ -1539,11 +1539,16 @@ const screenRead: ToolDef = {
     const { listWindows, scan } = await import('./a11y-bridge')
     const windows = await listWindows()
     const windowTitle = text(args.windowTitle) || undefined
+    const hwnd = text(args.hwnd) || undefined
+    const pid = num(args.pid)
+    if (hwnd && (!/^[1-9][0-9]*$/.test(hwnd) || !Number.isSafeInteger(Number(hwnd)) || !pid || !Number.isInteger(pid) || pid <= 0)) throw new Error('Geçerli HWND ve PID gerekli.')
+    const details = args.details !== false
     const wantImage = args.image === true
     const s = await scan({
       windowTitle,
-      ocr: true,
-      uia: true,
+      ...(hwnd ? { windowHandle: hwnd, windowPid: pid } : windowTitle ? { strictWindow: 'exact' as const } : {}),
+      ocr: details,
+      uia: details,
       readOnly: true,
       fresh: true,
       image: wantImage ? 'plain' : 'none',
@@ -1567,10 +1572,10 @@ const screenRead: ToolDef = {
         }
       }
     }
-    const where = windowTitle ? `“${windowTitle}”` : 'önde olan pencere'
-    const wrong = windowMismatch(windowTitle ?? '', s.window)
+    const where = hwnd ? `HWND ${hwnd} / PID ${pid}` : windowTitle ? `“${windowTitle}”` : 'tüm ekran'
+    const wrong = !!s.missingWindow || (hwnd ? s.windowHandle !== hwnd || s.windowPid !== pid : windowMismatch(windowTitle ?? '', s.window))
     const warning = wrong
-      ? ` DİKKAT: istediğin pencere bulunamadı; bunun yerine “${s.window || 'öndeki pencere'}” okundu.`
+      ? ' DİKKAT: istenen pencere eşleşmedi; bu okuma hedef için başarı kanıtı değildir.'
       : ''
     const imageNote = !wantImage
       ? ''
@@ -1582,14 +1587,14 @@ const screenRead: ToolDef = {
     const message = `${windows.length} pencere · ${where} · ${items.length} yazı/öğe okundu${imageNote}${warning}`
     ctx.log(wrong ? 'warn' : 'info', `Ajan · ekranı oku · ${message}`)
     return {
-      ok: true,
+      ok: !wrong,
       tool: screenRead.name,
-      outcome: 'tamam',
+      outcome: wrong ? 'hedef-yok' : 'tamam',
       message,
       observed: {
         note: `${wantImage ? (imageData ? 'İstenen görüntü cevabın içinde (data.image) ve diskte.' : 'Görüntü istendi ama alınamadı.') : 'Görüntü istenmedi.'}${wrong ? ' İstenen pencere ile okunan pencere aynı değil.' : ' İstenen pencere okundu.'}`,
       },
-      data: { windows: windows.slice(0, 40), window: s.window, requested: windowTitle ?? '', matched: !wrong, area: s.area, ocr: s.ocr, shot: s.shot, imagePath, image: imageData, sig: s.sig, items },
+      data: { windows: windows.slice(0, 40), window: s.window, hwnd: s.windowHandle, pid: s.windowPid, requested: windowTitle ?? '', matched: !wrong, area: s.area, ocr: s.ocr, shot: s.shot, imagePath, image: imageData, sig: s.sig, items },
     }
   },
 }

@@ -50,7 +50,7 @@ it('N09: an empty first model cannot burn 40 Yap turns before a backup completes
  const execute=vi.fn(async()=>({ok:true,outcome:'tamam' as const,message:'screen read'}))
  expect(await runYap({...createNode('ai',0,0),maxActions:1,prompt:'Read status'}, {},{shouldStop:()=>false,log:()=>{},makeExecute:()=>execute,turn:args=>recoveryToolTurn({...args,apiKey:'fixture',models:['empty','healthy'],stage:'yap'})})).toBe(true)
  expect(models).toEqual(['empty','healthy','empty','healthy'])
- expect(execute).toHaveBeenCalledExactlyOnceWith('screen.read',{})
+ expect(execute.mock.calls).toEqual([['screen.read',{}],['screen.read',{}]])
 })
 const transcript:ToolMessage[]=[{role:'system',content:'task rules'},{role:'tool',tool_call_id:'read',content:'OCR: target is visible; coordinates 10,20'},{role:'user',content:[{type:'text',text:'Current screen and cursor metadata'},{type:'image_url',image_url:{url:'data:image/png;base64,AA=='}}]}]
 it.each([false,true])('N04: Yap reaches completion after screen_read with localVision=%s',async vision=>{
@@ -59,7 +59,7 @@ it.each([false,true])('N04: Yap reaches completion after screen_read with localV
  vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{bodies.push(JSON.parse(init.body));return ok(bodies.length===1?tool('screen_read',{}):tool('task_complete',{summary:'observed result'}))}))
  const execute=vi.fn(async()=>({ok:true,outcome:'tamam' as const,message:'OCR reader succeeded',data:{text:'Target visible, OCR preserved',image:{data:'AA==',mime:'image/png'}}}))
  expect(await runYap({...createNode('ai',0,0),prompt:'observe target'}, {},{shouldStop:()=>false,log:()=>{},makeExecute:()=>execute,turn:args=>recoveryToolTurn({...args,apiKey:'',models:['local:fixture'],allowLocal:true,stage:'yap'})})).toBe(true)
- expect(bodies).toHaveLength(2);expect(execute).toHaveBeenCalledOnce()
+ expect(bodies).toHaveLength(2);expect(execute).toHaveBeenCalledTimes(2)
  const second=JSON.stringify(bodies[1].messages)
  expect(second).toContain('Target visible, OCR preserved')
  expect(second.includes('image_url')).toBe(vision)

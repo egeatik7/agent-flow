@@ -113,6 +113,8 @@ export type AgentNode = {
   /** İnisiyatif: look at the screenshot and click coordinates, or pick from the list of screen texts. */
   engine?: 'screen' | 'list'
   allowCode?: boolean
+  /** Yap may inspect the canvas only when explicitly enabled. Desktop tasks do not need it. */
+  allowFlowRead?: boolean
   maxActions?: number
   /** Runtime only. Recovery resume must not be written into a saved flow. */
   resumeTypeProgress?: TypeProgress

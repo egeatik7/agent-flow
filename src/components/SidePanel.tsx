@@ -319,6 +319,8 @@ function AiEditor(p: Props & { n: AgentNode }) {
     <details><summary>Gelişmiş ayarlar</summary>
       <label className="check"><input type="checkbox" checked={n.allowCode !== false} onChange={e => upd({ allowCode: e.target.checked })} />PowerShell çalıştırabilir</label>
       <p className="hint">Hazır araçlar yetmezse kod çalıştırır. Kod günlükte görünür ve kullanıcı yetkileriyle çalışır.</p>
+      <label className="check"><input type="checkbox" checked={n.allowFlowRead === true} onChange={e => upd({ allowFlowRead: e.target.checked })} />Tuval yapısını okuyabilir</label>
+      <p className="hint">Yalnız akışın kendisini inceleyen görevlerde aç. Normal masaüstü görevine diğer node’lar gönderilmez.</p>
       <div className="field"><label>En fazla eylem</label><input className="xp-input" type="number" min={1} max={60} value={n.maxActions ?? 25} onChange={e => upd({ maxActions: Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))) })} /></div>
       <div className="field"><label>Süre sınırı (saniye)</label><input className="xp-input" type="number" min={10} max={900} value={(n.timeoutMs || 300000) / 1000} onChange={e => upd({ timeoutMs: Math.min(900, Math.max(10, Number(e.target.value) || 300)) * 1000 })} /></div>
     </details>

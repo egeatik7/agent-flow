@@ -100,7 +100,7 @@ export default function Hud() {
         {countdown && <p className="hud-countdown" role="timer">{countdown}</p>}
       {stages && <p className="hud-stages">{stages}</p>}
       </div>
-      <p className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
+      <p title={method.startsWith('Yap ·') ? `Model: son başarılı model cevabının yaşı. Eylem: son eylem aracı girişiminin yaşı; tamamlanma kanıtı değildir. ${method}` : method} className={`hud-line hud-method${method || recovering ? ' on' : ''}`}>{recovering ? 'Kurtarma ajanı devrede · akış bekliyor' : method}</p>
       {/*
         CANLI BELLEK GÖSTERGESİ (1.9.130). Yalnız ölçüm ve raporlama: kart hiçbir şeyi temizlemez,
         süreç kapatmaz veya ayar değiştirmez. Kısa bölüm İKİ satırdır; GPU ve süreç ayrıntıları

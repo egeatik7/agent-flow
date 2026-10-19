@@ -6,6 +6,7 @@ import { findPlace } from './tool-context'
 import { renderTemplate, type AgentNode, type AppSettings } from './graph-types'
 import { RECOVERY_ACTION_KINDS, type RecoveryToolResult } from './recovery'
 import { recoverySettings } from './recovery-settings'
+import { yapDetailPage } from './yap-context'
 
 /** An internal session owns the paused run; public tools still see `running:true`. */
 export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, shouldStop: () => boolean, sharedExecutor?: Executor, taskMode = false) {
@@ -29,7 +30,17 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       const settings = recoverySettings(base.getSettings().recovery)
       if (taskMode && name === 'powershell_run' && request.node.allowCode === false) throw new Error('Yap kod çalıştırma kapalı.')
       if (!taskMode && (!settings.allowDesktop || name === 'powershell_run' && !settings.allowCode)) throw new Error('Bu Windows aracı kapalı.')
-      return runPowerShell(name === 'window_action' ? windowScript(args, process.pid) : String(args.code || ''), typeof args.cwd === 'string' ? args.cwd : undefined, shouldStop)
+      area = undefined
+      const result = await runPowerShell(name === 'window_action' ? windowScript(args, process.pid) : String(args.code || ''), typeof args.cwd === 'string' ? args.cwd : undefined, shouldStop)
+      check()
+      if (name === 'window_action' && result.ok) {
+        try {
+          const window = JSON.parse(String(result.data?.stdout || '')) as Record<string, unknown>
+          result.data = { ...result.data, window }
+          result.message = `Pencere aracı sonucu: ${JSON.stringify(window)}. Görevin tamamını güncel ekranla değerlendir.`
+        } catch { return { ...result, ok: false, outcome: 'hata', message: 'Pencere komutu gönderildi; durum cevabı çözülemedi. Tekrarlamadan güncel ekranı oku.' } }
+      }
+      return result
     }
     if (taskMode && ['step.run', 'target.preview'].includes(name)) throw new Error('Yap başka node çalıştıramaz.')
     if (['screen.read', 'flow.read', 'flow.context', 'target.preview'].includes(name)) {
@@ -37,12 +48,14 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
         const node = findPlace(graph, String(args.nodeId ?? ''))?.node
         if (!node || !RECOVERY_ACTION_KINDS.includes(node.kind)) throw new Error('Bu node türü kurtarma ajanına açık değil.')
       }
-      const result = await callTool(name, { ...args, ...(name === 'screen.read' ? { image: true } : {}), ...(name === 'target.preview' ? { fast: true } : {}) }, readContext, 'panel')
+      if (name === 'screen.read') area = undefined
+      let result = await callTool(name, { ...args, ...(name === 'screen.read' ? { image: true, ...(taskMode ? { details: args.details === true } : {}) } : {}), ...(name === 'target.preview' ? { fast: true } : {}) }, readContext, 'panel')
       check()
+      if (taskMode && name === 'screen.read') result = { ...result, data: yapDetailPage(result, args).data }
       if (name === 'screen.read') {
         const shotArea = result.data?.area as typeof area
         const image = result.data?.image as { data?: string } | undefined
-        area = result.ok && result.outcome === 'tamam' && image?.data && shotArea && [shotArea.x, shotArea.y, shotArea.w, shotArea.h].every(Number.isFinite) && shotArea.w > 0 && shotArea.h > 0
+        area = result.ok && result.outcome === 'tamam' && result.data?.matched !== false && image?.data && shotArea && [shotArea.x, shotArea.y, shotArea.w, shotArea.h].every(Number.isFinite) && shotArea.w > 0 && shotArea.h > 0
           ? { ...shotArea } : undefined
         const cursor = await (sharedExecutor ?? isolated.executor).pointerPosition?.()
         check()
@@ -56,15 +69,16 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       if (!source.pointerAction) throw new Error('Fare eylem altyapısı hazır değil.')
       const mode = name === 'act.move' ? 'move' : args.mode ?? 'left'
       if (!['move', 'left', 'double', 'right'].includes(String(mode)) || name !== 'act.move' && mode === 'move') throw new Error('Geçersiz tıklama modu.')
+      if (!area) throw new Error('Önce screen_read ile güncel ekranı oku. Önceki eylem veya başarısız okuma eski koordinat alanını geçersiz kılmış olabilir.')
       let point: { x?: number; y?: number; current?: boolean }
       if (name === 'act.clickCurrent') point = { current: true }
       else {
-        if (!area) throw new Error('Önce screen_read ile güncel ekranı oku.')
         const x = args.x, y = args.y
         if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) throw new Error('Koordinatlar ekran görüntüsüne göre 0–1 arasında olmalı.')
         point = { x: area.x + x * Math.max(0, area.w - 1), y: area.y + y * Math.max(0, area.h - 1) }
       }
       check()
+      if (mode !== 'move') area = undefined
       const input = await source.pointerAction({ ...point, mode: mode as 'move' | 'left' | 'double' | 'right' })
       check()
       const position = `@${Math.round(input.x)},${Math.round(input.y)} · ${mode}`
@@ -102,6 +116,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       type: (n, stepNo) => source.type(n, stepNo, n.id === request.node.id ? request.ahead : undefined),
     }
     // A one-node graph cannot reach a sibling, a package or a loop.
+    area = undefined
     await runGraph({ nodes: [node], edges: [] }, executor, {
       maxSteps: 1, stepDelayMs: Math.max(0, s.stepDelayMs), vars: { ...request.vars },
     })

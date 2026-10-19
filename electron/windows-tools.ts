@@ -5,7 +5,7 @@ import { StoppedError } from './runner'
 
 const str = { type: 'string' }
 export function windowsTools(allowCode: boolean): ModelTool[] {
-  const tools: ModelTool[] = [{ type: 'function', function: { name: 'window_action', description: 'Windows penceresini doğrudan yönet. windowTitle tam başlık olmalı; boşsa öndeki pencere. Birden fazla eşleşmede işlem yapılmaz. Maximize F11 tam ekran değildir.', parameters: { type: 'object', properties: { action: { type: 'string', enum: ['maximize', 'minimize', 'restore', 'focus', 'move', 'resize', 'topmost', 'notopmost'] }, windowTitle: str, x: { type: 'integer' }, y: { type: 'integer' }, width: { type: 'integer' }, height: { type: 'integer' } }, required: ['action'], additionalProperties: false } } }]
+  const tools: ModelTool[] = [{ type: 'function', function: { name: 'window_action', description: 'Windows penceresini yönet. Listelenen hwnd+pid kimliğini tercih et; kimlik değişmişse işlem yapılmaz. windowTitle eski uyumluluk için tam başlıktır; kimlik ve başlık boşsa öndeki pencere. Maximize F11 değildir.', parameters: { type: 'object', properties: { action: { type: 'string', enum: ['maximize', 'minimize', 'restore', 'focus', 'move', 'resize', 'topmost', 'notopmost'] }, windowTitle: str, hwnd: str, pid: { type: 'integer' }, x: { type: 'integer' }, y: { type: 'integer' }, width: { type: 'integer' }, height: { type: 'integer' } }, required: ['action'], additionalProperties: false } } }]
   if (allowCode) tools.push({ type: 'function', function: { name: 'powershell_run', description: 'Hazır araçlar yetmediğinde PowerShell/.NET/Windows API çalıştır. Yalnız görev kapsamındaki işlemleri yap. Kod ve sonuçlar günlükte görünür. Bu araç sandbox değildir; kullanıcı yetkileriyle çalışır. Çalışma klasörünü belirt. Başlattığın işi başka sürece ayırıp arkada bırakma.', parameters: { type: 'object', properties: { code: str, cwd: str }, required: ['code'], additionalProperties: false } } })
   return tools
 }
@@ -56,10 +56,19 @@ export function windowScript(args: Record<string, unknown>, ownPid: number): str
   for (const key of action === 'move' ? ['x', 'y'] : action === 'resize' ? ['width', 'height'] : []) {
     if (!Number.isInteger(args[key]) || Math.abs(Number(args[key])) > 100000 || (['width','height'].includes(key) && Number(args[key]) < 1)) throw new Error(`Geçersiz pencere alanı: ${key}`)
   }
+  const hwnd = args.hwnd === undefined ? '' : String(args.hwnd)
+  const pid = args.pid
+  if (hwnd && (!/^[1-9][0-9]*$/.test(hwnd) || !Number.isSafeInteger(Number(hwnd)) || !Number.isInteger(pid) || Number(pid) <= 0 || Number(pid) > 4294967295)) throw new Error('Geçerli HWND ve PID gerekli.')
   const title = Buffer.from(String(args.windowTitle || ''), 'utf8').toString('base64')
   return `Add-Type -TypeDefinition @'
-using System;using System.Runtime.InteropServices;
+using System;using System.Text;using System.Runtime.InteropServices;
 public static class NubboWindow {
+[StructLayout(LayoutKind.Sequential)] public struct RECT {public int Left,Top,Right,Bottom;}
+[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out RECT r);
+[DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);
@@ -68,9 +77,14 @@ public static class NubboWindow {
 }
 '@
 $title=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${title}'))
-if($title){$matches=@(Get-Process | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ceq $title});if($matches.Count -ne 1){throw 'Pencere bulunamadı veya başlık birden fazla pencereye ait.'};$h=[IntPtr]$matches[0].MainWindowHandle}else{$h=[NubboWindow]::GetForegroundWindow()}
-if($h -eq [IntPtr]::Zero){throw 'Hedef pencere yok.'}
+if('${hwnd}'){$h=[IntPtr][long]'${hwnd}'}elseif($title){$matches=@(Get-Process | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ceq $title});if($matches.Count -ne 1){throw 'Pencere bulunamadı veya başlık birden fazla pencereye ait.'};$h=[IntPtr]$matches[0].MainWindowHandle}else{$h=[NubboWindow]::GetForegroundWindow()}
+if($h -eq [IntPtr]::Zero -or -not [NubboWindow]::IsWindow($h)){throw 'Hedef pencere yok.'}
 [uint32]$targetPid=0;[void][NubboWindow]::GetWindowThreadProcessId($h,[ref]$targetPid);if($targetPid -eq ${ownPid}){throw 'Nubbo kendi penceresinde işlem yapmaz.'}
+${hwnd ? `if($targetPid -ne ${Number(pid)}){throw 'HWND başka sürece ait; pencere kimliği eskimiş.'}` : ''}
 ${['maximize','minimize','restore'].includes(action) ? `[void][NubboWindow]::ShowWindow($h,${{maximize:3,minimize:6,restore:9}[action as 'maximize']})` : action === 'focus' ? "if(-not [NubboWindow]::SetForegroundWindow($h)){throw 'Windows pencereyi öne getirmeye izin vermedi.'}" : `if(-not [NubboWindow]::SetWindowPos($h,[IntPtr]${action === 'topmost' ? -1 : action === 'notopmost' ? -2 : 0},${args.x || 0},${args.y || 0},${args.width || 0},${args.height || 0},${action === 'move' ? 21 : action === 'resize' ? 22 : 19})){throw 'Pencere yerleşimi uygulanamadı.'}`}
-@{hwnd=$h.ToInt64().ToString();action='${action}'}|ConvertTo-Json -Compress`
+${['maximize','minimize','restore'].includes(action) ? `for($i=0;$i -lt 10;$i++){if(${action === 'maximize' ? '[NubboWindow]::IsZoomed($h)' : action === 'minimize' ? '[NubboWindow]::IsIconic($h)' : '(-not [NubboWindow]::IsZoomed($h) -and -not [NubboWindow]::IsIconic($h))'}){break};Start-Sleep -Milliseconds 50}
+if(-not (${action === 'maximize' ? '[NubboWindow]::IsZoomed($h)' : action === 'minimize' ? '[NubboWindow]::IsIconic($h)' : '(-not [NubboWindow]::IsZoomed($h) -and -not [NubboWindow]::IsIconic($h))'})){throw 'Pencere komutu gönderildi ama istenen durum gözlenmedi.'}` : ''}
+$r=New-Object NubboWindow+RECT;[void][NubboWindow]::GetWindowRect($h,[ref]$r)
+$t=New-Object Text.StringBuilder 1024;[void][NubboWindow]::GetWindowText($h,$t,1024)
+@{hwnd=$h.ToInt64().ToString();pid=$targetPid;title=$t.ToString();action='${action}';maximized=[NubboWindow]::IsZoomed($h);minimized=[NubboWindow]::IsIconic($h);foreground=([NubboWindow]::GetForegroundWindow() -eq $h);rect=@{x=$r.Left;y=$r.Top;w=($r.Right-$r.Left);h=($r.Bottom-$r.Top)}}|ConvertTo-Json -Compress`
 }

@@ -1061,7 +1061,7 @@ function Invoke-Op([string]$op, $P) {
         try {
           $h = [IntPtr]$w.Current.NativeWindowHandle
           if ($h -ne [IntPtr]::Zero -and ([XpNative]::IsCloaked($h) -or -not [XpNative]::IsWindowVisible($h))) { continue }
-          [void]$out.Add([pscustomobject]@{ title = [string]$w.Current.Name; handle = [string]$w.Current.NativeWindowHandle })
+          [void]$out.Add([pscustomobject]@{ title = [string]$w.Current.Name; handle = [string]$w.Current.NativeWindowHandle; pid = [int]$w.Current.ProcessId })
         } catch {}
       }
       return , $out

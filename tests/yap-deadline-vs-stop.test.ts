@@ -18,12 +18,12 @@ describe('U08: Yap süre sınırı ≠ kullanıcı durdurması', () => {
       shouldStop: () => false, log: () => {},
       makeExecute: () => async () => { tools++; return { ok: true, outcome: 'tamam', message: 'ok' } },
       turn: async ({ shouldStop }) => {
-        vi.setSystemTime(Date.now() + 999_999)
+        await vi.advanceTimersByTimeAsync(999_999)
         expect(shouldStop()).toBe(false)
         return ++turn === 1 ? cevap([aracCagrisi('screen_read', {})]) : cevap([aracCagrisi('task_complete', { summary: 'done' })])
       },
     })).toBe(true)
-    expect(tools).toBe(1)
+    expect(tools).toBe(2)
   })
 
   it('gerçek kullanıcı durdurması StoppedError olarak kalır', async () => {
@@ -54,7 +54,7 @@ describe('U08: Yap süre sınırı ≠ kullanıcı durdurması', () => {
   })
 })
 
-it('Stop during model waiting still cancels Yap before any tool executes', async () => {
+it('Stop during model waiting cancels before any action; the initial observation is read-only', async () => {
   vi.useFakeTimers(); vi.setSystemTime(0)
   let stop = false
   const execute = vi.fn(async () => ({ ok: true, outcome: 'tamam' as const, message: 'ok' }))
@@ -62,7 +62,7 @@ it('Stop during model waiting still cancels Yap before any tool executes', async
     shouldStop: () => stop, log: () => {}, makeExecute: () => execute,
     turn: async ({ shouldStop }) => { vi.setSystemTime(999_999); stop = true; expect(shouldStop()).toBe(true); throw new StoppedError() },
   })).rejects.toBeInstanceOf(StoppedError)
-  expect(execute).not.toHaveBeenCalled()
+  expect(execute).toHaveBeenCalledExactlyOnceWith('screen.read', {})
 })
 
 it('deadline çalışan araca ulaşır ve sonraki araç başlatılmaz', async () => {
@@ -74,7 +74,7 @@ it('deadline çalışan araca ulaşır ve sonraki araç başlatılmaz', async ()
     shouldStop: () => false, log: () => {},
     makeExecute: stop => async () => {
       calls++
-      vi.setSystemTime(10_000)
+      await vi.advanceTimersByTimeAsync(10_000)
       expect(stop()).toBe(true)
       throw new StoppedError()
     },

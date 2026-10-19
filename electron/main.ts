@@ -1,3 +1,4 @@
+import { yapProgressText, type YapProgress } from './yap-context'
 import { HudWindowController } from './hud-window'
 import { assertRunStructure, structureSummary } from './run-structure'
 import { contextOf, findPlace } from './tool-context'
@@ -1083,10 +1084,14 @@ async function runFlow(
         if (opts?.fast || opts?.debug) throw new Error('Yap model gerektirir; hızlı/hata ayıklama koşusunda çalıştırılamaz.')
         const settings = getSettings()
         pushMethod('Yap')
+        let yapState: YapProgress | undefined
+        const showYap = () => { if (yapState && running) pushMethod(yapProgressText(yapState)) }
+        const yapProgressTimer = setInterval(showYap, 1000)
         try {
-          return await runYap(node, { nodeId: node.id, vars, packageContext: contextOf(graph, node.id), next: ahead.next, then: ahead.then }, {
+          return await runYap(node, { nodeId: node.id, vars }, {
             system: promptOf(settings.llmPrompts, 'yap'),
             shouldStop: () => stopRequested, log,
+            progress: state => { yapState = state; showYap() },
             makeExecute: shouldStop => {
               recoveryAbort = shouldStop
               if (!recoveryToolContext) throw new Error('Yap araçları hazır değil.')
@@ -1102,7 +1107,7 @@ async function runFlow(
         } catch (error) {
           if (stopRequested || error instanceof StoppedError) throw error
           throw error
-        } finally { recoveryAbort = () => false; pushMethod('') }
+        } finally { clearInterval(yapProgressTimer); recoveryAbort = () => false; pushMethod('') }
       },
       recover: async (request: import('./runner').RecoveryRequest) => {
         const settings = recoverySettings(getSettings().recovery)

@@ -777,7 +777,18 @@ function Invoke-Scan($P) {
   if ($P.fresh -eq $true) { $fresh = $true }
   $win = $null
   $missing = ''
-  if ($P.strictWindow -and $P.windowTitle) {
+  if ($P.windowHandle) {
+    $handle = [string]$P.windowHandle
+    if ($handle -notmatch '^[1-9][0-9]*$' -or [long]$P.windowPid -le 0) { throw 'Geçerli HWND ve PID gerekli.' }
+    $wins = @(Get-TopWindows ([int]$P.ownPid) | Where-Object {
+      (Test-UsableWindow $_) -and ([string]$_.Current.NativeWindowHandle -eq $handle) -and ([int]$_.Current.ProcessId -eq [int]$P.windowPid)
+    })
+    if ($wins.Count -ne 1) {
+      return [pscustomobject]@{ area = @{x=0;y=0;w=0;h=0}; items=@(); ocr=$false; uiaCount=0; ocrCount=0; image=$null; window=''; missingWindow=('HWND ' + $handle); windowHandle=''; windowPid=0 }
+    }
+    $win = $wins[0]
+    if ($P.readOnly -ne $true) { Enter-Window $win; Start-Sleep -Milliseconds 150 }
+  } elseif ($P.strictWindow -and $P.windowTitle) {
     $title = ([string]$P.windowTitle).Trim()
     $wins = @(Get-TopWindows ([int]$P.ownPid) | Where-Object {
       (Test-UsableWindow $_) -and $(if ($P.strictWindow -eq 'exact') {
@@ -793,7 +804,7 @@ function Invoke-Scan($P) {
   }
   # A fresh scan ignores the pinned target window and does not steal focus,
   # so a dialog or page that just appeared is part of the tree and the OCR.
-  if (-not $P.strictWindow -and -not $fresh -and $P.windowTitle) {
+  if (-not $P.windowHandle -and -not $P.strictWindow -and -not $fresh -and $P.windowTitle) {
     $win = Find-WindowOrNull ([string]$P.windowTitle)
     if ($null -eq $win) {
       $missing = [string]$P.windowTitle
@@ -880,6 +891,8 @@ function Invoke-Scan($P) {
       image  = $img
       cursor = $markedCursor
       window = $(if ($null -ne $win) { [string]$win.Current.Name } else { '' })
+      windowHandle = $(if ($null -ne $win) { [string]$win.Current.NativeWindowHandle } else { '' })
+      windowPid = $(if ($null -ne $win) { [int]$win.Current.ProcessId } else { 0 })
       missingWindow = $missing
       sig    = $sig
       uiaSkipped = $script:UiaSkipped

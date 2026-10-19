@@ -39,13 +39,13 @@ describe('Yap task agent', () => {
   it('requires a new screenshot after input, reports tool errors and forbids injected tools', async () => {
     const h = harness([call('screen_read'), call('act_key', { keys: 'enter' }), call('task_complete', { summary: 'done' }), call('step_run', { nodeId: 'other' }), call('screen_read'), call('task_complete', { summary: 'done' })])
     await runYap({ ...createNode('ai',0,0), prompt: 'do' }, {}, h.deps)
-    expect(h.executed).toEqual(['screen.read','act.key','screen.read'])
-    expect(h.transcripts.at(-1)).toContain('Bu araç Yap ajanına açık değil')
+    expect(h.executed).toEqual(['screen.read','screen.read','act.key','screen.read'])
+    expect(h.transcripts.some(text => text.includes('Bu araç Yap ajanına açık değil'))).toBe(true)
   })
   it('stops on user cancellation and fails at budget instead of pretending success', async () => {
-    const budget = harness([call('act_key', { keys: 'enter' })])
+    const budget = harness([call('act_key', { keys: 'enter' }), call('act_key', { keys: 'escape' })])
     await expect(runYap({ ...createNode('ai',0,0), maxActions: 1 }, {}, budget.deps)).rejects.toThrow('sınırında')
-    expect(budget.executed).toEqual(['act.key'])
+    expect(budget.executed).toEqual(['screen.read','act.key'])
     const stop = harness([call('screen_read')])
     await expect(runYap(createNode('ai',0,0), {}, { ...stop.deps, shouldStop: () => true })).rejects.toBeInstanceOf(StoppedError)
     expect(stop.executed).toEqual([])
@@ -53,7 +53,7 @@ describe('Yap task agent', () => {
   it('does not interpret malformed parameters as desktop actions', async () => {
     const h = harness([call('act_key', { keys: 5 }), call('screen_read'), call('task_complete', { summary: 'done' })])
     await runYap(createNode('ai',0,0), {}, h.deps)
-    expect(h.executed).toEqual(['screen.read'])
+    expect(h.executed).toEqual(['screen.read','screen.read'])
   })
 })
 

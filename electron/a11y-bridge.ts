@@ -293,7 +293,7 @@ const DEMO_ITEMS: ScreenItem[] = [
   { id: 5, text: 'Opera', type: 'Text', src: 'ocr', x: 40, y: 1040, w: 44, h: 16 },
 ]
 
-export async function listWindows(): Promise<{ title: string; handle: string }[]> {
+export async function listWindows(): Promise<{ title: string; handle: string; pid?: number }[]> {
   if (!IS_WIN) return [{ title: 'Demo Uygulama', handle: '0' }]
   return worker.call('listWindows', { ownPid: process.pid })
 }
@@ -320,6 +320,8 @@ async function scanImpl(opts: {
   signal?: AbortSignal
   windowTitle?: string
   strictWindow?: 'exact' | 'contains'
+  windowHandle?: string
+  windowPid?: number
   image?: 'none' | 'plain' | 'marked'
   maxImageW?: number
   /** Optional height bound for aspect-preserving model screenshots. Never upscales. */
@@ -364,6 +366,8 @@ async function scanImpl(opts: {
     withHud({
       windowTitle: opts.windowTitle || '',
       strictWindow: opts.strictWindow || '',
+      windowHandle: opts.windowHandle || '',
+      windowPid: opts.windowPid || 0,
       image: opts.image ?? 'none',
       maxImageW: opts.maxImageW ?? 1400,
       maxImageH: opts.maxImageH ?? 0,

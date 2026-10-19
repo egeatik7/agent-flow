@@ -9,7 +9,7 @@ it('Yap exhausts model alternatives, refreshes only its observation, then asks a
  const execute=vi.fn(async()=>({ok:true,outcome:'tamam' as const,message:'fresh-read',data:{image:{data:'AA==',mime:'image/png'}}}))
  const pending=runYap({...createNode('ai',0,0),prompt:'fixture'}, {},{shouldStop:()=>false,log:()=>{},makeExecute:()=>execute,turn:args=>recoveryToolTurn({...args,stage:'yap',models:['A','B'],apiKey:'fixture'})})
  await vi.advanceTimersByTimeAsync(3100);expect(await pending).toBe(true)
- expect(bodies.map(body=>body.model)).toEqual(['A','B','A']);expect(execute).toHaveBeenCalledExactlyOnceWith('screen.read',{})
+ expect(bodies.map(body=>body.model)).toEqual(['A','B','A']);expect(execute.mock.calls).toEqual([['screen.read',{}],['screen.read',{}]])
  expect(JSON.stringify(bodies[2].messages)).toContain('fresh-read')
 })
 it('Yap hands a give-up to Recovery after a valid current observation',async()=>{
@@ -36,5 +36,5 @@ it('Yap give-up after input reaches Recovery with uncertainty preserved and neve
  await expect(runGraph({nodes:[node],edges:[]},{shouldStop:()=>false,log:()=>{},step:()=>{},click:noop,type:noop,key:noop,exists:async()=>false,recover,
   initiative:async()=>runYap(node,{}, {shouldStop:()=>false,log:()=>{},makeExecute:()=>execute,turn:async()=>answers.shift()!})
  },{maxSteps:10,stepDelayMs:0})).resolves.toMatchObject({failed:0})
- expect(recover).toHaveBeenCalledOnce();expect(execute).toHaveBeenCalledTimes(3)
+ expect(recover).toHaveBeenCalledOnce();expect(execute).toHaveBeenCalledTimes(4)
 })

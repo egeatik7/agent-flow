@@ -27,6 +27,8 @@ export type ScanResult = {
   ocrCount: number
   image: { data: string; w: number; h: number; mime?: string } | null
   window: string
+  windowHandle?: string
+  windowPid?: number
   /** Set when the configured target window was not open and the whole screen was read instead. */
   missingWindow?: string
   /** 32x18 grayscale thumbnail (base64) when requested. */

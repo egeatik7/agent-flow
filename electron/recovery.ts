@@ -124,7 +124,7 @@ Hedefi alternatif hareketlerle gerçekleştirdiysen son hareketten sonra screen_
 Sırf metinle 'tamam' demek akışı ilerletmez. Sonunda recovery_retry, recovery_complete veya recovery_stop çağır; olası nedeni kesin kanıttan ayır ve Türkçe raporla.
 ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
     task: settings.task || 'Mevcut tuvalde kullanıcının tanımladığı akışı tamamla.',
-    failure: { node: request.live, error: request.error.message, stepNo: request.stepNo, ahead: request.ahead, vars: request.vars, context },
+    failure: { node: request.live, error: request.error.message, sentYapActions: (request.error as Error & { yapActions?: unknown }).yapActions, stepNo: request.stepNo, ahead: request.ahead, vars: request.vars, context },
     allowedNodeIds: settings.allowNodes ? [...allowedNodes] : [], recentLog: deps.recentLog, previousRecoveryReports: deps.previousReports ?? [],
     canvasJson: JSON.parse(recoveryGraphJson(request.graph)),
   }, (key, value) => key === 'icon' || key === 'patch' || key === 'sig' ? undefined : value) }]

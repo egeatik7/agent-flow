@@ -64,6 +64,7 @@ describe('recovery pointer through the real normal agent input path', () => {
     const denied = harness(false)
     await expect(denied.execute('act.clickCurrent', {})).rejects.toThrow('kapalı')
     const h = harness()
+    await h.execute('screen.read', {})
     fixture.cursorRead.mockImplementationOnce(async () => { h.stop(); return { x: 100, y: 200 } })
     await expect(h.execute('act.clickCurrent', { mode: 'double' })).rejects.toBeInstanceOf(StoppedError)
     expect(fixture.click).not.toHaveBeenCalled()
