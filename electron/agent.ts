@@ -1313,7 +1313,7 @@ export function createAgent(ctx: AgentContext) {
       progress.enter = 'sent'
     }
     if (enter) lastClickPoint = undefined
-    return false
+    return typed
   }
 
   // ---------- safety around input ----------
@@ -1470,10 +1470,21 @@ export function createAgent(ctx: AgentContext) {
         progress.enter = 'sent'
         return
       }
+      let typed: bridge.TypeResult | null = null
       if (progress.text !== 'sent') {
-        await typeDirect(text, enter, clear, progress.focusPoint ?? lastClickPoint, progress)
+        typed = await typeDirect(text, enter, clear, progress.focusPoint ?? lastClickPoint, progress)
       }
-      if (t) saveMemo(node, t.memo)
+      if (t) {
+        // §17: hafızaya yalnız KANITLI hedef yazılır. Yazma yolunda kanıt, alanın geri okunmasıdır;
+        // okunamıyorsa (klasik kutu) kullanıcının açıkça seçtiği locator varsa yazılır, yoksa yazılmaz.
+        const readback = typed?.value
+        const proven = typed
+          ? (String(text).trim()
+            ? typeof readback === 'string' && norm(readback) === norm(String(text).trim())
+            : typed.cleared === true)
+          : false
+        if (proven || node.locator) saveMemo(node, t.memo)
+      }
       } catch (e) {
         stampType(progress, e)
       }

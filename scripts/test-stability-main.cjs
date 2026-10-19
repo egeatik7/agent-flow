@@ -162,7 +162,10 @@ test('store or run preparation failure cannot leave the agent permanently busy',
 });
 
 test('failed cleanup still resets the run state; existing concurrent-run guard remains', async () => {
-  const h = harness({ globalShortcut: { register: () => {}, unregister: () => { throw new Error('cleanup failed'); } } });
+  // Temizlik hatası, çalışma durumu SIFIRLANDIKTAN SONRA çalışan bir adımda üretilir (1.9.168:
+  // Durdur kısayolu artık koşuya değil uygulama ömrüne bağlı; eski test register/unregister'ı
+  // kullanıyordu ve bu kanca kalkınca senaryo hiç tetiklenmiyordu).
+  const h = harness({ hideHudSoon: () => { throw new Error('cleanup failed') } });
   await assert.rejects(h.run({ nodes: [], edges: [] }), /cleanup failed/);
   assert.equal(h.context.running, false);
   h.context.running = true;

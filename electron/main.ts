@@ -518,8 +518,9 @@ function createWindow() {
   hardenContents(mainWindow.webContents, 'Ana pencere')
 
   reportBoot(88, 'Arayüz yükleniyor…')
-  if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  // Yükleme reddi sessiz kalmasın: dist/index.html yoksa/Vite kapalıysa boş pencere "Hazır" açılıyordu.
+  const loading = process.env.VITE_DEV_SERVER_URL ? mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL) : mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  void loading.catch((error: Error) => { log('error', `Arayüz yüklenemedi: ${error.message}`); reportBoot(100, 'Arayüz yüklenemedi') })
   // The page writes its own title while loading, so the window's title is set once it has: a test
   // instance has to be unmistakable in the taskbar too, not only inside its own title bar.
   mainWindow.webContents.once('did-finish-load', () => {
@@ -645,7 +646,7 @@ function createHud() {
   }, 1000)
   const dev = process.env.VITE_DEV_SERVER_URL
   if (dev) void hudWindow.loadURL(`${dev}${dev.includes('?') ? '&' : '?'}hud=1`)
-  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } })
+  else void hudWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { hud: '1' } }).catch((error: Error) => log('warn', `HUD yüklenemedi: ${error.message}`))
   const w = hudWindow
   hudWindow.on('closed', () => {
     if (hudKeepOnTop) { clearInterval(hudKeepOnTop); hudKeepOnTop = null }
@@ -1108,13 +1109,6 @@ async function runFlow(
       runLog = ''
     }
     agent.beginRun(shotDir)
-    if (!globalShortcut.register(STOP_HOTKEY, () => {
-      if (running) noteUserStop()
-      stopRequested = true
-    })) {
-      // Kısayol başka uygulamada kayıtlıysa sessiz kalma: pencere gizliyken tek durdurma yolu budur.
-      log('warn', `Durdur kısayolu (${STOP_HOTKEY}) kaydedilemedi; başka bir uygulama kullanıyor olabilir. Durdurmak için Nubbo penceresine dön.`)
-    }
     awake = powerSaveBlocker.start('prevent-display-sleep')
     if (runLog) log('info', `Günlük dosyası: ${runLog}`)
     // Koşu başlangıcı: bellek ölçümünün son örneği (ve ölçüm başladıysa ilk kayıt) günlüğe girer.
@@ -1292,7 +1286,6 @@ async function runFlow(
     derivedRun = false
     fastRun = false
     runLog = ''
-    globalShortcut.unregister(STOP_HOTKEY)
     if (awake !== undefined && powerSaveBlocker.isStarted(awake)) powerSaveBlocker.stop(awake)
     hideHudSoon()
     if (hidden) showSelf()
@@ -1335,6 +1328,14 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   applyContentSecurityPolicy()
   createWindow()
   createHud()
+  // Durdur kısayolu UYGULAMA ÖMRÜ boyunca kayıtlıdır: tek eylem sırasında pencere gizleniyor ve
+  // koşu dışında kayıtlı olmadığı için Ctrl+Shift+Q çalışmıyordu (yalnız zaman aşımı kalıyordu).
+  if (!globalShortcut.register(STOP_HOTKEY, () => {
+    if (running || probing()) noteUserStop()
+    stopRequested = true
+  })) {
+    log('warn', `Durdur kısayolu (${STOP_HOTKEY}) kaydedilemedi; başka bir uygulama kullanıyor olabilir. Durdurmak için Nubbo penceresine dön.`)
+  }
   screen.on('display-metrics-changed', placeHud)
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())

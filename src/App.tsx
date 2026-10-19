@@ -462,7 +462,10 @@ export default function App() {
     const offGraph = api.onAgentGraph?.((payload) => {
       const p = payload as { tabId: string; graph: AgentGraph; branchId?: string }
       // Yanıt istek kimliğini taşır: gecikmiş bir cevap başka bir merge isteğini onaylamasın.
-      void (agentGraphHandler.current?.(p) ?? Promise.resolve({ ok: false, error: 'Tuval hazır değil.' })).then(answer => api.replyAgentGraph?.({ ...answer, branchId: p.branchId }))
+      void (agentGraphHandler.current?.(p) ?? Promise.resolve({ ok: false, error: 'Tuval hazır değil.' }))
+        .then(answer => api.replyAgentGraph?.({ ...answer, branchId: p.branchId }))
+        // Handler fırlatırsa main 20 sn bekleyip "uygulanmış olabilir" derdi; gerçek hatayı bildir.
+        .catch((error: unknown) => api.replyAgentGraph?.({ ok: false, error: errText(error), branchId: p.branchId }))
     })
     return () => {
       offLog()

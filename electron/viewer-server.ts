@@ -27,7 +27,7 @@ export async function startViewerServer(state:ViewerState,directory:string,token
   // tablet izleyicisini kapıdan çeviremesin (Origin yoksa yerel istemci sayılır).
   const origin=req.headers.origin
   if(origin&&!/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(String(origin))){socket.destroy();return}
-  if(req.url!=='/viewer/events'||sockets.clients.size>=12){socket.destroy();return}
+  if(req.url!=='/viewer/events'||sockets.clients.size>=64){socket.destroy();return}
   sockets.handleUpgrade(req,socket,head,ws=>sockets.emit('connection',ws))
  })
  sockets.on('connection',ws=>{
@@ -38,6 +38,9 @@ export async function startViewerServer(state:ViewerState,directory:string,token
    const got=Buffer.from(typeof p.token==='string'?p.token:''),expected=Buffer.from(token)
    if(p.type!=='subscribe'||p.protocol!==1||got.length!==expected.length||!timingSafeEqual(got,expected)){ws.close(1008,'Eşleştirme veya sürüm geçersiz');return}
    clearTimeout(timeout)
+   // 12 sinirini JETONDAN SONRA uygula: kimliksiz soketler gercek izleyiciyi kapidan ceviremez.
+   const authed=[...sockets.clients].filter(client=>(client as WebSocket&{authenticated?:boolean}).authenticated).length
+   if(authed>=12){ws.close(1013,'İzleyici sınırı (12)');return}
    ;(ws as WebSocket&{authenticated?:boolean}).authenticated=true
    ws.send(JSON.stringify({type:'snapshot',state:state.snapshot()}))
    off=state.subscribe(message=>{if(ws.readyState!==WebSocket.OPEN)return;if(ws.bufferedAmount>2*1024*1024){ws.close(1013,'Yeniden bağlan');return}ws.send(JSON.stringify(message))})

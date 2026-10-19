@@ -7,6 +7,10 @@ import type { CheckpointDetail, CheckpointInfo, CheckpointSnapshot } from './che
 
 const json = async <T>(file: string): Promise<T> => JSON.parse(await fs.promises.readFile(file, 'utf8'))
 
+/** Yazım kesintisi işareti: checkpoint geçmişinin yanında durur, `detail()` issues'a ekler. */
+export const UNRELIABLE_NAME = '.resume-unreliable.json'
+const unreliableFile = (dir: string) => path.join(dir, UNRELIABLE_NAME)
+
 /**
  * Windows'ta taze dosyayı Defender/indeksleyici kısa süre tutabiliyor; rename EPERM/EBUSY veriyor.
  * ZIP kütüphanesinde ölçülen aynı sınıf hata (bkz. zip-library-storage.ts). Sınırlı ve artan
@@ -112,7 +116,11 @@ export class Checkpoints {
         await write(this.file(cp.id), this.metaOf(cp))
       }
     }
-    catch (e) { this.outputs.retryPersist(dirty); throw e }
+    catch (e) { this.outputs.retryPersist(dirty); await this.markUnreliable((e as Error).message); throw e }
+  }
+  /** Yazım kesintiye uğradıysa "hatadan devam güvenilir değil" işareti bırakılır (panelde görünür). */
+  async markUnreliable(reason: string): Promise<void> {
+    try { await fs.promises.writeFile(unreliableFile(this.dir), JSON.stringify({ at: Date.now(), reason }), 'utf8') } catch { /* tanılama */ }
   }
   private appended = new Map<string, number>()
   private outputFile(id: string) {
@@ -145,6 +153,8 @@ export class Checkpoints {
   }
   async begin(runId: string, canvasId: string, canvasName: string, parentId?: string) {
     if (this.active) throw new Error('Checkpoint izlemesi zaten çalışıyor.')
+    // Yeni koşu temiz başlar: önceki koşunun "güvenilmez" işareti kalkar.
+    try { await fs.promises.rm(unreliableFile(this.dir), { force: true }) } catch { /* yok */ }
     // Kök yoksa HATA ATMAZ: izlenecek klasör bulunamaması otomasyonu durdurmaz (bkz. KULLANIM).
     await this.outputs.start()
     this.active = { runId, canvasId, canvasName, ordinal: 0, parentId }
@@ -225,6 +235,12 @@ export class Checkpoints {
   async detail(id: string): Promise<CheckpointDetail> {
     const cp = await this.read<CheckpointDetail>(this.file(id))
     if (cp.status === 'running' && cp.id !== this.current?.id) cp.status = 'interrupted'
+    // Bu koşuda checkpoint yazımı kesintiye uğradıysa "buradan devam" güvenilir değildir; söyle.
+    try {
+      const raw = await fs.promises.readFile(unreliableFile(this.dir), 'utf8')
+      const info = JSON.parse(raw) as { at?: number; reason?: string }
+      cp.issues = [`Checkpoint yazımı bu koşuda kesintiye uğradı (${info.reason ?? 'bilinmeyen hata'}); buradan devam ederken öğeler yeniden çalışabilir.`, ...cp.issues]
+    } catch { /* işaret yok */ }
     // Yeni biçim: çıktılar NDJSON'da. Eski checkpoint'lerde dizi hâlâ JSON içindedir.
     const appended = await this.appendedOutputs(id)
     if (appended.length) cp.outputs = appended
