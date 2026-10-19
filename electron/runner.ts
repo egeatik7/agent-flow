@@ -469,6 +469,11 @@ export async function runGraph(
     // metni, uyumsuz hedef, "artık desteklenmiyor" ya da paket iç grafının hatası. Yeniden denemek
     // paketin tamamını (tıklama/yazma dâhil) yeniden oynatır ve hatayı gizler; bu yüzden tur
     // döngüsüne hiç girilmez (CLAUDE.md §19). Gözlem/okuyucu hataları ise yeniden denenebilir kalır.
+    // Koşul özel: ham okuyucu/model hatası (ör. eksik API anahtarı, worker çökmesi) tek bir
+    // "karar verilemedi" sinyali değildir; yine de sonsuz 3 sn'lik tura düşmemeli. Sınırlı sayıda
+    // taze gözlemden sonra hata karar sahibine (runGraph) verilir. Sınıflandırılmış
+    // ConditionUndecidedError buraya hiç gelmez (execStep onu kendi yolunda ele alır).
+    let conditionRounds = 0
     const outcome = repeatMethodCycle(async () => {
       let error: unknown
       if (blocked !== undefined) error = blocked
@@ -515,8 +520,8 @@ export async function runGraph(
     }, {
       check: () => { if (ex.shouldStop()) throw new StoppedError() },
       wait: () => interruptibleSleep(3000, ex.shouldStop),
-      terminal: (error) => isFatal(error) || error instanceof PermanentStepError,
-      retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`),
+      terminal: (error) => isFatal(error) || error instanceof PermanentStepError || (node.kind === 'condition' && conditionRounds >= 3),
+      retry: (error, round) => { if (node.kind === 'condition') conditionRounds = round; ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`) },
     })
     try {
       const port = await outcome
@@ -615,6 +620,13 @@ export async function runGraph(
           throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” yok; “yok” çıkışı bağlı değil ve kurtarma ajanı da doğrulayamadı. Akış durduruldu.`)
         }
       }
+      // Kutu/paket İÇİNDE belirsiz koşul 'yok' sayılıp sessizce tur tamamlanmış sayılamaz:
+      // 'yok' dalı yoksa bu tur bir hatadır (öğe hatası olarak sayılır, sıradaki öğeye geçilir).
+      if (node.kind === 'condition' && port === 'false' && (scope || opts.nested) && pendingCondition?.nodeId === node.id && pendingCondition.undecided) {
+        const pending = pendingCondition
+        pendingCondition = undefined
+        throw new PermanentStepError(`“${node.title}”: koşul “${pending.text}” karar veremedi ve kutu içinde “yok” dalı yok; bu tur hata sayıldı.`)
+      }
       observeExit(node, port, scope)
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)
       if (!edge) {
@@ -701,6 +713,9 @@ export async function runGraph(
         check: () => { if (ex.shouldStop()) throw new StoppedError() },
         wait: () => interruptibleSleep(3000, ex.shouldStop),
         retry: (error, round) => ex.log('warn', `DUGUM-TEKRAR “${loop.title}” tur=${round}: ${methodErrorText(error)}`),
+        // Eksik klasör KALICI bir hatadır: sınırlı denemeden sonra hata yukarı verilir; kutu
+        // sonsuza kadar aynı yerde beklemez (öğe hatası olarak sayılır, sıradaki öğeye geçilir).
+        maxRounds: 3,
       })
     }
     const keys = savedLoop?.keys ?? fromFolder ?? loopKeys(loop)

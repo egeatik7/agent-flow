@@ -5,7 +5,7 @@ import type { AppSettings } from '../electron/graph-types'
 
 // Modelin canlı tuş seçimi: kapatma/silme kombinasyonları engellenir (key-guard artık bağlı).
 describe('model tuş koruması', () => {
-  it.each(['alt+f4', 'ALT+F4', ['alt', 'F4'] as unknown as string, 'ctrl+w', 'ctrl+q', 'shift+delete', 'delete', '%{F4}'])('%s engellenir', (keys) => {
+  it.each(['alt+f4', 'ALT+F4', ['alt', 'F4'] as unknown as string, 'ctrl+w', 'ctrl+q', 'shift+delete', 'delete', '%{F4}', '^w', '^q', '^+{w}', '^%{F4}', '{ESC}{DELETE}', '{DELETE}'])('%s engellenir', (keys) => {
     expect(() => assertModelKeysAllowed(keys as string)).toThrow(/engellendi/)
   })
 

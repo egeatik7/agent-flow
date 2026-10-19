@@ -144,7 +144,7 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
           // Birim: tahmin BAYT, pencere TOKEN. Kapı token karşılığıyla kıyaslanır (eskiden bayt
           // doğrudan token penceresiyle kıyaslanıyor ve istek hiç gönderilmiyordu).
           const budget = yapBudgetCheck(estimate, window ?? 0)
-          if (window && !budget.ok) throw new Error(`Yap giriş bütçesi: ~${budget.tokens} token (${estimate} bayt) + cevap payı 2048, ölçülen/yapılandırılmış pencere ${window}. İstek gönderilmedi.`)
+          if (window && !budget.ok) throw new Error(`Yap giriş bütçesi: ~${budget.tokens} token (${estimate} bayt) + cevap payı 1024, ölçülen/yapılandırılmış pencere ${window}. İstek gönderilmedi.`)
         }
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),

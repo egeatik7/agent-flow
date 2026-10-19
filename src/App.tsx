@@ -208,7 +208,7 @@ export default function App() {
   const [saveQuestion, setSaveQuestion] = useState<{ name: string; kind: 'canvas' } | null>(null)
   const [nameQuestion, setNameQuestion] = useState<{ kind: 'canvas'; tabId: string; initial: string } | null>(null)
   const saveAnswer = useRef<((answer: SaveDecision) => void) | null>(null)
-  const agentGraphHandler = useRef<((p: { tabId: string; graph: AgentGraph }) => Promise<{ ok: boolean; error?: string }>) | null>(null)
+  const agentGraphHandler = useRef<((p: { tabId: string; graph: AgentGraph }) => Promise<{ ok: boolean; error?: string; ambiguous?: boolean }>) | null>(null)
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const runIdle = useRef<(() => void) | null>(null)
@@ -460,8 +460,9 @@ export default function App() {
       patchNode(p.id, p.patch)
     })
     const offGraph = api.onAgentGraph?.((payload) => {
-      const p = payload as { tabId: string; graph: AgentGraph }
-      void (agentGraphHandler.current?.(p) ?? Promise.resolve({ ok: false, error: 'Tuval hazır değil.' })).then(answer => api.replyAgentGraph?.(answer))
+      const p = payload as { tabId: string; graph: AgentGraph; branchId?: string }
+      // Yanıt istek kimliğini taşır: gecikmiş bir cevap başka bir merge isteğini onaylamasın.
+      void (agentGraphHandler.current?.(p) ?? Promise.resolve({ ok: false, error: 'Tuval hazır değil.' })).then(answer => api.replyAgentGraph?.({ ...answer, branchId: p.branchId }))
     })
     return () => {
       offLog()
@@ -728,7 +729,8 @@ export default function App() {
     setGraph(projected.view)
     setStack(projected.stack)
     const saved = await saveCurrentCanvas()
-    return saved ? { ok: true } : { ok: false, error: 'Tuval ZIP’e kaydedilemedi.' }
+    // Tuval BELLEKTE değişti; ZIP yazımı başarısız olsa da "hiçbir şey yazılmadı" denemez.
+    return saved ? { ok: true } : { ok: false, ambiguous: true, error: 'Tuval bellekte değişti ama ZIP’e kaydedilemedi; değişiklik uygulanmış olabilir.' }
   }
   const saveAllWorkspace = async () => {
     if (runningRef.current || libraryBusyRef.current) return false

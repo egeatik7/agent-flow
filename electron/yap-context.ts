@@ -145,8 +145,10 @@ export function yapInputEstimate(messages: ToolMessage[], tools: ModelTool[]): n
  * yapıyordu: ≤8192 pencereli yerel modelde istek hiç gönderilmiyordu (birim hatası). Burada bayt,
  * muhafazakâr 2 bayt/token varsayımıyla token'a çevrilir.
  */
-export function yapBudgetCheck(estimateBytes: number, windowTokens: number, reserveTokens = 2048): { ok: boolean; tokens: number; window: number } {
-  const tokens = Math.ceil(Math.max(0, estimateBytes) / 2)
+export function yapBudgetCheck(estimateBytes: number, windowTokens: number, reserveTokens = 1024): { ok: boolean; tokens: number; window: number } {
+  // JSON/araç şeması ağırlıklı içerik ~3-4 bayt/token; Türkçe metin ~2. Muhafazakâr ama aşırı
+  // değil: 3 bayt/token. Eski /2 + 2048 sığan istekleri de reddediyordu (ön-engel, §19).
+  const tokens = Math.ceil(Math.max(0, estimateBytes) / 3)
   return { ok: tokens + reserveTokens <= windowTokens, tokens, window: windowTokens }
 }
 

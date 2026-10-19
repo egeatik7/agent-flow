@@ -362,7 +362,7 @@ function log(level: LogLevel, message: string, forceHud = false) {
   // A sent action whose reaction was not clear is not a failure - the engine says so and carries
   // on - but it is not a confirmed success either. Counting those lines is what keeps a clean
   // "0 hata" from being read as "everything happened", which it once was not.
-  if (/Tepki net değil|hedefi göstermedi|Akış bozulmadan sıradaki adım|doğrulanmış sayılmıyor|değeri okunamadı/.test(message)) noteReview(message)
+  if (/Tepki net değil|tarama yapılamadı|tepki doğrulanamadı|hedefi göstermedi|Akış bozulmadan sıradaki adım|doğrulanmış sayılmıyor|değeri okunamadı/.test(message)) noteReview(message)
   send('agent:log', { level, message })
   const held = !forceHud && Date.now() < voiceHoldUntil && level !== 'error' && level !== 'warn'
   if (!held) pushHud(level, message)
@@ -467,7 +467,14 @@ function applyMergeInWindow(payload: { tabId: string; graph: AgentGraph; branchI
   const win = mainWindow
   if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'Pencere açık değil; tuval değiştirilmedi.' })
   return new Promise((resolve) => {
-    const onDone = (_event: unknown, answer: { ok: boolean; error?: string }) => { clearTimeout(timer); resolve(answer) }
+    // Yanıt İSTEK KİMLİĞİYLE eşleşir: gecikmiş bir cevap başka bir merge isteğini onaylayamaz.
+    const onDone = (_event: unknown, answer: { ok: boolean; error?: string; ambiguous?: boolean; branchId?: string }) => {
+      if (payload.branchId && answer?.branchId && answer.branchId !== payload.branchId) return
+      clearTimeout(timer)
+      ipcMain.removeListener('agent:graph-applied', onDone)
+      const { branchId: _id, ...rest } = answer ?? { ok: false }
+      resolve(rest)
+    }
     const timer = setTimeout(() => { ipcMain.removeListener('agent:graph-applied', onDone); resolve({ ok: false, ambiguous: true, error: 'Pencere 20 sn içinde uygulamayı onaylamadı; tuval değişmiş olabilir.' }) }, 20000)
     ipcMain.once('agent:graph-applied', onDone)
     win.webContents.send('agent:graph', payload)

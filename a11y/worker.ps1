@@ -1214,21 +1214,24 @@ function Invoke-Op([string]$op, $P) {
         $ownPid = 0
         if ($P.ownPid) { $ownPid = [int]$P.ownPid }
         if ($atX -ne 0 -or $atY -ne 0) {
-          $focusNow = $null
-          try { $focusNow = Get-InputFocus } catch {}
-          if (-not (Test-TextLike $focusNow)) {
-            try {
-              $aday = @(Get-TypeChoices $ownPid $atX $atY | Where-Object { $_.clicked -or $_.related })
-              if ($aday.Count -eq 1) {
+          # Odak TÜRÜNE bakılmaz: başka bir yazı alanı odakta kalmış olsa bile tıklanan noktanın
+          # komşuluğundaki TEK alan hedeftir (eski guard dalının kuralı). Yalnız aday zaten
+          # odaktaysa dokunulmaz. §8: 'başka alanda odak kalmış olması yeni hedefi geçersiz kılmaz'.
+          try {
+            $aday = @(Get-TypeChoices $ownPid $atX $atY | Where-Object { $_.clicked -or $_.related })
+            if ($aday.Count -eq 1) {
+              $focusNow = $null
+              try { $focusNow = Get-InputFocus } catch {}
+              if (-not (Test-InputFocus $focusNow $aday[0].el)) {
                 if (Focus-Input $aday[0].el $null) {
                   $out.focusType = [string]$aday[0].type
                   $out.focusHwnd = [string][XpWin]::FocusHandle()
                   $out.where = [string]$aday[0].window
                 }
               }
-              $script:TypeChoiceCache.Clear()
-            } catch { }
-          }
+            }
+            $script:TypeChoiceCache.Clear()
+          } catch { }
         }
         $usePaste = $text.Length -gt 0 -and -not [XpText]::CanType($text)
         $oldClip = $null
@@ -1626,6 +1629,7 @@ while ($true) {
     $script:CurrentOp = $parts[1]
     $inputOp = @('keys','hotkey','typeText','clickAt','clickCurrentAt','drag','scroll') -contains $parts[1]
     $inputStarted = $false
+    $guardWarning = ''
     try {
       if ($inputOp) {
         Write-InputState 'before' $id $parts[1]
@@ -1636,9 +1640,16 @@ while ($true) {
       $data = Invoke-Op $parts[1] $P
     } finally {
       if ($inputStarted) {
+        # Eylem YAPILDIKTAN sonraki klavye temizliği hatası sonucu EZMEZ: eylem gönderilmişse
+        # 'gönderilmedi' demek koşuyu boşuna durduruyordu. Hata uyarı olarak eklenir; gerçek engel
+        # bir SONRAKİ isteğin Before() kapısında görünür.
         try { [XpKeyboardGuard]::After() }
-        finally { Write-InputState 'after' $id $parts[1] }
+        catch { $guardWarning = "KEYBOARD_GUARD_FAILED: $([string]$_.Exception.Message)" }
+        finally { try { Write-InputState 'after' $id $parts[1] } catch { } }
       }
+    }
+    if ($guardWarning) {
+      try { $data | Add-Member -NotePropertyName warning -NotePropertyValue $guardWarning -Force } catch { }
     }
     Send-Response $id ([pscustomobject]@{ ok = $true; data = $data })
   } catch {

@@ -1254,7 +1254,10 @@ const runFrom: ToolDef = {
         // different file now; continuing would quietly work on the wrong one. The record says which
         // item it was, so it is compared before anything starts.
         const member = (at as { members?: string[] }).members?.[0]
-        if (member && typeof box.item === 'string' && box.item) {
+        // Klasörden dolan kutuda tuvaldeki `items` bayattır (motor listeyi koşu anında EZER);
+        // karşılaştırma yalnız saf liste kutularında anlamlıdır. Kimlikle devam motorun denetiminde.
+        const folderFed = String((at as { folder?: string }).folder ?? '').trim() !== ''
+        if (member && !folderFed && typeof box.item === 'string' && box.item) {
           const now = contextOf(graph, member)?.loops?.find((l) => l.id === box.id)
           const problem = resumeItemMismatch(box, now?.item)
           if (problem) return failed(runFrom.name, problem)
@@ -1420,7 +1423,7 @@ async function runOneAction(name: string, spec: ActSpec, args: Args, ctx: ToolCo
     if (r.status === 'done') {
       // "Gönderildi" ile "oldu" arasındaki fark: moturun kendi uyarısı varsa bu adım doğrulanmış
       // sayılmaz. Sessizce "tamam" demek, ekranda hiçbir şey olmamışken başarı raporlamak olur.
-      const unclear = logs.some((l) => /Tepki net değil|Akış bozulmadan sıradaki adım|doğrulanmış sayılmıyor|değeri okunamadı/.test(l))
+      const unclear = logs.some((l) => /Tepki net değil|tarama yapılamadı|tepki doğrulanamadı|Akış bozulmadan sıradaki adım|doğrulanmış sayılmıyor|değeri okunamadı/.test(l))
       if (unclear) {
         const message = `${spec.title} gönderildi ama tepkisi net değil; ekranda beklenen sonuç doğrulanmadı, bakılmalı (${r.ms} ms). ${where}`
         ctx.log('warn', `Ajan · eylem · ${message}`)

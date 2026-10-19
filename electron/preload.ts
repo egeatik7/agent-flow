@@ -74,7 +74,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
   onAgentEdge: on('agent:edge'),
   onAgentPatch: on('agent:patch'),
   onAgentGraph: on('agent:graph'),
-  replyAgentGraph: (answer: { ok: boolean; error?: string }) => ipcRenderer.send('agent:graph-applied', answer),
+  replyAgentGraph: (answer: { ok: boolean; error?: string; ambiguous?: boolean; branchId?: string }) => ipcRenderer.send('agent:graph-applied', answer),
   onRecoveryReport: on('recovery:report'),
   onRecoveryStatus: on('recovery:status'),
   onHud: on('hud:status'),

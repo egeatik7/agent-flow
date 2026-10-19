@@ -51,7 +51,7 @@ import {
   type ReactionVerdict,
 } from './openrouter'
 import { localConfigured } from './openrouter'
-import { ConditionUndecidedError, interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
+import { ConditionUndecidedError, PermanentStepError, interruptibleSleep, StoppedError, type Executor, type StepAhead } from './runner'
 import { type Point } from './input-policy'
 import { rememberShot } from './shots'
 import type { TargetTrace, TargetTraceData, TargetRect } from './target-trace'
@@ -1524,7 +1524,8 @@ export function createAgent(ctx: AgentContext) {
       // Every condition text is a plain sentence handed to the text model; there is no
       // quoted "exact text" shortcut and no local full-text equality any more.
       if (!getSettings().apiKey && !localConfigured()) {
-        throw new Error('Koşul artık her zaman metin modeline sorar; API anahtarı ya da yerel model gerekli.')
+        // Eksik anahtar/yapılandırma gerçek imkânsızlıktır: sonsuz gözlem turu değil, açık hata.
+        throw new PermanentStepError('Koşul artık her zaman metin modeline sorar; API anahtarı ya da yerel model gerekli.')
       }
       return repeatMethodCycle(async () => {
         let failed = false

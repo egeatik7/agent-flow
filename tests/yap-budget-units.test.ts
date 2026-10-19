@@ -8,13 +8,13 @@ describe('Yap giriş bütçesi: bayt ≠ token', () => {
     expect(yapBudgetCheck(6875, 8192).ok).toBe(true)
   })
 
-  it('4096 pencerede aynı istek sığmaz (dürüst ret)', () => {
-    expect(yapBudgetCheck(6875, 4096).ok).toBe(false)
+  it('4096 pencerede de sığan istek geçer (eski /2+2048 fazla engelliyordu)', () => {
+    expect(yapBudgetCheck(6875, 4096).ok).toBe(true)
   })
 
   it('görüntülü tahmin 8192 pencereye sığar', () => {
     const result = yapBudgetCheck(10742, 8192)
-    expect(result.tokens).toBe(5371)
+    expect(result.tokens).toBe(3581)
     expect(result.ok).toBe(true)
   })
 
