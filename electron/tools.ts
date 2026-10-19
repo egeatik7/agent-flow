@@ -1544,8 +1544,11 @@ const actWait: ToolDef = {
   run: async (args, ctx, source) => {
     const denied = writeGate(ctx, source)
     if (denied) return failed(actWait.name, denied)
-    const ms = num(args.ms) ?? 1000
-    return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle`, fields: { ms } }, args, ctx)
+    const raw = num(args.ms) ?? 1000
+    if (!Number.isFinite(raw) || raw < 0) return failed(actWait.name, 'ms negatif ya da geçersiz olamaz.')
+    // 30 dk üstü tek bekleme kabul edilmez; 2^31 üstü değerler ~1 ms'de sahte zaman aşımı veriyordu.
+    const ms = Math.min(30 * 60_000, Math.max(1, Math.round(raw)))
+    return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle${ms !== raw ? ' (sınıra çekildi)' : ''}`, fields: { ms } }, args, ctx)
   },
 }
 

@@ -240,8 +240,12 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
       const uzanti = files.image.mime.includes('png') ? 'png' : 'jpg'
       try { fs.writeFileSync(path.join(dir, `gonderilen-goruntu.${uzanti}`), files.image.buffer) } catch { /* aynı */ }
     }
-    // Sınırsız büyümeyi önle: dakikada en çok bir kez, en yeni N klasör tutulur.
-    if (Date.now() - lastPrune > 60_000) { lastPrune = Date.now(); pruneEvidence(root) }
+    // Sınırsız büyümeyi önle: dakikada en çok bir kez, en yeni N klasör tutulur. Budama SENKRON
+    // rmSync ile ilk isteği saniyelerce geciktiriyordu; bir sonraki tike bırakılır.
+    if (Date.now() - lastPrune > 60_000) {
+      lastPrune = Date.now()
+      setImmediate(() => { try { pruneEvidence(root) } catch { /* tanılama */ } })
+    }
     return dir
   } catch { return '' }
 }

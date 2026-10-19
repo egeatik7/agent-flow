@@ -77,3 +77,21 @@ describe('checkpoint saklama ve dayanÄ±klÄ±lÄ±k', () => {
     await expect(store.detail(id(2))).rejects.toThrow(/Checkpoint dosyasÄ± okunamadÄ±/)
   })
 })
+
+describe('çýktý dosyalarý (NDJSON) saklama', () => {
+  it('budama .outputs.jsonl dosyasýný da siler; tutulan checkpoint çýktýsý kalýr', async () => {
+    const fs = await import('node:fs')
+    const dir = fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'nubbo-ckpt-out-'))
+    const now = Date.now()
+    for (const n of [1, 2]) {
+      fs.writeFileSync(require('node:path').join(dir, id(n) + '.json'), JSON.stringify(detail(n)))
+      fs.writeFileSync(require('node:path').join(dir, id(n) + '.outputs.jsonl'), '{"path":"a"}\n')
+      const at = new Date(now - (3 - n) * 60_000)
+      fs.utimesSync(require('node:path').join(dir, id(n) + '.json'), at, at)
+    }
+    await pruneCheckpoints(dir, now, 1)
+    expect(fs.existsSync(require('node:path').join(dir, id(2) + '.outputs.jsonl'))).toBe(true)
+    expect(fs.existsSync(require('node:path').join(dir, id(1) + '.outputs.jsonl'))).toBe(false)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})

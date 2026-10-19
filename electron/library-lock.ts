@@ -86,12 +86,13 @@ function removeOwned(file: string, owner: Owner): boolean {
  */
 const UNLINK_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
 function unlinkRetrying(file: string): boolean {
-  for (let attempt = 1; attempt <= 12; attempt++) {
+  // 12 × 400 ms = ~3,25 sn main thread blokajı Durdur'u da donduruyordu; ~0,6 sn yeter.
+  for (let attempt = 1; attempt <= 6; attempt++) {
     try { fs.unlinkSync(file); return true } catch (e) {
       const c = code(e)
       if (c === 'ENOENT') return true
-      if (process.platform !== 'win32' || !UNLINK_RETRY_CODES.has(c ?? '') || attempt === 12) return false
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(30 * 2 ** (attempt - 1), 400))
+      if (process.platform !== 'win32' || !UNLINK_RETRY_CODES.has(c ?? '') || attempt === 6) return false
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(30 * 2 ** (attempt - 1), 120))
     }
   }
   return false

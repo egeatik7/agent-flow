@@ -23,7 +23,10 @@ export function clearInstanceMarker(dir: string): void {
 /** İşaret dosyasındaki süreç hâlâ yaşıyor mu? Okunamıyorsa "bilinmiyor" → öldürme. */
 export function instanceMarkerAlive(dir: string, alive: (pid: number) => boolean = processAlive): boolean {
   try {
-    const pid = Number(fs.readFileSync(instanceMarkerPath(dir), 'utf8').trim())
+    const marker = instanceMarkerPath(dir)
+    // 24 saatten eski işaret bayattır: PID geri dönüşümü yüzünden hiç silinmeyen klasör kalmasın.
+    if (Date.now() - fs.statSync(marker).mtimeMs > 24 * 60 * 60 * 1000) return false
+    const pid = Number(fs.readFileSync(marker, 'utf8').trim())
     if (!Number.isInteger(pid) || pid <= 0) return false
     return alive(pid)
   } catch { return false }

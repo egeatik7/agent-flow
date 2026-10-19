@@ -31,7 +31,7 @@ function validRunGraph(items:string[]){
 }
 function context(){
  const pending:Array<(p:string[])=>void>=[]
- const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:validRunGraph(['C:\\a.glb'])},stackRef:{current:[]},
+ const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},capturing:0,missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:validRunGraph(['C:\\a.glb'])},stackRef:{current:[]},
  api:{missingPaths:vi.fn(()=>new Promise<string[]>(r=>pending.push(r))),runAgent:vi.fn(async()=>({ok:true}))},inspectRunStructure,collectLoopPaths,missingLoopPaths:()=>[],canvasName:()=> 'T',rooted:(g:any)=>g,resetLoopTicks:(g:any)=>g,writeCanvas:vi.fn(),setRunning:vi.fn(),setStepStatus:vi.fn(),stopRequested:{current:false},setRunProgress:vi.fn(),beginProgress:()=>({}),pushLog:vi.fn(),bookRef:{current:{tabs:[{id:'tab'}]}},finishProgress:()=>({}),runIdle:{current:null},errText:String}
  return {ctx,pending}
 }

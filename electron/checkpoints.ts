@@ -53,7 +53,7 @@ export async function pruneCheckpoints(dir: string, now = Date.now(), keep = CHE
   try { names = await fs.promises.readdir(dir) } catch { return { removed: 0 } }
   const groups = new Map<string, { files: string[]; at: number; tmpOnly: boolean }>()
   for (const name of names) {
-    const m = name.match(/^([a-f0-9-]{36})(\.snapshot)?\.json(\.tmp)?$/)
+    const m = name.match(/^([a-f0-9-]{36})(\.snapshot)?\.(?:json(?:\.tmp)?|outputs\.jsonl)$/)
     if (!m) continue
     const id = m[1], file = path.join(dir, name)
     let at = now
@@ -98,8 +98,39 @@ export class Checkpoints {
   }
   private async persistChanges() {
     const dirty = await this.outputs.drain()
-    try { for (const cp of dirty) await write(this.file(cp.id), cp) }
+    try {
+      for (const cp of dirty) {
+        // Çıktılar APPEND-ONLY NDJSON'a yazılır; checkpoint JSON'u yalnız meta taşır. Eskiden her
+        // flush tüm çıktı dizisini yeniden serileştiriyordu (O(n²)) ve `mark()` aynı kuyrukta
+        // olduğu için koşunun öğe gecikmesine ekleniyordu.
+        const done = this.appended.get(cp.id) ?? 0
+        const fresh = cp.outputs.slice(done)
+        if (fresh.length) {
+          await fs.promises.appendFile(this.outputFile(cp.id), fresh.map(o => JSON.stringify(o) + '\n').join(''), 'utf8')
+          this.appended.set(cp.id, cp.outputs.length)
+        }
+        await write(this.file(cp.id), this.metaOf(cp))
+      }
+    }
     catch (e) { this.outputs.retryPersist(dirty); throw e }
+  }
+  private appended = new Map<string, number>()
+  private outputFile(id: string) {
+    if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Geçersiz checkpoint kimliği.')
+    return path.join(this.dir, `${id}.outputs.jsonl`)
+  }
+  private metaOf(cp: CheckpointDetail): CheckpointDetail {
+    return { ...cp, outputs: [], outputCount: cp.outputs.length }
+  }
+  private async appendedOutputs(id: string): Promise<CheckpointDetail['outputs']> {
+    let text: string
+    try { text = await fs.promises.readFile(this.outputFile(id), 'utf8') } catch { return [] }
+    const rows: CheckpointDetail['outputs'] = []
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue
+      try { rows.push(JSON.parse(line)) } catch { /* yarım satır: atla */ }
+    }
+    return rows
   }
   private poll() {
     if (this.pollPending || !this.active) return
@@ -139,10 +170,11 @@ export class Checkpoints {
       this.current = cp
       this.outputs.bind(cp)
       if (old) { old.endedAt = now; old.status = 'closed' }
+      this.appended.set(cp.id, 0)
       await this.persistChanges()
-      if (old) await write(this.file(old.id), old)
+      if (old) { await write(this.file(old.id), this.metaOf(old)); this.appended.delete(old.id) }
       await write(this.file(cp.id, true), snapshot)
-      await write(this.file(cp.id), cp)
+      await write(this.file(cp.id), this.metaOf(cp))
       if (!this.timer) this.timer = setInterval(() => this.poll(), 500)
       return cp.id
     })
@@ -156,7 +188,7 @@ export class Checkpoints {
     const result = await this.serial(async () => {
       try {
         await this.persistChanges()
-        if (this.current) { this.current.endedAt = endedAt; this.current.status = status; await write(this.file(this.current.id), this.current) }
+        if (this.current) { this.current.endedAt = endedAt; this.current.status = status; await write(this.file(this.current.id), this.metaOf(this.current)) }
       } finally { this.active = undefined; this.current = undefined }
     })
     // Saklama: koşu bittikten sonra eski kayıtları buda. Koşuyu beklemez; kilit/izin hatası yutulur.
@@ -193,6 +225,9 @@ export class Checkpoints {
   async detail(id: string): Promise<CheckpointDetail> {
     const cp = await this.read<CheckpointDetail>(this.file(id))
     if (cp.status === 'running' && cp.id !== this.current?.id) cp.status = 'interrupted'
+    // Yeni biçim: çıktılar NDJSON'da. Eski checkpoint'lerde dizi hâlâ JSON içindedir.
+    const appended = await this.appendedOutputs(id)
+    if (appended.length) cp.outputs = appended
     cp.outputs = await Promise.all(cp.outputs.map(async output => {
       try { await fs.promises.access(output.path); return { ...output, present: true } }
       catch (e) {

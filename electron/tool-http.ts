@@ -85,12 +85,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, ctx: 
   reply(res, 404, { ok: false, message: 'Bilinmeyen yol.' })
 }
 
-export async function startEndpoint(
+let starting: Promise<EndpointPublic> | null = null
+
+async function startEndpointOnce(
   ctx: ToolContext,
   file: string,
   stamp?: { app?: string; profile?: string; build?: string }
 ): Promise<EndpointPublic> {
-  if (server && info) return { port: info.port, file: info.file, startedAt: info.startedAt }
   const token = crypto.randomBytes(24).toString('hex')
   const s = http.createServer((req, res) => {
     void handle(req, res, ctx, token)
@@ -134,6 +135,17 @@ export async function startEndpoint(
     /* the endpoint still works in-process; only the command line cannot find it */
   }
   return { port, file, startedAt: info.startedAt }
+}
+
+export async function startEndpoint(
+  ctx: ToolContext,
+  file: string,
+  stamp?: { app?: string; profile?: string; build?: string }
+): Promise<EndpointPublic> {
+  if (server && info) return { port: info.port, file: info.file, startedAt: info.startedAt }
+  // Eşzamanlı iki çağrı iki dinleyici açıyordu; biri sahipsiz kalıp kapatılamıyordu.
+  if (!starting) starting = startEndpointOnce(ctx, file, stamp).finally(() => { starting = null })
+  return starting
 }
 
 export async function stopEndpoint(): Promise<void> {

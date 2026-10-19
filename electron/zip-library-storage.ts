@@ -175,7 +175,7 @@ export class ZipLibraryStorage {
           throw error
         }
       }
-    } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary) }
+    } finally { try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary) } catch { /* kilitli geçici dosya sonraki temizlikte */ } }
   }
   createGroup(name: string, archived = false): ZipLibrarySnapshot {
     return this.importDocuments(name, [], archived)

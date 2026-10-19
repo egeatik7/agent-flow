@@ -15,6 +15,8 @@ export default function CheckpointsPanel({ api, running, busy, onClose, onRun }:
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
   const [wideBusy, setWideBusy] = useState(false)
+  // 100.000 satıra kadar çıktı tek listede render edilirse ~50 bin DOM düğümü modalı donduruyordu.
+  const [outputLimit, setOutputLimit] = useState(300)
   const panel = useRef<HTMLElement>(null)
   const selection = useRef('')
   useEffect(() => {
@@ -109,11 +111,12 @@ export default function CheckpointsPanel({ api, running, busy, onClose, onRun }:
             <p>{when(detail.at)} → {detail.endedAt ? when(detail.endedAt) : statuses[detail.status]}</p>
             <p>Bu checkpoint ile sonraki checkpoint arasındaki çıktılar. Son checkpoint, koşunun sonuna kadar olan değişiklikleri gösterir. Dosyaların eski sürümleri saklanmaz; Aç düğmesi mevcut dosyayı açar.</p>
             {detail.issues.map((issue, i) => <p key={i} className="checkpoint-error">{issue}</p>)}
-            {!detail.outputs.length ? <p>Bu aralıkta gözlenen çıktı yok.</p> : <ul className="checkpoint-outputs">{detail.outputs.map(o => <li key={o.path}>
+            {!detail.outputs.length ? <p>Bu aralıkta gözlenen çıktı yok.</p> : <ul className="checkpoint-outputs">{detail.outputs.slice(0, outputLimit).map(o => <li key={o.path}>
               <b>{o.kind === 'folder' ? 'Klasör' : o.kind === 'unknown' ? 'Yol' : 'Dosya'} · {o.change === 'created' ? 'Yeni' : o.change === 'modified' ? 'Değişti' : o.change === 'observed' ? 'Dosya hareketi' : 'Kaldırıldı'}{o.present === false ? ' · Artık bu yolda yok' : ''}</b>
               <span title={o.path}>{o.path}</span>
               <div><button className="xp-btn" disabled={!o.present || working} onClick={() => void action(async () => { if (!await api?.openPath?.(o.path)) throw new Error('Çıktı açılamadı.') })}>Aç</button><button className="xp-btn" disabled={!o.present || working} onClick={() => void action(async () => { if (!await api?.showInFolder?.(o.path)) throw new Error('Klasör açılamadı.') })}>Klasörde göster</button></div>
             </li>)}</ul>}
+            {detail.outputs.length > outputLimit && <p><button className="xp-btn" onClick={() => setOutputLimit(limit => limit + 500)}>Daha fazla göster ({detail.outputs.length - outputLimit} kaldı)</button></p>}
           </>}
         </main>
       </div>

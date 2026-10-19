@@ -77,6 +77,9 @@ type Props = {
   onEnterPackage: (id: string) => void
   onUnpackPackage: (id: string) => void
   onUpdatePackaged: (packageId: string, nodeId: string, patch: Partial<AgentNode>) => void
+  /** Paket içi node için hedef yakalama/seçme (dış paket node'una yazmaz). */
+  onCapturePackaged?: (packageId: string, nodeId: string) => void
+  onOpenScannerPackaged?: (packageId: string, nodeId: string) => void
   onPickDir: () => Promise<string | null>
   capturing: number
 }
@@ -534,6 +537,8 @@ function PackageExposed(p: Props & { pkg: AgentNode }) {
                   {...p}
                   graph={p.pkg.inner ?? p.graph}
                   n={node}
+                  onCaptureForNode={p.onCapturePackaged ? () => p.onCapturePackaged!(p.pkg.id, node.id) : p.onCaptureForNode}
+                  onOpenScanner={p.onOpenScannerPackaged ? () => p.onOpenScannerPackaged!(p.pkg.id, node.id) : p.onOpenScanner}
                   onUpdateNode={(patch) => p.onUpdatePackaged(p.pkg.id, node.id, patch)}
                 />
               </div>

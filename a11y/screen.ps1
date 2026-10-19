@@ -114,7 +114,13 @@ function Copy-Screen($rect) {
   try {
     $bmp = New-Object System.Drawing.Bitmap ([int]$rect.w), ([int]$rect.h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    try { $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size) } finally { $g.Dispose() }
+    try {
+      # BitBlt alfa baytlarını yazmaz; bitmap önce OPAK siyahla doldurulursa alfa 255 kalır ve
+      # pikselleri tek tek dolaşan Set-BitmapOpaque döngüsüne (1080p'de ~2,8 sn) gerek kalmaz.
+      $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $g.Clear([System.Drawing.Color]::Black)
+      $g.CopyFromScreen([int]$rect.x, [int]$rect.y, 0, 0, $bmp.Size)
+    } finally { $g.Dispose() }
     return $bmp
   } catch {
     # A grab that fails (lock screen, secure desktop) must not leave its bitmap behind.
@@ -176,7 +182,13 @@ function Set-BitmapOpaque($bmp) {
   $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
   $bd = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $fmt)
   try {
+    # HIZLI YOL: kare opak siyahla doldurulup çekildiyse alfa zaten 255'tir; pikselleri dolaşma.
+    # (1080p'de tam döngü ~2,8 sn sürüyordu.) Örnek üç nokta tutmuyorsa tam döngü yapılır.
     $stride = [int]$bd.Stride
+    $samples = @(3, 3 + ($w / 2) * 4, 3 + ($h - 1) * $stride + ($w - 1) * 4)
+    $opaque = $true
+    foreach ($offset in $samples) { if ([System.Runtime.InteropServices.Marshal]::ReadByte($bd.Scan0, [int]$offset) -ne 255) { $opaque = $false; break } }
+    if ($opaque) { return }
     $n = $stride * $h
     $bytes = New-Object byte[] $n
     [System.Runtime.InteropServices.Marshal]::Copy($bd.Scan0, $bytes, 0, $n)
@@ -643,31 +655,12 @@ function New-Bitmap24($bmp) {
   $w = [int]$bmp.Width
   $h = [int]$bmp.Height
   $dst = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-  $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
-  $srcBd = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $dstBd = $dst.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  # 32→24 dönüşümünü GDI+ yapar (native). Piksel başına PowerShell döngüsü 1080p'de ~9,2 sn'ydi.
+  $g = [System.Drawing.Graphics]::FromImage($dst)
   try {
-    $ss = [int]$srcBd.Stride
-    $ds = [int]$dstBd.Stride
-    $sbytes = New-Object byte[] ($ss * $h)
-    $dbytes = New-Object byte[] ($ds * $h)
-    [System.Runtime.InteropServices.Marshal]::Copy($srcBd.Scan0, $sbytes, 0, $sbytes.Length)
-    for ($y = 0; $y -lt $h; $y++) {
-      $srow = $y * $ss
-      $drow = $y * $ds
-      for ($x = 0; $x -lt $w; $x++) {
-        $si = $srow + ($x * 4)
-        $di = $drow + ($x * 3)
-        $dbytes[$di] = $sbytes[$si]
-        $dbytes[$di + 1] = $sbytes[$si + 1]
-        $dbytes[$di + 2] = $sbytes[$si + 2]
-      }
-    }
-    [System.Runtime.InteropServices.Marshal]::Copy($dbytes, 0, $dstBd.Scan0, $dbytes.Length)
-  } finally {
-    $bmp.UnlockBits($srcBd)
-    $dst.UnlockBits($dstBd)
-  }
+    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    $g.DrawImage($bmp, (New-Object System.Drawing.Rectangle 0, 0, $w, $h))
+  } finally { $g.Dispose() }
   return $dst
 }
 

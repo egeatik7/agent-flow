@@ -172,7 +172,7 @@ export default function App() {
   const localCatalogRequest = useRef(0)
   const [capturing, setCapturing] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [scanner, setScanner] = useState<{ nodeId: string | null } | null>(null)
+  const [scanner, setScanner] = useState<{ nodeId: string | null; pkgId?: string } | null>(null)
   const [windows, setWindows] = useState<{ title: string; handle: string }[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [localCatalogBase, setLocalCatalogBase] = useState('')
@@ -1051,8 +1051,8 @@ export default function App() {
     else pushLog('warn', 'İmleç altında öğe bulunamadı.')
   }
 
-  const captureForSelected = async () => {
-    const id = selectedNodeId
+  const captureForSelected = async (pkgId?: string, nodeId?: string) => {
+    const id = nodeId ?? selectedNodeId
     if (!id) return
     pushLog('info', '3 saniye içinde imleci hedef öğenin üstüne götür…')
     const loc = await captureAfterDelay()
@@ -1060,17 +1060,21 @@ export default function App() {
       pushLog('warn', 'İmleç altında öğe bulunamadı.')
       return
     }
-    const node = graphRef.current.nodes.find((n) => n.id === id)
+    // Paket içi node: patch dış paket node'una değil, iç node'a yazılır.
+    const inner = pkgId ? graphRef.current.nodes.find((n) => n.id === pkgId)?.inner : undefined
+    const node = (pkgId ? inner?.nodes : graphRef.current.nodes)?.find((n) => n.id === id)
     if (node?.kind === 'condition') {
       pushLog('warn', 'Koşul artık seçim kullanmıyor; kutuya ne aradığını yaz.')
       return
     }
     const anchor = loc.x !== undefined && loc.y !== undefined ? { x: loc.x, y: loc.y } : undefined
-    updateNode(id, { locator: loc, anchor, prompt: node?.prompt?.trim() ? node.prompt : promptFor(loc) })
+    const patch = { locator: loc, anchor, prompt: node?.prompt?.trim() ? node.prompt : promptFor(loc) }
+    if (pkgId) updatePackaged(pkgId, id, patch)
+    else updateNode(id, patch)
     pushLog('success', `“${locText(loc) || loc.controlType}” node’a bağlandı.`)
   }
 
-  const openScanner = (nodeId: string | null) => setScanner({ nodeId })
+  const openScanner = (nodeId: string | null, pkgId?: string) => setScanner({ nodeId, pkgId })
 
   const loopFolderPending = useRef(new Map<string, { timer?: number }>())
   const templateFillGen = useRef(0)
@@ -1204,7 +1208,9 @@ export default function App() {
     const letters = (text.match(/\p{L}/gu) ?? []).length
     const meaningful = fromPage ? letters >= 1 : item.src === 'uia' ? letters >= 2 : letters >= 3 && letters / Math.max(1, text.length) >= 0.5
     const anchor = { x: Math.round(item.x + item.w / 2), y: Math.round(item.y + item.h / 2) }
-    const node = scanner?.nodeId ? graphRef.current.nodes.find((n) => n.id === scanner.nodeId) : undefined
+    const scannerPkg = scanner?.pkgId ? graphRef.current.nodes.find((n) => n.id === scanner.pkgId)?.inner : undefined
+    const node = scanner?.nodeId ? (scannerPkg?.nodes ?? graphRef.current.nodes).find((n) => n.id === scanner.nodeId) : undefined
+    const pkgId = scanner?.pkgId
     setScanner(null)
     if (node?.kind === 'condition') {
       pushLog('warn', 'Koşul artık seçim kullanmıyor; kutuya ne aradığını yaz.')
@@ -1224,7 +1230,9 @@ export default function App() {
     }
     const prompt = meaningful ? (node?.kind === 'type' ? `“${text}” alanı` : `“${text}” yazan yere tıkla`) : ''
     if (node && (node.kind === 'type' || node.kind === 'click')) {
-      updateNode(node.id, { prompt, anchor, locator: loc ?? undefined, memory: undefined })
+      const patch = { prompt, anchor, locator: loc ?? undefined, memory: undefined }
+      if (pkgId) updatePackaged(pkgId, node.id, patch)
+      else updateNode(node.id, patch)
     } else {
       appendClick({ prompt, title: `Tıkla: ${meaningful ? text : 'simge'}`.slice(0, 40), anchor, locator: loc ?? undefined })
     }
@@ -1272,7 +1280,7 @@ export default function App() {
   }
 
   const run = async (startId?: string) => {
-    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || missingReport || !activeIdRef.current || graphRef.current.nodes.length === 0) return
+    if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || missingReport || capturing > 0 || !activeIdRef.current || graphRef.current.nodes.length === 0) return
     const path = stackRef.current.map(c => c.id)
     const full = structuredClone(path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current)
     const name = canvasName()
@@ -1838,6 +1846,8 @@ export default function App() {
             onEnterPackage={enterPackage}
             onUnpackPackage={unpack}
             onUpdatePackaged={updatePackaged}
+            onCapturePackaged={(packageId, nodeId) => void captureForSelected(packageId, nodeId)}
+            onOpenScannerPackaged={(packageId, nodeId) => openScanner(nodeId, packageId)}
             onPickDir={async () => {
               if (api) return api.pickDir()
               return window.prompt('Klasör yolu') || null
