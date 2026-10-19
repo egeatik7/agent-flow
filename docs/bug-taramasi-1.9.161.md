@@ -192,16 +192,20 @@ Her patch iÃ§in Ã¶lÃ§Ã¼t Â§19'daki gibi olmalÄ±: *"iÅŸ ilerledi mi"* (dosya oluÅ
 - `screen.ps1` performans sayÄ±larÄ± (2,9 sn / 9,2 sn) ajanÄ±n piksel dÃ¶ngÃ¼sÃ¼ sayÄ±mÄ±ndan tÃ¼retildi; gerÃ§ek sayaÃ§la Ã¶lÃ§Ã¼lmedi.
 - 2 bulgu baÄŸÄ±msÄ±z doÄŸrulamada **Ã§Ã¼rÃ¼tÃ¼ldÃ¼**, 1'i belirsiz kaldÄ±; bunlar bu rapora alÄ±nmadÄ±.
 
-## 8. Düzeltme durumu
+## 8. DÃ¼zeltme durumu
 
-**1.9.162'de kapatıldı:** K1 (sonsuz retry/paket oynatma), K2 + H12 + H13'ün liste kısmı
-(checkpoint yazımı, saklama sınırı, bozuk dosya toleransı, rename retry), H3 (tıklama uyarısı),
-H4 (model tuş koruması), H5 (koşul turu sınırı), H8 (klasör kutusunda devam), H9 (`run.from`
-başladı demiyor), H10 (durdurulan koşu sayaçları), H11 (merge belirsizliği), H14 (kilit bırakma),
-H16 (tanılama budama), H18 (kapanış diyaloğu), H19 (bayt/token bütçesi), H20 (portable klasör
-sahipliği).
+**1.9.162'de kapatÄ±ldÄ±:** K1 (sonsuz retry/paket oynatma), K2 + H12 + H13'Ã¼n liste kÄ±smÄ±
+(checkpoint yazÄ±mÄ±, saklama sÄ±nÄ±rÄ±, bozuk dosya toleransÄ±, rename retry), H3 (tÄ±klama uyarÄ±sÄ±),
+H4 (model tuÅŸ korumasÄ±), H5 (koÅŸul turu sÄ±nÄ±rÄ±), H8 (klasÃ¶r kutusunda devam), H9 (`run.from`
+baÅŸladÄ± demiyor), H10 (durdurulan koÅŸu sayaÃ§larÄ±), H11 (merge belirsizliÄŸi), H14 (kilit bÄ±rakma),
+H16 (tanÄ±lama budama), H18 (kapanÄ±ÅŸ diyaloÄŸu), H19 (bayt/token bÃ¼tÃ§esi), H20 (portable klasÃ¶r
+sahipliÄŸi).
 
-**Açık kalanlar (sonraki patch'ler):** H1/H2 (worker etiket›alan ve `EM_SETSEL` geri düşüşü),
-H6 (`ensureActed` tarama koruması), H7 (paket içi hedef seçici), H15 (`savedId` silinmesi),
-H17 (`screen.ps1` piksel döngüsü), H13'ün 500 ms tam-dosya yeniden yazımı ve §4 tablosundaki
-orta/düşük bulgular.
+**1.9.163'te kapatÄ±ldÄ±:** H1 (etiketâ†’alan odaÄŸÄ±), H2 (`EM_SETSEL` temizleme), H6
+(`ensureActed` tarama korumasÄ±); ayrÄ±ca `EndFlow`'da `incomplete` kaybÄ±, Durdur kÄ±sayolu kaydÄ±
+sessizliÄŸi, koÅŸu sonrasÄ± model kronometresi, `act.wait` 60 sn tavanÄ±, boÅŸ bellek Ã¶lÃ§Ã¼mÃ¼nÃ¼n
+"baÅŸarÄ±lÄ±" sayÄ±lmasÄ±.
+
+**AÃ§Ä±k kalanlar (sonraki patch'ler):** H7 (paket iÃ§i hedef seÃ§ici), H15 (`savedId` silinmesi),
+H17 (`screen.ps1` piksel dÃ¶ngÃ¼sÃ¼), H13'Ã¼n 500 ms tam-dosya yeniden yazÄ±mÄ± ve Â§4 tablosundaki
+orta/dÃ¼ÅŸÃ¼k bulgular.
