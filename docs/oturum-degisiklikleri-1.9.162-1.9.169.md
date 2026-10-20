@@ -27,6 +27,11 @@ sürüm sürüm, dosya dosya listeler. Kaynak: git geçmişi (`bbfb42a..b1b9738`
 
 Docs-only commit'ler: `e08b482`, `75479e8`, `a0e2fc7`, `59b18da`, `b240045`, `b1b9738` (aşağıda §9).
 
+**Kapsam sayımı:** `bbfb42a..HEAD` toplam **65 yol** (26 yeni, 39 değişiklik). Her sürümde
+`package.json` yalnızca `version` satırı için değişti (1.9.162…1.9.169); başka alan değişmedi.
+Bu belgenin kendisi de (`docs/oturum-degisiklikleri-1.9.162-1.9.169.md`) son commit'tedir; §14
+repo dışı ve izlenmeyen değişiklikleri listeler.
+
 ## 1. 1.9.162 — `3fd41d7` (34 dosya, +1058/−61)
 
 **Amaç:** Taramanın kritik ve yüksek bulgularının ilk partisi: koşuyu kilitleyen hatalar, checkpoint
@@ -76,8 +81,8 @@ yazımının koşuyu öldürmesi, yanlış raporlama ve kaynak sızıntıları.
 `tests/model-key-guard.test.ts` (23), `tests/resume-item-check.test.ts` (4),
 `tests/library-lock-release.test.ts` (4), `tests/evidence-retention.test.ts` (3),
 `tests/window-close-heartbeat.test.ts` (3), `tests/yap-budget-units.test.ts` (5),
-`tests/instance-marker.test.ts` (3); güncel: `checkpoint-runner`, `method-cycle-persistence`,
-`bug-hunt`, `temp-sweep`.
+`tests/instance-marker.test.ts` (3); güncel: `tests/checkpoint-runner.test.ts`,
+`tests/method-cycle-persistence.test.ts`, `tests/bug-hunt.test.ts`, `tests/temp-sweep.test.ts`.
 
 ### 1.6 Yayın
 EXE: `Nubbo-1.9.162.exe` · SHA256 `63305897E321379612CB9E23DF87DE8D9FB7FD2B23C7E2C4F859F58DB4895CC8`
@@ -145,7 +150,9 @@ EXE: `Nubbo-1.9.164.exe` · SHA256 `A6A3EC63C5D95EFAB15B8BA7051400F4D9C3AF91D342
   + 30 dk sınırı; `zip-library-storage.ts` geçici dosya temizliği kilitliyse hata döndürmez;
   `tool-http.ts` `starting` kilidi (eşzamanlı iki dinleyici yok); `App.tsx` yakalama sürerken koşu
   başlatılamaz.
-- Testler: `tests/checkpoint-ndjson.test.ts` (1), `checkpoint-retention` NDJSON testi (+1).
+- Testler: `tests/checkpoint-ndjson.test.ts` (1), `checkpoint-retention` NDJSON testi (+1),
+  `tests/run-preflight-regressions.test.ts` (harness bağlamına `capturing: 0` eklendi; App'in run
+  kapısı yakalama sırasında koşuyu reddediyor).
 
 EXE: `Nubbo-1.9.165.exe` · SHA256 `F46D1306DC27B32689DE16F7B4EAE51503E75A60D67F78056CA6C4573789FBA6`
 
@@ -169,7 +176,8 @@ EXE: `Nubbo-1.9.165.exe` · SHA256 `F46D1306DC27B32689DE16F7B4EAE51503E75A60D67F
 - `electron/zip-library-storage.ts` — `link/unlink` ve silme için `retrySync` (EPERM/EBUSY/EACCES).
 - `electron/library-path.ts` — korumalı kökteki kayıtlı yol artık yoksa korumasız profile düşer.
 - `scripts/dev-start-test.cjs` — ürünle aynı işaret dosyası kuralı (çalışan örneğin klasörü silinmez).
-- Testler: `zip-library-path` (+2), `runner-terminal-errors` (+1: paket hatası tek sayım).
+- Testler: `tests/zip-library-path.test.ts` (+2), `tests/runner-terminal-errors.test.ts` (+1: paket
+  hatası tek sayım).
 
 EXE: `Nubbo-1.9.166.exe` · SHA256 `90F82285FC4DFE16D663BCD722EBEC26E2F3A8BA8E5FDA48B32F1205B0D144DD`
 
@@ -228,7 +236,9 @@ EXE: `Nubbo-1.9.169.exe` · SHA256 `47BEE86DC8F58C86C19F46E88034D9017013007811DC
 
 - `docs/bug-taramasi-1.9.161.md` (`3fd41d7` içinde) — ilk tarama raporu: 1 kritik, 20 yüksek,
   40 orta/düşük; dosya:satır, etki, düzeltme.
-- `docs/surum-notu-1.9.162.md` … `docs/surum-notu-1.9.169.md` — her sürümün ne/niçin/doğrulama/sınır
+- `docs/surum-notu-1.9.162.md`, `docs/surum-notu-1.9.163.md`, `docs/surum-notu-1.9.164.md`,
+  `docs/surum-notu-1.9.165.md`, `docs/surum-notu-1.9.166.md`, `docs/surum-notu-1.9.167.md`,
+  `docs/surum-notu-1.9.168.md`, `docs/surum-notu-1.9.169.md` — her sürümün ne/niçin/doğrulama/sınır
   metni.
 - `docs/bug-taramasi-1.9.164.md` (`a4f6f00` içinde) — 37 ajanlık düzeltme denetimi + yeni bulgular;
   §6–§10 sürüm sürüm durum ve kapanış özeti.
@@ -309,3 +319,21 @@ npx vitest run
 ```
 
 Sürüm EXE'leri: `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.162.exe` … `Nubbo-1.9.169.exe`.
+
+## 14. Repo dışı ve izlenmeyen değişiklikler (dürüstlük için)
+
+Bunlar git'te **yok**; ama bu oturumda diskte oluştu/değişti:
+
+| Yer | Değişiklik | Not |
+| --- | --- | --- |
+| `dist/`, `dist-electron/` | Her `build:electron`/`pack:win` çalıştırmasında yeniden üretildi | `.gitignore`'da; son yazma 20.10.2026 ~02:42 |
+| `release/` (`Nubbo.exe`, `win-unpacked/`) | 8 kez `pack:win` çıktısı; sonuncusu 1.9.169 | `.gitignore`'da; eski EXE'ler silinmedi |
+| `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.16{2..9}.exe` | 8 yeni portable EXE kopyalandı (hash doğrulandı) | `Nubbo-1.9.160/161.exe` oturum öncesinden; silinmedi |
+| `%TEMP%\nubbo-scan\` | 24 yardımcı dosya: commit mesajları, rapor ekleme scriptleri, haritalama/probe scriptleri | Geçici; silinebilir |
+| `%TEMP%\parent-session.jsonl` | ~6,5 MB, oturum transkriptinin zstd'siz kopyası (workflow çıktısını kurtarmak için açıldı) | **Kişisel oturum içeriği**; iş bitince silinebilir |
+| `%TEMP%` kökü | `unzstd.cjs`, `findrec*.cjs`, `probe*.cjs` (ilk tur kurtarma denemeleri) | Geçici; silinebilir |
+
+**Dokunulmayanlar:** üst klasördeki eski checkout `C:\Users\ASUS TUF\agent-flow` yalnız **okundu**
+(o depo ayrı; HEAD'i bu oturumda ben ilerletmedim), `.dsh` oturum verisi, `%APPDATA%` altındaki
+kullanıcı profili/akışları ve masaüstündeki diğer dosyalar.
+
