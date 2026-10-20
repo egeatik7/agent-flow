@@ -82,4 +82,6 @@ seçiminin açık kaydı (ağaç bunun görünümünü verdi), FolderBatcher rap
 
 ## EXE
 
-`Nubbo-1.9.172.exe` · masaüstü kopyası SHA256 ile doğrulandı (hash aşağıda güncellenir).
+`Nubbo-1.9.172.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.172.exe` · SHA256
+`8BE064F74819D622A97A85F571FEF5B9C0A0CB319B868B0C60781412B0A798AF` (build = masaüstü kopyası,
+97.591.734 bayt).
