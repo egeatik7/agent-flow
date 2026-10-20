@@ -22,14 +22,15 @@ describe('yeni sınırlar: sonsuz tur yok, sessiz başarı yok', () => {
     await checked
   })
 
-  it('kutu içinde karar verilemeyen koşul öğeyi sessizce tamamlandı saymaz', async () => {
+  it('kutu içinde karar verilemeyen koşul sessizce tamamlandı sayılmaz; kurtarma yoksa açık hatayla durur', async () => {
     const start = createNode('start', 0, 0), end = createNode('end', 0, 0), loop = createNode('loop', 0, 0)
     loop.items = ['tek']; const condition = createNode('condition', 0, 0); condition.text = 'GLB indi mi?'
     loop.members = [condition.id]
     const graph: AgentGraph = { nodes: [start, loop, condition, end], edges: [edge(start, 'next', loop), edge(loop, 'done', end)] }
-    const summary = await runGraph(graph, ex({ exists: async () => { throw new ConditionUndecidedError('okuyucu hatası') } }), opts)
-    expect(summary.failed).toBe(1)
-    expect(summary.reachedEnd).toBe(true)
+    const result = runGraph(graph, ex({ exists: async () => { throw new ConditionUndecidedError('okuyucu hatası') } }), opts)
+    const checked = expect(result).rejects.toThrow(/kurtarma ajanı kapalı/)
+    await vi.advanceTimersByTimeAsync(20000)
+    await checked
   })
 
   it('eksik klasör kutusu sonsuz beklemez: sınırlı turdan sonra hata', async () => {

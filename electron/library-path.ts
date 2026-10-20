@@ -35,14 +35,8 @@ export function isProtectedPath(candidate: string, roots: string[]): boolean {
 
 export function chooseLibraryDirectory(input: LibraryPathInput): LibraryPathChoice {
   const configured = input.configured.trim()
-  if (configured) {
-    // Korunan bir kökte (Belgeler/Masaüstü…) duran kayıtlı yol artık YOKSA `mkdirSync` Windows
-    // Denetimli klasör erişimi açıkken süresiz bekleyebiliyor; korumasız profil klasörüne düş.
-    if (isProtectedPath(configured, input.protectedRoots) && !input.exists(configured)) {
-      return { directory: path.join(input.home, 'NubboKutuphane'), fallback: true }
-    }
-    return { directory: configured, fallback: false }
-  }
+  // Kullanıcının AÇIK seçimi korunur: geçici erişim yokluğu kalıcı ayar göçü değildir.
+  if (configured) return { directory: configured, fallback: false }
   const preferred = path.join(input.documents, 'Nubbo', 'Kütüphane')
   if (!isProtectedPath(preferred, input.protectedRoots) || input.exists(preferred)) {
     return { directory: preferred, fallback: false }

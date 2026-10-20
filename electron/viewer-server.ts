@@ -23,10 +23,15 @@ export async function startViewerServer(state:ViewerState,directory:string,token
  })
  const sockets=new WebSocketServer({noServer:true,maxPayload:2048,perMessageDeflate:false})
  server.on('upgrade',(req,socket,head)=>{
-  // Tarayıcı sayfaları yalnız kendi Origin'iyle bağlanır; başka bir site 12 yuvayı tutup gerçek
-  // tablet izleyicisini kapıdan çeviremesin (Origin yoksa yerel istemci sayılır).
-  const origin=req.headers.origin
-  if(origin&&!/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(String(origin))){socket.destroy();return}
+  // Origin, isteğin geldiği Host ile AYNI olmalı: yerel akış da gerçek Tailscale adresi
+  // (https://…ts.net:8443) da kendi host'uyla bağlanır; başka sitelerin Origin'i reddedilir.
+  const origin=String(req.headers.origin||'')
+  if(origin){
+    try{
+      const host=String(req.headers.host||'').toLowerCase()
+      if(!host||new URL(origin).host.toLowerCase()!==host){socket.destroy();return}
+    }catch{socket.destroy();return}
+  }
   if(req.url!=='/viewer/events'||sockets.clients.size>=64){socket.destroy();return}
   sockets.handleUpgrade(req,socket,head,ws=>sockets.emit('connection',ws))
  })

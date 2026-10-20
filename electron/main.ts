@@ -470,16 +470,25 @@ function applyMergeInWindow(payload: { tabId: string; graph: AgentGraph; branchI
   const win = mainWindow
   if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'Pencere açık değil; tuval değiştirilmedi.' })
   return new Promise((resolve) => {
-    // Yanıt İSTEK KİMLİĞİYLE eşleşir: gecikmiş bir cevap başka bir merge isteğini onaylayamaz.
-    const onDone = (_event: unknown, answer: { ok: boolean; error?: string; ambiguous?: boolean; branchId?: string }) => {
-      if (payload.branchId && answer?.branchId && answer.branchId !== payload.branchId) return
-      clearTimeout(timer)
-      ipcMain.removeListener('agent:graph-applied', onDone)
+    // `once` DEĞİL: eşleşmeyen (başka isteğin/pencerenin) cevabı geldiğinde dinleyici tükenip
+    // doğru cevap 20 sn bekleniyordu. Eşleşene kadar dinle, eşleşince/timedout'ta kaldır.
+    const onDone = (event: unknown, answer: { ok: boolean; error?: string; ambiguous?: boolean; branchId?: string }) => {
+      if (event !== win.webContents) return
+      const answerId = answer?.branchId
+      if (payload.branchId && answerId !== payload.branchId) return
+      finish()
       const { branchId: _id, ...rest } = answer ?? { ok: false }
       resolve(rest)
     }
-    const timer = setTimeout(() => { ipcMain.removeListener('agent:graph-applied', onDone); resolve({ ok: false, ambiguous: true, error: 'Pencere 20 sn içinde uygulamayı onaylamadı; tuval değişmiş olabilir.' }) }, 20000)
-    ipcMain.once('agent:graph-applied', onDone)
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      ipcMain.removeListener('agent:graph-applied', onDone)
+    }
+    const timer = setTimeout(() => { finish(); resolve({ ok: false, ambiguous: true, error: 'Pencere 20 sn içinde uygulamayı onaylamadı; tuval değişmiş olabilir.' }) }, 20000)
+    ipcMain.on('agent:graph-applied', onDone)
     win.webContents.send('agent:graph', payload)
   })
 }
@@ -769,6 +778,8 @@ const bellekDurumu = bellekOlcumDongusu({
 })
 /** Son yayınlanan kart metni: aynı kart her 3 saniyede yeniden gönderilmez. */
 let bellekSonKart = ''
+/** Son yayınlanan kart nesnesi: koşu bitince SİLİNMEZ, donmuş/eski olarak yeniden gönderilir. */
+let bellekSonKartObj: BellekKarti | null = null
 
 /** Günlük kararını uygular: yalnız başlangıç, eşik GEÇİŞİ ve hata anı diske yazılır. */
 function bellekGunlugu(karar: ReturnType<typeof gunlukKarari>) {
@@ -801,6 +812,7 @@ function bellekKartiniYayinla(olcum: BellekOlcumu | null) {
   const imza = JSON.stringify({ ramVram: kart.ramVram, butce: kart.butce, eski: kart.eski, yas: kart.yas, hata: kart.hata, daraliyor: kart.daraliyor, surecSatirlari: kart.surecSatirlari, gpuSatirlari: kart.gpuSatirlari })
   if (imza === bellekSonKart) return
   bellekSonKart = imza
+  bellekSonKartObj = kart
   bellekKartiniGonder(kart)
 }
 
@@ -810,11 +822,12 @@ function bellekKartiniGonder(kart: BellekKarti) {
   if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart }, false)
 }
 
-/** Koşu bitince bellek kartı da temizlenir: saatler önceki ölçüm "az önce" görünmesin. */
+/** Koşu bitince canlı ölçüm durur; son ölçüm SİLİNMEZ, "eski" olarak donmuş hâlde kalır. */
 function bellekKartiniTemizle() {
   bellekSonKart = ''
-  viewerState.event('hud:memory', { kart: null })
-  if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart: null }, false)
+  const kart = bellekSonKartObj ? { ...bellekSonKartObj, eski: true } : null
+  viewerState.event('hud:memory', { kart })
+  if (hudWindow && !hudWindow.isDestroyed()) deliverHud('hud:memory', { kart }, false)
 }
 
 /**

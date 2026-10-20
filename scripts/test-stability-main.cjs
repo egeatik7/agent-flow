@@ -71,6 +71,8 @@ function harness(overrides = {}) {
     // 1.9.129: kosu bitince baglam olcum karti da birakilir (bir sonraki kosuya eski olcum tasinmaz).
     // runFlow un kullandigi yuzeyin aynisi: main.ts bunu gercek durum nesnesiyle yapar.
     baglamKartiniTemizle: () => events.push('context-cleared'),
+    // 1.9.170: kosu bitince bellek karti SILINMEZ, donmus/eski olarak kalir (kart nesnesi null'a cekilmez).
+    bellekKartiniTemizle: () => events.push('memory-frozen'),
     // 1.9.130: kosu basinda ve hata aninda bellek olcumunun son ornegi gunluge girer (her ornek DEGIL).
     // runFlow un kullandigi yuzeyin aynisi: main.ts bunu gercek olcum dongusuyle yapar.
     bellekGunlukBaslangic: () => events.push('memory-start'),

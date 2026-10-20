@@ -44,7 +44,7 @@ it('an undecided condition never takes its false port; undecided ends the flow i
  const ex=base();ex.exists=vi.fn(async()=>{throw new ConditionUndecidedError('reader failed')})
  // Sınıflandırılmış "karar verilemedi" sinyali tur döngüsüne girmez: runner onu kendi
  // kurtarma yolunda ele alır; kurtarma yoksa açık hatayla durur (sonsuz 3 sn'lik tur yok).
- await expect(runGraph({nodes:[n],edges:[]},ex,{maxSteps:2,stepDelayMs:0})).rejects.toThrow('yok')
+ await expect(runGraph({nodes:[n],edges:[]},ex,{maxSteps:2,stepDelayMs:0})).rejects.toThrow(/kurtarma ajanı (kapalı|da güvenle)/)
  expect(ex.exists).toHaveBeenCalledTimes(1)
 })
 it('the shared method cycle retries a complete pass after arbitrary rejection values',async()=>{

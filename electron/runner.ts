@@ -609,30 +609,44 @@ export async function runGraph(
       }
 
       if (NODE_SPECS[node.kind].outputs.length === 0) return
-      // A condition said "no" (or could not decide) with nothing connected to its "no" output.
+      // KOŞUL YÖNLENDİRMESİ (tek kural, her kapsamda):
+      //  • kesin "yok" + "yok" çıkışı bağlı → o kol çalışır;
+      //  • kesin "yok" + çıkış bağlı değil → kökte salt-okunur kurtarma sorulur, kutu/pakette tur hatası;
+      //  • BELİRSİZ ("karar verilemedi") → ASLA "yok" sayılmaz; her kapsamda kurtarma karar verir.
       const packageExitNo = opts.packageExit?.from === node.id && opts.packageExit.fromPort === 'false'
-      if (node.kind === 'condition' && port === 'false' && !scope && !opts.nested && !stopAt && !packageExitNo && pendingCondition?.nodeId === node.id && !graph.edges.some((e) => e.from === node.id && e.fromPort === 'false')) {
+      const hasFalse = graph.edges.some((e) => e.from === node.id && e.fromPort === 'false')
+      if (node.kind === 'condition' && port === 'false' && pendingCondition?.nodeId === node.id) {
         const pending = pendingCondition
         pendingCondition = undefined
-        const why = pending.undecided ? 'karar veremedi' : 'yok dedi'
-        if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” ${why} ve “yok” çıkışı bağlı değil; kurtarma ajanı kapalı. Akış durduruldu.`)
-        const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: { ...vars } })
-        if (ex.shouldStop()) throw new StoppedError()
-        if (decision === 'var') {
-          ex.log('success', `[${pending.stepNo}] Kurtarma ajanı koşulu doğruladı: “${pending.text}”: var`)
-          ex.recoveryFinished?.(node.id, true)
-          port = 'true'
-        } else {
-          ex.recoveryFinished?.(node.id, false, 'Kurtarma ajanı koşulu “yok” olarak bildirdi.')
-          throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” yok; “yok” çıkışı bağlı değil ve kurtarma ajanı da doğrulayamadı. Akış durduruldu.`)
+        const askRecovery = async (why: string): Promise<boolean> => {
+          if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: ${why}; kurtarma ajanı kapalı. Akış durduruldu.`)
+          const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: { ...vars } })
+          if (ex.shouldStop()) throw new StoppedError()
+          if (decision === 'var') {
+            ex.log('success', `[${pending.stepNo}] Kurtarma ajanı koşulu doğruladı: “${pending.text}”: var`)
+            ex.recoveryFinished?.(node.id, true)
+            port = 'true'
+            return true
+          }
+          if (decision === 'yok' && hasFalse) {
+            ex.log('warn', `[${pending.stepNo}] Kurtarma ajanı koşulu “yok” olarak doğruladı.`)
+            ex.recoveryFinished?.(node.id, false, 'Kurtarma ajanı koşulu “yok” olarak bildirdi.')
+            port = 'false'
+            return true
+          }
+          ex.recoveryFinished?.(node.id, false, 'Kurtarma ajanı koşulu güvenle karara bağlayamadı.')
+          throw new ConditionHaltError(`“${node.title}”: koşul “${pending.text}” ${why}; kurtarma ajanı da güvenle karara bağlayamadı. Akış durduruldu.`)
         }
-      }
-      // Kutu/paket İÇİNDE belirsiz koşul 'yok' sayılıp sessizce tur tamamlanmış sayılamaz:
-      // 'yok' dalı yoksa bu tur bir hatadır (öğe hatası olarak sayılır, sıradaki öğeye geçilir).
-      if (node.kind === 'condition' && port === 'false' && (scope || opts.nested) && pendingCondition?.nodeId === node.id && pendingCondition.undecided) {
-        const pending = pendingCondition
-        pendingCondition = undefined
-        throw new PermanentStepError(`“${node.title}”: koşul “${pending.text}” karar veremedi ve kutu içinde “yok” dalı yok; bu tur hata sayıldı.`)
+        if (pending.undecided) {
+          await askRecovery('karar veremedi')
+        } else if (!hasFalse) {
+          // Kapsam içinde kesin "yok" + bağlı çıkış yok: tur/paket burada biter (mevcut anlam).
+          // Yalnız KÖK seviyede, "yok" çıkışı bağlı değilken kurtarma sorulur; belirsizlik ise
+          // her kapsamda yukarıdaki kurtarma yolundan geçer.
+          if (!packageExitNo && !scope && !opts.nested && !stopAt) {
+            await askRecovery('yok dedi ve “yok” çıkışı bağlı değil')
+          }
+        }
       }
       observeExit(node, port, scope)
       const edge = graph.edges.find((e) => e.from === node.id && e.fromPort === port)

@@ -184,8 +184,16 @@ function Set-BitmapOpaque($bmp) {
   try {
     # HIZLI YOL: kare opak siyahla doldurulup çekildiyse alfa zaten 255'tir; pikselleri dolaşma.
     # (1080p'de tam döngü ~2,8 sn sürüyordu.) Örnek üç nokta tutmuyorsa tam döngü yapılır.
+    # Örnek noktalar AYRI skalerlerde: `@(3, 3 + ($w/2)*4, ...)` PowerShell'de virgül/artı önceliği
+    # yüzünden `Object[] op_Multiply` üretiyordu (tüm ekran okumaları çöküyordu).
     $stride = [int]$bd.Stride
-    $samples = @(3, 3 + ($w / 2) * 4, 3 + ($h - 1) * $stride + ($w - 1) * 4)
+    $midX = [int][Math]::Floor($w / 2)
+    $lastX = [int]($w - 1)
+    $offsetFirst = 3
+    $offsetMiddle = 3 + ($midX * 4)
+    $offsetLast = 3 + (([int]($h - 1)) * $stride) + ($lastX * 4)
+    $total = $stride * $h
+    $samples = @($offsetFirst, $offsetMiddle, $offsetLast) | Where-Object { $_ -ge 0 -and $_ -lt $total }
     $opaque = $true
     foreach ($offset in $samples) { if ([System.Runtime.InteropServices.Marshal]::ReadByte($bd.Scan0, [int]$offset) -ne 255) { $opaque = $false; break } }
     if ($opaque) { return }

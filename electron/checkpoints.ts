@@ -201,8 +201,8 @@ export class Checkpoints {
         if (this.current) { this.current.endedAt = endedAt; this.current.status = status; await write(this.file(this.current.id), this.metaOf(this.current)) }
       } finally { this.active = undefined; this.current = undefined }
     })
-    // Saklama: koşu bittikten sonra eski kayıtları buda. Koşuyu beklemez; kilit/izin hatası yutulur.
-    void pruneCheckpoints(this.dir).catch(() => {})
+    // KULLANICI KARARI: tamamlanmış geçmiş SESSİZCE budanmaz. `pruneCheckpoints` yalnız açık
+    // bir temizlik çağrısı için durur; otomatik silme varsayılan davranış değildir.
     return result
   }
   async list(): Promise<CheckpointInfo[]> {

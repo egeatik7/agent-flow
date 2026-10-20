@@ -61,12 +61,21 @@ describe('condition routing', () => {
     expect(recovered).toHaveLength(0)
   })
 
-  it('undecided with a connected false output is routed to the false branch like hayır', async () => {
+  it('undecided with a connected false output is NOT silently routed to false; recovery decides', async () => {
     const { g } = graph({ hayirBagli: true })
     const { ex, clicked, recovered } = executor('undecided')
-    await run(g, ex)
-    expect(clicked).toEqual(['HAYIR'])
+    // Kurtarma yok: belirsizlik "yok" sayılmaz, açık gerekçeyle durur.
+    await expect(run(g, ex)).rejects.toBeInstanceOf(ConditionHaltError)
+    expect(clicked).toEqual([])
     expect(recovered).toHaveLength(0)
+  })
+
+  it('undecided + connected false: recovery says yok → false branch runs (evidence, not invention)', async () => {
+    const { g } = graph({ hayirBagli: true })
+    const { ex, clicked, recovered } = executor('undecided', async () => 'yok')
+    await run(g, ex)
+    expect(recovered).toHaveLength(1)
+    expect(clicked).toEqual(['HAYIR'])
   })
 
   it('hayır, unconnected, recovery off: the run stops with the halt error (no silent completion)', async () => {

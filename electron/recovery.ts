@@ -51,15 +51,15 @@ function tool(name: string, description: string, properties: Record<string, unkn
 /** Condition mode: the agent may only look at the screen and answer yes/no. It never clicks or types. */
 export function conditionRecoveryTools(): ModelTool[] {
   return [
-    tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku.', { windowTitle: str }),
-    tool('recovery_condition', 'Güncel ekrana bakarak koşulun gerçekten sağlanıp sağlanmadığını bildir. "var" yalnız ekranda açık kanıt varsa; emin değilsen "yok".', { answer: { type: 'string', enum: ['var', 'yok'] }, probableCause: str, evidence: str, summary: str }, ['answer', 'evidence', 'summary']),
+    tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku. HWND/PID verilirse yalnız o pencere okunur.', { windowTitle: str, hwnd: str, pid: { type: 'integer' } }),
+    tool('recovery_condition', 'Güncel ekrana bakarak koşulun gerçekten sağlanıp sağlanmadığını bildir. "var" yalnız ekranda AÇIK kanıt varsa; "yok" yalnız açık karşıt kanıt varsa. Kanıt yetersizse answer verme, recovery_stop ile gerekçeyi bildir.', { answer: { type: 'string', enum: ['var', 'yok'] }, probableCause: str, evidence: str, summary: str }, ['evidence', 'summary']),
     tool('recovery_stop', 'Koşulu güvenle karara bağlayamadığını açık bir nedenle raporla.', { probableCause: str, evidence: str, summary: str }, ['probableCause', 'evidence', 'summary']),
   ]
 }
 
 export function recoveryTools(settings: RecoverySettings): ModelTool[] {
   const tools = [
-    tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku.', { windowTitle: str }),
+    tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku. HWND/PID verilirse yalnız o pencere okunur.', { windowTitle: str, hwnd: str, pid: { type: 'integer' } }),
     tool('flow_read', 'Bulunduğun tuvalin node ve paketlerini oku.'),
     tool('flow_context', 'Bir node için paket ve döngü bağlamını oku.', { nodeId: str }, ['nodeId']),
     tool('target_preview', 'Bir node hedefini güncel ekranda ara; girdi göndermez.', { nodeId: str }, ['nodeId']),
@@ -128,7 +128,7 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
     allowedNodeIds: settings.allowNodes ? [...allowedNodes] : [], recentLog: deps.recentLog, previousRecoveryReports: deps.previousReports ?? [],
     canvasJson: JSON.parse(recoveryGraphJson(request.graph)),
   }, (key, value) => key === 'icon' || key === 'patch' || key === 'sig' ? undefined : value) }]
-  if (request.node.kind === 'condition') messages.push({ role: 'system', content: `Bu bir Koşul sorusu. Koşul: "${request.node.text ?? request.node.title}". Önce screen_read ile güncel ekranı gör, sonra recovery_condition ile answer "var" veya "yok" olarak bildir. Yalnız ekranda açık kanıt görüyorsan "var" de; emin değilsen "yok" de. Tıklama, yazma veya tuş gönderme yoktur.` })
+  if (request.node.kind === 'condition') messages.push({ role: 'system', content: `Bu bir Koşul sorusu. Koşul: "${request.node.text ?? request.node.title}". Önce screen_read ile güncel ekranı gör, sonra recovery_condition ile answer "var" veya "yok" olarak bildir. "var" yalnız AÇIK kanıtla; "yok" yalnız açık karşıt kanıtla. Emin değilsen answer verme, recovery_stop ile gerekçeyi bildir. Tıklama, yazma veya tuş gönderme yoktur.` })
   deps.log('warn', `Kurtarma ajanı devrede: “${request.node.title}”. Mevcut döngü öğesi korunuyor.`)
   try {
     for (let calls = 0, turns = 0; calls < settings.maxCalls && turns < settings.maxCalls + 3; turns++) {
@@ -156,12 +156,15 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
         check()
         if (calls++ >= settings.maxCalls) break
         let args: Record<string, unknown> = {}
+        // `name` try bloğunda tanımlıydı; catch'te global `name` (void) ile karşılaştırma yapılıyordu.
+        let toolName = ''
         let result: RecoveryToolResult
         try {
           const parsed = JSON.parse(call.function.arguments)
           if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('Araç argümanları nesne olmalı.')
           args = parsed
           const name = call.function.name
+          toolName = name
           if (!allowedTools.has(name)) throw new Error(`Bu araç için yetki yok: ${name}`)
           const schema = tools.find(t => t.function.name === name)!.function.parameters
           const properties = schema.properties as Record<string, { type?: string; enum?: string[] }>
@@ -203,15 +206,27 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
           // No injected graph, branch, timeout or settings arguments reach the tool layer.
           const keys = Object.keys(schema.properties as Record<string, unknown>)
           args = Object.fromEntries(Object.entries(args).filter(([key]) => keys.includes(key)))
+          // PENCERE KİMLİĞİ: model pencere söylemezse hedef node'un kendi penceresi okunur; aksi
+          // hâlde screen_read tüm ekranı okuyup başka uygulamanın kanıtını koşula karıştırıyordu.
+          if (name === 'screen_read' && !args.windowTitle && !args.hwnd) {
+            const hedef = request.node.locator?.windowTitle?.trim()
+            if (hedef) args.windowTitle = hedef
+          }
           if (name === 'act_wait') args.ms = Math.max(0, Math.min(10_000, typeof args.ms === 'number' ? args.ms : 1000))
           deps.log('info', `Kurtarma aracı: ${names[name] || name} ${name === 'powershell_run' ? JSON.stringify(args) : JSON.stringify(args).slice(0, 500)}`)
           if (name.startsWith('act_') || name === 'step_run' || name === 'window_action' || name === 'powershell_run') freshScreen = false
           result = await execute(names[name] || name, args)
           check()
           if (name === 'screen_read') freshScreen = result.ok && result.outcome === 'tamam'
-          if (name === 'step_run' && args.nodeId === request.node.id && result.ok && result.outcome === 'tamam' && result.data?.sent !== false) failedNodeSent = true
+          if (name === 'step_run' && args.nodeId === request.node.id) {
+            // "eylem-belirsiz" = girdi GİTMİŞ OLABİLİR: aynı node bir kez daha çalıştırılmaz.
+            if (result.outcome === 'eylem-belirsiz' || result.data?.sent === true) failedNodeSent = true
+            else if (result.ok && result.outcome === 'tamam' && result.data?.sent !== false) failedNodeSent = true
+          }
         } catch (error) {
           if (error instanceof StoppedError) throw error
+          const sent = error as { inputMayHaveBeenSent?: boolean; inputAlreadySent?: boolean }
+          if (toolName === 'step_run' && args.nodeId === request.node.id && (sent.inputMayHaveBeenSent === true || sent.inputAlreadySent === true)) failedNodeSent = true
           result = { ok: false, outcome: 'hata', message: (error as Error).message }
         }
         const data = result.data ? { ...result.data } : undefined

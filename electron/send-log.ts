@@ -204,7 +204,7 @@ export function imageFromMessages(messages: { content?: unknown }[], mimeFromObj
 /** Uzun koşuda erken öğelerin kanıtı silinmesin: yoğun saatte ~109 istek → 1000 klasör ≈ 9 saat. */
 export const EVIDENCE_KEEP = 1000
 export const EVIDENCE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-let lastPrune = 0
+let lastPruneUnused = 0
 
 /** Eski istek kanıtı klasörlerini budar. Hata (kilit/izin) tanılamayı ve koşuyu durdurmaz. */
 export function pruneEvidence(dir: string, now = Date.now(), keep = EVIDENCE_KEEP): number {
@@ -241,12 +241,8 @@ export function saveRequestEvidence(id: string, files: { summary?: string; syste
       const uzanti = files.image.mime.includes('png') ? 'png' : 'jpg'
       try { fs.writeFileSync(path.join(dir, `gonderilen-goruntu.${uzanti}`), files.image.buffer) } catch { /* aynı */ }
     }
-    // Sınırsız büyümeyi önle: dakikada en çok bir kez, en yeni N klasör tutulur. Budama SENKRON
-    // rmSync ile ilk isteği saniyelerce geciktiriyordu; bir sonraki tike bırakılır.
-    if (Date.now() - lastPrune > 60_000) {
-      lastPrune = Date.now()
-      setImmediate(() => { try { pruneEvidence(root) } catch { /* tanılama */ } })
-    }
+    // KULLANICI KARARI: tanılama kanıtı SESSİZCE budanmaz (otomatik silme varsayılan değil).
+    // `pruneEvidence` yalnız açık bir temizlik çağrısı için durur.
     return dir
   } catch { return '' }
 }

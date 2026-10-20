@@ -730,20 +730,17 @@ export default function App() {
     // Beklemelerden (AI kopyası, ZIP) SONRA hedefin hâlâ açık tuval olduğunu doğrula: kullanıcı
     // bu arada sekme değiştirdiyse merge YANLIŞ tuvale yazılmamalı.
     if (activeIdRef.current !== targetTabId) return { ok: false, error: 'Sekme değişti; tuval değiştirilmedi.' }
-    libraryBusyRef.current = true
-    try {
-      const projected = projectView(p.graph, [])
-      graphRef.current = projected.view
-      stackRef.current = projected.stack
-      setGraph(projected.view)
-      setStack(projected.stack)
-      if (activeIdRef.current !== targetTabId) return { ok: false, error: 'Sekme değişti; tuval değiştirilmedi.' }
-      const saved = await saveCurrentCanvas()
-      // Tuval BELLEKTE değişti; ZIP yazımı başarısız olsa da "hiçbir şey yazılmadı" denemez.
-      return saved ? { ok: true } : { ok: false, ambiguous: true, error: 'Tuval bellekte değişti ama ZIP’e kaydedilemedi; değişiklik uygulanmış olabilir.' }
-    } finally {
-      libraryBusyRef.current = false
-    }
+    // DİKKAT: burada libraryBusyRef'i açmak saveCurrentCanvas'ı kendi kilidine takıp merge'i her
+    // seferinde başarısız yapıyordu. Kilit sahibi dıştaki tuval işlemleridir; merge onu beklemez.
+    const projected = projectView(p.graph, [])
+    graphRef.current = projected.view
+    stackRef.current = projected.stack
+    setGraph(projected.view)
+    setStack(projected.stack)
+    if (activeIdRef.current !== targetTabId) return { ok: false, error: 'Sekme değişti; tuval değiştirilmedi.' }
+    const saved = await saveCurrentCanvas()
+    // Tuval BELLEKTE değişti; ZIP yazımı başarısız olsa da "hiçbir şey yazılmadı" denemez.
+    return saved ? { ok: true } : { ok: false, ambiguous: true, error: 'Tuval bellekte değişti ama ZIP’e kaydedilemedi; değişiklik uygulanmış olabilir.' }
   }
   const saveAllWorkspace = async () => {
     if (runningRef.current || libraryBusyRef.current) return false

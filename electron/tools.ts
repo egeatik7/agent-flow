@@ -1556,7 +1556,7 @@ const actWait: ToolDef = {
     if (!Number.isFinite(raw) || raw < 0) return failed(actWait.name, 'ms negatif ya da geçersiz olamaz.')
     // 30 dk üstü tek bekleme kabul edilmez; 2^31 üstü değerler ~1 ms'de sahte zaman aşımı veriyordu.
     const ms = Math.min(30 * 60_000, Math.max(1, Math.round(raw)))
-    return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle${ms !== raw ? ' (sınıra çekildi)' : ''}`, fields: { ms } }, args, ctx)
+    return runOneAction(actWait.name, { kind: 'wait', title: `${ms} ms bekle${ms !== raw ? ' (sınıra çekildi)' : ''}`, fields: { ms } }, { ...args, ms }, ctx)
   },
 }
 
