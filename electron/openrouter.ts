@@ -97,7 +97,11 @@ type RecoveryTurnArgs = {
   stage?: string
   revision?: number
   chainSource?: string
+  /** Owned by ONE recovery invocation; never persisted or put in a provider body. */
+  modelSession?: RecoveryModelSession
 }
+
+export type RecoveryModelSession = { configuration?: string; imageUnsupported: Set<string> }
 
 export async function recoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
   // Return after one finite model-method pass. Yap owns the next pass and must
@@ -110,8 +114,18 @@ export async function recoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
 async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMessage> {
   const runtime = localRuntime()
   const label = args.stage === 'yap' ? 'Yap' : 'Kurtarma'
-  const deadline = Date.now() + args.timeoutMs
+  const deadline = performance.now() + args.timeoutMs
   const chain = asModelChain(args.models)
+  const hasImages = args.messages.some(m => Array.isArray(m.content) && m.content.some(p => (p as {type?:string}|null)?.type === 'image_url'))
+  const session = args.stage === 'recovery' ? args.modelSession : undefined
+  if (session) {
+    // Credentials remain private in-memory state; changing them/revision/order resets observations.
+    const configuration = JSON.stringify([args.revision, args.apiKey, chain])
+    if (session.configuration !== configuration) {
+      session.configuration = configuration
+      session.imageUnsupported.clear()
+    }
+  }
   if (args.stage) chatLogger?.(`ZINCIR asama=${args.stage} revizyon=${args.revision ?? 0} kaynak=${args.chainSource ?? '-'} sira=${chain.join(' > ')} ilk=${chain[0] ?? '-'}`)
   let last: unknown = new Error('Kurtarma modeli belirtilmedi.')
   // Within this Yap pass all remote rows share this OpenRouter account; local rows are independent.
@@ -119,13 +133,18 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
   for (const model of chain) {
     for (let outputAttempt = 0; outputAttempt < (args.stage === 'yap' ? 1 : 2); outputAttempt++) {
       if (args.shouldStop() || stopCheck()) throw new StoppedError()
-      if (Date.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
+      if (performance.now() >= deadline) throw new Error('Kurtarma modelinin süresi doldu.')
       try {
         const target = args.allowLocal ? targetFor(model, runtime) : { url: 'https://openrouter.ai/api/v1/chat/completions', model, local: false }
+        const imageKey = JSON.stringify([target.url, target.model])
+        if (hasImages && session?.imageUnsupported.has(imageKey)) {
+          last = new ImageUnsupportedError('Bu kurtarma oturumunda sağlayıcı bu model için görüntü girdisini reddetti.')
+          chatLogger?.(`ATLANDI asama=recovery model=${model} neden=oturum-goruntu-uyumsuzlugu`)
+          break
+        }
         if (args.stage === 'yap' && !target.local && rejectedRemoteAccount) throw rejectedRemoteAccount
         chatLogger?.(`${label} ${targetTag(target.local)} → ${target.model} · ${args.messages.length} mesaj · ${args.tools.length} araç`)
         if (!target.local && !args.apiKey.trim()) throw new ModelRejected('OpenRouter API anahtarı yok; model atlandı.')
-        const hasImages = args.messages.some(m => Array.isArray(m.content) && m.content.some(p => (p as {type?:string}|null)?.type === 'image_url'))
         let messages = args.messages
         if (target.local && hasImages && !runtime.vision) {
           if (args.stage !== 'yap') throw new ImageUnsupportedError('Yerel model için görüntü desteği kapalı.')
@@ -149,11 +168,15 @@ async function boundedRecoveryToolTurn(args: RecoveryTurnArgs): Promise<ToolMess
         const res = await guardedFetch(target.url, {
           method: 'POST', headers: target.local ? { 'Content-Type': 'application/json' } : HEADERS(args.apiKey),
           body: JSON.stringify({ model: target.model, messages, tools: args.tools, tool_choice: 'auto', parallel_tool_calls: false, usage: { include: true } }),
-        }, Math.min(target.local && args.stage === 'yap' ? runtime.timeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())), args.shouldStop)
+        }, Math.min(target.local && args.stage === 'yap' ? runtime.timeoutMs : REQUEST_TIMEOUT_MS, Math.max(1, deadline - performance.now())), args.shouldStop)
         if (args.shouldStop() || stopCheck()) throw new StoppedError()
         if (!res.ok) {
           chatLogger?.(`HTTP asama=${args.stage ?? 'recovery'} model=${target.model} durum=${res.status} govde=${res.text.slice(0, 500).replace(/\s+/g, ' ')}`)
           if (!target.local && (res.status === 401 || isCreditError(res.status, res.text))) throw new FatalApiError(`${label} uzak model çağrısı (HTTP ${res.status}): ${res.status === 401 ? 'API anahtarı geçersiz' : 'bakiye yetersiz'}. Aynı istek tekrar gönderilmedi.`)
+          if (hasImages && [400, 404, 422].includes(res.status) && /no endpoints found that support image input|(?:image|vision|multimodal).*(?:not supported|unsupported)|(?:not support|does not accept).*(?:image|vision|multimodal)/i.test(res.text)) {
+            session?.imageUnsupported.add(imageKey)
+            throw new ImageUnsupportedError(`${label} modeli görüntü girdisini destekleyen uç nokta bulamadı (HTTP ${res.status}).`)
+          }
           throw new Error(`${label} ${target.local ? 'yerel' : 'uzak'} model çağrısı (${res.status}): ${res.text.slice(0, 300)}`)
         }
         const data = JSON.parse(res.text)
@@ -956,6 +979,16 @@ export function validateConditionReply(content: string): void {
   if (typeof parsed.satisfied !== 'boolean' || !(parsed.id === null || typeof parsed.id === 'number' && Number.isInteger(parsed.id))) {
     throw new ModelRejected('MODEL_CONDITION_JSON_INVALID: Koşul için satisfied:boolean ve id:number|null yanıtı gerekli; geçersiz yanıt yokluk sayılmaz.')
   }
+  if (parsed.basis !== undefined && (typeof parsed.basis !== 'string' || !['observed', 'absence', 'unknown'].includes(parsed.basis))) {
+    throw new ModelRejected('MODEL_CONDITION_JSON_INVALID: basis observed/absence/unknown olmalı.')
+  }
+  if (parsed.basis === 'unknown') {
+    throw new ModelRejected('MODEL_CONDITION_UNDECIDED: Model kanıtı yetersiz buldu; bu yanıt yokluk veya başarı sayılmadı.')
+  }
+  if (parsed.satisfied === true && parsed.id === null &&
+      (parsed.basis !== 'absence' || typeof parsed.reason !== 'string' || !parsed.reason.trim())) {
+    throw new ModelRejected('MODEL_CONDITION_EVIDENCE_MISSING: Olumlu yanıt güncel kanıt numarası gerektirir; yalnız gerçekten yokluk sorusuna dayanan basis:absence yanıtı id:null olabilir.')
+  }
 }
 
 export type ScreenChoice = { giveUp?: boolean; satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
@@ -997,7 +1030,8 @@ ${spatialContext(scan)}
 
 ${opts.kind === 'condition' ? CONDITION_TARGET_RULES : WORD_TARGET_RULES}
 ${OCR_READER_RULES}
-Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "id": <one listed evidence id or null for absence>, "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
+Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "id": <one listed evidence id or null>, "basis": "observed|absence|unknown", "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
+${opts.kind === 'condition' ? 'Positive presence/state claims MUST cite a current listed evidence id. Only when the USER condition asks for absence and current coverage supports it may satisfied:true use id:null with basis:absence and an explicit reason. Absence of the requested button does NOT satisfy a question asking whether it is present. Use basis:unknown for insufficient/ambiguous coverage; it is retried, never routed as false. This contract overrides conflicting format examples above.' : ''}
 
 ${opts.kind === 'condition' ? '' : 'If you deliberately conclude that the requested target is definitely absent, you may add "give_up":true ONLY with id:null and a reason. If evidence is incomplete or you are unsure, do not give up; return id:null without give_up. A technical failure is never evidence of absence.'}
 Step: ${opts.stepTitle}

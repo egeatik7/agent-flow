@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createNode, type AgentGraph, type AgentNode } from '../electron/graph-types'
-import { runGraph, ConditionUndecidedError, ConditionHaltError, type Executor, type RecoveryRequest, type RecoveryDecision } from '../electron/runner'
+import { runGraph, StoppedError, ConditionUndecidedError, ConditionHaltError, type Executor, type RecoveryRequest, type RecoveryDecision } from '../electron/runner'
 import { runRecovery, type RecoveryReport } from '../electron/recovery'
 import { DEFAULT_RECOVERY } from '../electron/recovery-settings'
 import type { ToolMessage } from '../electron/openrouter'
@@ -45,6 +45,53 @@ function executor(answer: boolean | 'undecided', recover?: (req: RecoveryRequest
 const run = (g: AgentGraph, ex: Executor) => runGraph(g, ex, { maxSteps: 20, stepDelayMs: 0 })
 
 describe('condition routing', () => {
+  it('preserves the root canvas, rendered target and current item when a nested condition reader fails', async () => {
+    const cond = { ...createNode('condition', 0, 0), text: '{{öğe}} hazır mı?' }
+    const after = { ...createNode('key', 0, 0), keys: '{{öğe}}' }
+    const inner = { nodes: [cond, after], edges: [edge(cond, 'true', after)] }
+    const pkg = { ...createNode('package', 0, 0), inner }
+    const loop = { ...createNode('loop', 0, 0), items: ['a.glb', 'b.glb'], members: [pkg.id] }
+    const root = { nodes: [loop, pkg], edges: [] }
+    const seen: string[] = []
+    const recovered: RecoveryRequest[] = []
+    const { ex } = executor(true)
+    ex.exists = async () => { throw new Error('reader disconnected') }
+    ex.key = async n => { seen.push(n.keys!) }
+    ex.recover = async r => { recovered.push(r); return 'var' }
+    await run(root, ex)
+    expect(recovered.map(r => r.vars.oge)).toEqual(['a.glb', 'b.glb'])
+    expect(recovered.every(r => r.graph === root)).toBe(true)
+    expect(recovered.map(r => r.live.text)).toEqual(['a.glb hazır mı?', 'b.glb hazır mı?'])
+    expect(seen).toEqual(['a.glb', 'b.glb'])
+  })
+  it('does not hand a user Stop exception to Recovery', async () => {
+    const { g } = graph({ hayirBagli: true })
+    const { ex, recovered, clicked } = executor(true, async () => 'var')
+    ex.exists = async () => { throw new StoppedError() }
+    await expect(run(g, ex)).rejects.toBeInstanceOf(StoppedError)
+    expect(recovered).toEqual([])
+    expect(clicked).toEqual([])
+  })
+  it.each(['var', 'yok'] as const)('hands a raw reader failure to recovery once and routes its %s verdict', async decision => {
+    const { g, cond } = graph({ hayirBagli: true })
+    const { ex, clicked, recovered } = executor(true, async () => decision)
+    const error = new Error('OCR worker disconnected')
+    ex.exists = vi.fn(async () => { throw error })
+    await run(g, ex)
+    expect(ex.exists).toHaveBeenCalledTimes(1)
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0]).toMatchObject({ node: { id: cond.id }, error })
+    expect(recovered[0].graph).toBe(g)
+    expect(clicked).toEqual([decision === 'var' ? 'EVET' : 'HAYIR'])
+  })
+  it('reports a raw reader error and recovery-disabled handoff without taking either branch', async () => {
+    const { g } = graph({ hayirBagli: true })
+    const { ex, clicked } = executor(true)
+    ex.exists = vi.fn(async () => { throw Error('OCR worker disconnected') })
+    await expect(run(g, ex)).rejects.toThrow(/kurtarma ajanı kapalı.*OCR worker disconnected/)
+    expect(clicked).toEqual([])
+    expect(ex.exists).toHaveBeenCalledTimes(1)
+  })
   it('evet: continues on the true branch and never asks recovery', async () => {
     const { g } = graph({ hayirBagli: false })
     const { ex, clicked, recovered } = executor(true)

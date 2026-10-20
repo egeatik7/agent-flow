@@ -682,6 +682,10 @@ export function createAgent(ctx: AgentContext) {
           }
         }
         if (stage === 'offset' && ((loc?.offsetX !== undefined && loc.offsetY !== undefined) || (loc?.x !== undefined && loc?.y !== undefined))) {
+          if (hasText && targetMissingReason) {
+            log('warn', `Kayıtlı konum kullanılmadı: güncel hedef seçimi hedefin bulunmadığını bildirdi. ${targetMissingReason}`)
+            continue
+          }
           ctx.setMethod?.('Kayıtlı konum — son çare')
           try {
             if (loc?.offsetX !== undefined && loc.offsetY !== undefined && win) {
@@ -1550,7 +1554,7 @@ export function createAgent(ctx: AgentContext) {
         const s = live.s
         const promptId = source === 'uia' ? 'conditionUia' : 'conditionOcr'
         const choice = await observeWithin(chooseScreenTarget({ apiKey: s.apiKey, model: live.chain, revision: live.revision, chainSource: live.source, signal,
-          context: preferredWindow ? `Requested application/window context: ${preferredWindow}. The observation covers the whole screen; no window was selected or matched. Determine whether the evidence belongs to the intended application/task. A status from an unrelated application or historical log is not proof. If the intended context cannot be established, answer satisfied:false. A changed title alone does not disqualify the same application.` : undefined,
+          context: preferredWindow ? `Requested application/window context: ${preferredWindow}. The observation covers the whole screen; no window was selected or matched. Determine whether the evidence belongs to the intended application/task. A status from an unrelated application or historical log is not proof. If the intended context cannot be established, use basis:unknown instead of guessing true or false. A changed title alone does not disqualify the same application.` : undefined,
           kind: 'condition', prompt: instruction, scan: { ...res, items, image: null },
           stepTitle: 'Koşul', sendImage: false,
           system: promptOf(s.llmPrompts, promptId) || DEFAULT_PROMPTS[promptId] }), signal)

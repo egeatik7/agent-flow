@@ -3,7 +3,7 @@ import { createNode, itemVars, DEFAULT_SETTINGS, type AgentNode } from '../elect
 import { recoveryExecutor } from '../electron/recovery-runtime'
 import { DEFAULT_RECOVERY } from '../electron/recovery-settings'
 import type { ToolContext } from '../electron/tools'
-import type { RecoveryRequest } from '../electron/runner'
+import { StoppedError, type RecoveryRequest } from '../electron/runner'
 
 const calls = vi.hoisted(() => [] as { kind: string; node: AgentNode }[])
 vi.mock('../electron/agent', () => ({ createAgent: (ctx: any) => ({ executor: {
@@ -15,6 +15,39 @@ vi.mock('../electron/agent', () => ({ createAgent: (ctx: any) => ({ executor: {
 } }) }))
 
 describe('internal recovery desktop session', () => {
+  function waitExecutor(shouldStop = () => false, taskMode = false) {
+    const node = { ...createNode('click', 0, 0), id: 'wait-target' }
+    const request: RecoveryRequest = { graph: { nodes: [node], edges: [] }, node, live: node, error: new Error('missing'), stepNo: 1, ahead: {}, vars: {} }
+    const base = { getSettings: () => ({ ...DEFAULT_SETTINGS, stepDelayMs: 0, recovery: { ...DEFAULT_RECOVERY, enabled: true } }), log: () => {} } as unknown as ToolContext
+    return recoveryExecutor(request, base, shouldStop, undefined, taskMode)
+  }
+  it('actually waits beyond ten seconds in Recovery while keeping the Yap wait cap unchanged', async () => {
+    vi.useFakeTimers()
+    try {
+      let completed = false
+      const pending = waitExecutor()('act.wait', { ms: 60_000 }).then(result => { completed = true; return result })
+      await vi.advanceTimersByTimeAsync(10_001)
+      expect(completed).toBe(false)
+      await vi.advanceTimersByTimeAsync(50_000)
+      expect((await pending).ok).toBe(true)
+      completed = false
+      const yap = waitExecutor(() => false, true)('act.wait', { ms: 60_000 }).then(result => { completed = true; return result })
+      await vi.advanceTimersByTimeAsync(10_001)
+      expect(completed).toBe(true)
+      expect((await yap).ok).toBe(true)
+    } finally { vi.useRealTimers() }
+  })
+  it('interrupts a long Recovery wait when the user presses Stop', async () => {
+    vi.useFakeTimers()
+    try {
+      let stopped = false
+      const result = waitExecutor(() => stopped)('act.wait', { ms: 60_000 }).catch(error => error)
+      await vi.advanceTimersByTimeAsync(500)
+      stopped = true
+      await vi.advanceTimersByTimeAsync(500)
+      expect(await result).toBeInstanceOf(StoppedError)
+    } finally { vi.useRealTimers() }
+  })
   it('executes only the chosen action with the paused item and leaves graph, tick, and following nodes intact', async () => {
     calls.length = 0
     const leaf = { ...createNode('type', 0, 0), id: 'leaf', text: '{{öğe}}' }

@@ -4,7 +4,7 @@ import { callTool, type ToolContext } from './tools'
 import { runGraph, StoppedError, type RecoveryRequest, type Executor } from './runner'
 import { findPlace } from './tool-context'
 import { renderTemplate, type AgentNode, type AppSettings } from './graph-types'
-import { RECOVERY_ACTION_KINDS, type RecoveryToolResult } from './recovery'
+import { RECOVERY_ACTION_KINDS, RECOVERY_WAIT_MAX_MS, type RecoveryToolResult } from './recovery'
 import { recoverySettings } from './recovery-settings'
 import { assertModelKeysAllowed } from './key-guard'
 import { yapDetailPage } from './yap-context'
@@ -104,7 +104,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
         ...(kind === 'click' ? { prompt: String(args.target ?? ''), clickMode: args.mode as AgentNode['clickMode'] } : {}),
         ...(kind === 'type' ? { text: String(args.text ?? ''), prompt: String(args.into ?? ''), pressEnter: args.enter === true, clearFirst: args.clear !== false } : {}),
         ...(kind === 'key' ? { keys: String(args.keys ?? '') } : {}),
-        ...(kind === 'wait' ? { ms: Math.max(0, Math.min(10_000, Number(args.ms) || 0)) } : {}),
+        ...(kind === 'wait' ? { ms: Math.max(0, Math.min(taskMode ? 10_000 : RECOVERY_WAIT_MAX_MS, Number(args.ms) || 0)) } : {}),
       }
       if (kind === 'click' && !node.prompt?.trim() || kind === 'type' && !node.text?.trim() || kind === 'key' && !node.keys?.trim()) throw new Error('Kurtarma eyleminin hedefi/metni/tuşu boş.')
       // Modelin canlı tuş seçimi kapatma/silme kombinasyonlarını kullanamaz (key-guard).

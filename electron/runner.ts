@@ -369,7 +369,7 @@ export async function runGraph(
   const settle = () => interruptibleSleep(opts.stepDelayMs, ex.shouldStop)
 
   /** Last condition answer that was "no" or undecided; runChain decides its route. */
-  let pendingCondition: { nodeId: string; title: string; text: string; live: AgentNode; ahead: StepAhead; stepNo: number; undecided: boolean } | undefined
+  let pendingCondition: { nodeId: string; title: string; text: string; live: AgentNode; ahead: StepAhead; stepNo: number; undecided: boolean; error?: Error } | undefined
   const execStep = async (node: AgentNode, live: AgentNode, stepNo: number, ahead: StepAhead): Promise<string> => {
     switch (node.kind) {
       case 'start':
@@ -403,13 +403,18 @@ export async function runGraph(
         if (!text) throw new PermanentStepError(`“${live.title}”: koşul için ne aradığını yaz.`)
         ex.log('info', `[${stepNo}] Koşul “${text}” yöntemlerle değerlendiriliyor…`)
         let answer: boolean | undefined
+        let observationError: Error | undefined
         try { answer = await ex.exists(text, live) }
-        catch (error) { if (!(error instanceof ConditionUndecidedError)) throw error }
+        catch (error) {
+          if (isFatal(error) || error instanceof PermanentStepError) throw error
+          observationError = error instanceof Error ? error : new Error(String(error))
+          ex.log('warn', `Koşul gözlemi tamamlanamadı; aynı koşul ve öğe kurtarmaya devrediliyor: ${observationError.message}`)
+        }
         if (ex.shouldStop()) throw new StoppedError()
         if (answer === true) { ex.log('info', `[${stepNo}] Koşul “${text}”: var`); return 'true' }
         ex.log('info', `[${stepNo}] Koşul “${text}”: ${answer === false ? 'yok' : 'karar verilemedi'}`)
         // "No" or undecided: the route is chosen in runChain, where this scope's edges are known.
-        pendingCondition = { nodeId: node.id, title: node.title, text, live, ahead, stepNo, undecided: answer === undefined }
+        pendingCondition = { nodeId: node.id, title: node.title, text, live, ahead, stepNo, undecided: answer === undefined, error: observationError }
         return 'false'
       }
       case 'ai': {
@@ -472,15 +477,8 @@ export async function runGraph(
     let blocked: unknown
     // Set when recovery asked for a retry; the report is then closed by the final outcome of this step.
     let retriedAfterRecovery = false
-    // Eylem türü olmayan node'da (Koşul/Paket/kaldırılmış tür) bazı hatalar KALICIDIR: boş koşul
-    // metni, uyumsuz hedef, "artık desteklenmiyor" ya da paket iç grafının hatası. Yeniden denemek
-    // paketin tamamını (tıklama/yazma dâhil) yeniden oynatır ve hatayı gizler; bu yüzden tur
-    // döngüsüne hiç girilmez (CLAUDE.md §19). Gözlem/okuyucu hataları ise yeniden denenebilir kalır.
-    // Koşul özel: ham okuyucu/model hatası (ör. eksik API anahtarı, worker çökmesi) tek bir
-    // "karar verilemedi" sinyali değildir; yine de sonsuz 3 sn'lik tura düşmemeli. Sınırlı sayıda
-    // taze gözlemden sonra hata karar sahibine (runGraph) verilir. Sınıflandırılmış
-    // ConditionUndecidedError buraya hiç gelmez (execStep onu kendi yolunda ele alır).
-    let conditionRounds = 0
+    // Kalıcı yapılandırma/graf hataları paketi baştan oynatmaz. Koşul gözlem hataları
+    // execStep/runChain içinde aynı node ve öğe korunarak salt-okunur kurtarmaya gider.
     const outcome = repeatMethodCycle(async () => {
       let error: unknown
       if (blocked !== undefined) error = blocked
@@ -527,8 +525,8 @@ export async function runGraph(
     }, {
       check: () => { if (ex.shouldStop()) throw new StoppedError() },
       wait: () => interruptibleSleep(3000, ex.shouldStop),
-      terminal: (error) => isFatal(error) || error instanceof PermanentStepError || (node.kind === 'condition' && conditionRounds >= 3),
-      retry: (error, round) => { if (node.kind === 'condition') conditionRounds = round; ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`) },
+      terminal: (error) => isFatal(error) || error instanceof PermanentStepError,
+      retry: (error, round) => { ex.log('warn', `DUGUM-TEKRAR “${node.title}” tur=${round}: ${methodErrorText(error)}; aynı düğüm ve öğe korunuyor.`) },
     })
     try {
       const port = await outcome
@@ -619,8 +617,8 @@ export async function runGraph(
         const pending = pendingCondition
         pendingCondition = undefined
         const askRecovery = async (why: string): Promise<boolean> => {
-          if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: ${why}; kurtarma ajanı kapalı. Akış durduruldu.`)
-          const decision = await ex.recover({ graph, node, live: pending.live, error: new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: { ...vars } })
+          if (!ex.recover) throw new ConditionHaltError(`“${node.title}”: ${why}; kurtarma ajanı kapalı. Akış durduruldu.${pending.error ? ` Gözlem hatası: ${pending.error.message}` : ''}`)
+          const decision = await ex.recover({ graph: root, node, live: pending.live, error: pending.error ?? new ConditionUndecidedError(`Koşul “${pending.text}” ekranda cevaplanamadı.`), stepNo: pending.stepNo, ahead: pending.ahead, vars: { ...vars } })
           if (ex.shouldStop()) throw new StoppedError()
           if (decision === 'var') {
             ex.log('success', `[${pending.stepNo}] Kurtarma ajanı koşulu doğruladı: “${pending.text}”: var`)

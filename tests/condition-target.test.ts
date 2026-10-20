@@ -55,12 +55,12 @@ describe('Condition: one whole-screen observation with model decisions', () => {
   })
   it('accepts a model-confirmed absence with no selected ID', async () => {
     state.items = [{ ...row('Blender project is ready'), src: 'uia' }]
-    respond({ satisfied: true, id: null, reason: 'the requested context is observed and the error is absent' })
+    respond({ satisfied: true, id: null, basis: 'absence', reason: 'the requested context is observed and the error is absent' })
     expect(await make().exists('', condition('hata mesajı yoksa evet ver'))).toBe(true)
     expect(state.requests).toHaveLength(1)
   })
   it('empty-list verdict is also the model decision, never inferred from an ID', async () => {
-    respond({ satisfied: true, id: null, reason: 'fixture model absence verdict' })
+    respond({ satisfied: true, id: null, basis: 'absence', reason: 'fixture model absence verdict' })
     expect(await make().exists('', condition('hata yok mu?'))).toBe(true)
     expect(state.requests).toHaveLength(1)
   })
@@ -157,7 +157,8 @@ describe('condition response protocol', () => {
     expect(() => validateConditionReply(reply)).toThrow('MODEL_CONDITION_JSON_INVALID')
   })
   it('accepts explicit boolean absence verdicts without requiring an evidence ID', () => {
-    expect(() => validateConditionReply('{"satisfied":true,"id":null}')).not.toThrow()
+    expect(() => validateConditionReply('{"satisfied":true,"id":null}')).toThrow('MODEL_CONDITION_EVIDENCE_MISSING')
+    expect(() => validateConditionReply('{"satisfied":true,"id":null,"basis":"absence","reason":"Requested popup is absent"}')).not.toThrow()
     expect(() => validateConditionReply('{"satisfied":false,"id":1}')).not.toThrow()
   })
 })

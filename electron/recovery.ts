@@ -3,9 +3,10 @@ import { modelChain, type AgentGraph, type LogLevel } from './graph-types'
 import { contextOf, findPlace } from './tool-context'
 import { StoppedError, type RecoveryDecision, type RecoveryRequest } from './runner'
 import { recoverySettings, type RecoverySettings } from './recovery-settings'
-import type { ModelTool, ToolMessage } from './openrouter'
+import type { ModelTool, ToolMessage, RecoveryModelSession } from './openrouter'
 
 export const RECOVERY_ACTION_KINDS = ['click', 'type', 'key', 'wait']
+export const RECOVERY_WAIT_MAX_MS = 60_000
 
 export type RecoveryReport = {
   id: string
@@ -29,14 +30,17 @@ export type RecoveryReport = {
   resumed?: boolean
   resumeError?: string
   completionBasis?: 'node-executed' | 'model-observed'
+  /** Duration from a monotonic clock; timestamps above remain wall-clock dates. */
+  elapsedMs?: number
 }
 
 export type RecoveryToolResult = { ok: boolean; outcome: string; message: string; data?: Record<string, unknown> }
 type Dependencies = {
   settings: RecoverySettings
   shouldStop: () => boolean
+  clock?: () => number
   log: (level: LogLevel, message: string) => void
-  turn: (args: { messages: ToolMessage[]; tools: ModelTool[]; shouldStop: () => boolean; timeoutMs: number }) => Promise<ToolMessage>
+  turn: (args: { messages: ToolMessage[]; tools: ModelTool[]; shouldStop: () => boolean; timeoutMs: number; modelSession?: RecoveryModelSession }) => Promise<ToolMessage>
   makeExecute: (shouldStop: () => boolean) => (name: string, args: Record<string, unknown>) => Promise<RecoveryToolResult>
   recentLog: unknown
   previousReports?: unknown
@@ -57,7 +61,7 @@ export function conditionRecoveryTools(): ModelTool[] {
   ]
 }
 
-export function recoveryTools(settings: RecoverySettings): ModelTool[] {
+export function recoveryTools(settings: RecoverySettings, maxWaitMs = 10_000): ModelTool[] {
   const tools = [
     tool('screen_read', 'Güncel ekranı, açık pencereleri ve ekran görüntüsünü oku. HWND/PID verilirse yalnız o pencere okunur.', { windowTitle: str, hwnd: str, pid: { type: 'integer' } }),
     tool('flow_read', 'Bulunduğun tuvalin node ve paketlerini oku.'),
@@ -74,7 +78,7 @@ export function recoveryTools(settings: RecoverySettings): ModelTool[] {
     tool('act_click_point', 'Son screen_read görüntüsünde gördüğün noktaya tıkla. x/y görüntüye göre 0–1. Tercihen önce act_move ile hizala ve screen_read ile incele.', { x: { type: 'number' }, y: { type: 'number' }, mode: { type: 'string', enum: ['left', 'double', 'right'] } }, ['x', 'y']),
     tool('act_type', 'Metni hedef alana veya odaktaki alana yaz.', { text: str, into: str, enter: { type: 'boolean' }, clear: { type: 'boolean' } }, ['text']),
     tool('act_key', 'Klavye kısayolu gönder. Gönderilmesi pencerenin kapandığını doğrulamaz.', { keys: str }, ['keys']),
-    tool('act_wait', 'En fazla 10 saniye bekle.', { ms: { type: 'integer', minimum: 0, maximum: 10_000 } }, ['ms']),
+    tool('act_wait', `En fazla ${maxWaitMs / 1000} saniye bekle. Kalan toplam kurtarma süresi daha kısaysa motor beklemeyi kısaltır; süre bütçesi yenilenmez.`, { ms: { type: 'integer', minimum: 0, maximum: maxWaitMs } }, ['ms']),
   )
   if (settings.allowNodes) tools.push(tool('step_run', 'İzinli bir eylem node’unu mevcut döngü değişkenleriyle bir kez çalıştır. Bağlı sonraki node’lar çalışmaz. Hata veren node tamamlanırsa motor onu tekrarlamaz.', { nodeId: str }, ['nodeId']))
   return tools
@@ -91,6 +95,8 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
   const settings = recoverySettings(deps.settings)
   if (!settings.enabled) return { decision: 'disabled' }
   const startedAt = Date.now()
+  const clock = deps.clock ?? (() => performance.now())
+  const startedClock = clock()
   const context = contextOf(request.graph, request.node.id)
   const report: RecoveryReport = {
     id: `recovery-${startedAt}-${Math.random().toString(36).slice(2, 10)}`,
@@ -98,10 +104,11 @@ export async function runRecovery(request: RecoveryRequest, deps: Dependencies):
     nodeId: request.node.id, nodeTitle: request.node.title, error: request.error.message, context,
     result: 'failed', probableCause: '', evidence: '', summary: '', actions: [],
   }
-  const deadline = startedAt + settings.timeoutMs
-  const stopped = () => deps.shouldStop() || Date.now() >= deadline
+  const deadline = startedClock + settings.timeoutMs
+  const stopped = () => deps.shouldStop() || clock() >= deadline
   const check = () => { if (stopped()) throw new StoppedError() }
-  const tools = request.node.kind === 'condition' ? conditionRecoveryTools() : recoveryTools(settings)
+  const tools = request.node.kind === 'condition' ? conditionRecoveryTools() : recoveryTools(settings, RECOVERY_WAIT_MAX_MS)
+  const modelSession: RecoveryModelSession = { imageUnsupported: new Set() }
   const allowedTools = new Set(tools.map(t => t.function.name))
   const execute = deps.makeExecute(stopped)
   const allowedNodes = new Set([request.node.id, ...settings.allowedNodeIds])
@@ -130,10 +137,12 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
   }, (key, value) => key === 'icon' || key === 'patch' || key === 'sig' ? undefined : value) }]
   if (request.node.kind === 'condition') messages.push({ role: 'system', content: `Bu bir Koşul sorusu. Koşul: "${request.node.text ?? request.node.title}". Önce screen_read ile güncel ekranı gör, sonra recovery_condition ile answer "var" veya "yok" olarak bildir. "var" yalnız AÇIK kanıtla; "yok" yalnız açık karşıt kanıtla. Emin değilsen answer verme, recovery_stop ile gerekçeyi bildir. Tıklama, yazma veya tuş gönderme yoktur.` })
   deps.log('warn', `Kurtarma ajanı devrede: “${request.node.title}”. Mevcut döngü öğesi korunuyor.`)
+  const baseSystem = String(messages[0].content)
   try {
     for (let calls = 0, turns = 0; calls < settings.maxCalls && turns < settings.maxCalls + 3; turns++) {
       check()
-      const answer = await deps.turn({ messages, tools, shouldStop: stopped, timeoutMs: Math.max(1, deadline - Date.now()) })
+      messages[0].content = `${baseSystem}\nKalan kurtarma bütçesi: ${Math.max(0, Math.floor(deadline - clock()))} ms; kalan araç çağrısı: ${settings.maxCalls - calls}. Uzun bir beklemeyi gerekmedikçe 10 saniyelik parçalara bölme. Bütçe dolması modelin bilinçli vazgeçmesi değildir.`
+      const answer = await deps.turn({ messages, tools, shouldStop: stopped, timeoutMs: Math.max(1, deadline - clock()), modelSession })
       check()
       // The chain is a wish list: record who actually answered and what the provider billed.
       if (answer.model && modelsUsed[modelsUsed.length - 1] !== answer.model) modelsUsed.push(answer.model)
@@ -212,7 +221,11 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
             const hedef = request.node.locator?.windowTitle?.trim()
             if (hedef) args.windowTitle = hedef
           }
-          if (name === 'act_wait') args.ms = Math.max(0, Math.min(10_000, typeof args.ms === 'number' ? args.ms : 1000))
+          if (name === 'act_wait') {
+            const requested = typeof args.ms === 'number' ? args.ms : 1000
+            args.ms = Math.max(0, Math.min(RECOVERY_WAIT_MAX_MS, requested, Math.floor(deadline - clock() - 1000)))
+            if (args.ms !== requested) deps.log('info', `Kurtarma beklemesi kalan bütçeye göre ${requested} ms → ${args.ms} ms olarak sınırlandı.`)
+          }
           deps.log('info', `Kurtarma aracı: ${names[name] || name} ${name === 'powershell_run' ? JSON.stringify(args) : JSON.stringify(args).slice(0, 500)}`)
           if (name.startsWith('act_') || name === 'step_run' || name === 'window_action' || name === 'powershell_run') freshScreen = false
           result = await execute(names[name] || name, args)
@@ -246,14 +259,15 @@ ${settings.instructions}` }, { role: 'user', content: JSON.stringify({
     return { decision: 'failed', report }
   } catch (error) {
     report.result = deps.shouldStop() ? 'stopped' : 'failed'
-    report.summary = deps.shouldStop() ? 'Kullanıcı durdurdu.' : Date.now() >= deadline ? 'Kurtarma süresi doldu.' : `Kurtarma çağrısı başarısız: ${(error as Error).message}`
+    report.summary = deps.shouldStop() ? 'Kullanıcı durdurdu.' : clock() >= deadline ? 'Kurtarma süresi doldu.' : `Kurtarma çağrısı başarısız: ${(error as Error).message}`
     if (deps.shouldStop()) throw new StoppedError()
     return { decision: 'failed', report }
   } finally {
     report.endedAt = Date.now()
+    report.elapsedMs = Math.max(0, clock() - startedClock)
     if (modelsUsed.length) report.modelsUsed = modelsUsed
     report.usage = { ...usage, ...(costKnown && costUsd > 0 ? { costUsd } : {}) }
-    deps.log('info', `Kurtarma harcaması: ${modelsUsed.join(' → ') || 'cevap veren model yok'} · ${usage.total} token (giriş ${usage.prompt} · çıkış ${usage.completion}) · ${((report.endedAt - report.startedAt) / 1000).toFixed(1)} sn${costKnown && costUsd > 0 ? ` · $${costUsd.toFixed(4)} (sağlayıcı bildirimi)` : ' · maliyet bildirilmedi'}`)
+    deps.log('info', `Kurtarma harcaması: ${modelsUsed.join(' → ') || 'cevap veren model yok'} · ${usage.total} token (giriş ${usage.prompt} · çıkış ${usage.completion}) · ${(report.elapsedMs / 1000).toFixed(1)} sn${costKnown && costUsd > 0 ? ` · $${costUsd.toFixed(4)} (sağlayıcı bildirimi)` : ' · maliyet bildirilmedi'}`)
     try { deps.saveReport(report) } catch (error) { deps.log('warn', `Kurtarma raporu kaydedilemedi: ${(error as Error).message}`) }
     deps.log(report.result === 'retry' || report.result === 'completed' ? 'info' : 'warn', `Kurtarma raporu: ${report.summary || report.result}${report.probableCause ? ` Olası neden: ${report.probableCause}` : ''}`)
   }

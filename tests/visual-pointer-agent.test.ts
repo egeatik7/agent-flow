@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const h = vi.hoisted(() => ({ point: { x: 0, y: 0 }, moves: [] as any[], clicks: [] as any[], scans: [] as any[], requests: [] as any[], answers: [] as any[], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false }))
+const h = vi.hoisted(() => ({ point: { x: 0, y: 0 }, moves: [] as any[], clicks: [] as any[], scans: [] as any[], requests: [] as any[], answers: [] as any[], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false, missing: false, windowReads: 0 }))
 vi.mock('electron', () => ({ screen: { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 700 }, scaleFactor: 1 }) } }))
 vi.mock('../electron/a11y-bridge', () => ({
   isLocked: async () => h.locked,
   scan: async (opts: any) => { h.scans.push(opts); return { area: { x: 0, y: 0, w: 1000, h: 700 }, image: { data: Buffer.from(opts.cursorMarker ? `AFTER_MOVE_${h.moves.length}` : 'INITIAL').toString('base64'), w: 1000, h: 700 }, cursor: opts.cursorMarker && h.marker ? { ...h.point } : null, items: [], window: 'Fixture', ocr: false, uiaCount: 0, ocrCount: 0 } },
   discardShot: () => {}, foreground: async () => ({ title: 'Fixture', pid: 10, hwnd: '42', proc: 'fixture' }),
+  windowRect: async () => { h.windowReads++; return { x: 0, y: 0, w: 1000, h: 700 } },
   moveMouse: async (x: number, y: number) => { h.point = { x, y }; h.moves.push({ x, y }); return { hwnd: 42 } },
   cursorPos: async () => ({ ...h.point }),
   clickAt: async (...args: any[]) => { h.clicks.push({ direct: args }) },
@@ -19,12 +20,12 @@ import { setLocalEndpoint, setStopCheck } from '../electron/openrouter'
 function executor(extra: Partial<typeof DEFAULT_SETTINGS> = {}) { return createAgent({ log: () => {}, send: () => {}, shouldStop: () => h.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey: 'fixture', model: 'vision', agentModel: 'vision', agentBackups: [], findOrder: ['tars'], findOff: [], screenCheck: 'off', stepDelayMs: 0, ...extra }) }).executor }
 const node = (mode: 'left' | 'double' | 'right' | 'move' = 'left') => ({ ...createNode('click', 0, 0), prompt: 'Masaüstündeki Blender', clickMode: mode })
 beforeEach(() => {
-  Object.assign(h, { point: { x: 0, y: 0 }, moves: [], clicks: [], scans: [], requests: [], answers: [], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false })
+  Object.assign(h, { point: { x: 0, y: 0 }, moves: [], clicks: [], scans: [], requests: [], answers: [], stopped: false, stopOnRetry: false, drift: false, marker: true, locked: false, windowChanged: false, missing: false, windowReads: 0 })
   setLocalEndpoint(''); setStopCheck(() => h.stopped)
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body); h.requests.push(body)
     const verification = JSON.stringify(body.messages).includes('"decision\\"') || JSON.stringify(body.messages).includes('confirm|adjust|uncertain')
-    const reply = verification ? h.answers.shift() ?? { decision: 'confirm', reason: 'crosshair inside Blender' } : { name: 'computer_use', arguments: { action: 'mouse_move', coordinate: [300, 400] } }
+    const reply = verification ? h.answers.shift() ?? { decision: 'confirm', reason: 'crosshair inside Blender' } : { name: 'computer_use', arguments: h.missing ? { action: 'terminate', status: 'failure' } : { action: 'mouse_move', coordinate: [300, 400] } }
     if (verification && h.drift) h.point = { x: 800, y: 600 }
     return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
   }))
@@ -54,6 +55,18 @@ it.each(['uncertain', 'drift', 'marker', 'windowChanged'])('does not click on %s
 })
 it('move-only node sends no confirmation call and never clicks', async () => {
   await executor().click(node('move'), 1); expect(h.requests).toHaveLength(1); expect(h.moves).toHaveLength(1); expect(h.clicks).toHaveLength(0)
+})
+it('does not click a saved offset after the current visual selector reports the semantic target missing', async () => {
+  h.missing = true
+  h.stopOnRetry = true
+  const target = { ...node(), locator: { name: 'Blender', controlType: 'Button', path: '', windowTitle: 'Fixture', x: 300, y: 280, offsetX: 300, offsetY: 280 } }
+  await expect(executor({ findOrder: ['tars', 'offset'] }).click(target, 1)).rejects.toThrow()
+  expect(h.clicks).toEqual([])
+  expect(h.windowReads).toBe(0)
+})
+it('preserves explicitly coordinate-only click nodes', async () => {
+  await executor({ findOrder: ['offset'] }).click({ ...node(), prompt: '', locator: { name: '', controlType: '', path: '', x: 300, y: 280 } }, 1)
+  expect(h.clicks).toHaveLength(1)
 })
 
 it('backup B that locates the target also handles each pointer adjustment; never returns to A or the Yap list', async () => {

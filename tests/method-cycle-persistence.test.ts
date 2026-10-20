@@ -11,14 +11,13 @@ const graph = (kind: 'click'|'type'|'key'|'condition'|'ai'): AgentGraph => {
  loop.items=['a','b']; loop.members=[previous.id,node.id]; node.text='BİTTİ var mı'; node.prompt='{{öğe}}'; node.keys='ENTER'; previous.keys='previous'
  return {nodes:[start,loop,previous,node,end], edges:[{id:'1',from:start.id,fromPort:'next',to:loop.id},{id:'2',from:previous.id,fromPort:'next',to:node.id},{id:'3',from:loop.id,fromPort:'done',to:end.id}]}
 }
-it.each(['click','type','key','condition','ai'] as const)('%s: random error retries only the current node, with the same item; prior nodes never replay',async kind=>{
+it.each(['click','type','key','ai'] as const)('%s: random error retries only the current node, with the same item; prior nodes never replay',async kind=>{
  const g=graph(kind), node=g.nodes.find(n=>n.kind===kind&&n.keys!=='previous')!
  const seen:string[]=[], prior=vi.fn(async()=>{}); let calls=0
  const action=async(n:any)=>{seen.push(`${n.id}:${n.prompt}`); if(++calls<=2) throw Error('random transport fault')}
  const ex=base(); ex.key=async n=>n.keys==='previous'?prior():action(n)
  if(kind==='click') ex.click=action
  if(kind==='type') ex.type=action
- if(kind==='condition') ex.exists=async(_text,n)=>{await action(n);return false}
  if(kind==='ai') ex.initiative=async n=>{await action(n);return true}
  const statuses:string[]=[];ex.step=(_id,status)=>statuses.push(status)
  const pending=runGraph(g,ex,{maxSteps:20,stepDelayMs:0,reportEnd:true})

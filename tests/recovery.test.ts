@@ -25,6 +25,44 @@ function harness(answers: ToolMessage[], patch = {}) {
 }
 
 describe('recovery controller', () => {
+  it('waits 60 seconds in one tool call, updates the remaining budget, and shares one private model session', async () => {
+    const h = harness([call('act_wait', { ms: 60_000 }), finish()])
+    let clock = 0
+    h.execute.mockImplementation(async () => { clock += 60_000; return { ok: true, outcome: 'tamam', message: 'Beklendi.' } })
+    const sessions: unknown[] = []
+    const turn: Parameters<typeof runRecovery>[1]['turn'] = async args => {
+      sessions.push(args.modelSession)
+      return h.deps.turn(args)
+    }
+    const deps = { ...h.deps, clock: () => clock, turn }
+    expect((await runRecovery(request, deps)).decision).toBe('retry')
+    expect(h.execute).toHaveBeenCalledExactlyOnceWith('act.wait', { ms: 60_000 })
+    expect(h.turns[0][0].content).toContain('180000 ms')
+    expect(h.turns[1][0].content).toContain('120000 ms')
+    expect(h.turns[1][0].content).toContain('kalan araç çağrısı: 15')
+    expect(sessions[0]).toBe(sessions[1])
+    expect(h.reports[0].elapsedMs).toBe(60_000)
+    const nextSessions: unknown[] = []
+    await runRecovery(request, { ...h.deps, turn: async args => { nextSessions.push(args.modelSession); return finish() } })
+    expect(nextSessions[0]).not.toBe(sessions[0])
+  })
+  it('clamps a long wait to the remaining budget without resetting the recovery deadline', async () => {
+    const h = harness([call('act_wait', { ms: 60_000 }), finish()], { timeoutMs: 30_000 })
+    let clock = 0
+    h.execute.mockImplementation(async (_name, args) => { clock += Number(args.ms); return { ok: true, outcome: 'tamam', message: 'Beklendi.' } })
+    expect((await runRecovery(request, { ...h.deps, clock: () => clock })).decision).toBe('retry')
+    expect(h.execute).toHaveBeenCalledExactlyOnceWith('act.wait', { ms: 29_000 })
+    expect(h.turns[1][0].content).toContain('1000 ms')
+  })
+  it('does not expire or extend the recovery budget when the Windows wall clock jumps', async () => {
+    const h = harness([call('act_wait', { ms: 1000 }), finish()], { timeoutMs: 10_000 })
+    let clock = 0
+    const wall = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    h.execute.mockImplementation(async () => { wall.mockReturnValue(99_000_000); clock = 1000; return { ok: true, outcome: 'tamam', message: 'Beklendi.' } })
+    expect((await runRecovery(request, { ...h.deps, clock: () => clock })).decision).toBe('retry')
+    expect(h.turns[1][0].content).toContain('9000 ms')
+    expect(h.reports[0].elapsedMs).toBe(1000)
+  })
   it('does not blindly retry an original input that may already have been dispatched', async () => {
     const done = call('recovery_complete', { probableCause: 'Observation failed', evidence: 'Current screen read', summary: 'Inspected current result' })
     const h = harness([finish(), call('step_run', { nodeId: leaf.id }), call('screen_read'), done])
@@ -96,8 +134,8 @@ describe('recovery controller', () => {
   })
   it('does not act from a model answer that arrived after the recovery deadline', async () => {
     const h = harness([], { timeoutMs: 10_000 })
-    const now = Date.now()
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const now = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(now)
     h.deps.turn = vi.fn(async () => { clock.mockReturnValue(now + 11_000); return call('act_key', { keys: 'delete' }) })
     expect((await runRecovery(request, h.deps)).decision).toBe('failed')
     expect(h.execute).not.toHaveBeenCalled()
