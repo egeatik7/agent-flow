@@ -1,9 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { CheckpointActivity } from './checkpoint-activity'
 import { CheckpointOutputWatch, type OutputWatchDeps } from './checkpoint-output-watch'
 import { flowRoots } from './checkpoint-roots'
-import type { CheckpointDetail, CheckpointInfo, CheckpointSnapshot } from './checkpoint-types'
+import type { CheckpointDetail, CheckpointInfo, CheckpointSnapshot, CheckpointLoop, CheckpointLapStatus, CheckpointLap } from './checkpoint-types'
 
 const json = async <T>(file: string): Promise<T> => JSON.parse(await fs.promises.readFile(file, 'utf8'))
 
@@ -90,9 +91,49 @@ export class Checkpoints {
   private lastDiscovery = 0
   private exclude: string[]
   private outputs: CheckpointOutputWatch
+  private activity = new CheckpointActivity()
+  private activityDirty = false
+  /** Kapanmış koşunun tur günlüğü değişmez; mtime+boyut aynıysa yeniden ayrıştırma. */
+  private activityCache = new Map<string, { stamp: string; laps: CheckpointLap[]; damaged: boolean }>()
+  private async activityFor(runId: string): Promise<{ laps: CheckpointLap[]; damaged: boolean }> {
+    const file = this.activityFile(runId)
+    const stat = await fs.promises.stat(file)
+    const stamp = `${stat.mtimeMs}:${stat.size}`
+    const hit = this.activityCache.get(runId)
+    if (hit?.stamp === stamp) return hit
+    const text = await fs.promises.readFile(file, 'utf8'), latest = new Map<string, CheckpointLap>()
+    let damaged = false
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const lap = JSON.parse(line) as CheckpointLap
+        if (!lap || typeof lap.key !== 'string' || typeof lap.visitId !== 'string' || typeof lap.loopId !== 'string' || typeof lap.title !== 'string' || typeof lap.item !== 'string' ||
+          !Number.isInteger(lap.index) || lap.index < 0 || !Number.isInteger(lap.total) || lap.index >= lap.total ||
+          !['running', 'completed', 'incomplete', 'failed', 'stopped', 'interrupted'].includes(lap.status)) throw Error()
+        latest.set(lap.key, lap)
+      } catch { damaged = true }
+    }
+    const value = { stamp, laps: [...latest.values()], damaged }
+    this.activityCache.set(runId, value)
+    if (this.activityCache.size > 40) { const oldest = this.activityCache.keys().next().value; if (oldest) this.activityCache.delete(oldest) }
+    return value
+  }
   constructor(private dir: string, private warn: (message: string) => void = () => {}, deps?: OutputWatchDeps) {
     this.exclude = [dir, ...(deps?.exclude ?? [])]
-    this.outputs = new CheckpointOutputWatch({ discover: deps?.discover ?? (async () => []), ...deps, exclude: this.exclude })
+    this.outputs = new CheckpointOutputWatch({ discover: deps?.discover ?? (async () => []), ...deps, exclude: this.exclude,
+      lapKey: () => this.activity.path[this.activity.path.length - 1] })
+  }
+  context(frames: CheckpointLoop[], status?: CheckpointLapStatus) {
+    if (!this.active) return
+    this.activity.context(frames, status); this.activityDirty = true
+  }
+  private activityFile(runId: string) { return path.join(this.dir, `${createHash('sha256').update(runId).digest('hex')}.activity.jsonl`) }
+  private async persistActivity() {
+    if (!this.active || !this.activityDirty) return
+    const value = this.activity.takeChanges()
+    this.activityDirty = false
+    try { if (value.length) await fs.promises.appendFile(this.activityFile(this.active.runId), '\n' + value.map(lap => JSON.stringify(lap) + '\n').join(''), 'utf8') }
+    catch (error) { this.activity.retryChanges(value); this.activityDirty = true; throw error }
   }
   monitoring() { return this.outputs.monitoring() }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -146,6 +187,7 @@ export class Checkpoints {
     void this.serial(async () => {
       if (!this.active) return
       await this.persistChanges()
+      await this.persistActivity()
       // 10 sn'de bir kökleri tazele: yeni oluşan klasör izlemeye alınır (tüm disk izleme açıksa
       // takılan/sökülen diskler de burada yakalanır).
       if (Date.now() - this.lastDiscovery >= 10000) { this.lastDiscovery = Date.now(); await this.outputs.refresh() }
@@ -158,13 +200,14 @@ export class Checkpoints {
     // Kök yoksa HATA ATMAZ: izlenecek klasör bulunamaması otomasyonu durdurmaz (bkz. KULLANIM).
     await this.outputs.start()
     this.active = { runId, canvasId, canvasName, ordinal: 0, parentId }
+    this.activity = new CheckpointActivity(); this.activityDirty = false
     this.lastDiscovery = Date.now()
   }
   private file(id: string, snapshot = false) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Geçersiz checkpoint kimliği.')
     return path.join(this.dir, `${id}${snapshot ? '.snapshot' : ''}.json`)
   }
-  async mark(label: string, snapshot: CheckpointSnapshot) {
+  async mark(label: string, snapshot: CheckpointSnapshot, options: { canvasStart?: boolean; useCurrentContext?: boolean } = {}) {
     return this.serial(async () => {
       if (!this.active) throw new Error('Checkpoint oturumu başlamadı.')
       // KAPSAM: izlenecek kökler bu checkpoint'in grafından ve imlecinden hesaplanır. Döngü bir
@@ -175,7 +218,11 @@ export class Checkpoints {
       const now = Date.now(), old = this.current
       const { runId, canvasId, canvasName, parentId } = this.active
       const monitoring = this.outputs.monitoring()
-      const cp: CheckpointDetail = { id: randomUUID(), runId, ordinal: ++this.active.ordinal, canvasId, canvasName, label, at: now, outputCount: 0, status: 'running', roots: monitoring.roots, issues: monitoring.issues, outputs: [], parentId }
+      this.activity.graph(snapshot.graph)
+      if (options.canvasStart) this.context([])
+      else if (!options.useCurrentContext) this.context(snapshot.cursor.loops)
+      const cp: CheckpointDetail = { id: randomUUID(), runId, ordinal: ++this.active.ordinal, canvasId, canvasName, label, at: now, outputCount: 0, status: 'running', roots: monitoring.roots, issues: monitoring.issues, outputs: [], parentId, lapPath: [...this.activity.path], outputScopes: {} }
+      this.activity.checkpoint(cp.id)
       // Switch ownership synchronously. Queued old events retain the old checkpoint.
       this.current = cp
       this.outputs.bind(cp)
@@ -185,6 +232,7 @@ export class Checkpoints {
       if (old) { await write(this.file(old.id), this.metaOf(old)); this.appended.delete(old.id) }
       await write(this.file(cp.id, true), snapshot)
       await write(this.file(cp.id), this.metaOf(cp))
+      await this.persistActivity()
       if (!this.timer) this.timer = setInterval(() => this.poll(), 500)
       return cp.id
     })
@@ -194,10 +242,12 @@ export class Checkpoints {
     this.timer = undefined
     // Stop observation at the run boundary, then persist every already-received event.
     this.outputs.stop()
+    this.activity.finish(status); this.activityDirty = true
     const endedAt = Date.now()
     const result = await this.serial(async () => {
       try {
         await this.persistChanges()
+        await this.persistActivity()
         if (this.current) { this.current.endedAt = endedAt; this.current.status = status; await write(this.file(this.current.id), this.metaOf(this.current)) }
       } finally { this.active = undefined; this.current = undefined }
     })
@@ -220,7 +270,31 @@ export class Checkpoints {
         this.warnOnce(name, `Checkpoint okunamadı (${name}); liste bu kayıt olmadan gösteriliyor: ${(e as Error).message}`)
       }
     }
-    return rows.sort((a, b) => a.at - b.at || a.ordinal - b.ordinal)
+    rows.sort((a, b) => a.at - b.at || a.ordinal - b.ordinal)
+    const seen = new Set<string>()
+    for (const row of rows) {
+      if (seen.has(row.runId)) continue
+      seen.add(row.runId)
+      try {
+        let laps: CheckpointLap[]
+        if (this.active?.runId === row.runId) laps = [...this.activity.laps.values()]
+        else {
+          const cached = await this.activityFor(row.runId)
+          laps = cached.laps
+          if (cached.damaged) row.issues = [...row.issues, 'Döngü geçmişinde eksik/bozuk satır var; tur durumları eksik olabilir.']
+        }
+        if (!Array.isArray(laps) || laps.some(lap => !lap || typeof lap.key !== 'string' || typeof lap.visitId !== 'string' || typeof lap.index !== 'number')) throw Error('Tur kaydı geçersiz.')
+        row.activity = laps.map(lap => ({ ...lap, status: lap.status === 'running' && this.active?.runId !== row.runId ? 'interrupted' : lap.status }))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' && rows.some(info => info.runId === row.runId && info.lapPath?.length)) {
+          row.issues = [...row.issues, 'Döngü geçmişi dosyası bulunamadı; tur ilişkileri eksik olabilir. Kayıtlı checkpoint başlangıçları korunuyor.']
+        } else if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          row.issues = [...row.issues, 'Döngü geçmişi okunamadı; bu koşunun tur ilişkileri eksik olabilir.']
+          this.warnOnce(row.runId, `Döngü geçmişi okunamadı: ${(error as Error).message}`)
+        }
+      }
+    }
+    return rows
   }
   private warned = new Set<string>()
   private warnOnce(key: string, message: string) {

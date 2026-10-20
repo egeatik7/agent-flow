@@ -22,8 +22,9 @@ export type OutputWatchDeps = {
   wide?: () => boolean
   exclude?: string[]
   watch?: typeof fs.watch
+  lapKey?: () => string | undefined
 }
-type Pending = { cp: CheckpointDetail; path: string; rename: boolean; at: number; lastAt: number }
+type Pending = { cp: CheckpointDetail; path: string; rename: boolean; at: number; lastAt: number; lapKey?: string }
 export function insidePath(parent: string, target: string) {
   const rel = path.relative(parent.toLowerCase(), target.toLowerCase())
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
@@ -152,10 +153,11 @@ export class CheckpointOutputWatch {
         const full = path.resolve(root, String(filename))
         if (full.toLowerCase() === root.toLowerCase()) { this.issue(`Dosya izleyici yalnız izlenen kökü bildirdi (${root}); çıktı kaydı eksik olabilir.`); return }
         if (!insidePath(root, full) || this.excluded(full) || !this.current) return
-        const key = `${this.current.id}\0${full.toLowerCase()}`
+        const lapKey = this.deps.lapKey?.()
+        const key = `${this.current.id}\0${lapKey ?? ''}\0${full.toLowerCase()}`
         const old = this.pending.get(key)
         if (!old && this.pending.size >= 100000) { this.issue('100.000 bekleyen dosya olayı sınırı: çıktı kaydı eksik olabilir.'); return }
-        this.pending.set(key, { cp: this.current, path: full, rename: event === 'rename' || !!old?.rename, at: old?.at ?? Date.now(), lastAt: Date.now() })
+        this.pending.set(key, { cp: this.current, path: full, rename: event === 'rename' || !!old?.rename, at: old?.at ?? Date.now(), lastAt: Date.now(), lapKey })
       })
       watcher.on('error', error => {
         if (this.watchers.get(root) !== watcher) return
@@ -175,13 +177,16 @@ export class CheckpointOutputWatch {
   }
   private record(event: Pending, kind: CheckpointOutput['kind'], size: number, present: boolean) {
     let index = this.indexes.get(event.cp)
-    if (!index) { index = new Map(event.cp.outputs.map(output => [output.path.toLowerCase(), output])); this.indexes.set(event.cp, index) }
-    const old = index.get(event.path.toLowerCase())
+    const outputKey = (p: string, lap?: string) => `${lap ?? ''}\0${p.toLowerCase()}`
+    if (!index) { index = new Map(event.cp.outputs.map(output => [outputKey(output.path, output.lapKey), output])); this.indexes.set(event.cp, index) }
+    const old = index.get(outputKey(event.path, event.lapKey))
     if (!old && index.size >= 100000) { this.issue('100.000 çıktı yolu sınırı: bu checkpoint kaydı eksik olabilir.', event.cp); return false }
     if (old) { old.path = event.path; old.kind = kind === 'unknown' ? old.kind : kind; old.size = size; old.lastSeen = Math.max(old.lastSeen, event.lastAt); old.present = present }
     else {
-      const row: CheckpointOutput = { path: event.path, kind, size, change: 'observed', present, firstSeen: event.at, lastSeen: event.lastAt }
-      index.set(event.path.toLowerCase(), row); event.cp.outputs.push(row)
+      const row: CheckpointOutput = { path: event.path, kind, size, change: 'observed', present, firstSeen: event.at, lastSeen: event.lastAt, ...(event.lapKey ? { lapKey: event.lapKey } : {}) }
+      index.set(outputKey(event.path, event.lapKey), row); event.cp.outputs.push(row)
+      const scopes = event.cp.outputScopes ??= {}
+      scopes[event.lapKey ?? ''] = (scopes[event.lapKey ?? ''] ?? 0) + 1
     }
     event.cp.outputCount = event.cp.outputs.length
     this.dirty.add(event.cp)

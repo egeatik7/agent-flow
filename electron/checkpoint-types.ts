@@ -1,6 +1,8 @@
 import type { AgentGraph } from './graph-types'
 
-export type CheckpointLoop = { id: string; keys: string[]; index: number; isList: boolean; outerVars: Record<string, string> }
+export type CheckpointLoop = { id: string; keys: string[]; index: number; isList: boolean; outerVars: Record<string, string>; visitId?: string }
+export type CheckpointLapStatus = 'running' | 'completed' | 'incomplete' | 'failed' | 'stopped' | 'interrupted'
+export type CheckpointLap = { key: string; parentKey?: string; visitId: string; loopId: string; title: string; index: number; total: number; item: string; at: number; endedAt?: number; status: CheckpointLapStatus; checkpointId?: string }
 export type CheckpointScope = { path: string[]; vars: Record<string, string> }
 export type CheckpointCursor = {
   startId?: string
@@ -9,12 +11,16 @@ export type CheckpointCursor = {
   scopes: CheckpointScope[]
 }
 export type CheckpointSnapshot = { graph: AgentGraph; cursor: CheckpointCursor }
-export type CheckpointOutput = { path: string; kind: 'file' | 'folder' | 'unknown'; change: 'created' | 'modified' | 'removed' | 'observed'; firstSeen: number; lastSeen: number; size: number; present?: boolean }
+export type CheckpointOutput = { path: string; kind: 'file' | 'folder' | 'unknown'; change: 'created' | 'modified' | 'removed' | 'observed'; firstSeen: number; lastSeen: number; size: number; present?: boolean; /** Active lap when the filesystem event arrived; temporal evidence, not producer attribution. */ lapKey?: string }
 export type CheckpointInfo = {
   id: string; runId: string; ordinal: number; canvasId: string; canvasName: string
   label: string; at: number; endedAt?: number; outputCount: number
   status: 'running' | 'closed' | 'completed' | 'stopped' | 'failed' | 'interrupted'
   roots: string[]; issues: string[]; parentId?: string
+  /** Optional v2 observation metadata. Old records remain readable without inferred ancestry. */
+  lapPath?: string[]; outputScopes?: Record<string, number>
+  /** Run activity attached once per run by list(); stored separately from snapshots. */
+  activity?: CheckpointLap[]
 }
 export type CheckpointDetail = CheckpointInfo & { outputs: CheckpointOutput[] }
 /**

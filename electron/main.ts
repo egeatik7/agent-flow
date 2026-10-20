@@ -1116,7 +1116,7 @@ async function runFlow(
       try {
         await checkpoints.begin(runId, opts?.canvasId ?? '', opts?.canvasName ?? 'Tuval', opts?.checkpointId)
         checkpointStarted = true
-        await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } })
+        await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } }, { canvasStart: true })
       } catch (error) {
         log('warn', `Checkpoint başlatılamadı; koşu checkpoint olmadan sürüyor: ${(error as Error).message}`)
       }
@@ -1146,8 +1146,9 @@ async function runFlow(
     let recoveries = 0
     const pendingReports = new Map<string, RecoveryReport>()
     const executor = { ...agent.executor,
+      checkpointContext: opts?.derived ? undefined : (frames: import('./checkpoint-types').CheckpointLoop[], status?: import('./checkpoint-types').CheckpointLapStatus) => checkpoints.context(frames, status),
       checkpoint: opts?.derived ? undefined : async (label: string, cursor: CheckpointCursor) => {
-        await checkpoints.mark(label, { graph: structuredClone(graph), cursor })
+        await checkpoints.mark(label, { graph: structuredClone(graph), cursor }, { useCurrentContext: true })
       },
       initiative: async (node: import('./graph-types').AgentNode, stepNo: number, ahead: import('./runner').StepAhead = {}, vars: Record<string, string> = {}) => {
         if (opts?.fast || opts?.debug) throw new Error('Yap model gerektirir; hızlı/hata ayıklama koşusunda çalıştırılamaz.')

@@ -29,17 +29,46 @@ function scenario(depth: number, packages: boolean): AgentGraph {
 }
 async function record(graph: AgentGraph, snapshot?: CheckpointSnapshot) {
   const actions: string[] = [], checkpoints: { snapshot: CheckpointSnapshot; offset: number; label: string }[] = []
+  const activity: { frames: import('../electron/checkpoint-types').CheckpointLoop[]; status?: string }[] = []
   const ex: Executor = {
     log: () => {}, step: () => {}, shouldStop: () => false,
     click: async () => {}, key: async () => {}, exists: async () => true,
     type: async n => { actions.push(n.text ?? '') },
     checkpoint: async (label, cursor) => { checkpoints.push({ label, offset: actions.length, snapshot: { graph: structuredClone(graph), cursor: structuredClone(cursor) } }) },
+    checkpointContext: (frames, status) => { activity.push({ frames: structuredClone(frames), status }) },
   }
   const summary = await runGraph(graph, ex, { ...opts, ...(snapshot ? { startId: snapshot.cursor.startId, packagePath: snapshot.cursor.packagePath, resume: true, checkpointResume: snapshot.cursor } : {}) })
-  return { actions, checkpoints, summary }
+  return { actions, checkpoints, summary, activity }
 }
 
 describe('checkpoints preserve the exact execution suffix', () => {
+  it('records Stop on every active lap without inventing successful completion', async () => {
+    const events: { depth: number; status?: string }[] = []
+    const ex: Executor = { log: () => {}, step: () => {}, shouldStop: () => false, click: async () => {}, key: async () => {}, exists: async () => true,
+      type: async n => { if (n.text?.startsWith('before-0')) throw new StoppedError() },
+      checkpointContext: (frames, status) => { events.push({ depth: frames.length, status }) },
+    }
+    await expect(runGraph(scenario(1, true), ex, opts)).rejects.toBeInstanceOf(StoppedError)
+    expect(events.filter(e => e.status === 'stopped').map(e => e.depth)).toEqual([2, 1])
+    expect(events.some(e => e.status === 'completed')).toBe(false)
+  })
+  it('keeps executing when the optional activity observer throws', async () => {
+    let actions = 0
+    const ex: Executor = { log: () => {}, step: () => {}, shouldStop: () => false, click: async () => {}, key: async () => {}, exists: async () => true,
+      type: async () => { actions++ }, checkpointContext: () => { throw Error('observer unavailable') },
+    }
+    expect((await runGraph(scenario(0, false), ex, opts)).reachedEnd).toBe(true)
+    expect(actions).toBe(4)
+  })
+  it.each([false, true])('emits actual lap completion and distinct inner visits, without changing action order (packages=%s)', async packages => {
+    const result = await record(scenario(1, packages))
+    const completed = result.activity.filter(a => a.status === 'completed')
+    expect(completed).toHaveLength(6)
+    const inner = completed.filter(a => a.frames.length === 2)
+    expect(new Set(inner.map(a => a.frames[1].visitId)).size).toBe(2)
+    expect(inner.map(a => a.frames[1].index)).toEqual([0, 1, 0, 1])
+    expect(result.activity.at(-1)?.frames).toEqual([])
+  })
   it.each([[0, false], [2, false], [1, true], [2, true]] as const)('depth=%s packages=%s: every checkpoint resumes with the same variables, remaining items and continuation', async (depth, packages) => {
     const original = await record(scenario(depth, packages))
     expect(original.checkpoints.length).toBeGreaterThan(1)

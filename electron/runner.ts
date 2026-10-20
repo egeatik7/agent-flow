@@ -1,4 +1,5 @@
 import { checkpointGraphPath, type CheckpointCursor, type CheckpointLoop, type CheckpointScope } from './checkpoint-types'
+import type { CheckpointLapStatus } from './checkpoint-types'
 import { assertRunStructure } from './run-structure'
 import { repeatMethodCycle, methodErrorText, DeliberateStopError, RecoveryFailedError } from './method-cycle'
 import { type ObservationOptions } from './observation-budget'
@@ -22,6 +23,8 @@ import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
 import { outsideFolder, outsideVars, packageHost } from './enclosing'
 import type { DeliveryState, TypeProgress } from './graph-types'
+// Namespaced by runId in the activity store; package invocations share this module counter.
+let checkpointVisitSequence = 0
 
 /** The next one or two nodes, already filled with the current loop variables. */
 export type StepAhead = { next?: AgentNode; then?: AgentNode }
@@ -50,6 +53,8 @@ export type LoopProgress = { id: string; title: string; index: number; total: nu
 
 export type Executor = {
   checkpoint?: (label: string, cursor: CheckpointCursor) => Promise<void>
+  /** Observation only. Never chooses a branch, retries input or changes variables. */
+  checkpointContext?: (frames: CheckpointLoop[], status?: CheckpointLapStatus) => void
   /** Runs only at a failed action boundary; the existing loop stack remains paused. */
   recover?: (request: RecoveryRequest) => Promise<RecoveryDecision>
   recoveryFinished?: (nodeId: string, ok: boolean, error?: string) => void
@@ -313,7 +318,11 @@ export async function runGraph(
   }
   const inheritedLoops = opts.loopProgress ?? []
   const liveLoops: LoopProgress[] = []
-  const publishLoops = () => ex.setLoopProgress?.([...inheritedLoops, ...liveLoops].map(loop => ({ ...loop })))
+  const publishContext = (status?: CheckpointLapStatus) => {
+    try { ex.checkpointContext?.([...(opts.checkpointLoops ?? []), ...checkpointFrames], status) }
+    catch (error) { ex.log('warn', `Döngü geçmişi güncellenemedi: ${(error as Error).message}`) }
+  }
+  const publishLoops = () => { ex.setLoopProgress?.([...inheritedLoops, ...liveLoops].map(loop => ({ ...loop }))); publishContext() }
   publishLoops()
   const loopNotes: string[] = []
   const tally: Tally = opts.tally ?? newTally()
@@ -774,7 +783,7 @@ export async function runGraph(
     // Bir tur açıkken adım hataları ÖĞE hatası olarak sayılır (aşağıdaki catch): aynı hata
     // runGraph'un çıkışında bir kez daha "adım hatası" diye sayılmasın.
     tally.loopDepth++
-    checkpointFrames.push({ id: loop.id, keys, index: from, isList, outerVars: { ...outer } })
+    checkpointFrames.push({ id: loop.id, keys, index: from, isList, outerVars: { ...outer }, visitId: String(++checkpointVisitSequence) })
     try {
       for (let idx = from; idx < keys.length; idx++) {
         checkpointFrames[checkpointFrames.length - 1].index = idx
@@ -804,12 +813,15 @@ export async function runGraph(
         })
         if (ex.shouldStop()) throw new StoppedError()
         try {
+          const failuresBefore = tally.failed + tally.stepFailures
           await runChain(entry ?? first, loop, undefined, { used: 0 }, entry ? firstLapPath : undefined)
+          publishContext(incomplete || tally.failed + tally.stepFailures > failuresBefore ? 'incomplete' : 'completed')
           succeeded++
           // A lap that finished cleanly breaks the chain: only two failures in a row
           // mean the loop should stand still, not two failures far apart.
           lastFail = ''
         } catch (e) {
+          publishContext(e instanceof StoppedError ? 'stopped' : e instanceof EndFlow ? 'incomplete' : 'failed')
           if (isFatal(e)) throw e
           const msg = (e as Error).message || String(e)
           failedItems.push(label)
