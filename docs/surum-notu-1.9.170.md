@@ -92,4 +92,6 @@ Paket 1'in 3. maddesi (teknik hata yönlendirmesi) ve Paket 2–5'in kalanı son
 
 ## EXE
 
-`Nubbo-1.9.170.exe` · masaüstü kopyası SHA256 ile doğrulandı (bu not yazılırken hesaplanır).
+`Nubbo-1.9.170.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.170.exe` · SHA256
+`8F16FDC3C90DFD18DD4D1FB824035EB70F06A4679E098918267313DFDD05B314` (build = masaüstü kopyası,
+97.586.802 bayt).
