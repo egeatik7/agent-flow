@@ -78,4 +78,6 @@ checkpoint seçiminin açık kaydı, checkpoint izleyici/saklama ve FolderBatche
 
 ## EXE
 
-`Nubbo-1.9.171.exe` · masaüstü kopyası SHA256 ile doğrulandı (hash aşağıda güncellenir).
+`Nubbo-1.9.171.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.171.exe` · SHA256
+`61BF002A04E728159B03B1C1BA486EF6A7815977941947239057A5686A354315` (build = masaüstü kopyası,
+97.585.194 bayt).
