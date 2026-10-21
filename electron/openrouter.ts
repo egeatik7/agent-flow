@@ -602,6 +602,12 @@ export class ModelFailed extends Error { readonly serviceFailure = true }
 export class ModelRejected extends ModelFailed {}
 /** Only an actual model response rejected by the output contract gets one extra attempt. */
 export class ModelOutputRejected extends ModelRejected {}
+/** A valid read-only answer without enough evidence. Try a new reader, not the same prompt again. */
+export class ConditionEvidenceUnknownError extends ModelRejected {}
+/** A weak answer advances readers, then hands off to Recovery without repeating the confidence vote. */
+export class ConditionConfidenceUnknownError extends ConditionEvidenceUnknownError {}
+/** A valid leaning answer needs an independent opinion, not a same-model output repair. */
+class ConditionSecondOpinionError extends ModelRejected {}
 class CandidateOutputRejected extends ModelOutputRejected {
   constructor(message: string, readonly content: string) { super(message) }
 }
@@ -694,6 +700,10 @@ export async function runModelChain<T>(models: string[], run: (model: string) =>
       } catch (e) {
         checkObservation(limits.signal)
         if (e instanceof StoppedError) throw e
+        if (e instanceof ConditionEvidenceUnknownError) {
+          chatLogger?.(`KOSUL-BELIRSIZ model=${model} sonraki=yontem neden=${brief(e)}`)
+          throw e
+        }
         if (e instanceof ModelFailed && e.message.includes('geç yanıt reddedildi')) throw e
         if (!(e instanceof ModelRejected) || e instanceof ModelOutputRejected) allRejected = false
         lastError = brief(e)
@@ -882,7 +892,7 @@ async function chat(
   model: string | string[],
   messages: Message[],
   hasImage: boolean,
-  opts: { json?: boolean; validate?: (text: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean; requestId?: string; stage?: string; revision?: number; source?: string; onAnsweredModel?: (model: string) => void } = {},
+  opts: { json?: boolean; validate?: (text: string, model: string) => void; signal?: AbortSignal; maxCycles?: number; reasoningOff?: boolean; requestId?: string; stage?: string; revision?: number; source?: string; onAnsweredModel?: (model: string) => void } = {},
   /** Same request with the picture removed, used when this model cannot see images. */
   withoutImage?: Message[]
 ): Promise<string> {
@@ -892,8 +902,10 @@ async function chat(
     try {
       const text = await chatOnce(apiKey, name, messages, hasImage, requestOptions)
       if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
-      try { opts.validate?.(text) }
+      try { opts.validate?.(text, name) }
       catch (error) {
+        if (error instanceof ConditionEvidenceUnknownError) throw error
+        if (error instanceof ConditionSecondOpinionError) throw error
         if (error instanceof ModelOutputRejected) throw error
         if (error instanceof ModelRejected) throw new ModelOutputRejected(error.message)
         throw error
@@ -907,8 +919,10 @@ async function chat(
       chatLogger?.(`${name} görüntü kabul etmiyor, yazı listesiyle deneniyor.`)
       const text = await chatOnce(apiKey, name, withoutImage, false, requestOptions)
       if (!text.trim()) throw new ModelOutputRejected('boş yanıt')
-      try { opts.validate?.(text) }
+      try { opts.validate?.(text, name) }
       catch (error) {
+        if (error instanceof ConditionEvidenceUnknownError) throw error
+        if (error instanceof ConditionSecondOpinionError) throw error
         if (error instanceof ModelOutputRejected) throw error
         if (error instanceof ModelRejected) throw new ModelOutputRejected(error.message)
         throw error
@@ -983,7 +997,12 @@ export function validateConditionReply(content: string): void {
     throw new ModelRejected('MODEL_CONDITION_JSON_INVALID: basis observed/absence/unknown olmalı.')
   }
   if (parsed.basis === 'unknown') {
-    throw new ModelRejected('MODEL_CONDITION_UNDECIDED: Model kanıtı yetersiz buldu; bu yanıt yokluk veya başarı sayılmadı.')
+    throw new ConditionEvidenceUnknownError('MODEL_CONDITION_UNDECIDED: Model kanıtı yetersiz buldu; bu yanıt yokluk veya başarı sayılmadı.')
+  }
+  conditionConfidence(parsed.confidence)
+  if (parsed.satisfied === false && parsed.id === null &&
+      (parsed.basis !== 'absence' || typeof parsed.reason !== 'string' || !parsed.reason.trim())) {
+    throw new ConditionEvidenceUnknownError('MODEL_CONDITION_UNDECIDED: Olumsuz karar için gözlenen karşıt kanıt veya gerekçeli basis:absence gerekli; okunamayan durum hayır sayılmadı.')
   }
   if (parsed.satisfied === true && parsed.id === null &&
       (parsed.basis !== 'absence' || typeof parsed.reason !== 'string' || !parsed.reason.trim())) {
@@ -991,7 +1010,27 @@ export function validateConditionReply(content: string): void {
   }
 }
 
-export type ScreenChoice = { giveUp?: boolean; satisfied?: boolean; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
+/** Fraction is canonical. Numeric percentages are tolerated; missing scores keep legacy first answers usable. */
+function conditionConfidence(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    throw new ModelRejected('MODEL_CONDITION_JSON_INVALID: confidence 0..1 arasında sayı olmalı (0.75 = %75).')
+  }
+  return value > 1 ? value / 100 : value
+}
+
+/** A numeric counter is one value: substring matching must not turn 0 or 2 into 20. */
+function conditionTextAgrees(stated: unknown, actual: string): boolean {
+  if (typeof stated === 'string') {
+    const a = stated.trim().replace(/\s+/g, '')
+    const b = actual.trim().replace(/\s+/g, '')
+    const numeric = /^[+-]?\d+(?:[.,]\d+)?%?$/
+    if (numeric.test(a) && numeric.test(b)) return a === b
+  }
+  return listedTextAgrees(stated, actual)
+}
+
+export type ScreenChoice = { giveUp?: boolean; satisfied?: boolean; basis?: 'observed' | 'absence'; id: number | null; text?: string; reason: string; usedImage: boolean; wordIndex?: number; candidateId?: number; /** Modelin döndürdüğü ham numara ve çözülemediyse sebebi: günlükte dürüst rapor için (1.9.110). */ rawId?: number; rejected?: 'absent' | 'not-selectable' | 'not-listed' | 'contradicts'; /** Numara aday listesinde yoktu ama GERÇEKTEN gönderilen marked görüntünün rozetinden çözüldü (1.9.116): ajan bu satırı kısa ikinci kelime seçimine sokar. */ badgeResolved?: boolean }
 
 export async function chooseScreenTarget(opts: {
   apiKey: string
@@ -1016,6 +1055,7 @@ export async function chooseScreenTarget(opts: {
   const candidates = wordCandidates(scan)
   // Eylem cumlesi + yerlesik/kayitli secim tek yerde (saf, test edilir): listPromptFor.
   const system = listPromptFor(opts.kind, opts.system)
+  const textAgrees = opts.kind === 'condition' ? conditionTextAgrees : listedTextAgrees
 
   // Kırpma bilgisi tıkla/yaz promptunda da görünsün: model "listede yok"u "ekranda yok" sanmasın.
   const limitNotes: string[] = []
@@ -1030,8 +1070,9 @@ ${spatialContext(scan)}
 
 ${opts.kind === 'condition' ? CONDITION_TARGET_RULES : WORD_TARGET_RULES}
 ${OCR_READER_RULES}
-Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "id": <one listed evidence id or null>, "basis": "observed|absence|unknown", "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
-${opts.kind === 'condition' ? 'Positive presence/state claims MUST cite a current listed evidence id. Only when the USER condition asks for absence and current coverage supports it may satisfied:true use id:null with basis:absence and an explicit reason. Absence of the requested button does NOT satisfy a question asking whether it is present. Use basis:unknown for insufficient/ambiguous coverage; it is retried, never routed as false. This contract overrides conflicting format examples above.' : ''}
+Reply with JSON only: ${opts.kind === 'condition' ? '{"satisfied": <boolean: does the user condition hold?>, "confidence": <number 0..1: confidence in this true OR false answer>, "id": <one listed evidence id or null>, "basis": "observed|absence|unknown", "text": "<observed evidence>", "reason": "<short evidence-based reason>"}' : '{"id": <one listed candidate id or null>, "text": "<observed selected word/control text>", "reason": "<short reason>"}'}
+${opts.kind === 'condition' ? 'Positive presence/state claims MUST cite a current listed evidence id. Only when the USER condition asks for absence and current coverage supports it may satisfied:true use id:null with basis:absence and an explicit reason. Absence of the requested button does NOT satisfy a question asking whether it is present. A readable value/state that fails the condition is satisfied:false with basis:observed and its evidence id. Negative absence decisions with id:null require basis:absence and an explicit coverage-based reason. Use basis:unknown for insufficient/ambiguous coverage; this advances to another observation method, never routes as false. This contract overrides conflicting format examples above.' : ''}
+${opts.kind === 'condition' ? 'Judge only the requested CURRENT screen condition. Clear relevant text, counters or states can justify a confident true OR false; do not demand hidden backend proof or completion of unasked tasks. confidence rates your chosen answer, not the probability that satisfied is true. State your best evidence-based answer briefly; use unknown only when the supplied evidence cannot decide it.' : ''}
 
 ${opts.kind === 'condition' ? '' : 'If you deliberately conclude that the requested target is definitely absent, you may add "give_up":true ONLY with id:null and a reason. If evidence is incomplete or you are unsure, do not give up; return id:null without give_up. A technical failure is never evidence of absence.'}
 Step: ${opts.stepTitle}
@@ -1080,20 +1121,46 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
     },
   ]
 
-  const validateChoice = (content: string) => {
+  let firstOpinion: { model: string; satisfied: boolean; confidence: number } | undefined
+  const validateConfidence = (parsed: Record<string, unknown>, model: string) => {
+    if (opts.kind !== 'condition') return
+    const confidence = conditionConfidence(parsed.confidence)
+    const satisfied = parsed.satisfied === true
+    const score = confidence === undefined ? 'yok' : Math.floor(confidence * 10000) / 100
+    const report = (action: string) => chatLogger?.(`KOSUL-GUVEN model=${model} karar=${satisfied} guven=${score} islem=${action}`)
+    if (firstOpinion) {
+      if (model !== firstOpinion.model && satisfied === firstOpinion.satisfied && confidence !== undefined && confidence >= 0.75) {
+        report('ikinci-gorus-onay'); return
+      }
+      report('sonraki-yontem')
+      throw new ConditionConfidenceUnknownError('MODEL_CONDITION_CONFIDENCE: Bağımsız ikinci görüş aynı kararı en az %75 güvenle doğrulamadı; sıradaki okuyucuya geçiliyor.')
+    }
+    // Do not invent 100% for an older valid response. It simply follows the existing evidence contract.
+    if (confidence === undefined || confidence >= 0.75) {
+      report(confidence === undefined ? 'eski-sozlesme' : 'kabul'); return
+    }
+    if (confidence >= 0.5) {
+      firstOpinion = { model, satisfied, confidence }
+      report('ikinci-gorus')
+      throw new ConditionSecondOpinionError('MODEL_CONDITION_SECOND_OPINION: Kanıtlı cevap %50–75 aralığında; sıradaki modelden bağımsız görüş isteniyor.')
+    }
+    report('sonraki-yontem')
+    throw new ConditionConfidenceUnknownError('MODEL_CONDITION_CONFIDENCE: Cevabın güveni %50 altında; aynı gözlemde oylama tekrarlanmadan sıradaki okuyucuya geçiliyor.')
+  }
+  const validateChoice = (content: string, model: string) => {
     if (opts.kind === 'condition') validateConditionReply(content)
     else validateTargetReply(content)
     const parsed = parseJson(content)
     const id = Object.prototype.hasOwnProperty.call(parsed, 'id') ? parseListedId(parsed.id) : parseListedId(parsed.i ?? parsed.index)
-    if (id === null) return // A legitimate missing/uncertain answer is not malformed output.
+    if (id === null) { validateConfidence(parsed, model); return }
     const candidate = candidates.find(c => c.item.id === id && (!c.contextOnly || opts.kind === 'condition'))
     const badge = !candidate && usedImage && opts.kind !== 'condition' && (scan.image as { marked?: boolean } | null)?.marked === true
       ? scan.items.find(item => item.id === id && item.w > 0 && item.h > 0) : undefined
     const actual = candidate?.item ?? badge
-    if (!actual || !listedTextAgrees(parsed.text, actual.text)) {
+    if (!actual || !textAgrees(parsed.text, actual.text)) {
       const reason = !actual ? `id=${id} bu istekte seçilebilir değil` : `id=${id} metin=${String(parsed.text ?? '')} çözülen=${actual.text}`
       chatLogger?.(`CIKTI-RET asama=${opts.kind} ${reason}`)
-      const textClash = !!actual && !listedTextAgrees(parsed.text, actual.text)
+      const textClash = !!actual && !textAgrees(parsed.text, actual.text)
       const candidate = candidates.find(c => c.item.id === id)
       const rejected = textClash ? 'contradicts' : !candidate ? 'absent' : candidate.contextOnly ? 'not-selectable' : 'not-listed'
       if (textClash) chatLogger?.(`CELISKI id=${istekId} | donen-id=${id} | model-metni=${String(parsed.text ?? '').slice(0, 80)} | cozulen=${actual!.text.slice(0, 80)} | tiklama yok`)
@@ -1106,6 +1173,8 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
       } })
       throw new CandidateOutputRejected(`MODEL_TARGET_REJECTED: ${reason}`, content)
     }
+    // Scores never override an invented ID or contradictory evidence text.
+    validateConfidence(parsed, model)
   }
   let content: string
   let usedImage = withImage
@@ -1114,6 +1183,12 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   try {
     content = await chat(opts.apiKey, opts.model, build(withImage), withImage, { validate: validateChoice, signal: opts.signal, requestId: istekId, stage: String(opts.kind), revision: opts.revision, source: opts.chainSource }, withImage ? build(false) : undefined)
   } catch (e) {
+    checkObservation(opts.signal)
+    if (e instanceof StoppedError || stopCheck()) throw new StoppedError()
+    if (firstOpinion && (e instanceof ModelFailed || e instanceof TransientError)) {
+      if (e instanceof ConditionConfidenceUnknownError) throw e
+      throw new ConditionConfidenceUnknownError(`MODEL_CONDITION_CONFIDENCE: Bağımsız ikinci görüş tamamlanamadı; sıradaki okuyucuya geçiliyor. ${brief(e)}`)
+    }
     if (!(e instanceof ImageUnsupportedError)) throw e
     opts.onImageFallback?.('Seçili model ekran görüntüsünü desteklemiyor, sadece yazı listesiyle deneniyor.')
     usedImage = false
@@ -1138,7 +1213,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   // Artık: numara bu listede yok / var ama tıklanabilir değil / listeye alınmamış / numara yok.
   const aday = id !== null ? candidates.find(c => c.item.id === id) : undefined
   const actualText = selected?.item.text ?? rozet?.text ?? ''
-  const clash = !!(selected || rozet) && !listedTextAgrees(parsed.text, actualText)
+  const clash = !!(selected || rozet) && !textAgrees(parsed.text, actualText)
   const chosen = clash ? undefined : selected
   const badge = clash ? undefined : rozet
   const rejected = clash ? 'contradicts' as const : id === null || selected || rozet ? undefined : !aday ? 'absent' as const : aday.contextOnly ? 'not-selectable' as const : 'not-listed' as const
@@ -1165,6 +1240,7 @@ Instruction: ${opts.prompt}${opts.context ? `\n\nContext: ${opts.context}` : ''}
   return {
     ...(opts.kind !== 'condition' && parsed.id === null && parsed.give_up === true ? { giveUp: true } : {}),
     ...(opts.kind === 'condition' ? { satisfied: parsed.satisfied === true && (parsed.id === null || !!chosen) } : {}),
+    ...(opts.kind === 'condition' && (parsed.basis === 'observed' || parsed.basis === 'absence') ? { basis: parsed.basis } : {}),
     id: chosen?.parentId ?? badge?.id ?? null,
     ...(rejected ? { rejected, rawId: id ?? undefined } : {}),
     ...(badge ? { badgeResolved: true } : {}),

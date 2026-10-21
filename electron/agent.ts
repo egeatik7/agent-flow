@@ -42,6 +42,7 @@ import {
   chooseVisualTarget,
   ModelFailed,
   ModelOutputRejected,
+  ConditionConfidenceUnknownError,
   verifyVisualPointer,
   type VisualTargetResult,
   isTarsModel,
@@ -84,6 +85,8 @@ class VisualTargetMissingError extends NotFoundError {}
 class VisualTargetRecoveryError extends Error { readonly haltLoop = true; readonly inputMayHaveBeenSent = true }
 /** Still offered to Recovery, but never silently skip the failed loop item. */
 class TargetMethodsExhaustedError extends NotFoundError { readonly haltLoop = true }
+/** Both readers were tried: Recovery owns the next decision, not another confidence-voting round. */
+class ConditionConfidenceExhaustedError extends ConditionUndecidedError {}
 class InputDispatchError extends Error {
   readonly haltLoop = true
   readonly inputMayHaveBeenSent = true
@@ -1525,8 +1528,9 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      // Same readers and target-list model as Click, but one UIA pass then one
-      // combined OCR pass. No Click retries, popup recovery, input or memory writes.
+      // Same readers and target-list model as Click. A supported yes OR no completes
+      // the pass; only an inconclusive reader advances to the next observation method.
+      // No Click retries, popup recovery, input or memory writes.
       const preferredWindow = node.conditionWindow?.trim() || ''
       const scanCondition = async (source: 'uia' | 'ocr'): Promise<ScanResult> => {
         const res = await observeWithin(bridge.scan({ signal, image: 'none', uia: source === 'uia', ocr: source === 'ocr',
@@ -1544,6 +1548,7 @@ export function createAgent(ctx: AgentContext) {
       }
       return repeatMethodCycle(async () => {
         let failed = false
+        let confidenceUndecided = false
         for (const source of ['uia', 'ocr'] as const) {
         try {
         ctx.setMethod?.(source === 'uia' ? 'Koşul: uygulama öğeleri (UIA)' : 'Koşul: Windows + ONNX OCR')
@@ -1562,19 +1567,26 @@ export function createAgent(ctx: AgentContext) {
         checkObservation(signal)
         const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
         if (choice.satisfied === true) return found(`${source}: ${hit ? `“${hit.text}”` : 'model koşulu doğruladı'}${choice.reason ? ` — ${choice.reason}` : ''}`)
+        if (choice.satisfied === false && (hit || choice.basis === 'absence')) {
+          log('info', `Koşul ${source}: koşul sağlanmıyor${hit ? ` — güncel kanıt: “${hit.text}”` : ' — gerekçeli yokluk kararı'}${choice.reason ? ` — ${choice.reason}` : ''}.`)
+          return false
+        }
         log('info', `Koşul ${source}: açık kanıt yok${choice.reason ? ` — ${choice.reason}` : ''}.`)
         } catch (error) {
           checkStopped(); checkObservation(signal)
           failed = true
+          if (error instanceof ConditionConfidenceUnknownError) confidenceUndecided = true
           log('warn', `[Yöntem geçişi] Koşul ${source} karar veremedi; sıradaki yöntem: ${methodErrorText(error)}`)
         }
         }
+        if (confidenceUndecided) throw new ConditionConfidenceExhaustedError('Koşul güven değerlendirmesi UIA ve OCR ile tamamlanamadı; aynı oylama tekrarlanmadan Koşul Kurtarmasına devrediliyor.')
         if (failed) throw new ConditionUndecidedError('Koşul yöntemlerinden en az biri karar veremedi; yok sonucu üretilmedi.')
         return false
       }, {
         check: () => { checkStopped(); checkObservation(signal) },
         wait: () => observeWithin(pause(REFRESH_RETRY_MS), signal),
         retry: (error, round) => log('warn', `YONTEM-TUR “${node.title}” tur=${round}: ${methodErrorText(error)} Yeni UIA → OCR gözlemi başlıyor.`),
+        terminal: error => error instanceof ConditionConfidenceExhaustedError,
         // Kalıcı okuyucu/model hatasında sonsuz tur yok: birkaç taze gözlemden sonra karar
         // runner'a (kurtarma) devredilir; 'hayır' dalı da böylece erişilebilir kalır.
         maxRounds: 4,

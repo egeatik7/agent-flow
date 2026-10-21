@@ -63,8 +63,8 @@ describe('Koşul modeli — condition model chain', () => {
     expect(chainOf()).not.toContain('text/main')
   })
   it('asks both readers with the condition chain and never with the text chain', async () => {
-    state.items = [row('Running 6/60')]
-    respond({ satisfied: false, id: null })
+    state.items = [{ ...row('Running 6/60'), src: 'ocr' }]
+    respond({ satisfied: false, id: 1 }, 1)
     expect(await make({ conditionModel: 'cond/one', conditionBackups: [] }).exists('', condition('60/60 tamamlandı mı?'))).toBe(false)
     expect(state.scans).toHaveLength(2)
     expect(chainOf()).toEqual(['cond/one', 'cond/one'])

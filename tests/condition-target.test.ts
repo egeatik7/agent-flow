@@ -18,14 +18,19 @@ vi.mock('../electron/shots', () => ({ rememberShot: () => {} }))
 import { createAgent } from '../electron/agent'
 import { createNode, DEFAULT_SETTINGS } from '../electron/graph-types'
 import { validateConditionReply, setStopCheck } from '../electron/openrouter'
-import { StoppedError, runGraph } from '../electron/runner'
+import { ConditionUndecidedError, StoppedError, runGraph } from '../electron/runner'
 function make(order = ['windows', 'onnx', 'list'], apiKey = 'test-key', llmPrompts = {}) {
   return createAgent({ log: () => {}, send: () => {}, shouldStop: () => state.stopped, settings: () => ({ ...DEFAULT_SETTINGS, apiKey, llmPrompts, model: apiKey ? 'test/model' : '', agentModel: 'test/model', agentBackups: [], visionModel: 'test/model', visionBackups: [], findOrder: order as never, findOff: [] }) }).executor
 }
 const condition = (text: string) => ({ ...createNode('condition', 0, 0), text })
 const row = (text: string) => ({ id: 1, text, type: 'Text', src: 'ocr', x: 20, y: 30, w: 170, h: 20, ocrSources: ['onnx'] })
-function respond(value: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { state.requests.push(String(init.body)); const reply = { satisfied: typeof (value as { satisfied?: unknown }).satisfied === 'boolean' ? (value as { satisfied: boolean }).satisfied : (value as { id?: unknown }).id != null, ...(value as object) }; return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) } }))
+function respond(value: unknown, later?: unknown) {
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+    state.requests.push(String(init.body))
+    const answer = state.requests.length > 1 && later !== undefined ? later : value
+    const reply = { satisfied: typeof (answer as { satisfied?: unknown }).satisfied === 'boolean' ? (answer as { satisfied: boolean }).satisfied : (answer as { id?: unknown }).id != null, ...(answer as object) }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }
+  }))
 }
 beforeEach(() => { state.stopped = false; state.missingWindow = ''; state.scans = []; state.actions = []; state.items = []; state.scanError = null; state.requests = []; setStopCheck(() => false) })
 afterEach(() => { vi.unstubAllGlobals(); setStopCheck(() => false); expect(state.actions).toEqual([]) })
@@ -47,10 +52,12 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     expect(state.requests[2]).toContain('Done 60/60')
     expect(state.scans[1]).toMatchObject({ uia: false, ocr: true, fresh: true, tilt: true, readOnly: true, ocrEngine: 'combined' })
   })
-  it('asks both empty reader lists; an empty list is never a local No shortcut', async () => {
+  it('empty lists with unclear coverage remain undecided instead of producing a negative branch', async () => {
+    vi.useFakeTimers()
     respond({ satisfied: false, id: null, reason: 'reading coverage is unclear' })
-    expect(await make().exists('', condition('hata mesajı yoksa evet ver'))).toBe(false)
-    expect(state.requests).toHaveLength(2); expect(state.scans).toHaveLength(2)
+    const result = expect(make().exists('', condition('hata mesajı yoksa evet ver'))).rejects.toBeInstanceOf(ConditionUndecidedError)
+    await vi.runAllTimersAsync(); await result; vi.useRealTimers()
+    expect(state.requests).toHaveLength(8); expect(state.scans).toHaveLength(8)
     expect(state.requests.every(s => s.includes('empty or incomplete reader result alone is not proof'))).toBe(true)
   })
   it('accepts a model-confirmed absence with no selected ID', async () => {
@@ -68,7 +75,7 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     state.items = [{ ...row('Running 6/60'), src: 'uia' }]
     vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{state.requests.push(String(init.body));return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:JSON.stringify({satisfied:false,id:state.requests.length===1?1:null})}}]})}}))
     expect(await make().exists('', condition('60/60 tamamlandı mı?'))).toBe(false)
-    expect(state.requests).toHaveLength(2)
+    expect(state.requests).toHaveLength(1)
   })
   it('an invented evidence ID cannot prove a positive condition', async () => {
     state.items = [{ ...row('Running'), src: 'uia' }]; respond({ satisfied: true, id: 999 })
@@ -76,7 +83,8 @@ describe('Condition: one whole-screen observation with model decisions', () => {
   })
   it('preserves full UIA and unsplit OCR evidence, including a late negation/counter', async () => {
     const evidence = 'Job completed ' + 'details '.repeat(35) + 'NOT_COMPLETE_6_OF_60'
-    state.items = [{ ...row(evidence), src: 'uia' }, { ...row(evidence), id: 2 }]; respond({ satisfied: false, id: null })
+    state.items = [{ ...row(evidence), src: 'uia' }, { ...row(evidence), id: 2 }]
+    respond({ satisfied: false, id: null, basis: 'unknown' }, { satisfied: false, id: 2, basis: 'observed' })
     const before = JSON.stringify(state.items)
     expect(await make().exists('', condition('job completed 60/60?'))).toBe(false)
     expect(state.requests).toHaveLength(2)
@@ -84,12 +92,13 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     expect(JSON.stringify(state.items)).toBe(before)
   })
   it('sends the whole instruction, with no quoted/local shortcut', async () => {
-    state.items = [{ ...row('Done'), src: 'uia' }]; respond({ satisfied: false, id: null })
+    state.items = [{ ...row('Done'), src: 'uia' }]; respond({ satisfied: false, id: 1 })
     expect(await make().exists('Done', condition('"Done" ve 60/60 ise evet'))).toBe(false)
     expect(state.requests[0]).toContain('60/60 ise evet')
   })
   it.each(['exact', 'contains'] as const)('window context never selects a window (%s legacy match)', async match => {
-    state.items = [{ ...row('Done'), src: 'uia' }]; respond({ satisfied: false, id: null })
+    state.items = [{ ...row('Done'), src: 'uia' }]
+    respond({ satisfied: false, id: null, basis: 'unknown' }, { satisfied: false, id: null, basis: 'absence', reason: 'The fixture model observed the requested context and no matching completed state.' })
     expect(await make().exists('', { ...condition('bitti mi?'), conditionWindow: 'Missing or ambiguous Blender', conditionWindowMatch: match })).toBe(false)
     expect(state.scans).toHaveLength(2)
     expect(state.scans.every(s => !('windowTitle' in (s as object)) && !('strictWindow' in (s as object)))).toBe(true)
@@ -97,7 +106,7 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     expect(state.requests.every(s => s.includes('no window was selected or matched'))).toBe(true)
   })
   it('sends custom stage prompts only to their own readers and still enforces the boolean schema', async () => {
-    respond({ satisfied: false, id: null })
+    respond({ satisfied: false, id: null, basis: 'unknown' }, { satisfied: false, id: null, basis: 'absence', reason: 'The fixture model observed no matching completed state in the requested context.' })
     expect(await make(undefined, 'test-key', { list: 'CLICK_ONLY', conditionUia: 'MY_UIA', conditionOcr: 'MY_OCR' }).exists('', condition('bitti mi?'))).toBe(false)
     expect(state.requests[0]).toContain('MY_UIA'); expect(state.requests[0]).not.toContain('MY_OCR')
     expect(state.requests[1]).toContain('MY_OCR'); expect(state.requests[1]).not.toContain('MY_UIA')
