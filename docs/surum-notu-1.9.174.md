@@ -52,4 +52,8 @@ Kaynak paket: `C:\Users\ASUS TUF\Downloads\Nubbo-Klasor-Sistemi-Patch-1.9.174`
 
 ## EXE
 
-`Nubbo-1.9.174.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.174.exe` · SHA256 `BEKLENIYOR`.
+`Nubbo-1.9.174.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.174.exe` · SHA256
+`80E6FF4AF9A56A1C518118DC7FA0F30D8AABBD23AD77D457DD8162AD0949B09D` (build = masaüstü kopyası,
+97.602.215 bayt). Build damgası `resources/build.json` içinde `a196d81`, `dirty=false`,
+`version=1.9.174` — etiketli commit ile aynı ağaçtan üretildi. Masaüstündeki eski `Nubbo-*.exe`
+dosyaları silinmedi.
