@@ -98,7 +98,7 @@ export function commonAncestor(paths: string[]): string | null {
  * `itemVars`/`renderTemplate` yürütücüyle AYNI kuralları kullanır ({{öğe}}, {{sıra}}, {{toplam}}).
  */
 export function cursorVars(cursor?: CheckpointCursor): Record<string, string> {
-  const vars: Record<string, string> = { sira: '1', toplam: '1' }
+  const vars: Record<string, string> = { ...cursor?.files?.vars, sira: '1', toplam: '1' }
   for (const scope of cursor?.scopes ?? []) Object.assign(vars, scope.vars ?? {})
   for (const frame of cursor?.loops ?? []) {
     const key = frame.keys?.[frame.index]
@@ -159,6 +159,7 @@ export function flowRoots(graph: AgentGraph, cursor?: CheckpointCursor, opts?: {
   const max = Math.max(1, opts?.max ?? CHECKPOINT_ROOTS_MAX)
   const exclude = (opts?.exclude ?? []).filter(Boolean)
   const paths = collectFlowPaths(graph)
+  for (const root of cursor?.files?.roots ?? []) paths.push({ path: root, source: 'folder', label: 'Çalışmanın dosyaları' })
   // Döngünün O ANKİ öğesi de bir klasör olabilir (ör. "…\Remesh Gruplari\01").
   for (const frame of cursor?.loops ?? []) {
     const key = frame.keys?.[frame.index]

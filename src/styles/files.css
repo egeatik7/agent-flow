@@ -1,0 +1,28 @@
+.files-backdrop { z-index: 1200; }
+.files-backdrop .files-backdrop { z-index: 1250; }
+.files-dialog { width: min(1000px, 95vw); max-height: 94vh; display: flex; flex-direction: column; padding: 3px; }
+.files-dialog .dialog-title, .run-files-dialog .dialog-title { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.files-dialog h1, .run-files-dialog h1 { font-size: 14px; margin: 4px; color: white; }
+.files-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 7px; }
+.files-tools > .xp-input { flex: 1; min-width: 150px; }
+.files-layout { display: grid; grid-template-columns: minmax(180px, 27%) minmax(0, 1fr); min-height: 220px; height: 48vh; gap: 8px; padding: 6px; }
+.files-folders, .files-entries { overflow: auto; background: white; border: 1px inset #999; }
+.files-folders > button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #eee; padding: 9px; cursor: pointer; }
+.files-folders > button.selected { background: #316ac5; color: white; }
+.files-folders small { display: block; margin-top: 4px; }
+.files-content { display: flex; flex-direction: column; min-width: 0; overflow: auto; }
+.files-content > .xp-input { width: 100%; }
+.files-entries { flex: 1; min-height: 120px; }
+.files-entry { width: 100%; display: flex; justify-content: space-between; gap: 12px; padding: 6px 8px; border: 0; border-bottom: 1px solid #eee; background: white; text-align: left; cursor: pointer; }
+.files-entry:hover { background: #e6f0ff; }
+.files-entry span { overflow-wrap: anywhere; }
+.files-entry small { flex-shrink: 0; }
+.files-path { overflow-wrap: anywhere; user-select: text; margin: 7px 0; }
+.files-error { padding: 8px; color: #a80000; white-space: pre-wrap; overflow-wrap: anywhere; }
+.files-settings { margin: 5px 10px; }
+.run-files-dialog { width: min(650px, 95vw); max-height: 94vh; overflow: auto; padding: 3px; }
+.run-files-body { padding: 14px; }
+.run-files-last { border: 1px solid #aaa; background: #ffffe1; padding: 10px; margin-bottom: 12px; }
+.file-value-menu { max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 5px; }
+.file-value-menu select { max-width: 100%; }
+@media (max-width: 600px) { .files-layout { grid-template-columns: 1fr; height: 60vh; } .files-folders { max-height: 160px; } }

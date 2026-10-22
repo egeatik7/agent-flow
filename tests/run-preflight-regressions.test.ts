@@ -1,3 +1,4 @@
+import { fileSetup } from '../electron/file-contract'
 import {inspectRunStructure} from '../electron/run-structure'
 import { expect, it, vi } from 'vitest'
 import fs from 'node:fs'
@@ -31,7 +32,7 @@ function validRunGraph(items:string[]){
 }
 function context(){
  const pending:Array<(p:string[])=>void>=[]
- const ctx:any={flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},capturing:0,missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:validRunGraph(['C:\\a.glb'])},stackRef:{current:[]},
+ const ctx:any={fileSetup,chooseFiles:vi.fn(async()=>undefined),flushSettings:vi.fn(async()=>true),structuredClone,missingAnswer:{current:null},setMissingReport:vi.fn(),loaded:true,closingRef:{current:false},saveAnswer:{current:null},runningRef:{current:false},libraryBusyRef:{current:false},confirmAnswer:{current:null},capturing:0,missingReport:null,activeIdRef:{current:'tab'},graphRef:{current:validRunGraph(['C:\\a.glb'])},stackRef:{current:[]},
  api:{missingPaths:vi.fn(()=>new Promise<string[]>(r=>pending.push(r))),runAgent:vi.fn(async()=>({ok:true}))},inspectRunStructure,collectLoopPaths,missingLoopPaths:()=>[],canvasName:()=> 'T',rooted:(g:any)=>g,resetLoopTicks:(g:any)=>g,writeCanvas:vi.fn(),setRunning:vi.fn(),setStepStatus:vi.fn(),stopRequested:{current:false},setRunProgress:vi.fn(),beginProgress:()=>({}),pushLog:vi.fn(),bookRef:{current:{tabs:[{id:'tab'}]}},finishProgress:()=>({}),runIdle:{current:null},errText:String}
  return {ctx,pending}
 }
@@ -69,7 +70,7 @@ it('N4: actual App keyboard handler protects the graph while missing-path dialog
  const to=source.indexOf("    window.addEventListener('keydown', onKey)",from)
  const js=ts.transpileModule(source.slice(from,to)+'\nreturn onKey;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText
  const deleteSelection=vi.fn()
- const ctx:any={checkpointsOpen:false,activeIdRef:{current:'tab'},workspacePicker:null,confirmQuestion:null,saveAnswer:{current:null},closingRef:{current:false},runningRef:{current:false},libraryBusyRef:{current:false},scanner:null,nameQuestion:null,importQuestion:null,missingReport:{items:[{path:'C:\\missing.glb'}]},selectedEdgeId:null,selectedIdsRef:{current:['selected']},selectedNodeId:'selected',deleteSelection}
+ const ctx:any={filesOpen:false,fileQuestion:null,checkpointsOpen:false,activeIdRef:{current:'tab'},workspacePicker:null,confirmQuestion:null,saveAnswer:{current:null},closingRef:{current:false},runningRef:{current:false},libraryBusyRef:{current:false},scanner:null,nameQuestion:null,importQuestion:null,missingReport:{items:[{path:'C:\\missing.glb'}]},selectedEdgeId:null,selectedIdsRef:{current:['selected']},selectedNodeId:'selected',deleteSelection}
  const handler=new Function('ctx','with(ctx){'+js+'}')(ctx)
  handler({key:'Delete',ctrlKey:false,metaKey:false,target:{tagName:'BUTTON',closest:()=>null}})
  expect(deleteSelection).not.toHaveBeenCalled()

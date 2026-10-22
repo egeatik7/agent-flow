@@ -1,3 +1,4 @@
+import { scopedItemVars } from './file-contract'
 import { ancestors } from './groups'
 import {
   hasTemplate,
@@ -67,11 +68,11 @@ export function outsideVars(root: AgentGraph, loopId: string): Record<string, st
   const items = listItems(outer)
   if (items.length) {
     const i = loopStartIndex(outer, items.length, true)
-    return itemVars(items[i], i, items.length)
+    return { ...outsideVars(root, outer.id), ...itemVars(items[i], i, items.length), ...scopedItemVars(outer, items[i], i, items.length) }
   }
   const total = Math.max(1, outer.count ?? 1)
   const i = loopStartIndex(outer, total, true)
-  return itemVars(String(i + 1), i, total)
+  return { ...outsideVars(root, outer.id), ...itemVars(String(i + 1), i, total), ...scopedItemVars(outer, String(i + 1), i, total) }
 }
 
 /** Folder path for a loop whose address uses {{öğe}} from the loop outside it. Empty if it cannot be read. */

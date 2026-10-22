@@ -1,3 +1,6 @@
+import { FileLibrary } from './file-library'
+import { fileSetup, fileCanvasKey, type FileRunContext, type FileSelection } from './file-contract'
+import { listFileSource } from './file-list'
 import { yapProgressText, type YapProgress } from './yap-context'
 import { Checkpoints } from './checkpoints'
 import type { CheckpointCursor } from './checkpoint-types'
@@ -89,13 +92,28 @@ const APPROVAL_TIMEOUT_MS = 120_000
 
 const StoreCtor = (ElectronStore as unknown as { default?: typeof ElectronStore }).default ?? ElectronStore
 
-const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; zipCanvases?: CanvasBook; zipLibraryPath?: string; viewerEnabled?:boolean; viewerSecret?:string; viewerOrigin?:string }>({
+const store = new StoreCtor<{ settings: AppSettings; graph: AgentGraph; zipCanvases?: CanvasBook; zipLibraryPath?: string; fileLibraryRoot?: string; viewerEnabled?:boolean; viewerSecret?:string; viewerOrigin?:string }>({
   name: 'xp-agent-studio',
   defaults: { settings: DEFAULT_SETTINGS, graph: { nodes: [], edges: [] } },
   // The real profile keeps the file exactly where it has always lived. A test profile
   // (NUBBO_PROFILE) gets its own, so developing with Nubbo cannot reach the real flows.
   ...(storeCwd(process.env.NUBBO_PROFILE, app.getPath('userData')) ? { cwd: app.getPath('userData') } : {}),
 })
+
+function fileLibrary(): FileLibrary {
+  const configured = store.get('fileLibraryRoot')
+  const root = configured || path.join(app.getPath('home'), isTestProfile(process.env.NUBBO_PROFILE) ? 'NubboDosyalar-' + process.env.NUBBO_PROFILE!.replace(/[^a-z0-9-]/gi, '_') : 'NubboDosyalar')
+  return new FileLibrary(root)
+}
+function namedFileVars(): Record<string, string> { return Object.fromEntries(fileLibrary().info().folders.map(f => [`klasor.${f.id}`, f.path])) }
+function usesNamedFiles(graph: AgentGraph): boolean { return graph.nodes.some(n => ['text', 'prompt', 'folder', 'keys'].some(k => /\{\{\s*klasor\./i.test(String(n[k as keyof typeof n] ?? ''))) || !!n.inner && usesNamedFiles(n.inner)) }
+function filesForStep(graph: AgentGraph): Record<string, string> | undefined {
+  const setup = fileSetup(graph)
+  if (!setup) return usesNamedFiles(graph) ? namedFileVars() : undefined
+  const lib = fileLibrary(), key = fileCanvasKey(graph), last = lib.last(key, setup)
+  if (!last) throw new Error('Bu tuval için önce Nubbo içinden giriş/çıkış klasörlerini seçerek bir çalışma başlat.')
+  return lib.validate(last, key, setup).vars
+}
 
 let zipStorage: ZipLibraryStorage | undefined
 let zipSnapshot: ZipLibrarySnapshot | undefined
@@ -1067,7 +1085,7 @@ async function runFlow(
   raw: AgentGraph,
   startId?: string,
   packagePath?: string[],
-  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }
+  opts?: { derived?: boolean; debug?: boolean; fast?: boolean; resumeLoopId?: string; resumeItem?: string; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string; fileRunId?: string }
 ): Promise<{ ok: boolean; failed?: number; steps?: number; stopped?: boolean; runId?: string; reachedEnd?: boolean }> {
   if (running) throw new Error('Ajan zaten çalışıyor.')
   // A single step is driving the desktop; a run must not start on top of it.
@@ -1084,6 +1102,7 @@ async function runFlow(
   let runId = ''
   let checkpointCursor: CheckpointCursor | undefined
   let checkpointStarted = false
+  let runFiles: FileRunContext | undefined
   // Koşunun sayaçları burada tutulur: hata ile biten bir koşuda runGraph sonuç nesnesini
   // döndüremez (hata yukarı çıkar), sayaç yine de çağırana ulaşmalı. Şeklin tek tanımı
   // runner'daki newTally()'dir; burada elle kopyalanmaz ki yeni bir alan sessizce düşmesin.
@@ -1101,6 +1120,25 @@ async function runFlow(
     const warnings = structure.filter(issue => issue.severity === 'warning')
     if (warnings.length) log('warn', `Çalıştırma ön kontrolü:\n${structureSummary(warnings)}`)
     const graph = normalizeGraph(raw)
+    const setup = fileSetup(graph)
+    if (setup) {
+      const lib = fileLibrary(), key = fileCanvasKey(graph)
+      if (checkpointCursor) {
+        if (!checkpointCursor.files) throw new Error('Bu checkpoint dosya çalışma bağlamı içermiyor; yeni çalışma başlat.')
+        runFiles = lib.validate(checkpointCursor.files, key, setup)
+      } else {
+        const chosen = opts?.fileRunId ? lib.byRun(opts.fileRunId) : startId ? lib.last(key, setup) : undefined
+        if (chosen) runFiles = lib.validate(chosen, key, setup)
+        else {
+          if (opts?.fileRunId) throw new Error('Seçilen dosya çalışması artık bulunamıyor.')
+          const selection = lib.defaults(key).selection
+          if (!selection) throw new Error('Bu tuval için Nubbo içinden giriş ve çıkış klasörlerini seç.')
+          runFiles = await lib.prepare(key, setup, selection)
+        }
+      }
+      log('info', `Dosya çalışması ${runFiles.id}: Giriş: ${runFiles.input} · Çıkış: ${runFiles.output}`)
+    }
+
     // The desktop card resolves every step id in this run's own graph (packages included).
     hudRunGraph = graph
     // A test of an agent branch is not the saved flow: it runs, but it is not written down as
@@ -1116,7 +1154,7 @@ async function runFlow(
       try {
         await checkpoints.begin(runId, opts?.canvasId ?? '', opts?.canvasName ?? 'Tuval', opts?.checkpointId)
         checkpointStarted = true
-        await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [] } }, { canvasStart: true })
+        await checkpoints.mark(checkpointCursor ? 'Checkpoint’ten yeniden başlangıç' : 'Tuval başlangıcı', { graph: structuredClone(graph), cursor: checkpointCursor ?? { startId, packagePath: packagePath ?? [], loops: [], scopes: [], ...(runFiles ? { files: runFiles } : {}) } }, { canvasStart: true })
       } catch (error) {
         log('warn', `Checkpoint başlatılamadı; koşu checkpoint olmadan sürüyor: ${(error as Error).message}`)
       }
@@ -1148,7 +1186,7 @@ async function runFlow(
     const executor = { ...agent.executor,
       checkpointContext: opts?.derived ? undefined : (frames: import('./checkpoint-types').CheckpointLoop[], status?: import('./checkpoint-types').CheckpointLapStatus) => checkpoints.context(frames, status),
       checkpoint: opts?.derived ? undefined : async (label: string, cursor: CheckpointCursor) => {
-        await checkpoints.mark(label, { graph: structuredClone(graph), cursor }, { useCurrentContext: true })
+        await checkpoints.mark(label, { graph: structuredClone(graph), cursor: { ...cursor, ...(runFiles ? { files: runFiles } : {}) } }, { useCurrentContext: true })
       },
       initiative: async (node: import('./graph-types').AgentNode, stepNo: number, ahead: import('./runner').StepAhead = {}, vars: Record<string, string> = {}) => {
         if (opts?.fast || opts?.debug) throw new Error('Yap model gerektirir; hızlı/hata ayıklama koşusunda çalıştırılamaz.')
@@ -1254,6 +1292,7 @@ async function runFlow(
       startId,
       resume: !!startId || !!checkpointCursor,
       checkpointResume: checkpointCursor,
+      fileVars: runFiles?.vars ?? (usesNamedFiles(graph) ? namedFileVars() : undefined),
       // Debug koşusu runner'a da bildirilir: aynı hata kümesi tekrarında durma koruması
       // yalnız debug'da çalışır (normal kullanıcı akışlarının davranışı değişmez).
       ...(opts?.debug ? { debug: true } : {}),
@@ -1461,6 +1500,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     },
     startRun: (graph: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; debug?: boolean }) =>
       runFlow(graph, startId, packagePath, opts),
+    fileVars: filesForStep,
     getCanvases: () => loadCanvases(),
     // Branch records are the only thing the tool layer writes here. The active flow is left
     // exactly as it was, which is why an agent can never reach the user's canvas this way.
@@ -1703,6 +1743,37 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   })
   ipcMain.handle('windows:list', () => bridge.listWindows())
 
+  ipcMain.handle('files:info', () => fileLibrary().info())
+  ipcMain.handle('files:defaults', (_e, graph: AgentGraph) => fileLibrary().defaults(fileCanvasKey(graph)))
+  ipcMain.handle('files:prepare', (_e, graph: AgentGraph, selection: FileSelection) => {
+    if (running || probing()) throw new Error('Çalışan iş bitmeden klasörleri değiştiremezsin.')
+    const setup = fileSetup(normalizeGraph(graph))
+    if (!setup) throw new Error('Başlangıç node’unda dosya klasörlerini etkinleştir.')
+    return fileLibrary().prepare(fileCanvasKey(graph), setup, selection)
+  })
+  ipcMain.handle('files:browse', (_e, id: string, relative?: string) => fileLibrary().browse(id, relative))
+  ipcMain.handle('files:action', async (_e, action: { kind: string; id?: string; name?: string; paths?: string[]; relative?: string }) => {
+    if (running || probing()) throw new Error('Dosya düzenlemek için çalışan işin bitmesini bekle.')
+    const lib = fileLibrary()
+    if (action.kind === 'create') lib.create(String(action.name ?? ''), action.id, action.relative)
+    else if (action.kind === 'rename') lib.rename(String(action.id), String(action.name ?? ''))
+    else if (action.kind === 'forget') lib.forget(String(action.id))
+    else if (action.kind === 'link' || action.kind === 'tools' || action.kind === 'root') {
+      const r = action.kind === 'link' && action.paths?.[0] ? { canceled: false, filePaths: [action.paths[0]] } : await dialog.showOpenDialog({ title: action.kind === 'tools' ? 'Nubbo Tools klasörünü seç' : action.kind === 'root' ? 'Nubbo dosyalarının kökünü seç (mevcut dosyalar taşınmaz)' : 'Nubbo’ya bağlanacak klasörü seç', properties: ['openDirectory', 'createDirectory'] })
+      if (!r.canceled && r.filePaths[0]) {
+        if (action.kind === 'link') lib.link(r.filePaths[0])
+        else if (action.kind === 'tools') lib.tools(r.filePaths[0])
+        else store.set('fileLibraryRoot', r.filePaths[0])
+      }
+    } else if (action.kind === 'import') {
+      let sources = action.paths
+      if (!sources) { const r = await dialog.showOpenDialog({ title: 'Nubbo klasörüne kopyalanacak dosyaları seç', properties: ['openFile', 'multiSelections'] }); sources = r.canceled ? [] : r.filePaths }
+      await lib.importFiles(String(action.id), sources, action.relative)
+    } else throw new Error('Dosya işlemi tanınmıyor.')
+    return fileLibrary().info()
+  })
+  ipcMain.handle('files:listSource', (_e, dir: string, spec: import('./file-contract').ListSource) => listFileSource(dir, spec))
+
   ipcMain.handle('dialog:listDir', (_e, dir: string) => listDirEntries(typeof dir === 'string' ? dir : ''))
 
   ipcMain.handle('dialog:pickFolder', async () => {
@@ -1781,7 +1852,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
       : 'Checkpoint: tüm disk izleme kapatıldı; yalnız akıştaki klasörler izleniyor.')
     return checkpoints.monitoring()
   })
-  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }) =>
+  ipcMain.handle('agent:run', (_e, raw: AgentGraph, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string; fileRunId?: string }) =>
     runFlow(raw, startId, packagePath, opts)
   )
   // Döngü listesindeki bir öğe için: "Yolu aç" (bulunduğu klasör + seçim) ve çift tık (öğeyi aç).

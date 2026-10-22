@@ -5,6 +5,7 @@ export type CheckpointLapStatus = 'running' | 'completed' | 'incomplete' | 'fail
 export type CheckpointLap = { key: string; parentKey?: string; visitId: string; loopId: string; title: string; index: number; total: number; item: string; at: number; endedAt?: number; status: CheckpointLapStatus; checkpointId?: string }
 export type CheckpointScope = { path: string[]; vars: Record<string, string> }
 export type CheckpointCursor = {
+  files?: import('./file-contract').FileRunContext
   startId?: string
   packagePath: string[]
   loops: CheckpointLoop[]

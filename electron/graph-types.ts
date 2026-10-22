@@ -1,3 +1,4 @@
+import { normalizeFileSetup, normalizeListSource, type FileSetup, type ListSource } from './file-contract'
 /** How far a native command got. `not_sent` never reached the worker; `uncertain` was written and not confirmed; `sent` got a success reply. */
 export type DeliveryState = 'not_sent' | 'uncertain' | 'sent'
 export type TypeProgress = {
@@ -102,6 +103,10 @@ export type AgentNode = {
   startIndex?: number
   /** Loop: folder the list was filled from. Dosyayı Bekle: folder to watch. */
   folder?: string
+  /** Opt-in filtered folder list; missing = unchanged legacy list/count semantics. */
+  listSource?: ListSource
+  /** Başlangıç only: file roles, never machine paths or a runtime selection. */
+  fileSetup?: FileSetup
   /** Loop: nodes that belong to this box and repeat once per item. */
   members?: string[]
   /** Last successful targets of this node. */
@@ -855,6 +860,8 @@ export function normalizeGraph(raw: unknown): AgentGraph {
         title: n.title || fallback.title,
         locator: n.locator ?? recorded,
       } as AgentNode
+      if (n.fileSetup !== undefined) node.fileSetup = normalizeFileSetup(n.fileSetup)
+      if (n.listSource !== undefined) node.listSource = normalizeListSource(n.listSource)
       if (kind === 'loop') {
         if (!Array.isArray(n.members)) delete node.members
         delete (node as { results?: unknown }).results

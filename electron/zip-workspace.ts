@@ -1,3 +1,4 @@
+import { fileSetup, hasFileFeatures, withFileScope } from './file-contract'
 import { newId, normalizeGraph, type CanvasBook, type CanvasTab } from './graph-types'
 import type { ZipLibrarySnapshot, ZipCanvasGroup } from './zip-library-storage'
 import type { ZipCanvasDocument } from './zip-canvas-document'
@@ -11,7 +12,9 @@ export function zipCanvasOf(book: CanvasBook, id?: string): ZipCanvasDocument | 
 }
 export function zipCanvasGraph(canvas: ZipCanvasDocument) { return { nodes: structuredClone(canvas.nodes), edges: structuredClone(canvas.edges) } }
 export function zipDocumentFor(tab: CanvasTab, copy = false): ZipCanvasDocument {
-  return { ...normalizeGraph(tab.graph), format: 'nubbo-canvas', version: 1, canvasId: copy ? newId() : tab.savedId ?? tab.canvasId ?? tab.id, name: tab.name }
+  const canvasId = copy ? newId() : tab.savedId ?? tab.canvasId ?? tab.id
+  const graph = normalizeGraph(copy ? withFileScope(tab.graph, canvasId) : tab.graph)
+  return { ...graph, format: 'nubbo-canvas', version: hasFileFeatures(graph) ? 2 : 1, canvasId, name: tab.name }
 }
 export function openedZipCanvas(canvas: ZipCanvasDocument): CanvasTab {
   const graph = zipCanvasGraph(canvas)
@@ -43,7 +46,7 @@ export function adoptZipLibrary(book: CanvasBook, library: ZipLibrarySnapshot): 
 }
 export function savedZipTab(book: CanvasBook, tabId: string, canvas: ZipCanvasDocument, library: ZipLibrarySnapshot): CanvasBook {
   const adopted = adoptZipLibrary(book, library)
-  return { ...adopted, tabs: adopted.tabs.map(t => t.id === tabId ? { ...t, name: canvas.name, savedId: canvas.canvasId, canvasId: canvas.canvasId, baseline: { name: canvas.name, graph: zipCanvasGraph(canvas) } } : t) }
+  return { ...adopted, tabs: adopted.tabs.map(t => t.id === tabId ? { ...t, ...(fileSetup(canvas)?.scope ? { graph: withFileScope(t.graph, fileSetup(canvas)!.scope!) } : {}), name: canvas.name, savedId: canvas.canvasId, canvasId: canvas.canvasId, baseline: { name: canvas.name, graph: zipCanvasGraph(canvas) } } : t) }
 }
 
 /** Only a successful explicit rename may advance the name baseline, never a reload. */

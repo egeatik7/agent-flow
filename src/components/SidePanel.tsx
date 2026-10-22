@@ -1,3 +1,4 @@
+import { DEFAULT_FILE_SETUP } from '../../electron/file-contract'
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import AgentTab from './AgentTab'
 import RecoverySettingsPanel from './RecoverySettingsPanel'
@@ -190,6 +191,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
   return (
     <>
       {members === 0 && <p className="hint warn">Kutu boş. Tekrar edecek node’ları çerçevenin içine sürükle ya da seçip Ctrl+G.</p>}
+      <div className="field"><label>Liste kaynağı<select className="xp-input" aria-label="Döngü liste kaynağı" value={n.listSource ? 'folder' : 'legacy'} onChange={e => p.onUpdateNode({ listSource: e.target.value === 'folder' ? { kind: 'files', filter: '*' } : undefined })}><option value="legacy">Mevcut liste / sayı sistemi</option><option value="folder">Klasör içeriğini çalışırken oku</option></select></label>{n.listSource && <><label>İçerik<select className="xp-input" value={n.listSource.kind} onChange={e => p.onUpdateNode({ listSource: { ...n.listSource!, kind: e.target.value as 'files' | 'folders' | 'all' } })}><option value="files">Yalnız dosyalar</option><option value="folders">Yalnız klasörler</option><option value="all">Dosyalar ve klasörler</option></select></label><label>Dosya filtresi<input className="xp-input" value={n.listSource.filter} onChange={e => p.onUpdateNode({ listSource: { ...n.listSource!, filter: e.target.value } })} placeholder="*.glb veya *.png;*.jpg" /></label><label className="check"><input type="checkbox" checked={!!n.listSource.recursive} onChange={e => p.onUpdateNode({ listSource: { ...n.listSource!, recursive: e.target.checked } })} />Alt klasörleri tara</label><p className="hint">Liste bu döngüye girildiğinde okunur. Boş klasör 0 öğedir; sayı tekrarına dönüşmez.</p></>}</div>
       <div className="field">
         <label htmlFor="loop-folder">Klasör</label>
         <TemplateField {...p} n={n} field="folder" id="loop-folder" label="Klasör" mono placeholder={'C:\\Klasör veya D:\\İş\\{{öğe}}'} />
@@ -277,7 +279,7 @@ function LoopEditor(p: Props & { n: AgentNode }) {
         )}
       </div>
 
-      {items.length === 0 && !folderIsTemplate && (
+      {items.length === 0 && !folderIsTemplate && !n.listSource && (
         <div className="field">
           <label>Tekrar sayısı (liste boşken)</label>
           <input
@@ -406,6 +408,8 @@ function NodeFields(p: Props & { n: AgentNode }) {
         <input type="checkbox" checked={!!n.expose} onChange={(e) => upd({ expose: e.target.checked })} />
         Pakette ayarları göster
       </label>
+
+      {n.kind === 'start' && <div className="field"><label className="check"><input type="checkbox" checked={!!n.fileSetup} onChange={e => upd({ fileSetup: e.target.checked ? structuredClone(DEFAULT_FILE_SETUP) : undefined })} />Başlangıçta giriş ve çıkış klasörü seç</label>{n.fileSetup && <><label>Giriş etiketi<input className="xp-input" value={n.fileSetup.inputLabel} onChange={e => upd({ fileSetup: { ...n.fileSetup!, inputLabel: e.target.value } })} /></label><label>Giriş dosya filtresi<input className="xp-input" value={n.fileSetup.inputFilter} onChange={e => upd({ fileSetup: { ...n.fileSetup!, inputFilter: e.target.value } })} /></label><label>Çıkış etiketi<input className="xp-input" value={n.fileSetup.outputLabel} onChange={e => upd({ fileSetup: { ...n.fileSetup!, outputLabel: e.target.value } })} /></label><p className="hint">Klasörleri çalıştırırken Nubbo Dosyalar’dan seçersin. Eski sabit yollar da kullanılabilir.</p></>}</div>}
 
       {n.kind === 'click' && (
         <>

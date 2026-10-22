@@ -50,7 +50,7 @@ export function collectLoopPaths(canvases: { name: string; graph: AgentGraph }[]
   }
   for (const canvas of canvases) {
     walkGraph(canvas.graph, ({ node, loops }) => {
-      if (node.kind !== 'loop') return
+      if (node.kind !== 'loop' || node.listSource) return
       const label = [...loops.filter((l) => l.id !== node.id).map((l) => l.title), node.title].join(' › ')
       const folder = (node.folder ?? '').trim()
       if (/\{\{/.test(folder)) return // Runtime regenerates this loop's items from the resolved directory.

@@ -504,6 +504,9 @@ function rewriteNode(n: AgentNode, map: Map<string, string>, dx: number, dy: num
     packageExit: n.packageExit ? { ...n.packageExit, from: map.get(n.packageExit.from) ?? n.packageExit.from } : undefined,
     loopIndex: undefined,
   }
+  for (const field of ['prompt', 'text', 'keys', 'folder', 'source', 'pattern', 'url'] as const) {
+    if (typeof next[field] === 'string') next[field] = next[field]!.replace(/(\{\{\s*dongu\.)([^.]+)(\.)/gi, (all, head, id, tail) => `${head}${map.get(id) ?? id}${tail}`)
+  }
   if (n.inner) {
     next.inner = {
       nodes: n.inner.nodes.map((child) => rewriteNode(child, map, 0, 0, false)),

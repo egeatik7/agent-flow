@@ -1,0 +1,3991 @@
+{
+  "format": "nubbo-canvas",
+  "version": 2,
+  "canvasId": "nubbo-image-hunyuan-files-v2",
+  "name": "Görsel → İsimlendir → Hunyuan → GLB",
+  "nodes": [
+    {
+      "id": "nubbo-image-hunyuan-files-v2-start",
+      "kind": "start",
+      "title": "Başlangıç · giriş ve çıkış seç",
+      "x": 80,
+      "y": 100,
+      "fileSetup": {
+        "version": 1,
+        "inputLabel": "Görsel girişi",
+        "outputLabel": "GLB çıkışı",
+        "inputFilter": "*.png;*.jpg;*.jpeg;*.webp",
+        "outputName": "Hunyuan GLB",
+        "workFolders": [
+          "hazirlik",
+          "queue",
+          "hesaplar",
+          "sekmeler",
+          "indirme",
+          "raporlar"
+        ],
+        "tools": true
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-1",
+      "kind": "package",
+      "title": "Hunyuan · üç profilin kredi durumunu kontrol et",
+      "x": 380,
+      "y": 100,
+      "inner": {
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "b025d8a4-464f-418a-90f5-22cad5731650",
+        "name": "Hunyuan · Üç profilde en az 16 kredi bekle",
+        "nodes": [
+          {
+            "id": "s1_credit20_start",
+            "kind": "start",
+            "title": "Başlangıç · her hesapta en az 16 kredi",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s1_credit20_p1_open",
+            "kind": "package",
+            "title": "1. Chrome profili → Hunyuan'ı aç",
+            "x": 400,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p1_open_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p1_open_desktop",
+                  "kind": "key",
+                  "title": "Masaüstüne geç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+d"
+                },
+                {
+                  "id": "s1_credit20_p1_open_desktop_wait",
+                  "kind": "wait",
+                  "title": "Masaüstünü bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_open_chrome",
+                  "kind": "click",
+                  "title": "Chrome profil seçicisini aç",
+                  "x": 1120,
+                  "y": 60,
+                  "prompt": "Masaüstündeki Google Chrome simgesine çift tıkla.",
+                  "clickMode": "double"
+                },
+                {
+                  "id": "s1_credit20_p1_open_picker_wait",
+                  "kind": "wait",
+                  "title": "Chrome profil seçicisini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_open_choose",
+                  "kind": "click",
+                  "title": "Soldan 1. Chrome profilini aç",
+                  "x": 1840,
+                  "y": 60,
+                  "prompt": "Chrome profil seçicisinde soldan 1. profile tıkla.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s1_credit20_p1_open_profile_wait",
+                  "kind": "wait",
+                  "title": "Seçilen profilin açılmasını bekle",
+                  "x": 40,
+                  "y": 290,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_open_maximize",
+                  "kind": "ai",
+                  "title": "Yap · Chrome penceresini büyüt",
+                  "x": 400,
+                  "y": 290,
+                  "prompt": "Chrome penceresini ekranı kaplayacak şekilde büyüt. Zaten büyütülmüş veya tam ekransa hiçbir işlem yapma.",
+                  "maxActions": 25,
+                  "timeoutMs": 300000
+                },
+                {
+                  "id": "s1_credit20_p1_open_layout_wait",
+                  "kind": "wait",
+                  "title": "Pencere yerleşimini bekle",
+                  "x": 760,
+                  "y": 290,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_open_address",
+                  "kind": "key",
+                  "title": "Chrome adres çubuğunu seç",
+                  "x": 1120,
+                  "y": 290,
+                  "keys": "ctrl+l"
+                },
+                {
+                  "id": "s1_credit20_p1_open_url",
+                  "kind": "type",
+                  "title": "Bu profilde Hunyuan'ı aç",
+                  "x": 1480,
+                  "y": 290,
+                  "prompt": "",
+                  "text": "https://3d.hunyuan.tencent.com/creation",
+                  "pressEnter": true,
+                  "clearFirst": true
+                },
+                {
+                  "id": "s1_credit20_p1_open_page_wait",
+                  "kind": "wait",
+                  "title": "Hunyuan sayfası ve kredi sayacını bekle",
+                  "x": 1840,
+                  "y": 290,
+                  "ms": 5000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_open_end",
+                  "kind": "end",
+                  "title": "1. profil kredi kontrolüne hazır",
+                  "x": 40,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p1_open_start_next_credit20_p1_open_desktop",
+                  "from": "s1_credit20_p1_open_start",
+                  "to": "s1_credit20_p1_open_desktop",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_desktop_next_credit20_p1_open_desktop_wait",
+                  "from": "s1_credit20_p1_open_desktop",
+                  "to": "s1_credit20_p1_open_desktop_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_desktop_wait_next_credit20_p1_open_chrome",
+                  "from": "s1_credit20_p1_open_desktop_wait",
+                  "to": "s1_credit20_p1_open_chrome",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_chrome_next_credit20_p1_open_picker_wait",
+                  "from": "s1_credit20_p1_open_chrome",
+                  "to": "s1_credit20_p1_open_picker_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_picker_wait_next_credit20_p1_open_choose",
+                  "from": "s1_credit20_p1_open_picker_wait",
+                  "to": "s1_credit20_p1_open_choose",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_choose_next_credit20_p1_open_profile_wait",
+                  "from": "s1_credit20_p1_open_choose",
+                  "to": "s1_credit20_p1_open_profile_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_profile_wait_next_credit20_p1_open_maximize",
+                  "from": "s1_credit20_p1_open_profile_wait",
+                  "to": "s1_credit20_p1_open_maximize",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_maximize_next_credit20_p1_open_layout_wait",
+                  "from": "s1_credit20_p1_open_maximize",
+                  "to": "s1_credit20_p1_open_layout_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_layout_wait_next_credit20_p1_open_address",
+                  "from": "s1_credit20_p1_open_layout_wait",
+                  "to": "s1_credit20_p1_open_address",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_address_next_credit20_p1_open_url",
+                  "from": "s1_credit20_p1_open_address",
+                  "to": "s1_credit20_p1_open_url",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_url_next_credit20_p1_open_page_wait",
+                  "from": "s1_credit20_p1_open_url",
+                  "to": "s1_credit20_p1_open_page_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_open_page_wait_next_credit20_p1_open_end",
+                  "from": "s1_credit20_p1_open_page_wait",
+                  "to": "s1_credit20_p1_open_end",
+                  "fromPort": "next"
+                }
+              ]
+            },
+            "expose": false
+          },
+          {
+            "id": "s1_credit20_p1_ready",
+            "kind": "condition",
+            "title": "1. profil · en az 16 kredi var mı?",
+            "x": 760,
+            "y": 60,
+            "text": "Etkin Hunyuan sayfasının sağ üstündeki kullanılabilir üretim kredisi en az 16 mı? 16–20 evettir. Yükleme yüzdesi, başka yerdeki sayı veya okunamayan sayaç evet değildir.",
+            "conditionWindow": "腾讯混元3D - Google Chrome"
+          },
+          {
+            "id": "s1_credit20_p1_close",
+            "kind": "package",
+            "title": "1. profil hazır · kontrol penceresini kapat",
+            "x": 1120,
+            "y": 60,
+            "expose": false,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p1_close_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p1_close_window",
+                  "kind": "key",
+                  "title": "Kontrol edilen Chrome penceresini kapat",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "ctrl+shift+w"
+                },
+                {
+                  "id": "s1_credit20_p1_close_wait",
+                  "kind": "wait",
+                  "title": "Profil penceresinin kapanmasını bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p1_close_end",
+                  "kind": "end",
+                  "title": "Kredi kontrol penceresi kapandı",
+                  "x": 1120,
+                  "y": 60
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p1_close_start_next_credit20_p1_close_window",
+                  "from": "s1_credit20_p1_close_start",
+                  "to": "s1_credit20_p1_close_window",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_close_window_next_credit20_p1_close_wait",
+                  "from": "s1_credit20_p1_close_window",
+                  "to": "s1_credit20_p1_close_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p1_close_wait_next_credit20_p1_close_end",
+                  "from": "s1_credit20_p1_close_wait",
+                  "to": "s1_credit20_p1_close_end",
+                  "fromPort": "next"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s1_credit20_p2_open",
+            "kind": "package",
+            "title": "2. Chrome profili → Hunyuan'ı aç",
+            "x": 1480,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p2_open_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p2_open_desktop",
+                  "kind": "key",
+                  "title": "Masaüstüne geç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+d"
+                },
+                {
+                  "id": "s1_credit20_p2_open_desktop_wait",
+                  "kind": "wait",
+                  "title": "Masaüstünü bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_open_chrome",
+                  "kind": "click",
+                  "title": "Chrome profil seçicisini aç",
+                  "x": 1120,
+                  "y": 60,
+                  "prompt": "Masaüstündeki Google Chrome simgesine çift tıkla.",
+                  "clickMode": "double"
+                },
+                {
+                  "id": "s1_credit20_p2_open_picker_wait",
+                  "kind": "wait",
+                  "title": "Chrome profil seçicisini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_open_choose",
+                  "kind": "click",
+                  "title": "Soldan 2. Chrome profilini aç",
+                  "x": 1840,
+                  "y": 60,
+                  "prompt": "Chrome profil seçicisinde soldan 2. profile tıkla.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s1_credit20_p2_open_profile_wait",
+                  "kind": "wait",
+                  "title": "Seçilen profilin açılmasını bekle",
+                  "x": 40,
+                  "y": 290,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_open_maximize",
+                  "kind": "ai",
+                  "title": "Yap · Chrome penceresini büyüt",
+                  "x": 400,
+                  "y": 290,
+                  "prompt": "Chrome penceresini ekranı kaplayacak şekilde büyüt. Zaten büyütülmüş veya tam ekransa hiçbir işlem yapma.",
+                  "maxActions": 25,
+                  "timeoutMs": 300000
+                },
+                {
+                  "id": "s1_credit20_p2_open_layout_wait",
+                  "kind": "wait",
+                  "title": "Pencere yerleşimini bekle",
+                  "x": 760,
+                  "y": 290,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_open_address",
+                  "kind": "key",
+                  "title": "Chrome adres çubuğunu seç",
+                  "x": 1120,
+                  "y": 290,
+                  "keys": "ctrl+l"
+                },
+                {
+                  "id": "s1_credit20_p2_open_url",
+                  "kind": "type",
+                  "title": "Bu profilde Hunyuan'ı aç",
+                  "x": 1480,
+                  "y": 290,
+                  "prompt": "",
+                  "text": "https://3d.hunyuan.tencent.com/creation",
+                  "pressEnter": true,
+                  "clearFirst": true
+                },
+                {
+                  "id": "s1_credit20_p2_open_page_wait",
+                  "kind": "wait",
+                  "title": "Hunyuan sayfası ve kredi sayacını bekle",
+                  "x": 1840,
+                  "y": 290,
+                  "ms": 5000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_open_end",
+                  "kind": "end",
+                  "title": "2. profil kredi kontrolüne hazır",
+                  "x": 40,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p2_open_start_next_credit20_p2_open_desktop",
+                  "from": "s1_credit20_p2_open_start",
+                  "to": "s1_credit20_p2_open_desktop",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_desktop_next_credit20_p2_open_desktop_wait",
+                  "from": "s1_credit20_p2_open_desktop",
+                  "to": "s1_credit20_p2_open_desktop_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_desktop_wait_next_credit20_p2_open_chrome",
+                  "from": "s1_credit20_p2_open_desktop_wait",
+                  "to": "s1_credit20_p2_open_chrome",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_chrome_next_credit20_p2_open_picker_wait",
+                  "from": "s1_credit20_p2_open_chrome",
+                  "to": "s1_credit20_p2_open_picker_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_picker_wait_next_credit20_p2_open_choose",
+                  "from": "s1_credit20_p2_open_picker_wait",
+                  "to": "s1_credit20_p2_open_choose",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_choose_next_credit20_p2_open_profile_wait",
+                  "from": "s1_credit20_p2_open_choose",
+                  "to": "s1_credit20_p2_open_profile_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_profile_wait_next_credit20_p2_open_maximize",
+                  "from": "s1_credit20_p2_open_profile_wait",
+                  "to": "s1_credit20_p2_open_maximize",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_maximize_next_credit20_p2_open_layout_wait",
+                  "from": "s1_credit20_p2_open_maximize",
+                  "to": "s1_credit20_p2_open_layout_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_layout_wait_next_credit20_p2_open_address",
+                  "from": "s1_credit20_p2_open_layout_wait",
+                  "to": "s1_credit20_p2_open_address",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_address_next_credit20_p2_open_url",
+                  "from": "s1_credit20_p2_open_address",
+                  "to": "s1_credit20_p2_open_url",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_url_next_credit20_p2_open_page_wait",
+                  "from": "s1_credit20_p2_open_url",
+                  "to": "s1_credit20_p2_open_page_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_open_page_wait_next_credit20_p2_open_end",
+                  "from": "s1_credit20_p2_open_page_wait",
+                  "to": "s1_credit20_p2_open_end",
+                  "fromPort": "next"
+                }
+              ]
+            },
+            "expose": false
+          },
+          {
+            "id": "s1_credit20_p2_ready",
+            "kind": "condition",
+            "title": "2. profil · en az 16 kredi var mı?",
+            "x": 1840,
+            "y": 60,
+            "text": "Etkin Hunyuan sayfasının sağ üstündeki kullanılabilir üretim kredisi en az 16 mı? 16–20 evettir. Yükleme yüzdesi, başka yerdeki sayı veya okunamayan sayaç evet değildir.",
+            "conditionWindow": "腾讯混元3D - Google Chrome"
+          },
+          {
+            "id": "s1_credit20_p2_close",
+            "kind": "package",
+            "title": "2. profil hazır · kontrol penceresini kapat",
+            "x": 40,
+            "y": 290,
+            "expose": false,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p2_close_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p2_close_window",
+                  "kind": "key",
+                  "title": "Kontrol edilen Chrome penceresini kapat",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "ctrl+shift+w"
+                },
+                {
+                  "id": "s1_credit20_p2_close_wait",
+                  "kind": "wait",
+                  "title": "Profil penceresinin kapanmasını bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p2_close_end",
+                  "kind": "end",
+                  "title": "Kredi kontrol penceresi kapandı",
+                  "x": 1120,
+                  "y": 60
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p2_close_start_next_credit20_p2_close_window",
+                  "from": "s1_credit20_p2_close_start",
+                  "to": "s1_credit20_p2_close_window",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_close_window_next_credit20_p2_close_wait",
+                  "from": "s1_credit20_p2_close_window",
+                  "to": "s1_credit20_p2_close_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p2_close_wait_next_credit20_p2_close_end",
+                  "from": "s1_credit20_p2_close_wait",
+                  "to": "s1_credit20_p2_close_end",
+                  "fromPort": "next"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s1_credit20_p3_open",
+            "kind": "package",
+            "title": "3. Chrome profili → Hunyuan'ı aç",
+            "x": 400,
+            "y": 290,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p3_open_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p3_open_desktop",
+                  "kind": "key",
+                  "title": "Masaüstüne geç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+d"
+                },
+                {
+                  "id": "s1_credit20_p3_open_desktop_wait",
+                  "kind": "wait",
+                  "title": "Masaüstünü bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_open_chrome",
+                  "kind": "click",
+                  "title": "Chrome profil seçicisini aç",
+                  "x": 1120,
+                  "y": 60,
+                  "prompt": "Masaüstündeki Google Chrome simgesine çift tıkla.",
+                  "clickMode": "double"
+                },
+                {
+                  "id": "s1_credit20_p3_open_picker_wait",
+                  "kind": "wait",
+                  "title": "Chrome profil seçicisini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_open_choose",
+                  "kind": "click",
+                  "title": "Soldan 3. Chrome profilini aç",
+                  "x": 1840,
+                  "y": 60,
+                  "prompt": "Chrome profil seçicisinde soldan 3. profile tıkla.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s1_credit20_p3_open_profile_wait",
+                  "kind": "wait",
+                  "title": "Seçilen profilin açılmasını bekle",
+                  "x": 40,
+                  "y": 290,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_open_maximize",
+                  "kind": "ai",
+                  "title": "Yap · Chrome penceresini büyüt",
+                  "x": 400,
+                  "y": 290,
+                  "prompt": "Chrome penceresini ekranı kaplayacak şekilde büyüt. Zaten büyütülmüş veya tam ekransa hiçbir işlem yapma.",
+                  "maxActions": 25,
+                  "timeoutMs": 300000
+                },
+                {
+                  "id": "s1_credit20_p3_open_layout_wait",
+                  "kind": "wait",
+                  "title": "Pencere yerleşimini bekle",
+                  "x": 760,
+                  "y": 290,
+                  "ms": 700,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_open_address",
+                  "kind": "key",
+                  "title": "Chrome adres çubuğunu seç",
+                  "x": 1120,
+                  "y": 290,
+                  "keys": "ctrl+l"
+                },
+                {
+                  "id": "s1_credit20_p3_open_url",
+                  "kind": "type",
+                  "title": "Bu profilde Hunyuan'ı aç",
+                  "x": 1480,
+                  "y": 290,
+                  "prompt": "",
+                  "text": "https://3d.hunyuan.tencent.com/creation",
+                  "pressEnter": true,
+                  "clearFirst": true
+                },
+                {
+                  "id": "s1_credit20_p3_open_page_wait",
+                  "kind": "wait",
+                  "title": "Hunyuan sayfası ve kredi sayacını bekle",
+                  "x": 1840,
+                  "y": 290,
+                  "ms": 5000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_open_end",
+                  "kind": "end",
+                  "title": "3. profil kredi kontrolüne hazır",
+                  "x": 40,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p3_open_start_next_credit20_p3_open_desktop",
+                  "from": "s1_credit20_p3_open_start",
+                  "to": "s1_credit20_p3_open_desktop",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_desktop_next_credit20_p3_open_desktop_wait",
+                  "from": "s1_credit20_p3_open_desktop",
+                  "to": "s1_credit20_p3_open_desktop_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_desktop_wait_next_credit20_p3_open_chrome",
+                  "from": "s1_credit20_p3_open_desktop_wait",
+                  "to": "s1_credit20_p3_open_chrome",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_chrome_next_credit20_p3_open_picker_wait",
+                  "from": "s1_credit20_p3_open_chrome",
+                  "to": "s1_credit20_p3_open_picker_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_picker_wait_next_credit20_p3_open_choose",
+                  "from": "s1_credit20_p3_open_picker_wait",
+                  "to": "s1_credit20_p3_open_choose",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_choose_next_credit20_p3_open_profile_wait",
+                  "from": "s1_credit20_p3_open_choose",
+                  "to": "s1_credit20_p3_open_profile_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_profile_wait_next_credit20_p3_open_maximize",
+                  "from": "s1_credit20_p3_open_profile_wait",
+                  "to": "s1_credit20_p3_open_maximize",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_maximize_next_credit20_p3_open_layout_wait",
+                  "from": "s1_credit20_p3_open_maximize",
+                  "to": "s1_credit20_p3_open_layout_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_layout_wait_next_credit20_p3_open_address",
+                  "from": "s1_credit20_p3_open_layout_wait",
+                  "to": "s1_credit20_p3_open_address",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_address_next_credit20_p3_open_url",
+                  "from": "s1_credit20_p3_open_address",
+                  "to": "s1_credit20_p3_open_url",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_url_next_credit20_p3_open_page_wait",
+                  "from": "s1_credit20_p3_open_url",
+                  "to": "s1_credit20_p3_open_page_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_open_page_wait_next_credit20_p3_open_end",
+                  "from": "s1_credit20_p3_open_page_wait",
+                  "to": "s1_credit20_p3_open_end",
+                  "fromPort": "next"
+                }
+              ]
+            },
+            "expose": false
+          },
+          {
+            "id": "s1_credit20_p3_ready",
+            "kind": "condition",
+            "title": "3. profil · en az 16 kredi var mı?",
+            "x": 760,
+            "y": 290,
+            "text": "Etkin Hunyuan sayfasının sağ üstündeki kullanılabilir üretim kredisi en az 16 mı? 16–20 evettir. Yükleme yüzdesi, başka yerdeki sayı veya okunamayan sayaç evet değildir.",
+            "conditionWindow": "腾讯混元3D - Google Chrome"
+          },
+          {
+            "id": "s1_credit20_p3_close",
+            "kind": "package",
+            "title": "3. profil hazır · kontrol penceresini kapat",
+            "x": 1120,
+            "y": 290,
+            "expose": false,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_p3_close_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_p3_close_window",
+                  "kind": "key",
+                  "title": "Kontrol edilen Chrome penceresini kapat",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "ctrl+shift+w"
+                },
+                {
+                  "id": "s1_credit20_p3_close_wait",
+                  "kind": "wait",
+                  "title": "Profil penceresinin kapanmasını bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_p3_close_end",
+                  "kind": "end",
+                  "title": "Kredi kontrol penceresi kapandı",
+                  "x": 1120,
+                  "y": 60
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_p3_close_start_next_credit20_p3_close_window",
+                  "from": "s1_credit20_p3_close_start",
+                  "to": "s1_credit20_p3_close_window",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_close_window_next_credit20_p3_close_wait",
+                  "from": "s1_credit20_p3_close_window",
+                  "to": "s1_credit20_p3_close_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_p3_close_wait_next_credit20_p3_close_end",
+                  "from": "s1_credit20_p3_close_wait",
+                  "to": "s1_credit20_p3_close_end",
+                  "fromPort": "next"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s1_credit20_not_ready_close",
+            "kind": "package",
+            "title": "Kredi eksik · kontrol penceresini kapat",
+            "x": 1480,
+            "y": 290,
+            "expose": false,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_credit20_not_ready_close_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_credit20_not_ready_close_window",
+                  "kind": "key",
+                  "title": "Kontrol edilen Chrome penceresini kapat",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "ctrl+shift+w"
+                },
+                {
+                  "id": "s1_credit20_not_ready_close_wait",
+                  "kind": "wait",
+                  "title": "Profil penceresinin kapanmasını bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 2000,
+                  "expose": false
+                },
+                {
+                  "id": "s1_credit20_not_ready_close_end",
+                  "kind": "end",
+                  "title": "Kredi kontrol penceresi kapandı",
+                  "x": 1120,
+                  "y": 60
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_credit20_not_ready_close_start_next_credit20_not_ready_close_window",
+                  "from": "s1_credit20_not_ready_close_start",
+                  "to": "s1_credit20_not_ready_close_window",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_not_ready_close_window_next_credit20_not_ready_close_wait",
+                  "from": "s1_credit20_not_ready_close_window",
+                  "to": "s1_credit20_not_ready_close_wait",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s1_credit20_not_ready_close_wait_next_credit20_not_ready_close_end",
+                  "from": "s1_credit20_not_ready_close_wait",
+                  "to": "s1_credit20_not_ready_close_end",
+                  "fromPort": "next"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s1_credit20_retry_wait",
+            "kind": "wait",
+            "title": "30 dakika bekle → 1. profilden yeniden kontrol et",
+            "x": 1840,
+            "y": 290,
+            "ms": 1800000,
+            "expose": true
+          },
+          {
+            "id": "s1_credit20_end",
+            "kind": "end",
+            "title": "Üç hesap hazır · hesap başına 16 üretime geç",
+            "x": 40,
+            "y": 520
+          }
+        ],
+        "edges": [
+          {
+            "id": "s1_credit20_p1_open_next_credit20_p1_ready",
+            "from": "s1_credit20_p1_open",
+            "to": "s1_credit20_p1_ready",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p1_ready_true_credit20_p1_close",
+            "from": "s1_credit20_p1_ready",
+            "to": "s1_credit20_p1_close",
+            "fromPort": "true"
+          },
+          {
+            "id": "s1_credit20_p1_ready_false_credit20_not_ready_close",
+            "from": "s1_credit20_p1_ready",
+            "to": "s1_credit20_not_ready_close",
+            "fromPort": "false"
+          },
+          {
+            "id": "s1_credit20_start_next_credit20_p1_open",
+            "from": "s1_credit20_start",
+            "to": "s1_credit20_p1_open",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p2_open_next_credit20_p2_ready",
+            "from": "s1_credit20_p2_open",
+            "to": "s1_credit20_p2_ready",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p2_ready_true_credit20_p2_close",
+            "from": "s1_credit20_p2_ready",
+            "to": "s1_credit20_p2_close",
+            "fromPort": "true"
+          },
+          {
+            "id": "s1_credit20_p2_ready_false_credit20_not_ready_close",
+            "from": "s1_credit20_p2_ready",
+            "to": "s1_credit20_not_ready_close",
+            "fromPort": "false"
+          },
+          {
+            "id": "s1_credit20_p1_close_next_credit20_p2_open",
+            "from": "s1_credit20_p1_close",
+            "to": "s1_credit20_p2_open",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p3_open_next_credit20_p3_ready",
+            "from": "s1_credit20_p3_open",
+            "to": "s1_credit20_p3_ready",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p3_ready_true_credit20_p3_close",
+            "from": "s1_credit20_p3_ready",
+            "to": "s1_credit20_p3_close",
+            "fromPort": "true"
+          },
+          {
+            "id": "s1_credit20_p3_ready_false_credit20_not_ready_close",
+            "from": "s1_credit20_p3_ready",
+            "to": "s1_credit20_not_ready_close",
+            "fromPort": "false"
+          },
+          {
+            "id": "s1_credit20_p2_close_next_credit20_p3_open",
+            "from": "s1_credit20_p2_close",
+            "to": "s1_credit20_p3_open",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_not_ready_close_next_credit20_retry_wait",
+            "from": "s1_credit20_not_ready_close",
+            "to": "s1_credit20_retry_wait",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_retry_wait_next_credit20_p1_open",
+            "from": "s1_credit20_retry_wait",
+            "to": "s1_credit20_p1_open",
+            "fromPort": "next"
+          },
+          {
+            "id": "s1_credit20_p3_close_next_credit20_end",
+            "from": "s1_credit20_p3_close",
+            "to": "s1_credit20_end",
+            "fromPort": "next"
+          }
+        ]
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-2",
+      "kind": "package",
+      "title": "İlk 48 görseli kopyala ve isimlendir",
+      "x": 720,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s2_mv3rh4uqd1vazi84",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s2_mv3rh4uq9vopwmos",
+            "kind": "key",
+            "title": "Çalıştır penceresini aç · Win+R",
+            "x": 400,
+            "y": 60,
+            "keys": "win+r"
+          },
+          {
+            "id": "s2_mv3rh4uqt815r2ns",
+            "kind": "wait",
+            "title": "Çalıştır penceresini bekle",
+            "x": 760,
+            "y": 60,
+            "ms": 700,
+            "expose": false
+          },
+          {
+            "id": "s2_mv3rh4uqcsrbvajd",
+            "kind": "type",
+            "title": "EXE yolunu aç",
+            "x": 1120,
+            "y": 60,
+            "prompt": "",
+            "text": "\"{{araclar}}\\GorselIsimlendirici.exe\"",
+            "pressEnter": true,
+            "clearFirst": true,
+            "expose": true
+          },
+          {
+            "id": "s2_mv3rh4uq8rtkxf56",
+            "kind": "wait",
+            "title": "Araç penceresinin açılmasını bekle",
+            "x": 1480,
+            "y": 60,
+            "ms": 1200,
+            "expose": false
+          },
+          {
+            "id": "s2_mv3rh4uq6pvt8nhp",
+            "kind": "type",
+            "title": "İşlenecek görsel klasörü",
+            "x": 1840,
+            "y": 60,
+            "prompt": "Görsel İsimlendirici penceresindeki “Görsel klasörü” yazısının altındaki yol kutusu.",
+            "text": "{{calisma.hazirlik}}\\01",
+            "pressEnter": false,
+            "clearFirst": true,
+            "expose": true
+          },
+          {
+            "id": "s2_mv3rh4uqdidl5ivx",
+            "kind": "click",
+            "title": "Ayarları kaydet",
+            "x": 40,
+            "y": 290,
+            "prompt": "“Tüm ayarları kaydet” düğmesine tıkla.",
+            "clickMode": "left"
+          },
+          {
+            "id": "s2_mv3rh4uqberz2gzj",
+            "kind": "click",
+            "title": "İsimlendirmeyi bir kez başlat",
+            "x": 400,
+            "y": 290,
+            "prompt": "“İsimlendirmeyi başlat” düğmesine bir kez tıkla.",
+            "clickMode": "left"
+          },
+          {
+            "id": "s2_mv3rh4uqjysu8mdm",
+            "kind": "wait",
+            "title": "Yeni isimlendirme oturumunun başlamasını bekle",
+            "x": 760,
+            "y": 290,
+            "ms": 3000,
+            "expose": false
+          },
+          {
+            "id": "s2_mv3rh4uqbg9f4ie9",
+            "kind": "condition",
+            "title": "İsimlendirme tamamlandı mı?",
+            "x": 1120,
+            "y": 290,
+            "text": "Görsel İsimlendirici güncel DURUM satırında Bitti özeti var mı? Hata sayısı 0 ve adlandırılan + zaten adlı toplamı bu işin başlangıç görsel sayısına eşit olmalı. Eski olay kaydı, iptal veya erken API hatası tamamlanma değildir.",
+            "conditionWindow": "Görsel İsimlendirici"
+          },
+          {
+            "id": "s2_mv3rh4uqlg5oc60s",
+            "kind": "wait",
+            "title": "Koşul sağlanmadı → 3 saniye bekle",
+            "x": 1480,
+            "y": 290,
+            "ms": 3000,
+            "expose": true
+          },
+          {
+            "id": "s2_mv3rh4uqaxxtc2w3",
+            "kind": "key",
+            "title": "Bu Görsel İsimlendirici penceresini kapat",
+            "x": 1840,
+            "y": 290,
+            "keys": "alt+f4"
+          },
+          {
+            "id": "s2_mv3rh4uqs9npk95i",
+            "kind": "wait",
+            "title": "Kapanmasını bekle",
+            "x": 40,
+            "y": 520,
+            "ms": 700,
+            "expose": false
+          },
+          {
+            "id": "s2_mv3rh4uq9wslhl5b",
+            "kind": "end",
+            "title": "Paket tamamlandı",
+            "x": 400,
+            "y": 520
+          },
+          {
+            "id": "s2_h16_select_48",
+            "kind": "package",
+            "title": "İlk 48 görseli çalışma kopyasına al",
+            "x": 760,
+            "y": 520,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s2_select48_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s2_select48_run",
+                  "kind": "key",
+                  "title": "Çalıştır penceresini aç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+r"
+                },
+                {
+                  "id": "s2_select48_run_wait",
+                  "kind": "wait",
+                  "title": "Çalıştır penceresini bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700
+                },
+                {
+                  "id": "s2_select48_exe",
+                  "kind": "type",
+                  "title": "FolderBatcher.exe aç",
+                  "x": 1120,
+                  "y": 60,
+                  "text": "\"{{araclar}}\\FolderBatcher.exe\"",
+                  "prompt": "",
+                  "clearFirst": true,
+                  "pressEnter": true
+                },
+                {
+                  "id": "s2_select48_open_wait",
+                  "kind": "wait",
+                  "title": "Yeni araç penceresini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 1200
+                },
+                {
+                  "id": "s2_select48_source",
+                  "kind": "type",
+                  "title": "Kaynak klasör",
+                  "x": 1840,
+                  "y": 60,
+                  "text": "{{girdi}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s2_select48_target",
+                  "kind": "type",
+                  "title": "Hedef klasör",
+                  "x": 40,
+                  "y": 290,
+                  "text": "{{calisma.hazirlik}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s2_select48_size",
+                  "kind": "type",
+                  "title": "Grup boyutu",
+                  "x": 400,
+                  "y": 290,
+                  "text": "48",
+                  "prompt": "Dosya Klasörleyici penceresinde “Grup boyutu” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s2_select48_limit",
+                  "kind": "type",
+                  "title": "En fazla dosya",
+                  "x": 760,
+                  "y": 290,
+                  "text": "48",
+                  "prompt": "Dosya Klasörleyici penceresinde “En fazla dosya” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s2_select48_filter",
+                  "kind": "type",
+                  "title": "Dosya filtresi",
+                  "x": 1120,
+                  "y": 290,
+                  "text": "*.png;*.jpg;*.jpeg;*.webp",
+                  "prompt": "Dosya Klasörleyici penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s2_select48_go",
+                  "kind": "click",
+                  "title": "İşlemi bir kez başlat",
+                  "x": 1840,
+                  "y": 290,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Dosyaları grupla” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s2_select48_ready",
+                  "kind": "condition",
+                  "title": "Araç işlemi tamamlandı mı?",
+                  "x": 40,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici penceresinin güncel DURUM satırı “Gruplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s2_select48_error",
+                  "kind": "condition",
+                  "title": "Araç açık hata mı bildirdi?",
+                  "x": 400,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s2_select48_poll",
+                  "kind": "wait",
+                  "title": "Araç çalışıyor · 3 saniye bekle",
+                  "x": 760,
+                  "y": 520,
+                  "ms": 3000
+                },
+                {
+                  "id": "s2_select48_repair",
+                  "kind": "ai",
+                  "title": "Yalnız açık araç hatasında toparla",
+                  "x": 1120,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici hatasını gider. Kaynak: {{girdi}}. Hedef: {{calisma.hazirlik}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                  "maxActions": 8,
+                  "timeoutMs": 90000,
+                  "allowCode": false,
+                  "allowFlowRead": false
+                },
+                {
+                  "id": "s2_select48_close",
+                  "kind": "click",
+                  "title": "Bu araç penceresini kapat",
+                  "x": 1480,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Klasörleyiciyi kapat” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s2_select48_end",
+                  "kind": "end",
+                  "title": "Araç işlemi tamamlandı",
+                  "x": 1840,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s2_h16_select48_ready_false_select48_error",
+                  "from": "s2_select48_ready",
+                  "fromPort": "false",
+                  "to": "s2_select48_error"
+                },
+                {
+                  "id": "s2_h16_select48_error_true_select48_repair",
+                  "from": "s2_select48_error",
+                  "fromPort": "true",
+                  "to": "s2_select48_repair"
+                },
+                {
+                  "id": "s2_h16_select48_error_false_select48_poll",
+                  "from": "s2_select48_error",
+                  "fromPort": "false",
+                  "to": "s2_select48_poll"
+                },
+                {
+                  "id": "s2_h16_select48_poll_next_select48_ready",
+                  "from": "s2_select48_poll",
+                  "fromPort": "next",
+                  "to": "s2_select48_ready"
+                },
+                {
+                  "id": "s2_h16_select48_repair_next_select48_ready",
+                  "from": "s2_select48_repair",
+                  "fromPort": "next",
+                  "to": "s2_select48_ready"
+                },
+                {
+                  "id": "s2_h16_select48_start_next_select48_run",
+                  "from": "s2_select48_start",
+                  "fromPort": "next",
+                  "to": "s2_select48_run"
+                },
+                {
+                  "id": "s2_h16_select48_run_next_select48_run_wait",
+                  "from": "s2_select48_run",
+                  "fromPort": "next",
+                  "to": "s2_select48_run_wait"
+                },
+                {
+                  "id": "s2_h16_select48_run_wait_next_select48_exe",
+                  "from": "s2_select48_run_wait",
+                  "fromPort": "next",
+                  "to": "s2_select48_exe"
+                },
+                {
+                  "id": "s2_h16_select48_exe_next_select48_open_wait",
+                  "from": "s2_select48_exe",
+                  "fromPort": "next",
+                  "to": "s2_select48_open_wait"
+                },
+                {
+                  "id": "s2_h16_select48_open_wait_next_select48_source",
+                  "from": "s2_select48_open_wait",
+                  "fromPort": "next",
+                  "to": "s2_select48_source"
+                },
+                {
+                  "id": "s2_h16_select48_source_next_select48_target",
+                  "from": "s2_select48_source",
+                  "fromPort": "next",
+                  "to": "s2_select48_target"
+                },
+                {
+                  "id": "s2_h16_select48_target_next_select48_size",
+                  "from": "s2_select48_target",
+                  "fromPort": "next",
+                  "to": "s2_select48_size"
+                },
+                {
+                  "id": "s2_h16_select48_size_next_select48_limit",
+                  "from": "s2_select48_size",
+                  "fromPort": "next",
+                  "to": "s2_select48_limit"
+                },
+                {
+                  "id": "s2_h16_select48_limit_next_select48_filter",
+                  "from": "s2_select48_limit",
+                  "fromPort": "next",
+                  "to": "s2_select48_filter"
+                },
+                {
+                  "id": "s2_h16_select48_filter_next_select48_backup",
+                  "from": "s2_select48_filter",
+                  "fromPort": "next",
+                  "to": "s2_select48_go"
+                },
+                {
+                  "id": "s2_h16_select48_go_next_select48_ready",
+                  "from": "s2_select48_go",
+                  "fromPort": "next",
+                  "to": "s2_select48_ready"
+                },
+                {
+                  "id": "s2_h16_select48_ready_true_select48_close",
+                  "from": "s2_select48_ready",
+                  "fromPort": "true",
+                  "to": "s2_select48_close"
+                },
+                {
+                  "id": "s2_h16_select48_close_next_select48_end",
+                  "from": "s2_select48_close",
+                  "fromPort": "next",
+                  "to": "s2_select48_end"
+                }
+              ]
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "s2_mv3rh4uqdg6o6k3b",
+            "from": "s2_mv3rh4uqd1vazi84",
+            "to": "s2_h16_select_48",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqaxknjrdw",
+            "from": "s2_mv3rh4uq9vopwmos",
+            "to": "s2_mv3rh4uqt815r2ns",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqglg8l7v2",
+            "from": "s2_mv3rh4uqt815r2ns",
+            "to": "s2_mv3rh4uqcsrbvajd",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uq5yz51tkq",
+            "from": "s2_mv3rh4uqcsrbvajd",
+            "to": "s2_mv3rh4uq8rtkxf56",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqc63j6t1g",
+            "from": "s2_mv3rh4uq8rtkxf56",
+            "to": "s2_mv3rh4uq6pvt8nhp",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqqcor2qjr",
+            "from": "s2_mv3rh4uq6pvt8nhp",
+            "to": "s2_mv3rh4uqdidl5ivx",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqlf8b52k8",
+            "from": "s2_mv3rh4uqdidl5ivx",
+            "to": "s2_mv3rh4uqberz2gzj",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqdxbkugq1",
+            "from": "s2_mv3rh4uqberz2gzj",
+            "to": "s2_mv3rh4uqjysu8mdm",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uq6olvvb5c",
+            "from": "s2_mv3rh4uqjysu8mdm",
+            "to": "s2_mv3rh4uqbg9f4ie9",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uq6fmjg7sg",
+            "from": "s2_mv3rh4uqbg9f4ie9",
+            "to": "s2_mv3rh4uqlg5oc60s",
+            "fromPort": "false"
+          },
+          {
+            "id": "s2_mv3rh4uqa70uqw3a",
+            "from": "s2_mv3rh4uqlg5oc60s",
+            "to": "s2_mv3rh4uqbg9f4ie9",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uq2bag8mty",
+            "from": "s2_mv3rh4uqbg9f4ie9",
+            "to": "s2_mv3rh4uqaxxtc2w3",
+            "fromPort": "true"
+          },
+          {
+            "id": "s2_mv3rh4uqigs0anyg",
+            "from": "s2_mv3rh4uqaxxtc2w3",
+            "to": "s2_mv3rh4uqs9npk95i",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_mv3rh4uqfhoa9u1m",
+            "from": "s2_mv3rh4uqs9npk95i",
+            "to": "s2_mv3rh4uq9wslhl5b",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_h16_h16_select_48_next_mv3rh4uq9vopwmos",
+            "from": "s2_h16_select_48",
+            "fromPort": "next",
+            "to": "s2_mv3rh4uq9vopwmos"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "1ff4cbfb-def7-485f-b47c-388a8865421c",
+        "name": "Ilk_48_Gorseli_Isimlendir"
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-3",
+      "kind": "package",
+      "title": "İsimlendirilmiş görselleri queue’ya kopyala",
+      "x": 1060,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s3_0002_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s3_queue_copy",
+            "kind": "package",
+            "title": "Görselleri yeni Queue alanına kopyala",
+            "x": 400,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s3_queue_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s3_queue_run",
+                  "kind": "key",
+                  "title": "Çalıştır penceresini aç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+r"
+                },
+                {
+                  "id": "s3_queue_run_wait",
+                  "kind": "wait",
+                  "title": "Çalıştır penceresini bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700
+                },
+                {
+                  "id": "s3_queue_exe",
+                  "kind": "type",
+                  "title": "FileCollector.exe aç",
+                  "x": 1120,
+                  "y": 60,
+                  "text": "\"{{araclar}}\\FileCollector.exe\"",
+                  "prompt": "",
+                  "clearFirst": true,
+                  "pressEnter": true
+                },
+                {
+                  "id": "s3_queue_open_wait",
+                  "kind": "wait",
+                  "title": "Yeni araç penceresini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 1200
+                },
+                {
+                  "id": "s3_queue_source",
+                  "kind": "type",
+                  "title": "Kaynak klasör",
+                  "x": 1840,
+                  "y": 60,
+                  "text": "{{calisma.hazirlik}}\\01",
+                  "prompt": "Dosya Toplayıcı penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s3_queue_target",
+                  "kind": "type",
+                  "title": "Hedef klasör",
+                  "x": 40,
+                  "y": 290,
+                  "text": "{{calisma.queue}}",
+                  "prompt": "Dosya Toplayıcı penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s3_queue_filter",
+                  "kind": "type",
+                  "title": "Dosya filtresi",
+                  "x": 400,
+                  "y": 290,
+                  "text": "*.png;*.jpg;*.jpeg;*.webp",
+                  "prompt": "Dosya Toplayıcı penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s3_queue_recursive_off",
+                  "kind": "click",
+                  "title": "Yalnız doğrudan bu klasörün dosyalarını al",
+                  "x": 760,
+                  "y": 290,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Alt klasörleri de tara” kutusunu bir kez kapat.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s3_queue_go",
+                  "kind": "click",
+                  "title": "İşlemi bir kez başlat",
+                  "x": 1480,
+                  "y": 290,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Dosyaları topla” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s3_queue_ready",
+                  "kind": "condition",
+                  "title": "Araç işlemi tamamlandı mı?",
+                  "x": 1840,
+                  "y": 290,
+                  "text": "Dosya Toplayıcı penceresinin güncel DURUM satırı “Toplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                  "conditionWindow": "Dosya Toplayıcı"
+                },
+                {
+                  "id": "s3_queue_error",
+                  "kind": "condition",
+                  "title": "Araç açık hata mı bildirdi?",
+                  "x": 40,
+                  "y": 520,
+                  "text": "Dosya Toplayıcı güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                  "conditionWindow": "Dosya Toplayıcı"
+                },
+                {
+                  "id": "s3_queue_poll",
+                  "kind": "wait",
+                  "title": "Araç çalışıyor · 3 saniye bekle",
+                  "x": 400,
+                  "y": 520,
+                  "ms": 3000
+                },
+                {
+                  "id": "s3_queue_repair",
+                  "kind": "ai",
+                  "title": "Yalnız açık araç hatasında toparla",
+                  "x": 760,
+                  "y": 520,
+                  "prompt": "Dosya Toplayıcı hatasını gider. Kaynak: {{calisma.hazirlik}}\\01. Hedef: {{calisma.queue}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                  "maxActions": 8,
+                  "timeoutMs": 90000,
+                  "allowCode": false,
+                  "allowFlowRead": false
+                },
+                {
+                  "id": "s3_queue_close",
+                  "kind": "click",
+                  "title": "Bu araç penceresini kapat",
+                  "x": 1120,
+                  "y": 520,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Toplayıcıyı kapat” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s3_queue_end",
+                  "kind": "end",
+                  "title": "Araç işlemi tamamlandı",
+                  "x": 1480,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s3_h16_queue_ready_false_queue_error",
+                  "from": "s3_queue_ready",
+                  "fromPort": "false",
+                  "to": "s3_queue_error"
+                },
+                {
+                  "id": "s3_h16_queue_error_true_queue_repair",
+                  "from": "s3_queue_error",
+                  "fromPort": "true",
+                  "to": "s3_queue_repair"
+                },
+                {
+                  "id": "s3_h16_queue_error_false_queue_poll",
+                  "from": "s3_queue_error",
+                  "fromPort": "false",
+                  "to": "s3_queue_poll"
+                },
+                {
+                  "id": "s3_h16_queue_poll_next_queue_ready",
+                  "from": "s3_queue_poll",
+                  "fromPort": "next",
+                  "to": "s3_queue_ready"
+                },
+                {
+                  "id": "s3_h16_queue_repair_next_queue_ready",
+                  "from": "s3_queue_repair",
+                  "fromPort": "next",
+                  "to": "s3_queue_ready"
+                },
+                {
+                  "id": "s3_h16_queue_start_next_queue_run",
+                  "from": "s3_queue_start",
+                  "fromPort": "next",
+                  "to": "s3_queue_run"
+                },
+                {
+                  "id": "s3_h16_queue_run_next_queue_run_wait",
+                  "from": "s3_queue_run",
+                  "fromPort": "next",
+                  "to": "s3_queue_run_wait"
+                },
+                {
+                  "id": "s3_h16_queue_run_wait_next_queue_exe",
+                  "from": "s3_queue_run_wait",
+                  "fromPort": "next",
+                  "to": "s3_queue_exe"
+                },
+                {
+                  "id": "s3_h16_queue_exe_next_queue_open_wait",
+                  "from": "s3_queue_exe",
+                  "fromPort": "next",
+                  "to": "s3_queue_open_wait"
+                },
+                {
+                  "id": "s3_h16_queue_open_wait_next_queue_source",
+                  "from": "s3_queue_open_wait",
+                  "fromPort": "next",
+                  "to": "s3_queue_source"
+                },
+                {
+                  "id": "s3_h16_queue_source_next_queue_target",
+                  "from": "s3_queue_source",
+                  "fromPort": "next",
+                  "to": "s3_queue_target"
+                },
+                {
+                  "id": "s3_h16_queue_target_next_queue_filter",
+                  "from": "s3_queue_target",
+                  "fromPort": "next",
+                  "to": "s3_queue_filter"
+                },
+                {
+                  "id": "s3_h16_queue_filter_next_queue_recursive_off",
+                  "from": "s3_queue_filter",
+                  "fromPort": "next",
+                  "to": "s3_queue_recursive_off"
+                },
+                {
+                  "id": "s3_h16_queue_recursive_off_next_queue_backup",
+                  "from": "s3_queue_recursive_off",
+                  "fromPort": "next",
+                  "to": "s3_queue_go"
+                },
+                {
+                  "id": "s3_h16_queue_go_next_queue_ready",
+                  "from": "s3_queue_go",
+                  "fromPort": "next",
+                  "to": "s3_queue_ready"
+                },
+                {
+                  "id": "s3_h16_queue_ready_true_queue_close",
+                  "from": "s3_queue_ready",
+                  "fromPort": "true",
+                  "to": "s3_queue_close"
+                },
+                {
+                  "id": "s3_h16_queue_close_next_queue_end",
+                  "from": "s3_queue_close",
+                  "fromPort": "next",
+                  "to": "s3_queue_end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s3_0002_end",
+            "kind": "end",
+            "title": "Görselleri yeni Queue alanına kopyala · bitti",
+            "x": 760,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s3_h16_0002_start_next_queue_copy",
+            "from": "s3_0002_start",
+            "fromPort": "next",
+            "to": "s3_queue_copy"
+          },
+          {
+            "id": "s3_h16_queue_copy_next_0002_end",
+            "from": "s3_queue_copy",
+            "fromPort": "next",
+            "to": "s3_0002_end"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "b5319b15-3803-4c95-962b-338c17d7a189",
+        "name": "Gorselleri_Queueya_Kopyala"
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-4",
+      "kind": "package",
+      "title": "Hesap başına 16’lı grupları hazırla",
+      "x": 1400,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s4_0003_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s4_account_groups",
+            "kind": "package",
+            "title": "İlk 48 görsel → üç hesap × 16 görsel",
+            "x": 400,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s4_accounts_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s4_accounts_run",
+                  "kind": "key",
+                  "title": "Çalıştır penceresini aç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+r"
+                },
+                {
+                  "id": "s4_accounts_run_wait",
+                  "kind": "wait",
+                  "title": "Çalıştır penceresini bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700
+                },
+                {
+                  "id": "s4_accounts_exe",
+                  "kind": "type",
+                  "title": "FolderBatcher.exe aç",
+                  "x": 1120,
+                  "y": 60,
+                  "text": "\"{{araclar}}\\FolderBatcher.exe\"",
+                  "prompt": "",
+                  "clearFirst": true,
+                  "pressEnter": true
+                },
+                {
+                  "id": "s4_accounts_open_wait",
+                  "kind": "wait",
+                  "title": "Yeni araç penceresini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 1200
+                },
+                {
+                  "id": "s4_accounts_source",
+                  "kind": "type",
+                  "title": "Kaynak klasör",
+                  "x": 1840,
+                  "y": 60,
+                  "text": "{{calisma.queue}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s4_accounts_target",
+                  "kind": "type",
+                  "title": "Hedef klasör",
+                  "x": 40,
+                  "y": 290,
+                  "text": "{{calisma.hesaplar}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s4_accounts_size",
+                  "kind": "type",
+                  "title": "Grup boyutu",
+                  "x": 400,
+                  "y": 290,
+                  "text": "16",
+                  "prompt": "Dosya Klasörleyici penceresinde “Grup boyutu” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s4_accounts_limit",
+                  "kind": "type",
+                  "title": "En fazla dosya",
+                  "x": 760,
+                  "y": 290,
+                  "text": "48",
+                  "prompt": "Dosya Klasörleyici penceresinde “En fazla dosya” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s4_accounts_filter",
+                  "kind": "type",
+                  "title": "Dosya filtresi",
+                  "x": 1120,
+                  "y": 290,
+                  "text": "*.png;*.jpg;*.jpeg;*.webp",
+                  "prompt": "Dosya Klasörleyici penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s4_accounts_go",
+                  "kind": "click",
+                  "title": "İşlemi bir kez başlat",
+                  "x": 1840,
+                  "y": 290,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Dosyaları grupla” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s4_accounts_ready",
+                  "kind": "condition",
+                  "title": "Araç işlemi tamamlandı mı?",
+                  "x": 40,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici penceresinin güncel DURUM satırı “Gruplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s4_accounts_error",
+                  "kind": "condition",
+                  "title": "Araç açık hata mı bildirdi?",
+                  "x": 400,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s4_accounts_poll",
+                  "kind": "wait",
+                  "title": "Araç çalışıyor · 3 saniye bekle",
+                  "x": 760,
+                  "y": 520,
+                  "ms": 3000
+                },
+                {
+                  "id": "s4_accounts_repair",
+                  "kind": "ai",
+                  "title": "Yalnız açık araç hatasında toparla",
+                  "x": 1120,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici hatasını gider. Kaynak: {{calisma.queue}}. Hedef: {{calisma.hesaplar}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                  "maxActions": 8,
+                  "timeoutMs": 90000,
+                  "allowCode": false,
+                  "allowFlowRead": false
+                },
+                {
+                  "id": "s4_accounts_close",
+                  "kind": "click",
+                  "title": "Bu araç penceresini kapat",
+                  "x": 1480,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Klasörleyiciyi kapat” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s4_accounts_end",
+                  "kind": "end",
+                  "title": "Araç işlemi tamamlandı",
+                  "x": 1840,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s4_h16_accounts_ready_false_accounts_error",
+                  "from": "s4_accounts_ready",
+                  "fromPort": "false",
+                  "to": "s4_accounts_error"
+                },
+                {
+                  "id": "s4_h16_accounts_error_true_accounts_repair",
+                  "from": "s4_accounts_error",
+                  "fromPort": "true",
+                  "to": "s4_accounts_repair"
+                },
+                {
+                  "id": "s4_h16_accounts_error_false_accounts_poll",
+                  "from": "s4_accounts_error",
+                  "fromPort": "false",
+                  "to": "s4_accounts_poll"
+                },
+                {
+                  "id": "s4_h16_accounts_poll_next_accounts_ready",
+                  "from": "s4_accounts_poll",
+                  "fromPort": "next",
+                  "to": "s4_accounts_ready"
+                },
+                {
+                  "id": "s4_h16_accounts_repair_next_accounts_ready",
+                  "from": "s4_accounts_repair",
+                  "fromPort": "next",
+                  "to": "s4_accounts_ready"
+                },
+                {
+                  "id": "s4_h16_accounts_start_next_accounts_run",
+                  "from": "s4_accounts_start",
+                  "fromPort": "next",
+                  "to": "s4_accounts_run"
+                },
+                {
+                  "id": "s4_h16_accounts_run_next_accounts_run_wait",
+                  "from": "s4_accounts_run",
+                  "fromPort": "next",
+                  "to": "s4_accounts_run_wait"
+                },
+                {
+                  "id": "s4_h16_accounts_run_wait_next_accounts_exe",
+                  "from": "s4_accounts_run_wait",
+                  "fromPort": "next",
+                  "to": "s4_accounts_exe"
+                },
+                {
+                  "id": "s4_h16_accounts_exe_next_accounts_open_wait",
+                  "from": "s4_accounts_exe",
+                  "fromPort": "next",
+                  "to": "s4_accounts_open_wait"
+                },
+                {
+                  "id": "s4_h16_accounts_open_wait_next_accounts_source",
+                  "from": "s4_accounts_open_wait",
+                  "fromPort": "next",
+                  "to": "s4_accounts_source"
+                },
+                {
+                  "id": "s4_h16_accounts_source_next_accounts_target",
+                  "from": "s4_accounts_source",
+                  "fromPort": "next",
+                  "to": "s4_accounts_target"
+                },
+                {
+                  "id": "s4_h16_accounts_target_next_accounts_size",
+                  "from": "s4_accounts_target",
+                  "fromPort": "next",
+                  "to": "s4_accounts_size"
+                },
+                {
+                  "id": "s4_h16_accounts_size_next_accounts_limit",
+                  "from": "s4_accounts_size",
+                  "fromPort": "next",
+                  "to": "s4_accounts_limit"
+                },
+                {
+                  "id": "s4_h16_accounts_limit_next_accounts_filter",
+                  "from": "s4_accounts_limit",
+                  "fromPort": "next",
+                  "to": "s4_accounts_filter"
+                },
+                {
+                  "id": "s4_h16_accounts_filter_next_accounts_backup",
+                  "from": "s4_accounts_filter",
+                  "fromPort": "next",
+                  "to": "s4_accounts_go"
+                },
+                {
+                  "id": "s4_h16_accounts_go_next_accounts_ready",
+                  "from": "s4_accounts_go",
+                  "fromPort": "next",
+                  "to": "s4_accounts_ready"
+                },
+                {
+                  "id": "s4_h16_accounts_ready_true_accounts_close",
+                  "from": "s4_accounts_ready",
+                  "fromPort": "true",
+                  "to": "s4_accounts_close"
+                },
+                {
+                  "id": "s4_h16_accounts_close_next_accounts_end",
+                  "from": "s4_accounts_close",
+                  "fromPort": "next",
+                  "to": "s4_accounts_end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s4_0003_end",
+            "kind": "end",
+            "title": "İlk 48 görsel → üç hesap × 16 görsel · bitti",
+            "x": 760,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s4_h16_0003_start_next_account_groups",
+            "from": "s4_0003_start",
+            "fromPort": "next",
+            "to": "s4_account_groups"
+          },
+          {
+            "id": "s4_h16_account_groups_next_0003_end",
+            "from": "s4_account_groups",
+            "fromPort": "next",
+            "to": "s4_0003_end"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "81d20709-3a18-4939-81fb-4ddfe9237c9f",
+        "name": "Hunyuan_16li_Hesap_Gruplari"
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-5",
+      "kind": "package",
+      "title": "Hunyuan · 8 sekmede üret ve GLB indir",
+      "x": 1740,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s5_split_hunyuan_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s5_hy20_groups_loop",
+            "kind": "loop",
+            "title": "Hazır hesap grupları · sırayla",
+            "x": 400,
+            "y": 60,
+            "count": 3,
+            "members": [
+              "s5_hy20_group"
+            ],
+            "folder": "{{calisma.hesaplar}}",
+            "expose": true,
+            "listSource": {
+              "kind": "folders",
+              "filter": "*"
+            }
+          },
+          {
+            "id": "s5_hy20_group",
+            "kind": "package",
+            "title": "Bir hesap · 16 görsel = iki tur × sekiz sekme",
+            "x": 424,
+            "y": 136,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s5_five_account_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s5_five_mv3rh4uq5fryurl8",
+                  "kind": "package",
+                  "title": "Bu hesabın 16 görselini iki 8’li klasöre kopyala",
+                  "x": 400,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s5_eight_groups_start",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s5_eight_groups_run",
+                        "kind": "key",
+                        "title": "Çalıştır penceresini aç",
+                        "x": 400,
+                        "y": 60,
+                        "keys": "win+r"
+                      },
+                      {
+                        "id": "s5_eight_groups_run_wait",
+                        "kind": "wait",
+                        "title": "Çalıştır penceresini bekle",
+                        "x": 760,
+                        "y": 60,
+                        "ms": 700
+                      },
+                      {
+                        "id": "s5_eight_groups_exe",
+                        "kind": "type",
+                        "title": "FolderBatcher.exe aç",
+                        "x": 1120,
+                        "y": 60,
+                        "text": "\"{{araclar}}\\FolderBatcher.exe\"",
+                        "prompt": "",
+                        "clearFirst": true,
+                        "pressEnter": true
+                      },
+                      {
+                        "id": "s5_eight_groups_open_wait",
+                        "kind": "wait",
+                        "title": "Yeni araç penceresini bekle",
+                        "x": 1480,
+                        "y": 60,
+                        "ms": 1200
+                      },
+                      {
+                        "id": "s5_eight_groups_source",
+                        "kind": "type",
+                        "title": "Kaynak klasör",
+                        "x": 1840,
+                        "y": 60,
+                        "text": "{{öğe}}",
+                        "prompt": "Dosya Klasörleyici penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                        "clearFirst": true,
+                        "pressEnter": false
+                      },
+                      {
+                        "id": "s5_eight_groups_target",
+                        "kind": "type",
+                        "title": "Hedef klasör",
+                        "x": 40,
+                        "y": 290,
+                        "text": "{{calisma.sekmeler}}\\{{öğe.ad}}",
+                        "prompt": "Dosya Klasörleyici penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                        "clearFirst": true,
+                        "pressEnter": false
+                      },
+                      {
+                        "id": "s5_eight_groups_size",
+                        "kind": "type",
+                        "title": "Grup boyutu",
+                        "x": 400,
+                        "y": 290,
+                        "text": "8",
+                        "prompt": "Dosya Klasörleyici penceresinde “Grup boyutu” etiketinin yanındaki yazı kutusu.",
+                        "clearFirst": true,
+                        "pressEnter": false
+                      },
+                      {
+                        "id": "s5_eight_groups_limit",
+                        "kind": "type",
+                        "title": "En fazla dosya",
+                        "x": 760,
+                        "y": 290,
+                        "text": "16",
+                        "prompt": "Dosya Klasörleyici penceresinde “En fazla dosya” etiketinin yanındaki yazı kutusu.",
+                        "clearFirst": true,
+                        "pressEnter": false
+                      },
+                      {
+                        "id": "s5_eight_groups_filter",
+                        "kind": "type",
+                        "title": "Dosya filtresi",
+                        "x": 1120,
+                        "y": 290,
+                        "text": "*.png;*.jpg;*.jpeg;*.webp",
+                        "prompt": "Dosya Klasörleyici penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                        "clearFirst": true,
+                        "pressEnter": false
+                      },
+                      {
+                        "id": "s5_eight_groups_go",
+                        "kind": "click",
+                        "title": "İşlemi bir kez başlat",
+                        "x": 1840,
+                        "y": 290,
+                        "prompt": "Dosya Klasörleyici penceresindeki “Dosyaları grupla” düğmesi.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s5_eight_groups_ready",
+                        "kind": "condition",
+                        "title": "Araç işlemi tamamlandı mı?",
+                        "x": 40,
+                        "y": 520,
+                        "text": "Dosya Klasörleyici penceresinin güncel DURUM satırı “Gruplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                        "conditionWindow": "Dosya Klasörleyici"
+                      },
+                      {
+                        "id": "s5_eight_groups_error",
+                        "kind": "condition",
+                        "title": "Araç açık hata mı bildirdi?",
+                        "x": 400,
+                        "y": 520,
+                        "text": "Dosya Klasörleyici güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                        "conditionWindow": "Dosya Klasörleyici"
+                      },
+                      {
+                        "id": "s5_eight_groups_poll",
+                        "kind": "wait",
+                        "title": "Araç çalışıyor · 3 saniye bekle",
+                        "x": 760,
+                        "y": 520,
+                        "ms": 3000
+                      },
+                      {
+                        "id": "s5_eight_groups_repair",
+                        "kind": "ai",
+                        "title": "Yalnız açık araç hatasında toparla",
+                        "x": 1120,
+                        "y": 520,
+                        "prompt": "Dosya Klasörleyici hatasını gider. Kaynak: {{öğe}}. Hedef: {{calisma.sekmeler}}\\{{öğe.ad}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                        "maxActions": 8,
+                        "timeoutMs": 90000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      },
+                      {
+                        "id": "s5_eight_groups_close",
+                        "kind": "click",
+                        "title": "Bu araç penceresini kapat",
+                        "x": 1480,
+                        "y": 520,
+                        "prompt": "Dosya Klasörleyici penceresindeki “Klasörleyiciyi kapat” düğmesi.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s5_eight_groups_end",
+                        "kind": "end",
+                        "title": "Araç işlemi tamamlandı",
+                        "x": 1840,
+                        "y": 520
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s5_h16_eight_groups_ready_false_eight_groups_error",
+                        "from": "s5_eight_groups_ready",
+                        "fromPort": "false",
+                        "to": "s5_eight_groups_error"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_error_true_eight_groups_repair",
+                        "from": "s5_eight_groups_error",
+                        "fromPort": "true",
+                        "to": "s5_eight_groups_repair"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_error_false_eight_groups_poll",
+                        "from": "s5_eight_groups_error",
+                        "fromPort": "false",
+                        "to": "s5_eight_groups_poll"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_poll_next_eight_groups_ready",
+                        "from": "s5_eight_groups_poll",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_ready"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_repair_next_eight_groups_ready",
+                        "from": "s5_eight_groups_repair",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_ready"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_start_next_eight_groups_run",
+                        "from": "s5_eight_groups_start",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_run"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_run_next_eight_groups_run_wait",
+                        "from": "s5_eight_groups_run",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_run_wait"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_run_wait_next_eight_groups_exe",
+                        "from": "s5_eight_groups_run_wait",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_exe"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_exe_next_eight_groups_open_wait",
+                        "from": "s5_eight_groups_exe",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_open_wait"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_open_wait_next_eight_groups_source",
+                        "from": "s5_eight_groups_open_wait",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_source"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_source_next_eight_groups_target",
+                        "from": "s5_eight_groups_source",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_target"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_target_next_eight_groups_size",
+                        "from": "s5_eight_groups_target",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_size"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_size_next_eight_groups_limit",
+                        "from": "s5_eight_groups_size",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_limit"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_limit_next_eight_groups_filter",
+                        "from": "s5_eight_groups_limit",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_filter"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_filter_next_eight_groups_backup",
+                        "from": "s5_eight_groups_filter",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_go"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_go_next_eight_groups_ready",
+                        "from": "s5_eight_groups_go",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_ready"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_ready_true_eight_groups_close",
+                        "from": "s5_eight_groups_ready",
+                        "fromPort": "true",
+                        "to": "s5_eight_groups_close"
+                      },
+                      {
+                        "id": "s5_h16_eight_groups_close_next_eight_groups_end",
+                        "from": "s5_eight_groups_close",
+                        "fromPort": "next",
+                        "to": "s5_eight_groups_end"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s5_hy20_profile",
+                  "kind": "package",
+                  "title": "H01 · {{sıra}}. Chrome profilini aç; Hunyuan’a git",
+                  "x": 760,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s5_hy20_profile_start",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s5_hy20_profile_desktop",
+                        "kind": "key",
+                        "title": "Masaüstüne geç",
+                        "x": 400,
+                        "y": 60,
+                        "keys": "win+d"
+                      },
+                      {
+                        "id": "s5_hy20_profile_desktop_wait",
+                        "kind": "wait",
+                        "title": "Masaüstünü bekle",
+                        "x": 760,
+                        "y": 60,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_hy20_profile_chrome",
+                        "kind": "click",
+                        "title": "Chrome profil seçicisini aç",
+                        "x": 1120,
+                        "y": 60,
+                        "prompt": "Masaüstündeki Google Chrome simgesine çift tıkla.",
+                        "clickMode": "double"
+                      },
+                      {
+                        "id": "s5_hy20_profile_picker_wait",
+                        "kind": "wait",
+                        "title": "Chrome profil seçicisini bekle",
+                        "x": 1480,
+                        "y": 60,
+                        "ms": 2000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_hy20_profile_choose",
+                        "kind": "click",
+                        "title": "Bu grubun profilini aç · soldan {{sıra}}.",
+                        "x": 1840,
+                        "y": 60,
+                        "prompt": "Chrome profil seçicisinde soldan {{sıra}}. profile tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s5_hy20_profile_open_wait",
+                        "kind": "wait",
+                        "title": "Seçilen profilin açılmasını bekle",
+                        "x": 40,
+                        "y": 290,
+                        "ms": 2000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_hy20_profile_maximize_wait",
+                        "kind": "wait",
+                        "title": "Pencere yerleşimini bekle",
+                        "x": 400,
+                        "y": 290,
+                        "ms": 500,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_five_profile_menu_tab",
+                        "kind": "key",
+                        "title": "Sekme menüsünün açık olması için boş sekme aç",
+                        "x": 760,
+                        "y": 290,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_five_profile_first",
+                        "kind": "key",
+                        "title": "İlk sekmeye geç",
+                        "x": 1120,
+                        "y": 290,
+                        "keys": "ctrl+1"
+                      },
+                      {
+                        "id": "s5_five_profile_tabmenu",
+                        "kind": "click",
+                        "title": "İlk sekmenin menüsünü aç",
+                        "x": 1480,
+                        "y": 290,
+                        "prompt": "Etkin Chrome profilinin ilk sekmesinin başlığının ortasına sağ tıkla; sekmenin Kapat/X düğmesine basma.",
+                        "clickMode": "right"
+                      },
+                      {
+                        "id": "s5_five_profile_only",
+                        "kind": "click",
+                        "title": "Yalnız başlangıç sekmesini bırak",
+                        "x": 1840,
+                        "y": 290,
+                        "prompt": "Chrome’un açık sekme bağlam menüsündeki “Diğer sekmeleri kapat” komutu. Sayfa veya başka pencere değil.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s5_five_profile_only_wait",
+                        "kind": "wait",
+                        "title": "Tek sekmeyi bekle",
+                        "x": 40,
+                        "y": 520,
+                        "ms": 500,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_hy20_profile_end",
+                        "kind": "end",
+                        "title": "Bu hesabın sekiz üretim sekmesi hazır",
+                        "x": 400,
+                        "y": 520
+                      },
+                      {
+                        "id": "s5_sade_prepare_tab_2",
+                        "kind": "key",
+                        "title": "2. üretim sekmesini hazırla",
+                        "x": 760,
+                        "y": 520,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_sade_prepare_tab_3",
+                        "kind": "key",
+                        "title": "3. üretim sekmesini hazırla",
+                        "x": 1120,
+                        "y": 520,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_sade_prepare_tab_4",
+                        "kind": "key",
+                        "title": "4. üretim sekmesini hazırla",
+                        "x": 1480,
+                        "y": 520,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_sade_prepare_tab_5",
+                        "kind": "key",
+                        "title": "5. üretim sekmesini hazırla",
+                        "x": 1840,
+                        "y": 520,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_mvgvz9w9yqts5r1v",
+                        "kind": "ai",
+                        "title": "Yap · Chrome penceresini büyüt",
+                        "x": 40,
+                        "y": 750,
+                        "prompt": "Chrome penceresini ekranı kaplayacak şekilde büyüt. Zaten büyütülmüş veya tam ekransa hiçbir işlem yapma.",
+                        "maxActions": 25,
+                        "timeoutMs": 300000
+                      },
+                      {
+                        "id": "s5_h16_prepare_tab_6",
+                        "kind": "key",
+                        "title": "6. üretim sekmesini aç",
+                        "x": 400,
+                        "y": 750,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_h16_prepare_tab_7",
+                        "kind": "key",
+                        "title": "7. üretim sekmesini aç",
+                        "x": 760,
+                        "y": 750,
+                        "keys": "ctrl+t"
+                      },
+                      {
+                        "id": "s5_h16_prepare_tab_8",
+                        "kind": "key",
+                        "title": "8. üretim sekmesini aç",
+                        "x": 1120,
+                        "y": 750,
+                        "keys": "ctrl+t"
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s5_sade_hy20_profile_start_next_hy20_profile_desktop",
+                        "from": "s5_hy20_profile_start",
+                        "to": "s5_hy20_profile_desktop",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_desktop_next_hy20_profile_desktop_wait",
+                        "from": "s5_hy20_profile_desktop",
+                        "to": "s5_hy20_profile_desktop_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_desktop_wait_next_hy20_profile_chrome",
+                        "from": "s5_hy20_profile_desktop_wait",
+                        "to": "s5_hy20_profile_chrome",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_chrome_next_hy20_profile_picker_wait",
+                        "from": "s5_hy20_profile_chrome",
+                        "to": "s5_hy20_profile_picker_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_picker_wait_next_hy20_profile_choose",
+                        "from": "s5_hy20_profile_picker_wait",
+                        "to": "s5_hy20_profile_choose",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_choose_next_hy20_profile_open_wait",
+                        "from": "s5_hy20_profile_choose",
+                        "to": "s5_hy20_profile_open_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_hy20_profile_maximize_wait_next_five_profile_menu_tab",
+                        "from": "s5_hy20_profile_maximize_wait",
+                        "to": "s5_five_profile_menu_tab",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_profile_menu_tab_next_five_profile_first",
+                        "from": "s5_five_profile_menu_tab",
+                        "to": "s5_five_profile_first",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_profile_first_next_five_profile_tabmenu",
+                        "from": "s5_five_profile_first",
+                        "to": "s5_five_profile_tabmenu",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_profile_tabmenu_next_five_profile_only",
+                        "from": "s5_five_profile_tabmenu",
+                        "to": "s5_five_profile_only",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_profile_only_next_five_profile_only_wait",
+                        "from": "s5_five_profile_only",
+                        "to": "s5_five_profile_only_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_profile_only_wait_next_sade_prepare_tab_2",
+                        "from": "s5_five_profile_only_wait",
+                        "to": "s5_sade_prepare_tab_2",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_sade_prepare_tab_2_next_sade_prepare_tab_3",
+                        "from": "s5_sade_prepare_tab_2",
+                        "to": "s5_sade_prepare_tab_3",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_sade_prepare_tab_3_next_sade_prepare_tab_4",
+                        "from": "s5_sade_prepare_tab_3",
+                        "to": "s5_sade_prepare_tab_4",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_sade_prepare_tab_4_next_sade_prepare_tab_5",
+                        "from": "s5_sade_prepare_tab_4",
+                        "to": "s5_sade_prepare_tab_5",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_sade_prepare_tab_5_next_hy20_profile_end",
+                        "from": "s5_sade_prepare_tab_5",
+                        "to": "s5_h16_prepare_tab_6",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_mvgvz9w9kjokiqja",
+                        "from": "s5_hy20_profile_open_wait",
+                        "to": "s5_mvgvz9w9yqts5r1v",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_mvgvzftc4qihp4yh",
+                        "from": "s5_mvgvz9w9yqts5r1v",
+                        "to": "s5_hy20_profile_maximize_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_h16_h16_prepare_tab_6_next_h16_prepare_tab_7",
+                        "from": "s5_h16_prepare_tab_6",
+                        "fromPort": "next",
+                        "to": "s5_h16_prepare_tab_7"
+                      },
+                      {
+                        "id": "s5_h16_h16_prepare_tab_7_next_h16_prepare_tab_8",
+                        "from": "s5_h16_prepare_tab_7",
+                        "fromPort": "next",
+                        "to": "s5_h16_prepare_tab_8"
+                      },
+                      {
+                        "id": "s5_h16_h16_prepare_tab_8_next_hy20_profile_end",
+                        "from": "s5_h16_prepare_tab_8",
+                        "fromPort": "next",
+                        "to": "s5_hy20_profile_end"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s5_five_batches",
+                  "kind": "loop",
+                  "title": "Bu hesabın 8’li grupları · son eksik grup dahil",
+                  "x": 1120,
+                  "y": 60,
+                  "count": 2,
+                  "members": [
+                    "s5_five_round"
+                  ],
+                  "folder": "{{calisma.sekmeler}}\\{{öğe.ad}}",
+                  "listSource": {
+                    "kind": "folders",
+                    "filter": "*"
+                  }
+                },
+                {
+                  "id": "s5_five_round",
+                  "kind": "package",
+                  "title": "Aynı sekiz sekme · sekiz üretim → sekiz indirme",
+                  "x": 1144,
+                  "y": 136,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s5_five_round_start",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s5_five_submit_loop",
+                        "kind": "loop",
+                        "title": "Sekiz görsel → sekme 1–8 → üret",
+                        "x": 400,
+                        "y": 60,
+                        "count": 8,
+                        "members": [
+                          "s5_five_submit"
+                        ],
+                        "folder": "{{öğe}}",
+                        "listSource": {
+                          "kind": "files",
+                          "filter": "*.png;*.jpg;*.jpeg;*.webp"
+                        }
+                      },
+                      {
+                        "id": "s5_five_submit",
+                        "kind": "package",
+                        "title": "Sabit sekmeye görsel yükle ve üretimi başlat",
+                        "x": 424,
+                        "y": 136,
+                        "inner": {
+                          "nodes": [
+                            {
+                              "id": "s5_five_submit_start",
+                              "kind": "start",
+                              "title": "Başlangıç",
+                              "x": 40,
+                              "y": 60
+                            },
+                            {
+                              "id": "s5_five_submit_newtab",
+                              "kind": "key",
+                              "title": "Bu görselin sabit sekmesine geç · 1–8",
+                              "x": 400,
+                              "y": 60,
+                              "keys": "ctrl+{{sıra}}"
+                            },
+                            {
+                              "id": "s5_five_submit_url",
+                              "kind": "type",
+                              "title": "Bu sekmede doğrudan Hunyuan üretim ekranını aç",
+                              "x": 760,
+                              "y": 60,
+                              "prompt": "",
+                              "text": "https://3d.hunyuan.tencent.com/creation",
+                              "pressEnter": true,
+                              "clearFirst": true
+                            },
+                            {
+                              "id": "s5_five_submit_page",
+                              "kind": "wait",
+                              "title": "Yeni sekmenin yüklenmesini bekle",
+                              "x": 1120,
+                              "y": 60,
+                              "ms": 4000,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_submit_upload",
+                              "kind": "click",
+                              "title": "Görsel yükleme düğmesi · 上传图片",
+                              "x": 1480,
+                              "y": 60,
+                              "prompt": "Etkin Hunyuan üretim formundaki “上传图片” görsel yükleme alanı.",
+                              "clickMode": "left",
+                              "anchor": {
+                                "x": 227,
+                                "y": 458
+                              },
+                              "locator": {
+                                "name": "",
+                                "text": "上传图片",
+                                "controlType": "Group",
+                                "automationId": "",
+                                "path": "0/1/0/0/1/1/0/1/0/0/41",
+                                "windowTitle": "腾讯混元3D - Google Chrome",
+                                "x": 226,
+                                "y": 458,
+                                "offsetX": 235,
+                                "offsetY": 467,
+                                "icon": "iVBORw0KGgoAAAANSUhEUgAAAFcAAAAiCAYAAAAqJ0UeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAXASURBVGhD7VhZUxRXGOVfABUsQCKrMEPFBQyLgGFYBsI+IjDDDkaWqlSoimXykDhDTJCU+kRIJDEasVETMQsxm4kxrSZPZjXv8xvm9aS+296h+/YyPQtZyDyc+ea7X9/bPadPn/7upKSnp4MjLS0t/N0q386RQxw3q1vlKfSRxNYgKnL5HTGDWI813y4xKnKTiA6MXJHxf3PkiDcXEakeC5LK3UJoyCW27eTbOXLEmxOSyt1C6DzX7E5EmyeRVK4GREgic51yI8U9ngA6V4CiWp9hncMs37W3Hp7VEMp8AV297riE7gtBZOY7TOcTSpq8GPoaGP5GwchtYORbYPQ7YPQOMPo9MHYXGPsBGJOB8XvA+H1g4oGCyZ8A32dBZBU6NOcguE9L8FySkZGdo6sRsoscGLsTROtZSVcTEbVy9x4OoPNdhVyxZgdl3gA8V0LI3e/SjGflOxmxh06s6eaIcDT74NsIIf+Ado3sQif6PgzC2WJ9bdXTAQxuBJFd5NTVWhbXGLk7dj6pqxF27nYycp89F/k6U0S2I+GpHj8jt7DGq6tFwhOZOWg8JaNmTmLfm9+Q0XcD6F8H+m8CAx8/xqeAl7AB+AifA75bQEmjck5SrncjhLzyes36rlclRm5RXYfu3GpUTfm3n3KL6304ch0odunn1h1fY8rNKtCriYMumCJXLpHLaxWTAa0l3AXGyRJkYOIeMHEfaHpNYscSuaRcIle9LkW1ctXjPKqVa1RXx7By+WCkPB7lHnxBYsol1arHmYpPy8xzxTlGEJXraPYyz+27TjdHr8aGeYl5rrNVueZtp9zcfS54LofQdEpGRpbWz8h/e6+FUD4c0M0zgtpzKyYCjFin24eGk2toX5KxI3tz/cb5Nabc0tbN6zXzXCKElDv1MzD1CzD9KzD9GzDzOzDzBzD7CJj90xxHJDm8DsWYPZfQ9R7QdQHofh/ovgj0XAJ6PgB6LgNFdZvKJmU2zMvovQam3Mw8B5pel9H3EQw9l/mt4LmDt4DDq0onwZXraPKi92qQKZfOk5GVw8gd/ioEh9uL/vUgswVni/Ypi0e50SDq7a9auUZ1o7j7kBcdy0GmWgKRzeuk4uYFmdmCetwqErlqz1XXqWPovxFkbdjI7RDyK1y6+fF4LoedPDblrtj33MxcB9qXgoxgI8/dta8evVdDKBv06+aaQfRcgusVKdznuk4qflhx1B/uczvPkx0p5/1HlGsHVp5LC4o5eW3V9ArLD85JGs+lOnUOZAslDcabEnE9ily51TNnMPx4A0GeK85Tx6pjAUw+ALpWZNTOnTFULhHquShbKjeaGJtyY+0W5vTK3e/z6zzXqM9tPbupPCPlEiom/OF2rGN583gRZsrl5GpeaAR6oREeKeAvsJrnrZ+2qLe/Rp5rN9LmQfTcSPGZl9fYy8zRtHk+K8/loF0a73Mrn/Nr6mrP5WNU5+S6F63brIKqekw9DEUmVxyIhLiUa+C5Vqg7ITH1lo9of4So3KfH/eH/FqhLENcRYaZcyoe+DKJ61po02+TSHeOggUh5IpXLNg8LMmpfVHZO6uMPjASYJVAU1zFTLm0gaPur3qEN3NR7q1m3UNrmxeSPIRRU6p8IHglG5KrrPP97lSt4LkXqeYlc8lz3olIrH/Izz617yfjxFJVrhcqjftYtdNnoFtwLErOFSJ2CEblG0Hkuh1m+x6OQy5Ur1q1ytXLVNQ7a/g58orzMyBLEOodauWLNDow8l1R77CFYFI8XYZtccSCntB4t50JoWwLa3gLaloH2t4H2d4CO8wqozzXaoXWrdmieVaDBryXSjudSzf2mzAgubjD+oYn+P5d57RdBplzxXEawTa6o3K2MvM9VdwscYp5X5kL/Ov3foPwAdT3Ryq2a8TNyRZswg21yxYH/M1JTUxOS85gkdwuRJHcLofNcjnjzJBKsXNGDRIj1WPP/SkwouUlo8ReQGmff0e+h+QAAAABJRU5ErkJggg=="
+                              }
+                            },
+                            {
+                              "id": "s5_five_submit_picker_wait",
+                              "kind": "wait",
+                              "title": "Dosya seçme penceresini bekle",
+                              "x": 1840,
+                              "y": 60,
+                              "ms": 700,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_submit_path",
+                              "kind": "type",
+                              "title": "Bu grubun sıradaki görselini yükle",
+                              "x": 40,
+                              "y": 290,
+                              "prompt": "",
+                              "text": "{{öğe}}",
+                              "pressEnter": true,
+                              "clearFirst": true,
+                              "expose": true
+                            },
+                            {
+                              "id": "s5_five_submit_upload_wait",
+                              "kind": "wait",
+                              "title": "Görselin yüklenmesini bekle",
+                              "x": 400,
+                              "y": 290,
+                              "ms": 3000,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_submit_poly",
+                              "kind": "click",
+                              "title": "500k poligon seç",
+                              "x": 760,
+                              "y": 290,
+                              "prompt": "\"500k\"",
+                              "clickMode": "left",
+                              "locator": {
+                                "name": "500k",
+                                "text": "500k",
+                                "controlType": "Group",
+                                "automationId": "",
+                                "path": "0/1/0/0/1/1/0/1/0/0/41",
+                                "windowTitle": "腾讯混元3D - Google Chrome",
+                                "x": 249,
+                                "y": 828,
+                                "offsetX": 258,
+                                "offsetY": 837,
+                                "icon": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAfCAYAAACh+E5kAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAGISURBVFhH7ZQxioRAEEXnNJ5lTmBsIpiZeQQvYCgIBoK3dPlCQc33l7oDu43QwWPGttv+r7r0VRTF9mRePPA0skBqskBqskBqskBqpEBZlts8z9u6rgf6vj/MH4bhcg7ouu5j3jiO2/v9PuzL42ecCiAY32MwB3OxBtcWkiVsHL9+Dx9WjV0hBZqm2ZZlOYRgOJQBKazHc3AdFYRl/12Aq29wsEiUA/M176f4WiCqql9v9yJRhERYuxcJ2DvG40AKRBXzcEiPD1LX9UdInuvbTQmgiMii9gGnAh7f0+DslJSAqh44E7AcUXggBRg7an8qfy3Qtu0+Hq0zbgkAe7i1wp0Wwj3uc57r3w9bZ6d+FR7cFgCqWlcCtu43AtM07XDbKr4WsMqqKvFHAG2mwrCob6Gqqvb/ap3ntgC/YBiLgnHFo/eFRXkPWxedHpACCOA3s2pzWNXfHMqwzyGH9S3IAv55kUQowJ9R1SrAf6HU59ZjEgafiBLw69SzpcCTyAKpyQKpyQKp+QGvVciSVhEShAAAAABJRU5ErkJggg=="
+                              },
+                              "anchor": {
+                                "x": 249,
+                                "y": 829
+                              }
+                            },
+                            {
+                              "id": "s5_five_submit_generate",
+                              "kind": "click",
+                              "title": "Bu görseli bir kez üret · 立即生成",
+                              "x": 1120,
+                              "y": 290,
+                              "prompt": "“立即生成” yazan yere tıkla",
+                              "clickMode": "left",
+                              "locator": {
+                                "name": "",
+                                "text": "立即生成",
+                                "controlType": "Group",
+                                "automationId": "",
+                                "path": "0/1/0/0/1/1/0/1/0/0/41",
+                                "windowTitle": "腾讯混元3D - Google Chrome",
+                                "x": 208,
+                                "y": 904,
+                                "offsetX": 217,
+                                "offsetY": 913,
+                                "icon": "iVBORw0KGgoAAAANSUhEUgAAANwAAAA3CAYAAABn2STAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAxhSURBVHhe7ZwLkxXFFcf5FPuVfAYFE1888lJZ8h1IVYwJmId57IJgjBqjiMozEYyJ7IOHwEpIwkIlKJooRCMRykC5GKlUp850n7mnT5/uO909czM31V31r1kusKxV8/PX/z5z77KJiQlVUlIymizjL5SUlHSXAlxJyQhTgCspGWGW3fRdpSA3b1Tqpo1K3byJ5VGdW77H8n2dW3/A8kOd2x5j+ZHO7ZAfk/xE5wt4/anJlJ3l0yab7dyxxeRxO3duNdlmZ8UTJj+zs/JJpVY8qdTKn7M8pXPX0yzP6HwR8guSZ3W+hPmlyXM6d2OeN9mucw9eXzDZYefeF01esnPfyyY77dy/y2S3nVV7TPbaWb1PqVX79HX1rwZZ82uWV3TW7ldqzX59XXuA5FWdL2N+Y/KazlcwvzX5nc5X8fq6yUGdr+F1xmRW5+t4nTOZt/PAIZLDgzx4hOToIA+9QXJskHXHWU7oTC4otW5BX6u8aXJSZz3m9yandJYBaFYMaLcgaAy2WxE0jAHtNgQNI4FGYSOgVWGgLccw0O7AIGgGtjs5aAy2GjQGG4BmxYB2F0BGY0CrAKMxoAFcqaBVQdAMbPdiGGj3YRA0A9v9HDSTVRw0k9UENCsNQLNiQKsBY6DVgAVAq4KgGdgAtCoImgmAVgVBM3lAAu2QUg8CZBy0I0o9JIFGYAuBZsWAVgPGQPsG5NQg2nAGNslwFXCC4WrwYg1H7UbBQ+Ak8BA6Bt5yBl0dD3TDDEeBc8BjhgPYKsNRu1HDIXASeAgdBY8CRwxnQcfAizGcA55gOG43CzwDnAMetRsFD81GwKsNh9CFwCOGs6AjhrPAQ+A4eGg2bjhiNws8YjcLPAOcCB7ajYOHdjPQ2YaLAI2ajRrOsdtjxGzMcPUWMtdwaDYMA20FhoG2siloDLaQ4awY0GqzMdjqLSQ3HAWtieEQMIwAWhVqOACMg2ayhoNmYFvLQcs0XL2FZKDVW0gGW72F5KAZ2AC0KmwrKRoOAMMww60DyATDTUqgNTEcsdvAcH3vcILhxrrDSYbjpiPgSR0u1nBNOpxkuZDhRtXhLMu11eF8hkvpcMRwvg7X3HBCh7PS1w7nAy2lwzU03FDQmnS4WMOFOpzPcD3ocD7DeTtciuH60OFEwwmHJg54wtYyyXBtdbgtLXY4ATgHvMwOB7BV4FG75XY4Bl0NHoNuLDocBY4bLrLDWeB13eGo3Sh4pL/FGU4ArfUO5wOtieG67nACaD7DOXZL6HD1FpLBVm8hueEyOlwVbjbMCDqcFdLhrKR2OAKaY7jYDgeAcdCyDNf3DieAN9YdzrO1lDpcbTpmuNp0LXa4ModzLRfaWpY5XJnD2R2uzOFkw42yw5U5nAtd6tYypsMNPaVM6XARhnPAEwzH7TbSDsfBy+hwFnhddzjW4yTo+tfhcgzXdYeLOKW0ktjhok8pMzqcZLgyhxM6XJnDjXmHkwzHTVfmcCJ4rXU4n+FSOlyZwwVAS+lwDQ03FLQmHS7WcKEO5zNcDzqcz3DeDpdiuD50ONFwwqGJA56wtUwyXFsdbszncIsfKnXhk8wOx6CrwWPQjUWHo8Bxw0V2ON94oJHhYjtcmcO13OEE0HyGc+wW6HBH/6bUjf8otfiPfszh5t7TP8/ec/lzuPkLSl2/odS200qdvazUlc+UevRN13BlDieA14sOJ4DXVYebOqTU5IsddzgD3sHzSi19rtT0G/4OB5k+rtTSDSUuuLG3LOjA13wBRLv/bHe47xxR6sp1pS5eHRgOgdtzzmM4YWvp63BzCNyftN3+fk1/733vuFvLJh2uzOHGocMx2Jp0uMkd+iadeaudOdzUUQ1U6gLINh/Xga9n3rUNN/uuC9zsXweWA9DgNbhSw80au+75i2s4BC4EWozhELD5ixo8CbRGHY6YzjFcmcMFDNdWh+tgDgeg4ULLceBSO9zQU8pAh6PA0Q4Hv5aAw8MTCzhjOLQbBL5ubDjS3+bep/9biFvw8zyx2AC8jA5ngdd1h2M9ToKufx0ux3AtdTgKG671L7mwhQwn9TgA7OHXlbr8qT4oGTaHu/AvpS4vKfXt2UGHSzLc7gFwe4jhzlzi/5XNFgC68Zi2GgBXGeyPsuH2nVfq6r9tw/GtpO+Usszh+tDhBMO11eE2vKLU4gf89hqsqcNKTQJ4mR0OTiQBOoBPNNx23eUALADu4dmB4WI6nM9wCCBYDKDjp5SxhoPvuxWAEzrc3vP69wG8MoeLNZzQ4f5f5nBT8/z2lddH15oZTgINt5JwQAI39M5FFzQ03Mw7+t+DKz2lTDIcAQ4M9/hJ/TVuJfkcjgMX6nBNDIfA0Q5Ht5M+w3k7XIrh+tDhRMMJhyYOeMLWMslwbXW4luZwAB0A5Vuw1fzmAddwsR1u2hygVLM3yXBmOwlgTR/L7HDCoQlY7cqS6W3CHI4DN8xw0qpOIs/r00n4d+HwBOy2aUGPBqpDkzKHiwet9Q7nA62J4VrqcBJ004dl0HyGc+zG5nAAmzMGwO3kMQ0VQMfncAAc3MBRhvN0uDbmcAAcmHLT8YHhAC4ErgLsun4N7VaPBcocbgw6nABeWx2OnlJS6Hacan8OB9tKWHDlhpsxvwfbyZw5XKjDQVIPTQBIhO/MP80hCgBnOhydvSFwZz/WByfwOgzAUztcmcONQ4djsEkdjhoOsmG/vrmqzibM4WCt3+k3nA80HAdY20pmOL6d5IbL6XB8DgfJ6XAA0sVr9oFJPXuDYfer+s8AdJeW5CdNvOMAX4cjpnMMV+ZwAcO11eE6mMPheGDDAfcRrzMfauDguv7l+A4H0H3LjAes08rt+iAFbvbqMa8Gc7hdZ5W6+plSm08MHvEaZrhhz1Jy4EIdDmADoChw8GsKHAAIC7eZANu2xYHthoKX0eEs8LrucKzHSdD1r8PlGK6lDud9lpLAhuvSNdlwUo/jz1LCLA5uwl1wWmnsBqBVr52xQQsZ7qKZ1z0yrwFzDNegw0mGgw7nGI50ODiZhO8JPY4CBwciVa9bsIGr4DLbSDihhL8Lnc53SlnmcH3ocILhuuhwoffDzbytbyCAL7XDQXae1jc29rhq9va5mb0dlA2HHY6eUm45MZjZAXSS4eDrast50n6WMsdwdCQApsNVwfr24FlK+no1j3tNH5rA36WHJ006nG88kNXhfIZL6XBlDhcALdDhqOl4f4MAbKFTyhBo/N0Cww5LfIZ7ZE5DBguucAOD7RC4cx/rmxxXNeTm7xZI7HDwpAkehviepQTTwYI/gw8uw88FdgOzVX3upN9w3g6XYrg+dDjRcMKhiQOesLVMMlxbHa6lOVwVATgHvKd1d4uZw51mW9GUBdtN6GwUosWP9LYS3g8HoEGfQ5vRORxuLXNOJ+mCx7UgW//gAuf0OPJeOHgdl9XfyhyuGWitdzgfaE0M13WHa3EORw3H53C4lQSrccMBdLD4KSV9P5zU4WLeD1dvITGeDme9U0AwXJ0G7/guczgBvF50OAG8UXc4Dl5qh+Pg0fEAPnHC53AVgOwd3/UTJy1+pkn5XErXcqGtZZnDZc7hvB2OABcyXCpo1HAIGzUc/2gFy3ChzzQpn0spG26UHa7M4VzoUreWwzqclYz3w3k/0yTCcA54guG43aRTSgc8areczzTh4GV0OAu8rjsc63ESdP3rcDmG67rDMdhChrOS2OGkU0oOmtThUj7TRDJc+VxKocOVOdyYdzjJcNx0BDypw8UarkmHkywXMtyoOpxvPJDV4XyGS+lwZQ4XAC2lwzU03FDQmnS4WMOFOpzPcD3ocD7DeTtciuH60OFEwwmHJg54wtYyyXBtdbj/wRyOgxfT4QC2Cjxqt9wOx6CrwWPQjUWHo8Bxw0V2ON94oJHhYjtcmcO13OEE0HyGc+yW0OGkORyk3kJyw2V0uDKHcw0ndrgyhxvzDufZWkodrjYdM1xtuhY7XJnDuZYLbS3LHK7M4ewOV+ZwsuFG2eHKHM6FLnVrGdPhhp5SpnS4CMM54AmG43YbaYfj4GV0OAu8rjsc63ESdP3rcDmG67rDRZxSWknscNGnlBkdTjJcmcMJHa7M4ca8w0mG46YrczgRvNY6nM9wKR2uzOECoKV0uIaGGwpakw4Xa7hQh/MZrgcdzmc4b4dLMVwfOpxoOOHQxAFP2FomGa6tDlfmcGUOJxjOAa/rDhc7h5uYmFAlJSWjSQGupGSEKcCVlIwwBbiSkhHmv7Qf0a5jy3oXAAAAAElFTkSuQmCC"
+                              },
+                              "anchor": {
+                                "x": 208,
+                                "y": 904
+                              }
+                            },
+                            {
+                              "id": "s5_five_submit_end",
+                              "kind": "end",
+                              "title": "Üretim başlatıldı; tamamlanmasını burada bekleme",
+                              "x": 1480,
+                              "y": 290
+                            },
+                            {
+                              "id": "s5_sade_submit_address",
+                              "kind": "key",
+                              "title": "Bu sekmenin adresini seç",
+                              "x": 1840,
+                              "y": 290,
+                              "keys": "ctrl+l"
+                            }
+                          ],
+                          "edges": [
+                            {
+                              "id": "s5_five_submit_start_next_five_submit_newtab",
+                              "from": "s5_five_submit_start",
+                              "to": "s5_five_submit_newtab",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_newtab_next_five_submit_url",
+                              "from": "s5_five_submit_newtab",
+                              "to": "s5_sade_submit_address",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_url_next_five_submit_page",
+                              "from": "s5_five_submit_url",
+                              "to": "s5_five_submit_page",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_page_next_five_submit_begin",
+                              "from": "s5_five_submit_page",
+                              "to": "s5_five_submit_upload",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_upload_next_five_submit_picker_wait",
+                              "from": "s5_five_submit_upload",
+                              "to": "s5_five_submit_picker_wait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_picker_wait_next_five_submit_path",
+                              "from": "s5_five_submit_picker_wait",
+                              "to": "s5_five_submit_path",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_path_next_five_submit_upload_wait",
+                              "from": "s5_five_submit_path",
+                              "to": "s5_five_submit_upload_wait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_upload_wait_next_five_submit_poly",
+                              "from": "s5_five_submit_upload_wait",
+                              "to": "s5_five_submit_poly",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_poly_next_five_submit_generate",
+                              "from": "s5_five_submit_poly",
+                              "to": "s5_five_submit_generate",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_submit_generate_next_five_submit_submit_wait",
+                              "from": "s5_five_submit_generate",
+                              "to": "s5_five_submit_end",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_sade_submit_address_url",
+                              "from": "s5_sade_submit_address",
+                              "to": "s5_five_submit_url",
+                              "fromPort": "next"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "id": "s5_five_download_loop",
+                        "kind": "loop",
+                        "title": "Aynı sekiz görsel → sekme 1–8 → indir",
+                        "x": 1120,
+                        "y": 60,
+                        "count": 8,
+                        "members": [
+                          "s5_five_download"
+                        ],
+                        "folder": "{{öğe}}",
+                        "listSource": {
+                          "kind": "files",
+                          "filter": "*.png;*.jpg;*.jpeg;*.webp"
+                        }
+                      },
+                      {
+                        "id": "s5_five_download",
+                        "kind": "package",
+                        "title": "Sabit sekmedeki modeli aynı adla kaydet",
+                        "x": 1144,
+                        "y": 136,
+                        "inner": {
+                          "nodes": [
+                            {
+                              "id": "s5_five_download_start",
+                              "kind": "start",
+                              "title": "Başlangıç",
+                              "x": 40,
+                              "y": 60
+                            },
+                            {
+                              "id": "s5_five_download_tab",
+                              "kind": "key",
+                              "title": "Bu görselin üretim sekmesine geç · 1–8",
+                              "x": 400,
+                              "y": 60,
+                              "keys": "ctrl+{{sıra}}"
+                            },
+                            {
+                              "id": "s5_five_download_tabwait",
+                              "kind": "wait",
+                              "title": "Etkin sekmeyi bekle",
+                              "x": 760,
+                              "y": 60,
+                              "ms": 700,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_download_ready",
+                              "kind": "condition",
+                              "title": "Hunyuan model indirme düğmesi göründü mü?",
+                              "x": 1120,
+                              "y": 60,
+                              "text": "Etkin Chrome sekmesinin Hunyuan model sonuç panelinde “下载” indirme düğmesi var mı? Evet için bu düğmenin güncel aday numarasını göster; üretim hatası, yükleme yazısı veya başka uygulama kanıt değildir.",
+                              "conditionWindow": "Google Chrome"
+                            },
+                            {
+                              "id": "s5_five_download_download",
+                              "kind": "click",
+                              "title": "Hazır modelin indirme menüsünü aç · 下载",
+                              "x": 1480,
+                              "y": 60,
+                              "prompt": "Etkin Hunyuan sekmesinin model sonuç panelindeki “下载” indirme menüsünü aç. Üretim hatası görünüyorsa veya düğme yoksa başka bir yere tıklama.",
+                              "clickMode": "left",
+                              "locator": {
+                                "name": "下载 caret-down",
+                                "text": "下载 caret-down",
+                                "controlType": "Button",
+                                "automationId": "",
+                                "path": "0/1/0/0/1/1/0/1/0/0/48",
+                                "windowTitle": "腾讯混元3D - Google Chrome",
+                                "icon": "iVBORw0KGgoAAAANSUhEUgAAAFcAAAAuCAYAAABd5YVlAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAT2SURBVGhD7ZpLbFRVGMf7Tre6MWLcGVJxoFUK9DGDikRFEokJNRIVQ0Jq3y0t0KCQqIFoYh9gdybowoULOwO6MNFESQx9LUjEhW1to+lj0ChYDEvu9G++e899zDnnnjnzkFY4i1+++33nfGd6f/fMndtpi4qKimD4zxAKhsIhFDJSXFxsw9fvdnI4b6Egpby8HJuindh9+GvsO5FE02kLL58Bms7gnol0znTu5IBckBPeE4dQSIOu1KZYJ/YeX8aek0DsKLDzqInPn4TthCQrdrNQ8CgrK0N903lbarQPiPWZyEeSXN/0ie2K9xcql65G3f7zeLpfvqiJftzVD9uVZAeLYomqaAee6QeivQYdyBU5yyi3srISu7qX7KtiN5uoFckZuVPK3djQjoYjQGMvTMwykjul3G2vfIWGXtbERRe+bsadSO6UchvbFu0rYcgechcqlz7xGnstocmgB7kLlUvU98CQB2q5R7gGN+ejGZfWlXLrerCGpDBvWZif4OqJFG5aFqYSQN2EBcuycFHoXR8URO7Fa85J5gNJPDcr1tO4lcK5gFw6nrrl9/M/11qjlLujG3lzIelIOSsZU8N27jhXT6SwwuS6tbMz+q9Bb1n6LYq+J3nhlBqaQ3PpA4pfR4f/n1xWD8rNBhL27RVgdikzM0vAN1eA594W19FBKXd7N7C9C3lFT27IuBfHJbeBHJiKh6zP4oH3gV+Wgb/+0WN2GXj9Q3Ednagv1yXLPLhzZeNhuXBRvHF/R6v6w/InjwGJMeCPFVEkz+9/A59fAnYeC19PlSvlbutC3jiSLPs+SbKGJXNEHIErM6uSsVX7Q4zkBnP5XDn7TwM//Qb8eVMU6kJjV38F9r0r9utyZ+RaFi4wCXQsF+GPq5gf52TGnQ84X3ZmdvQAb30KJK+LUl2WrwN9Hzs7kO/XRSm3thN5k2Bv72G3NuaLSkjm1zJZk3FgmD0FeL3BNZMp+fqaPHUc+OIHUarLZ985X4Lzfdlw5+XarGKS7dK5sWA9hTm2sykPk+vV2YVIX0MPuje+9B4wvSiK/XkRePEdZw7flw1KuVs7ga0dCjTGXblD/BjBdvHkaHquIhGYN6dam72+UAtAD/qtI8C1G77Y5A3gwAfOo1Sm/kzjenLziGlyJeOqOMR26JAw7uxw78II43qxtst563854cuNX3b+oiCbn21Uyn2iA3kTZ3IHJWOZGGRyxV4mN5kSerKFBO85BXz/I3DpKrD7hPOW5uflwvqXy90W4h3+/drJ2Xx2q/DyLCCZ9PxLFEosoZT7eDvyxpMrGUsnXZpHWq8/J86OV6ZX7bHBaX7u2rOO5IqkCwuKZXNGnacFyu3XSaaENdYSpdyadqCmDXlFV+5AyLgqDjC5A+2BY37eZX+XT4zK11mrmFmuIWdC5dIfKKtbb6O6DYYc2NJyO1wuEXljQWgy6BE5uKCW+8jeBLa0wqM6cGxydU7ulHIfrGlOb6btbnKtnNwp5VZUVKDqtQVsbgU2t8BEzUjOyJ1SLvFA5LDT5OIuYvLQnJxxHkWxBD01PBQbQYQWaYGJGeKG2Ef6//xMlJaWYkN0RLqYiX4kR+SK96eUS9DVuP/RQ9j46gIeexM2ERbv9ZyckBvJjtWT61JSUoL7qg7h4WfjjuhmS3ixuz5vtuxzJwfkgpzwnjiEgqFwCAVD4RAKhgLxLzRG1GQE52sgAAAAAElFTkSuQmCC"
+                              }
+                            },
+                            {
+                              "id": "s5_five_download_menu_wait",
+                              "kind": "wait",
+                              "title": "İndirme menüsünü bekle",
+                              "x": 1840,
+                              "y": 60,
+                              "ms": 700,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_download_glb",
+                              "kind": "click",
+                              "title": "GLB biçimini seç",
+                              "x": 40,
+                              "y": 290,
+                              "prompt": "Hunyuan modelinin AÇIK indirme menüsündeki “GLB” biçimini seç. Chrome araç çubuğu veya uzantı düğmesi değil.",
+                              "clickMode": "left",
+                              "locator": {
+                                "name": "GLB",
+                                "text": "GLB",
+                                "controlType": "Text",
+                                "automationId": "",
+                                "path": "0/1/0/0/1/1/0/1/0/2/0/0",
+                                "windowTitle": "腾讯混元3D - Google Chrome",
+                                "icon": "iVBORw0KGgoAAAANSUhEUgAAACgAAAAfCAYAAACVgY94AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAEnSURBVFhH7ZTJDYMwFEQphC5oiiaohCZogyIogAK4cHE0h4msv9mRkcLBlp6UmDHzMMswjmOapum1DHLibXTBVrpgK12wlS7YSlFw27Ykx3VdaVmWb2ae53Sep5rPYcYa+76rPHEFUYRCq5THIJ+XW1niZbgBx3GoNcAUpIC3SOKV12bQY80DUzBaYBGV12TQd993WtdVrVOCCCEcPReSqLyU4TzAb7lOCUIMg89XDV55TSbaPaAESwssvHIrY43oblUL8tZbJ/5FUGZ4XjlPlCBKLcEc+Zx65TlRhp8aayeVYBQmTwviP+atz5oSZNh7q8BfBUFpF58WjPpMQcDPjbWTPPaEIC/W6gGuYH5SOeRL5OU4cCFRxtq5KsE30AVb6YKtdMFWPpHeVnEukjAxAAAAAElFTkSuQmCC"
+                              }
+                            },
+                            {
+                              "id": "s5_five_download_save_wait",
+                              "kind": "wait",
+                              "title": "Farklı Kaydet penceresini bekle",
+                              "x": 400,
+                              "y": 290,
+                              "ms": 1500,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_download_output",
+                              "kind": "type",
+                              "title": "GLB’yi tam dosya yoluyla kaydet · {{öğe.isim}}.glb",
+                              "x": 760,
+                              "y": 290,
+                              "prompt": "Yeni açılan Farklı Kaydet / Save As penceresinde Dosya adı / File name yazı kutusu.",
+                              "text": "{{calisma.indirme}}\\{{öğe.isim}}.glb",
+                              "pressEnter": true,
+                              "clearFirst": true,
+                              "expose": true
+                            },
+                            {
+                              "id": "s5_five_download_download_wait",
+                              "kind": "wait",
+                              "title": "İndirmeye 5 saniye ver; son toplamada dosya bütünlüğü kontrol edilir",
+                              "x": 1120,
+                              "y": 290,
+                              "ms": 5000,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_five_download_end",
+                              "kind": "end",
+                              "title": "Bu görsel için kaydetme gönderildi",
+                              "x": 1480,
+                              "y": 290
+                            },
+                            {
+                              "id": "s5_five_download_poll",
+                              "kind": "wait",
+                              "title": "Üretim sürüyor · 10 saniye bekle",
+                              "x": 1840,
+                              "y": 290,
+                              "ms": 10000,
+                              "expose": false
+                            },
+                            {
+                              "id": "s5_sade_generation_failed",
+                              "kind": "condition",
+                              "title": "Üretim açıkça başarısız mı?",
+                              "x": 40,
+                              "y": 520,
+                              "text": "Etkin Hunyuan model sonuç paneli bu üretim için “生成失败” veya açık bir başarısızlık/hata durumu gösteriyor mu? Normal devam eden üretim veya yalnız indirme düğmesinin yokluğu hata değildir.",
+                              "conditionWindow": "Google Chrome"
+                            },
+                            {
+                              "id": "s5_sade_generation_repair",
+                              "kind": "ai",
+                              "title": "Yalnız üretim hatasında · aynı görselle toparla",
+                              "x": 400,
+                              "y": 520,
+                              "prompt": "Bu sekmedeki üretim hatasını incele; aynı görselle düzeltilebiliyorsa yeniden başlat. Görseli, hesabı ve sekmeyi değiştirme. Yeni üretim başladığında tamamla; indirmeyi burada bekleme.",
+                              "maxActions": 8,
+                              "timeoutMs": 90000,
+                              "allowCode": false
+                            }
+                          ],
+                          "edges": [
+                            {
+                              "id": "s5_five_download_start_next_five_download_tab",
+                              "from": "s5_five_download_start",
+                              "to": "s5_five_download_tab",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_tab_next_five_download_tabwait",
+                              "from": "s5_five_download_tab",
+                              "to": "s5_five_download_tabwait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_tabwait_next_five_download_ready",
+                              "from": "s5_five_download_tabwait",
+                              "to": "s5_five_download_ready",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_download_next_five_download_menu_wait",
+                              "from": "s5_five_download_download",
+                              "to": "s5_five_download_menu_wait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_menu_wait_next_five_download_glb",
+                              "from": "s5_five_download_menu_wait",
+                              "to": "s5_five_download_glb",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_glb_next_five_download_save_wait",
+                              "from": "s5_five_download_glb",
+                              "to": "s5_five_download_save_wait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_save_wait_next_five_download_location",
+                              "from": "s5_five_download_save_wait",
+                              "to": "s5_five_download_output",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_output_next_five_download_download_wait",
+                              "from": "s5_five_download_output",
+                              "to": "s5_five_download_download_wait",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_download_wait_next_five_download_end",
+                              "from": "s5_five_download_download_wait",
+                              "to": "s5_five_download_end",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_five_download_ready_true_five_download_download",
+                              "from": "s5_five_download_ready",
+                              "to": "s5_five_download_download",
+                              "fromPort": "true"
+                            },
+                            {
+                              "id": "s5_five_download_ready_false_five_download_poll",
+                              "from": "s5_five_download_ready",
+                              "to": "s5_sade_generation_failed",
+                              "fromPort": "false"
+                            },
+                            {
+                              "id": "s5_five_download_poll_next_five_download_ready",
+                              "from": "s5_five_download_poll",
+                              "to": "s5_five_download_ready",
+                              "fromPort": "next"
+                            },
+                            {
+                              "id": "s5_sade_generation_failed_yes",
+                              "from": "s5_sade_generation_failed",
+                              "to": "s5_sade_generation_repair",
+                              "fromPort": "true"
+                            },
+                            {
+                              "id": "s5_sade_generation_failed_no",
+                              "from": "s5_sade_generation_failed",
+                              "to": "s5_five_download_poll",
+                              "fromPort": "false"
+                            },
+                            {
+                              "id": "s5_sade_generation_repair_next",
+                              "from": "s5_sade_generation_repair",
+                              "to": "s5_five_download_poll",
+                              "fromPort": "next"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "id": "s5_five_round_end",
+                        "kind": "end",
+                        "title": "Bu sekizli indirildi · aynı sekmeler sonraki turda kullanılır",
+                        "x": 1840,
+                        "y": 60
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s5_sade_five_round_start_next_five_submit_loop",
+                        "from": "s5_five_round_start",
+                        "to": "s5_five_submit_loop",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_sade_five_submit_loop_done_five_download_loop",
+                        "from": "s5_five_submit_loop",
+                        "to": "s5_five_download_loop",
+                        "fromPort": "done"
+                      },
+                      {
+                        "id": "s5_sade_five_download_loop_done_five_round_end",
+                        "from": "s5_five_download_loop",
+                        "to": "s5_five_round_end",
+                        "fromPort": "done"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "s5_hy20_close",
+                  "kind": "package",
+                  "title": "H03 · Tamamlanan grubun Chrome penceresini kapat",
+                  "x": 1840,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s5_hy20_close_start",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s5_hy20_close_window",
+                        "kind": "key",
+                        "title": "Bu Chrome profilinin penceresini kapat",
+                        "x": 400,
+                        "y": 60,
+                        "keys": "ctrl+shift+w"
+                      },
+                      {
+                        "id": "s5_hy20_close_wait",
+                        "kind": "wait",
+                        "title": "Profil penceresinin kapanmasını bekle",
+                        "x": 760,
+                        "y": 60,
+                        "ms": 2000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s5_hy20_close_end",
+                        "kind": "end",
+                        "title": "Bu grup tamamlandı; sonraki profile geçilebilir",
+                        "x": 1120,
+                        "y": 60
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s5_hy20_close_start_next_hy20_close_window",
+                        "from": "s5_hy20_close_start",
+                        "to": "s5_hy20_close_window",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_hy20_close_window_next_hy20_close_wait",
+                        "from": "s5_hy20_close_window",
+                        "to": "s5_hy20_close_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s5_hy20_close_wait_next_hy20_close_desktop",
+                        "from": "s5_hy20_close_wait",
+                        "to": "s5_hy20_close_end",
+                        "fromPort": "next"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s5_hy20_group_end",
+                  "kind": "end",
+                  "title": "Bu grubun Hunyuan adımları tamamlandı",
+                  "x": 40,
+                  "y": 290
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s5_five_account_start_next_five_mv3rh4uq5fryurl8",
+                  "from": "s5_five_account_start",
+                  "to": "s5_five_mv3rh4uq5fryurl8",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s5_five_mv3rh4uq5fryurl8_next_hy20_profile",
+                  "from": "s5_five_mv3rh4uq5fryurl8",
+                  "to": "s5_hy20_profile",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s5_hy20_profile_next_five_batches",
+                  "from": "s5_hy20_profile",
+                  "to": "s5_five_batches",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s5_hy20_close_next_hy20_group_end",
+                  "from": "s5_hy20_close",
+                  "to": "s5_hy20_group_end",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s5_five_batches_done_hy20_close",
+                  "from": "s5_five_batches",
+                  "to": "s5_hy20_close",
+                  "fromPort": "done"
+                }
+              ]
+            },
+            "expose": false
+          },
+          {
+            "id": "s5_five_final_download_settle",
+            "kind": "wait",
+            "title": "Son indirme için ek süre",
+            "x": 1120,
+            "y": 60,
+            "ms": 10000,
+            "expose": false
+          },
+          {
+            "id": "s5_split_hunyuan_end",
+            "kind": "end",
+            "title": "Hunyuan indirmeleri bitti; GLB toplama aşamasına geç",
+            "x": 1480,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s5_sade_split_hunyuan_start_next_hy20_groups_loop",
+            "from": "s5_split_hunyuan_start",
+            "to": "s5_hy20_groups_loop",
+            "fromPort": "next"
+          },
+          {
+            "id": "s5_sade_hy20_groups_loop_done_five_final_download_settle",
+            "from": "s5_hy20_groups_loop",
+            "to": "s5_five_final_download_settle",
+            "fromPort": "done"
+          },
+          {
+            "id": "s5_sade_five_final_download_settle_next_split_hunyuan_end",
+            "from": "s5_five_final_download_settle",
+            "to": "s5_split_hunyuan_end",
+            "fromPort": "next"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "517555c3-8396-4e46-8df5-d2ee5a91b07a",
+        "name": "Hunyuan_8li_Uret_Indir_16_Kredi"
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-stage-6",
+      "kind": "package",
+      "title": "GLB’leri seçilen çıkış klasörüne topla",
+      "x": 2080,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s6_0005_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s6_five_collect_verified",
+            "kind": "package",
+            "title": "GLB’leri havuza taşı · boş alt klasörleri temizle",
+            "x": 400,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s6_glb_pool_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s6_glb_pool_run",
+                  "kind": "key",
+                  "title": "Çalıştır penceresini aç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+r"
+                },
+                {
+                  "id": "s6_glb_pool_run_wait",
+                  "kind": "wait",
+                  "title": "Çalıştır penceresini bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700
+                },
+                {
+                  "id": "s6_glb_pool_exe",
+                  "kind": "type",
+                  "title": "FileCollector.exe aç",
+                  "x": 1120,
+                  "y": 60,
+                  "text": "\"{{araclar}}\\FileCollector.exe\"",
+                  "prompt": "",
+                  "clearFirst": true,
+                  "pressEnter": true
+                },
+                {
+                  "id": "s6_glb_pool_open_wait",
+                  "kind": "wait",
+                  "title": "Yeni araç penceresini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 1200
+                },
+                {
+                  "id": "s6_glb_pool_source",
+                  "kind": "type",
+                  "title": "Kaynak klasör",
+                  "x": 1840,
+                  "y": 60,
+                  "text": "{{calisma.indirme}}",
+                  "prompt": "Dosya Toplayıcı penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s6_glb_pool_target",
+                  "kind": "type",
+                  "title": "Hedef klasör",
+                  "x": 40,
+                  "y": 290,
+                  "text": "{{cikti}}",
+                  "prompt": "Dosya Toplayıcı penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s6_glb_pool_filter",
+                  "kind": "type",
+                  "title": "Dosya filtresi",
+                  "x": 400,
+                  "y": 290,
+                  "text": "*.glb",
+                  "prompt": "Dosya Toplayıcı penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s6_glb_pool_mode",
+                  "kind": "click",
+                  "title": "Taşıma modunu seç",
+                  "x": 760,
+                  "y": 290,
+                  "prompt": "Dosya Toplayıcı penceresindeki “İşlem” açılır listesine odaklan.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s6_glb_pool_mode_home",
+                  "kind": "key",
+                  "title": "İşlem listesinin ilk seçeneğine git",
+                  "x": 1120,
+                  "y": 290,
+                  "keys": "home"
+                },
+                {
+                  "id": "s6_glb_pool_mode_down",
+                  "kind": "key",
+                  "title": "Taşı seçeneğine geç",
+                  "x": 1480,
+                  "y": 290,
+                  "keys": "down"
+                },
+                {
+                  "id": "s6_glb_pool_mode_tab",
+                  "kind": "key",
+                  "title": "Taşı seçimini bırak",
+                  "x": 1840,
+                  "y": 290,
+                  "keys": "tab"
+                },
+                {
+                  "id": "s6_glb_pool_backup",
+                  "kind": "click",
+                  "title": "Mevcut hedefe ekle seçeneğini aç",
+                  "x": 40,
+                  "y": 520,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Mevcut hedefe ekle” kutusu. Yeni pencerede kapalıdır; bir kez tıkla.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s6_glb_pool_clean",
+                  "kind": "click",
+                  "title": "Yalnız boş alt klasörleri temizle",
+                  "x": 400,
+                  "y": 520,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Taşıma sonrası boş alt klasörleri sil” kutusunu bir kez aç.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s6_glb_pool_go",
+                  "kind": "click",
+                  "title": "İşlemi bir kez başlat",
+                  "x": 760,
+                  "y": 520,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Dosyaları topla” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s6_glb_pool_ready",
+                  "kind": "condition",
+                  "title": "Araç işlemi tamamlandı mı?",
+                  "x": 1120,
+                  "y": 520,
+                  "text": "Dosya Toplayıcı penceresinin güncel DURUM satırı “Toplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                  "conditionWindow": "Dosya Toplayıcı"
+                },
+                {
+                  "id": "s6_glb_pool_error",
+                  "kind": "condition",
+                  "title": "Araç açık hata mı bildirdi?",
+                  "x": 1480,
+                  "y": 520,
+                  "text": "Dosya Toplayıcı güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                  "conditionWindow": "Dosya Toplayıcı"
+                },
+                {
+                  "id": "s6_glb_pool_poll",
+                  "kind": "wait",
+                  "title": "Araç çalışıyor · 3 saniye bekle",
+                  "x": 1840,
+                  "y": 520,
+                  "ms": 3000
+                },
+                {
+                  "id": "s6_glb_pool_repair",
+                  "kind": "ai",
+                  "title": "Yalnız açık araç hatasında toparla",
+                  "x": 40,
+                  "y": 750,
+                  "prompt": "Dosya Toplayıcı hatasını gider. Kaynak: {{calisma.indirme}}. Hedef: {{cikti}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                  "maxActions": 8,
+                  "timeoutMs": 90000,
+                  "allowCode": false,
+                  "allowFlowRead": false
+                },
+                {
+                  "id": "s6_glb_pool_close",
+                  "kind": "click",
+                  "title": "Bu araç penceresini kapat",
+                  "x": 400,
+                  "y": 750,
+                  "prompt": "Dosya Toplayıcı penceresindeki “Toplayıcıyı kapat” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s6_glb_pool_end",
+                  "kind": "end",
+                  "title": "Araç işlemi tamamlandı",
+                  "x": 760,
+                  "y": 750
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s6_h16_glb_pool_ready_false_glb_pool_error",
+                  "from": "s6_glb_pool_ready",
+                  "fromPort": "false",
+                  "to": "s6_glb_pool_error"
+                },
+                {
+                  "id": "s6_h16_glb_pool_error_true_glb_pool_repair",
+                  "from": "s6_glb_pool_error",
+                  "fromPort": "true",
+                  "to": "s6_glb_pool_repair"
+                },
+                {
+                  "id": "s6_h16_glb_pool_error_false_glb_pool_poll",
+                  "from": "s6_glb_pool_error",
+                  "fromPort": "false",
+                  "to": "s6_glb_pool_poll"
+                },
+                {
+                  "id": "s6_h16_glb_pool_poll_next_glb_pool_ready",
+                  "from": "s6_glb_pool_poll",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_ready"
+                },
+                {
+                  "id": "s6_h16_glb_pool_repair_next_glb_pool_ready",
+                  "from": "s6_glb_pool_repair",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_ready"
+                },
+                {
+                  "id": "s6_h16_glb_pool_start_next_glb_pool_run",
+                  "from": "s6_glb_pool_start",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_run"
+                },
+                {
+                  "id": "s6_h16_glb_pool_run_next_glb_pool_run_wait",
+                  "from": "s6_glb_pool_run",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_run_wait"
+                },
+                {
+                  "id": "s6_h16_glb_pool_run_wait_next_glb_pool_exe",
+                  "from": "s6_glb_pool_run_wait",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_exe"
+                },
+                {
+                  "id": "s6_h16_glb_pool_exe_next_glb_pool_open_wait",
+                  "from": "s6_glb_pool_exe",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_open_wait"
+                },
+                {
+                  "id": "s6_h16_glb_pool_open_wait_next_glb_pool_source",
+                  "from": "s6_glb_pool_open_wait",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_source"
+                },
+                {
+                  "id": "s6_h16_glb_pool_source_next_glb_pool_target",
+                  "from": "s6_glb_pool_source",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_target"
+                },
+                {
+                  "id": "s6_h16_glb_pool_target_next_glb_pool_filter",
+                  "from": "s6_glb_pool_target",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_filter"
+                },
+                {
+                  "id": "s6_h16_glb_pool_filter_next_glb_pool_mode",
+                  "from": "s6_glb_pool_filter",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_mode"
+                },
+                {
+                  "id": "s6_h16_glb_pool_mode_next_glb_pool_mode_home",
+                  "from": "s6_glb_pool_mode",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_mode_home"
+                },
+                {
+                  "id": "s6_h16_glb_pool_mode_home_next_glb_pool_mode_down",
+                  "from": "s6_glb_pool_mode_home",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_mode_down"
+                },
+                {
+                  "id": "s6_h16_glb_pool_mode_down_next_glb_pool_mode_tab",
+                  "from": "s6_glb_pool_mode_down",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_mode_tab"
+                },
+                {
+                  "id": "s6_h16_glb_pool_mode_tab_next_glb_pool_backup",
+                  "from": "s6_glb_pool_mode_tab",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_backup"
+                },
+                {
+                  "id": "s6_h16_glb_pool_backup_next_glb_pool_clean",
+                  "from": "s6_glb_pool_backup",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_clean"
+                },
+                {
+                  "id": "s6_h16_glb_pool_clean_next_glb_pool_go",
+                  "from": "s6_glb_pool_clean",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_go"
+                },
+                {
+                  "id": "s6_h16_glb_pool_go_next_glb_pool_ready",
+                  "from": "s6_glb_pool_go",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_ready"
+                },
+                {
+                  "id": "s6_h16_glb_pool_ready_true_glb_pool_close",
+                  "from": "s6_glb_pool_ready",
+                  "fromPort": "true",
+                  "to": "s6_glb_pool_close"
+                },
+                {
+                  "id": "s6_h16_glb_pool_close_next_glb_pool_end",
+                  "from": "s6_glb_pool_close",
+                  "fromPort": "next",
+                  "to": "s6_glb_pool_end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s6_0005_end",
+            "kind": "end",
+            "title": "GLB’leri havuza taşı · boş alt klasörleri temizle · bitti",
+            "x": 760,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s6_h16_0005_start_next_five_collect_verified",
+            "from": "s6_0005_start",
+            "fromPort": "next",
+            "to": "s6_five_collect_verified"
+          },
+          {
+            "id": "s6_h16_five_collect_verified_next_0005_end",
+            "from": "s6_five_collect_verified",
+            "fromPort": "next",
+            "to": "s6_0005_end"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "413c55e7-4f7c-4adc-abcc-93c7f2adbecc",
+        "name": "Hunyuan_Sonrasi_GLB_Topla_ve_Bos_Klasorleri_Temizle"
+      }
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-end",
+      "kind": "end",
+      "title": "Bitti · sonuçlar seçtiğin çıktı klasöründe",
+      "x": 2420,
+      "y": 100
+    }
+  ],
+  "edges": [
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-0",
+      "from": "nubbo-image-hunyuan-files-v2-start",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-1"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-1",
+      "from": "nubbo-image-hunyuan-files-v2-stage-1",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-2"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-2",
+      "from": "nubbo-image-hunyuan-files-v2-stage-2",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-3"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-3",
+      "from": "nubbo-image-hunyuan-files-v2-stage-3",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-4"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-4",
+      "from": "nubbo-image-hunyuan-files-v2-stage-4",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-5"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-5",
+      "from": "nubbo-image-hunyuan-files-v2-stage-5",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-stage-6"
+    },
+    {
+      "id": "nubbo-image-hunyuan-files-v2-edge-end",
+      "from": "nubbo-image-hunyuan-files-v2-stage-6",
+      "fromPort": "next",
+      "to": "nubbo-image-hunyuan-files-v2-end"
+    }
+  ]
+}

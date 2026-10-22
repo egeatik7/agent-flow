@@ -1,4 +1,7 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { fileTokens, isFileToken } from '../../electron/file-contract'
+import { enclosingLoop } from '../../electron/enclosing'
+import { FileValuesContext } from './FileValuesContext'
+import { useContext, useLayoutEffect, useRef, useState } from 'react'
 import { TEMPLATE_VARS, type AgentGraph } from '../types'
 import { revealAt, revealTip } from '../../electron/reveal'
 import { atomicRange, editorSelection, rawText, replaceRange, restoreSelection, templateParts, type TextRange } from '../lib/template-editor'
@@ -18,6 +21,20 @@ type Props = {
 
 /** Tokens are visual only. Graph data, selection offsets and clipboard keep {{…}}. */
 export default function TemplateInput(p: Props) {
+  const { values: fileValues, folders } = useContext(FileValuesContext)
+  const preview = (token: string) => {
+    const key = token.replace(/^\{\{\s*|\s*\}\}$/g, '').trim().toLowerCase()
+    if (isFileToken(token)) return { value: fileValues[key] ?? 'Başlangıçta seçilecek', resolved: fileValues[key] !== undefined, where: 'Bu çalışmanın klasör seçimi. Döngü öğesi değişse de aynı kalır.' }
+    return revealAt(p.graph, p.nodeId, token)
+  }
+  const extraTokens = [...fileTokens(p.graph), ...folders.map(f => ({ token: `{{klasor.${f.id}}}`, label: `Klasör: ${f.name}` }))]
+  let outside = enclosingLoop(p.graph, p.nodeId)
+  const seenLoops = new Set<string>()
+  while (outside && !seenLoops.has(outside.id)) {
+    seenLoops.add(outside.id)
+    for (const [field, name] of [['yol', 'tam yol'], ['ad', 'ad'], ['isim', 'uzantısız ad'], ['sira', 'sıra'], ['toplam', 'toplam']] as const) extraTokens.push({ token: `{{dongu.${outside.id}.${field}}}`, label: `${outside.title}: ${name}` })
+    outside = enclosingLoop(p.graph, outside.id)
+  }
   const root = useRef<HTMLDivElement>(null)
   const current = useRef(p.value)
   const selection = useRef<TextRange>({ start: p.value.length, end: p.value.length })
@@ -64,7 +81,7 @@ export default function TemplateInput(p: Props) {
     el.replaceChildren()
     for (const part of templateParts(p.value)) {
       if (!part.token) { el.append(el.ownerDocument.createTextNode(part.text)); continue }
-      const reveal = revealAt(p.graph, p.nodeId, part.text)
+      const reveal = preview(part.text)
       const chip = el.ownerDocument.createElement('span')
       chip.className = `template-token${reveal.resolved ? '' : ' unresolved'}`
       chip.contentEditable = 'false'
@@ -88,7 +105,7 @@ export default function TemplateInput(p: Props) {
       chip.append(value, remove); el.append(chip)
     }
     if (focused) restoreSelection(el, selection.current)
-  }, [p.value, p.graph, p.nodeId, p.disabled, revision])
+  }, [p.value, p.graph, p.nodeId, p.disabled, revision, fileValues])
 
   return <div className="template-field" data-template-field="true">
     <div ref={root} id={p.id} data-template-editor="true"
@@ -169,9 +186,10 @@ export default function TemplateInput(p: Props) {
         const next = replaceRange(current.current, { start, end }, '')
         commit(next.value, { start: next.caret, end: next.caret })
       }} />
+    <div className="file-value-menu"><label>Değer ekle: <select className="xp-input" aria-label="Klasör veya döngü değeri ekle" value="" disabled={p.disabled} onMouseDown={remember} onChange={e => { if (e.target.value) insert(e.target.value) }}><option value="">Klasör / döngü seç…</option>{extraTokens.map(t => <option key={t.token} value={t.token}>{t.label}</option>)}</select></label></div>
     <div className="var-chips">
       {TEMPLATE_VARS.map(token => {
-        const reveal = revealAt(p.graph, p.nodeId, token)
+        const reveal = preview(token)
         return <button type="button" key={token} className="chip var" disabled={p.disabled}
           data-manual-title={token} data-manual-text={revealTip(token, reveal)}
           onMouseDown={e => { remember(); e.preventDefault() }} onClick={() => insert(token)}>{token}</button>

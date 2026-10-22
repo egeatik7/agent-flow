@@ -1,0 +1,1623 @@
+{
+  "format": "nubbo-canvas",
+  "version": 2,
+  "canvasId": "nubbo-glb-remesh-files-v2",
+  "name": "GLB → Remesh → Blend",
+  "nodes": [
+    {
+      "id": "nubbo-glb-remesh-files-v2-start",
+      "kind": "start",
+      "title": "Başlangıç · giriş ve çıkış seç",
+      "x": 80,
+      "y": 100,
+      "fileSetup": {
+        "version": 1,
+        "inputLabel": "GLB girişi",
+        "outputLabel": "Blend çıkışı",
+        "inputFilter": "*.glb",
+        "outputName": "Remesh Blend",
+        "workFolders": [
+          "remesh",
+          "raporlar"
+        ],
+        "tools": true
+      }
+    },
+    {
+      "id": "nubbo-glb-remesh-files-v2-stage-1",
+      "kind": "package",
+      "title": "Seçili GLB’leri 15’li çalışma gruplarına kopyala",
+      "x": 380,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s1_0007_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s1_b15_batch_files",
+            "kind": "package",
+            "title": "48 GLB → 15 + 15 + 15 + 3",
+            "x": 400,
+            "y": 60,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s1_remesh_groups_start",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s1_remesh_groups_run",
+                  "kind": "key",
+                  "title": "Çalıştır penceresini aç",
+                  "x": 400,
+                  "y": 60,
+                  "keys": "win+r"
+                },
+                {
+                  "id": "s1_remesh_groups_run_wait",
+                  "kind": "wait",
+                  "title": "Çalıştır penceresini bekle",
+                  "x": 760,
+                  "y": 60,
+                  "ms": 700
+                },
+                {
+                  "id": "s1_remesh_groups_exe",
+                  "kind": "type",
+                  "title": "FolderBatcher.exe aç",
+                  "x": 1120,
+                  "y": 60,
+                  "text": "\"{{araclar}}\\FolderBatcher.exe\"",
+                  "prompt": "",
+                  "clearFirst": true,
+                  "pressEnter": true
+                },
+                {
+                  "id": "s1_remesh_groups_open_wait",
+                  "kind": "wait",
+                  "title": "Yeni araç penceresini bekle",
+                  "x": 1480,
+                  "y": 60,
+                  "ms": 1200
+                },
+                {
+                  "id": "s1_remesh_groups_source",
+                  "kind": "type",
+                  "title": "Kaynak klasör",
+                  "x": 1840,
+                  "y": 60,
+                  "text": "{{girdi}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Kaynak klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s1_remesh_groups_target",
+                  "kind": "type",
+                  "title": "Hedef klasör",
+                  "x": 40,
+                  "y": 290,
+                  "text": "{{calisma.remesh}}",
+                  "prompt": "Dosya Klasörleyici penceresinde “Hedef klasör” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s1_remesh_groups_size",
+                  "kind": "type",
+                  "title": "Grup boyutu",
+                  "x": 400,
+                  "y": 290,
+                  "text": "15",
+                  "prompt": "Dosya Klasörleyici penceresinde “Grup boyutu” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s1_remesh_groups_limit",
+                  "kind": "type",
+                  "title": "En fazla dosya · 0 = seçili girdinin tamamı",
+                  "x": 760,
+                  "y": 290,
+                  "text": "0",
+                  "prompt": "Dosya Klasörleyici penceresinde “En fazla dosya” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s1_remesh_groups_filter",
+                  "kind": "type",
+                  "title": "Dosya filtresi",
+                  "x": 1120,
+                  "y": 290,
+                  "text": "*.glb",
+                  "prompt": "Dosya Klasörleyici penceresinde “Dosya filtresi” etiketinin yanındaki yazı kutusu.",
+                  "clearFirst": true,
+                  "pressEnter": false
+                },
+                {
+                  "id": "s1_remesh_groups_go",
+                  "kind": "click",
+                  "title": "İşlemi bir kez başlat",
+                  "x": 1840,
+                  "y": 290,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Dosyaları grupla” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s1_remesh_groups_ready",
+                  "kind": "condition",
+                  "title": "Araç işlemi tamamlandı mı?",
+                  "x": 40,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici penceresinin güncel DURUM satırı “Gruplama tamamlandı” gösteriyor mu? Eski olay kaydı, Önizleme hazır, Kısmen tamamlandı veya iptal başarı değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s1_remesh_groups_error",
+                  "kind": "condition",
+                  "title": "Araç açık hata mı bildirdi?",
+                  "x": 400,
+                  "y": 520,
+                  "text": "Dosya Klasörleyici güncel DURUM satırında Hata, Kısmen tamamlandı, İşlem iptal edildi, Toplanacak dosya yok var mı? Çalışıyor veya Hazır tek başına hata değildir.",
+                  "conditionWindow": "Dosya Klasörleyici"
+                },
+                {
+                  "id": "s1_remesh_groups_poll",
+                  "kind": "wait",
+                  "title": "Araç çalışıyor · 3 saniye bekle",
+                  "x": 760,
+                  "y": 520,
+                  "ms": 3000
+                },
+                {
+                  "id": "s1_remesh_groups_repair",
+                  "kind": "ai",
+                  "title": "Yalnız açık araç hatasında toparla",
+                  "x": 1120,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici hatasını gider. Kaynak: {{girdi}}. Hedef: {{calisma.remesh}}. Tamamlanan dosyaları koru; çalışan işi yeniden başlatma.",
+                  "maxActions": 8,
+                  "timeoutMs": 90000,
+                  "allowCode": false,
+                  "allowFlowRead": false
+                },
+                {
+                  "id": "s1_remesh_groups_close",
+                  "kind": "click",
+                  "title": "Bu araç penceresini kapat",
+                  "x": 1480,
+                  "y": 520,
+                  "prompt": "Dosya Klasörleyici penceresindeki “Klasörleyiciyi kapat” düğmesi.",
+                  "clickMode": "left"
+                },
+                {
+                  "id": "s1_remesh_groups_end",
+                  "kind": "end",
+                  "title": "Araç işlemi tamamlandı",
+                  "x": 1840,
+                  "y": 520
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s1_h16_remesh_groups_ready_false_remesh_groups_error",
+                  "from": "s1_remesh_groups_ready",
+                  "fromPort": "false",
+                  "to": "s1_remesh_groups_error"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_error_true_remesh_groups_repair",
+                  "from": "s1_remesh_groups_error",
+                  "fromPort": "true",
+                  "to": "s1_remesh_groups_repair"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_error_false_remesh_groups_poll",
+                  "from": "s1_remesh_groups_error",
+                  "fromPort": "false",
+                  "to": "s1_remesh_groups_poll"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_poll_next_remesh_groups_ready",
+                  "from": "s1_remesh_groups_poll",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_ready"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_repair_next_remesh_groups_ready",
+                  "from": "s1_remesh_groups_repair",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_ready"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_start_next_remesh_groups_run",
+                  "from": "s1_remesh_groups_start",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_run"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_run_next_remesh_groups_run_wait",
+                  "from": "s1_remesh_groups_run",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_run_wait"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_run_wait_next_remesh_groups_exe",
+                  "from": "s1_remesh_groups_run_wait",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_exe"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_exe_next_remesh_groups_open_wait",
+                  "from": "s1_remesh_groups_exe",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_open_wait"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_open_wait_next_remesh_groups_source",
+                  "from": "s1_remesh_groups_open_wait",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_source"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_source_next_remesh_groups_target",
+                  "from": "s1_remesh_groups_source",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_target"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_target_next_remesh_groups_size",
+                  "from": "s1_remesh_groups_target",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_size"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_size_next_remesh_groups_limit",
+                  "from": "s1_remesh_groups_size",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_limit"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_limit_next_remesh_groups_filter",
+                  "from": "s1_remesh_groups_limit",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_filter"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_filter_next_remesh_groups_backup",
+                  "from": "s1_remesh_groups_filter",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_go"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_go_next_remesh_groups_ready",
+                  "from": "s1_remesh_groups_go",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_ready"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_ready_true_remesh_groups_close",
+                  "from": "s1_remesh_groups_ready",
+                  "fromPort": "true",
+                  "to": "s1_remesh_groups_close"
+                },
+                {
+                  "id": "s1_h16_remesh_groups_close_next_remesh_groups_end",
+                  "from": "s1_remesh_groups_close",
+                  "fromPort": "next",
+                  "to": "s1_remesh_groups_end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s1_0007_end",
+            "kind": "end",
+            "title": "48 GLB → 15 + 15 + 15 + 3 · bitti",
+            "x": 760,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s1_h16_0007_start_next_b15_batch_files",
+            "from": "s1_0007_start",
+            "fromPort": "next",
+            "to": "s1_b15_batch_files"
+          },
+          {
+            "id": "s1_h16_b15_batch_files_next_0007_end",
+            "from": "s1_b15_batch_files",
+            "fromPort": "next",
+            "to": "s1_0007_end"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "8b271f5d-b2bd-4a69-bc5b-57efd14ea77a",
+        "name": "Blender_15li_GLB_Gruplarini_Hazirla"
+      }
+    },
+    {
+      "id": "nubbo-glb-remesh-files-v2-stage-2",
+      "kind": "package",
+      "title": "Blender · grupları import et, remesh yap, kaydet",
+      "x": 720,
+      "y": 100,
+      "inner": {
+        "nodes": [
+          {
+            "id": "s2_split_blender_start",
+            "kind": "start",
+            "title": "Başlangıç",
+            "x": 40,
+            "y": 60
+          },
+          {
+            "id": "s2_b15_standalone_003",
+            "kind": "loop",
+            "title": "Hazır 15’li gruplar · son eksik grup dahil",
+            "x": 424,
+            "y": 136,
+            "count": 4,
+            "members": [
+              "s2_b15_standalone_004"
+            ],
+            "folder": "{{calisma.remesh}}",
+            "listSource": {
+              "kind": "folders",
+              "filter": "*"
+            }
+          },
+          {
+            "id": "s2_b15_standalone_004",
+            "kind": "package",
+            "title": "15’lik GLB grubu · import → remesh → kaydet",
+            "x": 448,
+            "y": 212,
+            "inner": {
+              "nodes": [
+                {
+                  "id": "s2_b09_module_000",
+                  "kind": "start",
+                  "title": "Başlangıç",
+                  "x": 40,
+                  "y": 60
+                },
+                {
+                  "id": "s2_b09_module_001",
+                  "kind": "package",
+                  "title": "B01 · Blender 5.2 aç ve başlangıç sahnesini temizle",
+                  "x": 400,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_blender_open_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_blender_open_009",
+                        "kind": "click",
+                        "title": "3D görünümüne odaklan",
+                        "x": 400,
+                        "y": 60,
+                        "prompt": "“User Perspective” yazan yere tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_blender_open_010",
+                        "kind": "key",
+                        "title": "Başlangıç objelerini seç: A",
+                        "x": 760,
+                        "y": 60,
+                        "keys": "a"
+                      },
+                      {
+                        "id": "s2_blender_open_011",
+                        "kind": "key",
+                        "title": "Başlangıç objelerini sil: X",
+                        "x": 1120,
+                        "y": 60,
+                        "keys": "x"
+                      },
+                      {
+                        "id": "s2_blender_open_012",
+                        "kind": "wait",
+                        "title": "Silme onayını bekle",
+                        "x": 1480,
+                        "y": 60,
+                        "ms": 500,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_blender_open_013",
+                        "kind": "key",
+                        "title": "Silme onayı: Enter",
+                        "x": 1840,
+                        "y": 60,
+                        "keys": "enter"
+                      },
+                      {
+                        "id": "s2_blender_open_014",
+                        "kind": "wait",
+                        "title": "Sahnenin temizlenmesini bekle",
+                        "x": 40,
+                        "y": 290,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_blender_open_015",
+                        "kind": "end",
+                        "title": "Paket tamamlandı",
+                        "x": 400,
+                        "y": 290
+                      },
+                      {
+                        "id": "s2_muzpaqi4z0v2zh88",
+                        "kind": "wait",
+                        "title": "Zamanlayıcı 3",
+                        "x": 760,
+                        "y": 290,
+                        "ms": 5000
+                      },
+                      {
+                        "id": "s2_mv0t7n2h13ih0w9g",
+                        "kind": "click",
+                        "title": "Tıkla 2",
+                        "x": 1120,
+                        "y": 290,
+                        "prompt": "Masaüstündeki Blender 5.2",
+                        "clickMode": "double"
+                      },
+                      {
+                        "id": "s2_mv3gpbhz7vak9lvd",
+                        "kind": "key",
+                        "title": "Tuş Gönder 4",
+                        "x": 1480,
+                        "y": 290,
+                        "keys": "win+d"
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_blender_open_009_next_blender_open_010",
+                        "from": "s2_blender_open_009",
+                        "to": "s2_blender_open_010",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_blender_open_010_next_blender_open_011",
+                        "from": "s2_blender_open_010",
+                        "to": "s2_blender_open_011",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_blender_open_011_next_blender_open_012",
+                        "from": "s2_blender_open_011",
+                        "to": "s2_blender_open_012",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_blender_open_012_next_blender_open_013",
+                        "from": "s2_blender_open_012",
+                        "to": "s2_blender_open_013",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_blender_open_013_next_blender_open_014",
+                        "from": "s2_blender_open_013",
+                        "to": "s2_blender_open_014",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_blender_open_014_next_blender_open_015",
+                        "from": "s2_blender_open_014",
+                        "to": "s2_blender_open_015",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_muzpaubnscj0weme",
+                        "from": "s2_muzpaqi4z0v2zh88",
+                        "to": "s2_blender_open_009",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0t7tj51cw88x8c",
+                        "from": "s2_mv0t7n2h13ih0w9g",
+                        "to": "s2_muzpaqi4z0v2zh88",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv3gpbhz0e56lrpw",
+                        "from": "s2_blender_open_000",
+                        "to": "s2_mv3gpbhz7vak9lvd",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv3gpf53pkswnx8u",
+                        "from": "s2_mv3gpbhz7vak9lvd",
+                        "to": "s2_mv0t7n2h13ih0w9g",
+                        "fromPort": "next"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_002",
+                  "kind": "package",
+                  "title": "B02 · Custom GLB ile bu grubun GLB’lerini içeri al",
+                  "x": 760,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_import_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_import_001",
+                        "kind": "click",
+                        "title": "3D görünümüne odaklan",
+                        "x": 400,
+                        "y": 60,
+                        "prompt": "“User Perspective” yazan yere tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_import_002",
+                        "kind": "key",
+                        "title": "Komut araması: F3",
+                        "x": 760,
+                        "y": 60,
+                        "keys": "f3"
+                      },
+                      {
+                        "id": "s2_import_003",
+                        "kind": "type",
+                        "title": "Custom GLB komutu",
+                        "x": 1120,
+                        "y": 60,
+                        "prompt": "",
+                        "text": "Custom GLB",
+                        "pressEnter": false,
+                        "clearFirst": true,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_import_004",
+                        "kind": "wait",
+                        "title": "Komut sonucunu bekle",
+                        "x": 1480,
+                        "y": 60,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_import_005",
+                        "kind": "key",
+                        "title": "Custom GLB dosya seçicisini aç",
+                        "x": 1840,
+                        "y": 60,
+                        "keys": "enter"
+                      },
+                      {
+                        "id": "s2_import_006",
+                        "kind": "wait",
+                        "title": "Dosya seçicisinin açılmasını bekle",
+                        "x": 40,
+                        "y": 290,
+                        "ms": 1500,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_import_008",
+                        "kind": "type",
+                        "title": "Bu grubun GLB klasörü",
+                        "x": 400,
+                        "y": 290,
+                        "prompt": "Blender Custom GLB dosya seçicisindeki ÜST klasör adresi kutusu. Alttaki dosya adı veya dosya filtresi alanı değil.",
+                        "text": "{{öğe}}",
+                        "pressEnter": true,
+                        "clearFirst": true,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_import_009",
+                        "kind": "wait",
+                        "title": "GLB listesinin açılmasını bekle",
+                        "x": 760,
+                        "y": 290,
+                        "ms": 1200,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_import_010",
+                        "kind": "click",
+                        "title": "GLB dosya listesine odaklan",
+                        "x": 1120,
+                        "y": 290,
+                        "prompt": "Blender dosya seçicisinde ortadaki dosya listesinden adı .glb ile biten bir dosyanın satırına bir kez tıkla. Klasör yoluna veya filtre girişine değil dosya satırına tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_import_011",
+                        "kind": "key",
+                        "title": "Dosya listesindeki bütün GLB’leri seç: A",
+                        "x": 1480,
+                        "y": 290,
+                        "keys": "a"
+                      },
+                      {
+                        "id": "s2_import_012",
+                        "kind": "key",
+                        "title": "GLB importunu başlat: Enter",
+                        "x": 1840,
+                        "y": 290,
+                        "keys": "enter"
+                      },
+                      {
+                        "id": "s2_import_013",
+                        "kind": "wait",
+                        "title": "15 GLB importu için 20 saniye bekle",
+                        "x": 40,
+                        "y": 520,
+                        "ms": 20000,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_import_014",
+                        "kind": "end",
+                        "title": "Paket tamamlandı",
+                        "x": 400,
+                        "y": 520
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_import_000_next_import_001",
+                        "from": "s2_import_000",
+                        "to": "s2_import_001",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_001_next_import_002",
+                        "from": "s2_import_001",
+                        "to": "s2_import_002",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_002_next_import_003",
+                        "from": "s2_import_002",
+                        "to": "s2_import_003",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_003_next_import_004",
+                        "from": "s2_import_003",
+                        "to": "s2_import_004",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_004_next_import_005",
+                        "from": "s2_import_004",
+                        "to": "s2_import_005",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_005_next_import_006",
+                        "from": "s2_import_005",
+                        "to": "s2_import_006",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_006_next_import_007",
+                        "from": "s2_import_006",
+                        "to": "s2_import_008",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_008_next_import_009",
+                        "from": "s2_import_008",
+                        "to": "s2_import_009",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_009_next_import_010",
+                        "from": "s2_import_009",
+                        "to": "s2_import_010",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_010_next_import_011",
+                        "from": "s2_import_010",
+                        "to": "s2_import_011",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_011_next_import_012",
+                        "from": "s2_import_011",
+                        "to": "s2_import_012",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_012_next_import_013",
+                        "from": "s2_import_012",
+                        "to": "s2_import_013",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_import_013_next_import_014",
+                        "from": "s2_import_013",
+                        "to": "s2_import_014",
+                        "fromPort": "next"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_003",
+                  "kind": "package",
+                  "title": "B03 · Final Blends’e ilk kaydı yap",
+                  "x": 1120,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_save_initial_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_save_initial_001",
+                        "kind": "click",
+                        "title": "3D görünümüne odaklan",
+                        "x": 400,
+                        "y": 60,
+                        "prompt": "“User Perspective” yazan yere tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_save_initial_002",
+                        "kind": "key",
+                        "title": "Farklı kaydet: Ctrl+Shift+S",
+                        "x": 760,
+                        "y": 60,
+                        "keys": "ctrl+shift+s"
+                      },
+                      {
+                        "id": "s2_save_initial_003",
+                        "kind": "wait",
+                        "title": "Blender kaydetme penceresini bekle",
+                        "x": 1120,
+                        "y": 60,
+                        "ms": 1500,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_save_initial_005",
+                        "kind": "type",
+                        "title": "Final Blends klasörü",
+                        "x": 1480,
+                        "y": 60,
+                        "prompt": "Blender Save As penceresindeki ÜST klasör adresi kutusu.",
+                        "text": "{{cikti}}",
+                        "pressEnter": true,
+                        "clearFirst": true,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_save_initial_006",
+                        "kind": "wait",
+                        "title": "Klasör listesini bekle",
+                        "x": 1840,
+                        "y": 60,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_save_initial_008",
+                        "kind": "type",
+                        "title": "Tarihli grup adıyla blend dosyası",
+                        "x": 40,
+                        "y": 290,
+                        "prompt": "Blender Save As penceresinin ALT bölümündeki .blend dosya adı giriş kutusu.",
+                        "text": "{{calisma.kod}}_{{öğe.ad}}.blend",
+                        "pressEnter": false,
+                        "clearFirst": true,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_save_initial_009",
+                        "kind": "click",
+                        "title": "İlk blend kaydını başlat",
+                        "x": 400,
+                        "y": 290,
+                        "prompt": "Blender dosya penceresindeki “Save As” kaydetme düğmesine bir kez tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_save_initial_010",
+                        "kind": "wait",
+                        "title": "Yeni blend kaydı onayına kısa süre ver",
+                        "x": 760,
+                        "y": 290,
+                        "ms": 800,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_save_initial_011",
+                        "kind": "key",
+                        "title": "Normal Save As onayı: Enter",
+                        "x": 1120,
+                        "y": 290,
+                        "keys": "enter"
+                      },
+                      {
+                        "id": "s2_save_initial_012",
+                        "kind": "wait",
+                        "title": "İlk kaydın tamamlanmasını bekle",
+                        "x": 1480,
+                        "y": 290,
+                        "ms": 3000,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_save_initial_013",
+                        "kind": "end",
+                        "title": "Paket tamamlandı",
+                        "x": 1840,
+                        "y": 290
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_save_initial_000_next_save_initial_001",
+                        "from": "s2_save_initial_000",
+                        "to": "s2_save_initial_001",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_001_next_save_initial_002",
+                        "from": "s2_save_initial_001",
+                        "to": "s2_save_initial_002",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_002_next_save_initial_003",
+                        "from": "s2_save_initial_002",
+                        "to": "s2_save_initial_003",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_003_next_save_initial_004",
+                        "from": "s2_save_initial_003",
+                        "to": "s2_save_initial_005",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_005_next_save_initial_006",
+                        "from": "s2_save_initial_005",
+                        "to": "s2_save_initial_006",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_006_next_save_initial_007",
+                        "from": "s2_save_initial_006",
+                        "to": "s2_save_initial_008",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_008_next_save_initial_009",
+                        "from": "s2_save_initial_008",
+                        "to": "s2_save_initial_009",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_009_next_save_initial_010",
+                        "from": "s2_save_initial_009",
+                        "to": "s2_save_initial_010",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_010_next_save_initial_011",
+                        "from": "s2_save_initial_010",
+                        "to": "s2_save_initial_011",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_011_next_save_initial_012",
+                        "from": "s2_save_initial_011",
+                        "to": "s2_save_initial_012",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_save_initial_012_next_save_initial_013",
+                        "from": "s2_save_initial_012",
+                        "to": "s2_save_initial_013",
+                        "fromPort": "next"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_004",
+                  "kind": "package",
+                  "title": "B04 · Mesh objelerini seç ve CustomRemesh’i aç",
+                  "x": 1480,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_remesh_prepare_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_remesh_prepare_001",
+                        "kind": "click",
+                        "title": "3D görünümüne odaklan",
+                        "x": 400,
+                        "y": 60,
+                        "prompt": "“User Perspective” yazan yere tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_remesh_prepare_010",
+                        "kind": "ai",
+                        "title": "CustomRemesh panelini duruma göre aç",
+                        "x": 760,
+                        "y": 60,
+                        "prompt": "Blender’da CustomRemesh panelini aç. Zaten açıksa kapatma; henüz remesh başlatma.",
+                        "maxActions": 14,
+                        "timeoutMs": 180000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      },
+                      {
+                        "id": "s2_remesh_prepare_011",
+                        "kind": "wait",
+                        "title": "Sidebar’ın açılmasını bekle",
+                        "x": 1120,
+                        "y": 60,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_remesh_prepare_013",
+                        "kind": "end",
+                        "title": "Paket tamamlandı",
+                        "x": 1480,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_muzqupsn8dhmu6bb",
+                        "kind": "key",
+                        "title": "Tuş Gönder 2",
+                        "x": 1840,
+                        "y": 60,
+                        "keys": "a"
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_remesh_prepare_000_next_remesh_prepare_001",
+                        "from": "s2_remesh_prepare_000",
+                        "to": "s2_remesh_prepare_001",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_remesh_prepare_010_next_remesh_prepare_011",
+                        "from": "s2_remesh_prepare_010",
+                        "to": "s2_remesh_prepare_011",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_remesh_prepare_011_next_remesh_prepare_012",
+                        "from": "s2_remesh_prepare_011",
+                        "to": "s2_remesh_prepare_013",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_muzqupsngypnhq2y",
+                        "from": "s2_remesh_prepare_001",
+                        "to": "s2_muzqupsn8dhmu6bb",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_muzquusnqdiabeth",
+                        "from": "s2_muzqupsn8dhmu6bb",
+                        "to": "s2_remesh_prepare_010",
+                        "fromPort": "next"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_005",
+                  "kind": "package",
+                  "title": "B05 · ProcessWatcher’da bu blend penceresini izlemeye başla",
+                  "x": 1840,
+                  "y": 60,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_watcher_start_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_watcher_start_001",
+                        "kind": "key",
+                        "title": "Çalıştır penceresini aç · Win+R",
+                        "x": 400,
+                        "y": 60,
+                        "keys": "win+r"
+                      },
+                      {
+                        "id": "s2_watcher_start_003",
+                        "kind": "wait",
+                        "title": "Çalıştır penceresini bekle",
+                        "x": 760,
+                        "y": 60,
+                        "ms": 1000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_watcher_start_004",
+                        "kind": "type",
+                        "title": "EXE yolunu aç",
+                        "x": 1120,
+                        "y": 60,
+                        "prompt": "",
+                        "text": "\"{{araclar}}\\ProcessWatcher.exe\"",
+                        "pressEnter": true,
+                        "clearFirst": true,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_watcher_start_005",
+                        "kind": "wait",
+                        "title": "Araç penceresinin açılmasını bekle",
+                        "x": 1480,
+                        "y": 60,
+                        "ms": 1800,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_watcher_start_006",
+                        "kind": "click",
+                        "title": "İzlenecek pencere listesini aç",
+                        "x": 1840,
+                        "y": 60,
+                        "prompt": "Nubbo Process Watcher penceresindeki “İzlenecek pencere” açılır listesini aç.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_watcher_start_013",
+                        "kind": "wait",
+                        "title": "Pencere geçişini bekle",
+                        "x": 40,
+                        "y": 290,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_watcher_start_014",
+                        "kind": "end",
+                        "title": "Paket tamamlandı",
+                        "x": 400,
+                        "y": 290
+                      },
+                      {
+                        "id": "s2_mvapay3aifpijvgg",
+                        "kind": "ai",
+                        "title": "Bu grubun Blender penceresine dön",
+                        "x": 760,
+                        "y": 290,
+                        "prompt": "{{calisma.kod}}_{{öğe.ad}}.blend adlı Blender penceresini öne al. Diğer pencereleri kapatma.",
+                        "maxActions": 12,
+                        "timeoutMs": 180000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      },
+                      {
+                        "id": "s2_h16_watcher_select",
+                        "kind": "click",
+                        "title": "Bu grubun Blender penceresini seç",
+                        "x": 1120,
+                        "y": 290,
+                        "prompt": "Açık pencere listesinde blender.exe sürecine ait {{calisma.kod}}_{{öğe.ad}}.blend başlıklı Blender penceresi.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_h16_watcher_start",
+                        "kind": "click",
+                        "title": "Bu iş için yeni izleme başlat",
+                        "x": 1480,
+                        "y": 290,
+                        "prompt": "Nubbo Process Watcher penceresindeki “İzlemeyi başlat” düğmesi.",
+                        "clickMode": "left"
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_watcher_start_000_next_watcher_start_001",
+                        "from": "s2_watcher_start_000",
+                        "to": "s2_watcher_start_001",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_watcher_start_001_next_watcher_start_003",
+                        "from": "s2_watcher_start_001",
+                        "to": "s2_watcher_start_003",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_watcher_start_003_next_watcher_start_004",
+                        "from": "s2_watcher_start_003",
+                        "to": "s2_watcher_start_004",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_watcher_start_004_next_watcher_start_005",
+                        "from": "s2_watcher_start_004",
+                        "to": "s2_watcher_start_005",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_watcher_start_005_next_watcher_start_006",
+                        "from": "s2_watcher_start_005",
+                        "to": "s2_watcher_start_006",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_watcher_start_013_next_watcher_start_014",
+                        "from": "s2_watcher_start_013",
+                        "to": "s2_watcher_start_014",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_muzqxia36lt1ewrv",
+                        "from": "s2_watcher_start_006",
+                        "to": "s2_h16_watcher_select",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mvapb5vd5vp2bv44",
+                        "from": "s2_mvapay3aifpijvgg",
+                        "to": "s2_watcher_start_013",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_h16_h16_watcher_select_next_h16_watcher_start",
+                        "from": "s2_h16_watcher_select",
+                        "fromPort": "next",
+                        "to": "s2_h16_watcher_start"
+                      },
+                      {
+                        "id": "s2_h16_h16_watcher_start_next_mvapay3aifpijvgg",
+                        "from": "s2_h16_watcher_start",
+                        "fromPort": "next",
+                        "to": "s2_mvapay3aifpijvgg"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_006",
+                  "kind": "package",
+                  "title": "B06 · Remesh’i bir kez başlat; Watcher BİTTİ bekle",
+                  "x": 40,
+                  "y": 290,
+                  "inner": {
+                    "nodes": [
+                      {
+                        "id": "s2_b09_remesh_wait_000",
+                        "kind": "start",
+                        "title": "Başlangıç",
+                        "x": 40,
+                        "y": 60
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_001",
+                        "kind": "click",
+                        "title": "Remesh’i bir kez başlat",
+                        "x": 400,
+                        "y": 60,
+                        "prompt": "CustomRemesh panelindeki “Run Remesh for multiple objects” düğmesine BİR KEZ tıkla.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_002",
+                        "kind": "wait",
+                        "title": "Remesh’in başlamasına kısa süre ver",
+                        "x": 760,
+                        "y": 60,
+                        "ms": 2000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_006",
+                        "kind": "wait",
+                        "title": "Pencere geçişini bekle",
+                        "x": 1120,
+                        "y": 60,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_007",
+                        "kind": "condition",
+                        "title": "Watcher’ın güncel durumu BİTTİ mi?",
+                        "x": 1480,
+                        "y": 60,
+                        "text": "Nubbo Process Watcher penceresinde şu anda izlenen Blender işleminin büyük güncel durum alanı “BİTTİ” gösteriyor mu? Yalnız eski bir günlük satırındaki BİTTİ, başlangıç/bekleme bilgisi veya başka pencerenin tamamlanma yazısı yeterli değildir. İşlem sürüyorsa ya da güncel durum belirsizse koşul sağlanmış sayılmaz.",
+                        "conditionWindow": "Nubbo Process Watcher"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_008",
+                        "kind": "wait",
+                        "title": "Remesh sürüyor · 150 saniye bekle",
+                        "x": 1840,
+                        "y": 60,
+                        "ms": 150000,
+                        "expose": true
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_009",
+                        "kind": "click",
+                        "title": "Tamamlanan Watcher penceresini kapat",
+                        "x": 40,
+                        "y": 290,
+                        "prompt": "Nubbo Process Watcher penceresinin başlık çubuğundaki Kapat (X) düğmesi.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_010",
+                        "kind": "wait",
+                        "title": "Watcher’ın kapanmasını bekle",
+                        "x": 400,
+                        "y": 290,
+                        "ms": 1000,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_011",
+                        "kind": "click",
+                        "title": "Kaydedilmiş Blender penceresini kapat",
+                        "x": 760,
+                        "y": 290,
+                        "prompt": "{{calisma.kod}}_{{öğe.ad}}.blend başlıklı Blender penceresinin başlık çubuğundaki Kapat (X) düğmesi.",
+                        "clickMode": "left"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_014",
+                        "kind": "wait",
+                        "title": "Pencere geçişini bekle",
+                        "x": 1120,
+                        "y": 290,
+                        "ms": 700,
+                        "expose": false
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_015",
+                        "kind": "end",
+                        "title": "Remesh tamamlandı; eski Watcher kapatıldı",
+                        "x": 1480,
+                        "y": 290
+                      },
+                      {
+                        "id": "s2_mv0soge3qaufaiz7",
+                        "kind": "key",
+                        "title": "Tuş Gönder 4",
+                        "x": 1840,
+                        "y": 290,
+                        "keys": "ctrl+s"
+                      },
+                      {
+                        "id": "s2_mv0sov87zmgb9gqc",
+                        "kind": "ai",
+                        "title": "Son kayıt için doğru Blender penceresine dön",
+                        "x": 40,
+                        "y": 520,
+                        "prompt": "{{calisma.kod}}_{{öğe.ad}}.blend adlı Blender penceresini öne al ve 3D görünümüne odaklan. Henüz pencere kapatma.",
+                        "maxActions": 12,
+                        "timeoutMs": 180000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      },
+                      {
+                        "id": "s2_mv0tl1jg4rm22eb4",
+                        "kind": "ai",
+                        "title": "Watcher durumunu görmek için öne al",
+                        "x": 400,
+                        "y": 520,
+                        "prompt": "Nubbo Process Watcher penceresini öne al. Blender’ı kapatma ve remesh’i yeniden başlatma.",
+                        "maxActions": 12,
+                        "timeoutMs": 180000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      },
+                      {
+                        "id": "s2_b15_final_save_wait",
+                        "kind": "wait",
+                        "title": "Remesh sonrası son blend kaydını bekle",
+                        "x": 760,
+                        "y": 520,
+                        "ms": 3000
+                      },
+                      {
+                        "id": "s2_post21_watcher_error",
+                        "kind": "condition",
+                        "title": "Watcher izleme hatası mı gösteriyor?",
+                        "x": 1120,
+                        "y": 520,
+                        "text": "Nubbo Process Watcher büyük GÜNCEL durumunda HATA gösteriyor mu? BAŞLAMADI ve SÜRÜYOR hata değildir; DURAKLATILDI kullanıcı kararıdır.",
+                        "conditionWindow": "Nubbo Process Watcher"
+                      },
+                      {
+                        "id": "s2_post21_watcher_repair",
+                        "kind": "ai",
+                        "title": "İzlemeyi aynı Blender işleminde toparla",
+                        "x": 1480,
+                        "y": 520,
+                        "prompt": "Nubbo Process Watcher’da {{calisma.kod}}_{{öğe.ad}}.blend penceresinin izlemesini düzelt ve başlat. Çalışan remesh’i yeniden başlatma; Blender’ı kapatma.",
+                        "maxActions": 8,
+                        "timeoutMs": 90000,
+                        "allowCode": false,
+                        "allowFlowRead": false
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "id": "s2_b09_remesh_wait_000_next_b09_remesh_wait_001",
+                        "from": "s2_b09_remesh_wait_000",
+                        "to": "s2_b09_remesh_wait_001",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_001_next_b09_remesh_wait_002",
+                        "from": "s2_b09_remesh_wait_001",
+                        "to": "s2_b09_remesh_wait_002",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_006_next_b09_remesh_wait_007",
+                        "from": "s2_b09_remesh_wait_006",
+                        "to": "s2_b09_remesh_wait_007",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_008_next_b09_remesh_wait_007",
+                        "from": "s2_b09_remesh_wait_008",
+                        "to": "s2_b09_remesh_wait_007",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_007_true_b09_remesh_wait_009",
+                        "from": "s2_b09_remesh_wait_007",
+                        "to": "s2_b09_remesh_wait_009",
+                        "fromPort": "true"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_009_next_b09_remesh_wait_010",
+                        "from": "s2_b09_remesh_wait_009",
+                        "to": "s2_b09_remesh_wait_010",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b09_remesh_wait_014_next_b09_remesh_wait_015",
+                        "from": "s2_b09_remesh_wait_014",
+                        "to": "s2_b09_remesh_wait_015",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0songhachqwe2f",
+                        "from": "s2_mv0soge3qaufaiz7",
+                        "to": "s2_b15_final_save_wait",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0sov871qpazykz",
+                        "from": "s2_b09_remesh_wait_010",
+                        "to": "s2_mv0sov87zmgb9gqc",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0sp7kf38minkgk",
+                        "from": "s2_mv0sov87zmgb9gqc",
+                        "to": "s2_mv0soge3qaufaiz7",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0sqdxkqf82ygnu",
+                        "from": "s2_b09_remesh_wait_011",
+                        "to": "s2_b09_remesh_wait_014",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0tl1jhnz70davo",
+                        "from": "s2_b09_remesh_wait_002",
+                        "to": "s2_mv0tl1jg4rm22eb4",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_mv0tl8uo55lq0utz",
+                        "from": "s2_mv0tl1jg4rm22eb4",
+                        "to": "s2_b09_remesh_wait_006",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_b15_final_save_wait_next_close",
+                        "from": "s2_b15_final_save_wait",
+                        "to": "s2_b09_remesh_wait_011",
+                        "fromPort": "next"
+                      },
+                      {
+                        "id": "s2_post21_edge_22",
+                        "from": "s2_b09_remesh_wait_007",
+                        "fromPort": "false",
+                        "to": "s2_post21_watcher_error"
+                      },
+                      {
+                        "id": "s2_post21_edge_23",
+                        "from": "s2_post21_watcher_error",
+                        "fromPort": "true",
+                        "to": "s2_post21_watcher_repair"
+                      },
+                      {
+                        "id": "s2_post21_edge_24",
+                        "from": "s2_post21_watcher_error",
+                        "fromPort": "false",
+                        "to": "s2_b09_remesh_wait_008"
+                      },
+                      {
+                        "id": "s2_post21_edge_25",
+                        "from": "s2_post21_watcher_repair",
+                        "fromPort": "next",
+                        "to": "s2_b09_remesh_wait_007"
+                      }
+                    ]
+                  },
+                  "expose": false
+                },
+                {
+                  "id": "s2_b09_module_009",
+                  "kind": "end",
+                  "title": "Bu 15’lik grubun Blender paketi tamamlandı",
+                  "x": 400,
+                  "y": 290
+                }
+              ],
+              "edges": [
+                {
+                  "id": "s2_b09_module_000_next_b09_module_001",
+                  "from": "s2_b09_module_000",
+                  "to": "s2_b09_module_001",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_b09_module_001_next_b09_module_002",
+                  "from": "s2_b09_module_001",
+                  "to": "s2_b09_module_002",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_b09_module_002_next_b09_module_003",
+                  "from": "s2_b09_module_002",
+                  "to": "s2_b09_module_003",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_b09_module_003_next_b09_module_004",
+                  "from": "s2_b09_module_003",
+                  "to": "s2_b09_module_004",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_b09_module_004_next_b09_module_005",
+                  "from": "s2_b09_module_004",
+                  "to": "s2_b09_module_005",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_b09_module_005_next_b09_module_006",
+                  "from": "s2_b09_module_005",
+                  "to": "s2_b09_module_006",
+                  "fromPort": "next"
+                },
+                {
+                  "id": "s2_muzu3ghw016zwhfb",
+                  "from": "s2_b09_module_006",
+                  "to": "s2_b09_module_009",
+                  "fromPort": "next"
+                }
+              ]
+            },
+            "expose": false
+          },
+          {
+            "id": "s2_split_blender_end",
+            "kind": "end",
+            "title": "Remesh ve Blend kayıtları tamamlandı · kaynak GLB’ler yerinde",
+            "x": 1480,
+            "y": 60
+          }
+        ],
+        "edges": [
+          {
+            "id": "s2_split_blender_start_next_b15_standalone_002",
+            "from": "s2_split_blender_start",
+            "to": "s2_b15_standalone_003",
+            "fromPort": "next"
+          },
+          {
+            "id": "s2_b15_standalone_002_done_split_blender_end",
+            "from": "s2_b15_standalone_003",
+            "to": "s2_split_blender_end",
+            "fromPort": "done"
+          }
+        ],
+        "format": "nubbo-canvas",
+        "version": 1,
+        "canvasId": "e58ea101-3167-4bc7-9756-47d681b20397",
+        "name": "Blender_Dort_Grubu_Remesh_Kaydet"
+      }
+    },
+    {
+      "id": "nubbo-glb-remesh-files-v2-end",
+      "kind": "end",
+      "title": "Bitti · sonuçlar seçtiğin çıktı klasöründe",
+      "x": 1060,
+      "y": 100
+    }
+  ],
+  "edges": [
+    {
+      "id": "nubbo-glb-remesh-files-v2-edge-0",
+      "from": "nubbo-glb-remesh-files-v2-start",
+      "fromPort": "next",
+      "to": "nubbo-glb-remesh-files-v2-stage-1"
+    },
+    {
+      "id": "nubbo-glb-remesh-files-v2-edge-1",
+      "from": "nubbo-glb-remesh-files-v2-stage-1",
+      "fromPort": "next",
+      "to": "nubbo-glb-remesh-files-v2-stage-2"
+    },
+    {
+      "id": "nubbo-glb-remesh-files-v2-edge-end",
+      "from": "nubbo-glb-remesh-files-v2-stage-2",
+      "fromPort": "next",
+      "to": "nubbo-glb-remesh-files-v2-end"
+    }
+  ]
+}

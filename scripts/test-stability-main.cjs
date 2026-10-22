@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const { normalizeGraph, createNode } = require('../dist-electron/graph-types.js');
+const { fileSetup, fileCanvasKey } = require('../dist-electron/file-contract.js');
 const { StoppedError, runGraph, newTally } = require('../dist-electron/runner.js');
 const { recoverySettings } = require('../dist-electron/recovery-settings.js');
 const { runRecovery } = require('../dist-electron/recovery.js');
@@ -14,13 +15,14 @@ const { assertRunStructure, structureSummary } = require('../dist-electron/run-s
 // Electron, patch the desktop, or rewrite a second copy of the runner.
 const filename = path.resolve(__dirname, '../electron/main.ts');
 const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
-let callback;
+let callback, namedFileCallback;
 (function walk(node) {
   if (ts.isFunctionDeclaration(node) && node.name?.text === 'runFlow') callback = node;
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'usesNamedFiles') namedFileCallback = node;
   ts.forEachChild(node, walk);
 })(source);
 assert(callback, 'runFlow must exist');
-const compiled = ts.transpileModule('const handler = ' + callback.getText(source) + '; handler;', {
+const compiled = ts.transpileModule(namedFileCallback.getText(source) + '\nconst handler = ' + callback.getText(source) + '; handler;', {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
@@ -28,7 +30,7 @@ function harness(overrides = {}) {
   const events = [];
   const context = {
     running: false, stopRequested: false, runLog: 'old', recoveryActive: false, StoppedError, newTally,
-    recoverySettings, runRecovery, assertRunStructure, structureSummary, modelChain: (primary, backups) => [primary, ...backups],
+    fileSetup, fileCanvasKey, recoverySettings, runRecovery, assertRunStructure, structureSummary, modelChain: (primary, backups) => [primary, ...backups],
     recoveryStatus: (active, title, message) => events.push({ active, title, message }),
     pushMethod: () => {}, recentLogLines: () => [], readRecoveryReports: () => [],
     saveRecoveryReport: () => {}, recoveryToolContext: {}, recoveryAbort: () => false,

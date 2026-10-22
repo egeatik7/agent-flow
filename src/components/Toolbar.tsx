@@ -19,6 +19,7 @@ type Props = {
   onForget: () => void
   onResetLoops: () => void
   /** Checkpoint panelini açar. Sağ üstte, durum çubuğunun altındaki araç çubuğunun ucunda durur. */
+  onOpenFiles?: () => void
   onOpenCheckpoints?: () => void
   checkpointsDisabled?: boolean
 }
@@ -81,6 +82,7 @@ export default function Toolbar(p: Props) {
         </button>
       )}
 
+      {p.onOpenFiles && <button className="xp-btn" disabled={p.running || p.busy} onClick={p.onOpenFiles}>Dosyalar</button>}
       <span className="tb-sep" />
 
       <button type="button" className="xp-btn" onClick={p.onOpenScanner} disabled={p.running || p.busy} title="Ekrandaki yazıları gör, birini seçerek Tıkla node’u ekle">

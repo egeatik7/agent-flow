@@ -1,3 +1,5 @@
+import { assertFileValues, scopedItemVars } from './file-contract'
+import { listFileSource } from './file-list'
 import { checkpointGraphPath, type CheckpointCursor, type CheckpointLoop, type CheckpointScope } from './checkpoint-types'
 import type { CheckpointLapStatus } from './checkpoint-types'
 import { assertRunStructure } from './run-structure'
@@ -21,7 +23,7 @@ import {
 } from './graph-types'
 import { firstMember, ownerOf } from './groups'
 import { listDirEntries } from './list-dir'
-import { outsideFolder, outsideVars, packageHost } from './enclosing'
+import { enclosingLoop, outsideFolder, outsideVars, packageHost } from './enclosing'
 import type { DeliveryState, TypeProgress } from './graph-types'
 // Namespaced by runId in the activity store; package invocations share this module counter.
 let checkpointVisitSequence = 0
@@ -211,6 +213,7 @@ export async function runGraph(
     tally?: Tally
     /** Variables the run starts with. A package gets those of the loop lap it runs in. */
     vars?: Record<string, string>
+    fileVars?: Record<string, string>
     /** Runtime telemetry inherited through packages; never saved in graph JSON. */
     loopProgress?: LoopProgress[]
   }
@@ -227,6 +230,24 @@ export async function runGraph(
       if (!pkg?.inner) throw new Error('Açık paket bu akışta yok.')
       layers.push({ parent: cursor, pkg })
       cursor = pkg.inner
+    }
+    // A selected package may be inside a modern folder loop that has never been
+    // visited in this run. Resolve its real ancestors before a leaf can use an item.
+    // Frozen checkpoint lists are intentionally not refreshed here.
+    if (!opts.checkpointResume) {
+      const root = opts.root ?? graph, ancestors: AgentNode[] = []
+      const seen = new Set<string>()
+      let loop = enclosingLoop(root, layers[layers.length - 1].pkg.id)
+      while (loop && !seen.has(loop.id)) { seen.add(loop.id); ancestors.unshift(loop); loop = enclosingLoop(root, loop.id) }
+      for (const outer of ancestors) {
+        if (!outer.listSource) continue
+        const vars = { ...opts.fileVars, ...outsideVars(root, outer.id) }
+        const folder = renderTemplate(outer.folder, vars) ?? ''
+        const keys = await listFileSource(folder, outer.listSource)
+        if (!keys.length) throw new Error(`“${outer.title}”: devam edilecek hazır öğe yok (${folder}). Hazırlık adımından çalıştır.`)
+        outer.items = keys
+        ex.patchNode?.(outer.id, { items: keys })
+      }
     }
     // Validate the outside cursor BEFORE a package-local node can send input.
     if (opts.resume && opts.resumeItem && opts.resumeLoopId && !resumeState.identityUsed) {
@@ -245,7 +266,7 @@ export async function runGraph(
       loop.loopIndex = matches[0]
     }
     const shared = {
-      checkpointResume: opts.checkpointResume, checkpointUsed,
+      checkpointResume: opts.checkpointResume, checkpointUsed, fileVars: opts.fileVars,
       maxSteps: opts.maxSteps,
       stepDelayMs: opts.stepDelayMs,
       root: opts.root ?? graph,
@@ -301,7 +322,7 @@ export async function runGraph(
   const host = !opts.vars && graph !== root ? packageHost(root, graph) : undefined
   const scopePath = checkpointGraphPath(root, graph)
   const savedScope = opts.checkpointResume?.scopes.find(s => JSON.stringify(s.path) === JSON.stringify(scopePath))
-  let vars: Record<string, string> = opts.vars ?? savedScope?.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }
+  let vars: Record<string, string> = { ...opts.fileVars, ...(opts.vars ?? savedScope?.vars ?? (host ? outsideVars(root, host.id) : null) ?? { sira: '1' }) }
   const checkpointScopes = [...(opts.checkpointScopes ?? []), { path: scopePath, vars: { ...vars } }]
   const checkpointFrames: CheckpointLoop[] = []
   // Gözlemlenebilirlik yazımı otomasyonu durdurmaz (CLAUDE.md §19): checkpoint diske yazılamazsa
@@ -453,7 +474,7 @@ export async function runGraph(
         // The package sees the variables of the lap it runs in; a loop inside it still lets its own item win.
         let result: Awaited<ReturnType<typeof runGraph>>
         try {
-          result = await runGraph(inner, ex, { checkpointResume: opts.checkpointResume, checkpointUsed, checkpointLoops: [...(opts.checkpointLoops ?? []), ...checkpointFrames], checkpointScopes, packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
+          result = await runGraph(inner, ex, { checkpointResume: opts.checkpointResume, checkpointUsed, checkpointLoops: [...(opts.checkpointLoops ?? []), ...checkpointFrames], checkpointScopes, fileVars: opts.fileVars, packageExit: node.packageExit, debug: opts.debug, resumeState, maxSteps: opts.maxSteps, stepDelayMs: opts.stepDelayMs, nested: true, root, resume: opts.resume, resumeLoopId: opts.resumeLoopId, resumeItem: opts.resumeItem, tally, vars, loopProgress: [...inheritedLoops, ...liveLoops] })
         } catch (error) {
           if (isFatal(error)) throw error
           // Paket içinde kalan bir hata paketi BAŞTAN oynatmayı hak etmez: içerideki tıklama/yazma
@@ -578,6 +599,7 @@ export async function runGraph(
         ex.step(node.id, 'running')
         let recovering = false
         try {
+          assertFileValues(node, vars)
           const live = renderNode(node, vars)
           const ahead = peekAhead(node, scope)
           if (!opts.debug) port = await persistentStep(node, live, tally.n, ahead)
@@ -720,7 +742,14 @@ export async function runGraph(
     if (savedLoop) checkpointUsed.add(loop.id)
     const folderRaw = loop.folder?.trim() ?? ''
     let fromFolder: string[] | null = null
-    if (!savedLoop && hasTemplate(folderRaw)) {
+    const fileSource = loop.listSource ?? (/\{\{\s*(?:girdi|cikti|calisma|klasor\.|dongu\.)/i.test(folderRaw) ? { kind: 'all' as const, filter: '*' } : undefined)
+    if (!savedLoop && fileSource) {
+      const resolved = (renderTemplate(folderRaw, vars) ?? '').trim()
+      fromFolder = await listFileSource(resolved, fileSource)
+      patch(loop.id, { items: fromFolder })
+      ex.log('info', `“${loop.title}”: ${resolved} içinde ${fromFolder.length} uygun öğe.`)
+    }
+    if (!savedLoop && !fileSource && hasTemplate(folderRaw)) {
       const readFolder = async () => {
         const resolved = outsideFolder(root, loop)
         if (!resolved) {
@@ -789,7 +818,7 @@ export async function runGraph(
         checkpointFrames[checkpointFrames.length - 1].index = idx
         const key = keys[idx]
         const label = isList ? baseName(key) : `${idx + 1}. tur`
-        vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length) }
+        vars = { ...outer, ...itemVars(isList ? key : String(idx + 1), idx, keys.length), ...scopedItemVars(loop, isList ? key : String(idx + 1), idx, keys.length) }
         liveLoops[liveLoops.length - 1] = { id: loop.id, title: loop.title, index: idx + 1, total: keys.length, item: label }
         publishLoops()
         patch(loop.id, { loopIndex: idx, startIndex: idx })

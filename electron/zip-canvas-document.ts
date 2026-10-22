@@ -1,10 +1,11 @@
+import { hasFileFeatures, withFileScope } from './file-contract'
 import { randomUUID } from 'node:crypto'
 import { normalizeGraph, type AgentGraph } from './graph-types'
 
 /** Each canvas owns its content and identity; the ZIP is only its containing group. */
 export type ZipCanvasDocument = AgentGraph & {
   format: 'nubbo-canvas'
-  version: 1
+  version: 1 | 2
   canvasId: string
   name: string
 }
@@ -15,7 +16,7 @@ export function zipCanvasDocument(raw: unknown, fallbackName?: string): ZipCanva
   const name = (typeof value.name === 'string' ? value.name : fallbackName ?? '').trim()
   if (!name || name.length > 160 || /[\x00-\x1f]/.test(name)) throw new Error('Tuval adı geçersiz.')
   if (value.format !== undefined && value.format !== 'nubbo-canvas') throw new Error('JSON tuval dosyası değil.')
-  if (value.format === 'nubbo-canvas' && value.version !== 1) throw new Error('Tuval dosyası sürümü desteklenmiyor.')
+  if (value.format === 'nubbo-canvas' && value.version !== 1 && value.version !== 2) throw new Error('Tuval dosyası sürümü desteklenmiyor.')
   const id = value.canvasId
   if (value.format === 'nubbo-canvas' && id === undefined) throw new Error('Tuval dosyasında kimlik eksik.')
   if (id !== undefined && (typeof id !== 'string' || !id.trim() || id !== id.trim() || id.length > 200 || /[\x00-\x1f]/.test(id))) throw new Error('Tuval kimliği geçersiz.')
@@ -28,9 +29,10 @@ export function zipCanvasDocument(raw: unknown, fallbackName?: string): ZipCanva
     if (!edge?.id || edgeIds.has(edge.id) || !ids.has(edge.from) || !ids.has(edge.to)) throw new Error('Tuval bağlantıları geçersiz; kayıp bağlantı sessizce kaldırılmadı.')
     edgeIds.add(edge.id)
   }
-  return { ...normalizeGraph({ nodes, edges }), format: 'nubbo-canvas', version: 1, canvasId: id ?? randomUUID(), name }
+  return { ...normalizeGraph({ nodes, edges }), format: 'nubbo-canvas', version: hasFileFeatures({ nodes, edges }) ? 2 : 1, canvasId: id ?? randomUUID(), name }
 }
 
 export function copyZipCanvas(document: ZipCanvasDocument, name = document.name): ZipCanvasDocument {
-  return zipCanvasDocument({ ...structuredClone(document), canvasId: randomUUID(), name })
+  const id = randomUUID()
+  return zipCanvasDocument({ ...document, ...withFileScope(document, id), canvasId: id, name })
 }

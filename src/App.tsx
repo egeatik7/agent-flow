@@ -1,3 +1,7 @@
+import { FileValuesContext } from './components/FileValuesContext'
+import FilesPanel from './components/FilesPanel'
+import RunFilesDialog from './components/RunFilesDialog'
+import { fileSetup, type FileRunContext, type FileFolder } from '../electron/file-contract'
 import { restoreCheckpointTab } from './lib/checkpoint-resume'
 import CheckpointsPanel from './components/CheckpointsPanel'
 import type { CheckpointInfo, CheckpointSnapshot } from '../electron/checkpoint-types'
@@ -190,6 +194,18 @@ export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [tabletDialog,setTabletDialog]=useState(false)
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
+  const [filesOpen, setFilesOpen] = useState(false)
+  const [fileValues, setFileValues] = useState<Record<string, string>>({})
+  const [fileFolders, setFileFolders] = useState<FileFolder[]>([])
+  const [fileQuestion, setFileQuestion] = useState<{ graph: AgentGraph; resume: boolean } | null>(null)
+  const fileAnswer = useRef<((context: FileRunContext | null) => void) | null>(null)
+  const answerFiles = (value: FileRunContext | null) => { const answer = fileAnswer.current; fileAnswer.current = null; setFileQuestion(null); if (value) setFileValues(value.vars); answer?.(value) }
+  const chooseFiles = async (full: AgentGraph, resume: boolean): Promise<FileRunContext | null | undefined> => {
+    if (!fileSetup(full)) return undefined
+    if (!api?.prepareFiles) throw new Error('Bu tuvalin klasörlerini seçmek için güncel Nubbo masaüstü sürümünü aç.')
+    return new Promise(resolve => { fileAnswer.current = resolve; setFileQuestion({ graph: full, resume }) })
+  }
+
   const [libraryDirectory, setLibraryDirectory] = useState('')
   const [zipLibrary, setZipLibrary] = useState(() => zipLibraryOf(book0))
   const [recovery, setRecovery] = useState<RecoveredCanvas[]>([])
@@ -215,6 +231,15 @@ export default function App() {
   const writeQueue = useRef<Promise<boolean>>(Promise.resolve(true))
   const canvasRenameFlush = useRef<(() => void) | null>(null)
   const registerCanvasRenameFlush = useCallback((flush: (() => void) | null) => { canvasRenameFlush.current = flush }, [])
+
+  useEffect(() => {
+    let live = true
+    setFileValues({})
+    if (api?.fileInfo) void api.fileInfo().then(i => { if (live) setFileFolders(i.folders) }).catch(() => {})
+    const full = rooted(graph, stack)
+    if (api?.fileDefaults && fileSetup(full)) void api.fileDefaults(full).then(d => { if (live && d.last) setFileValues(d.last.vars) }).catch(() => {})
+    return () => { live = false }
+  }, [activeId])
 
   const graphRef = useRef(graph)
   graphRef.current = graph
@@ -916,7 +941,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (checkpointsOpen) return
+      if (checkpointsOpen || filesOpen || fileQuestion) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (mod && key === 's') {
@@ -1114,6 +1139,9 @@ export default function App() {
           ? { ...tab, graph: mapNodes(tab.graph, n => n.id === nodeId ? { ...n, ...patch } : n) } : tab) })
       }
     }
+    const modern = rooted(graphRef.current, stackRef.current)
+    const findModern = (g: AgentGraph): AgentNode | undefined => { for (const n of g.nodes) { if (n.id === nodeId) return n; if (n.inner) { const hit = findModern(n.inner); if (hit) return hit } } }
+    if (findModern(modern)?.listSource) { loopFolderPending.current.delete(key); apply({ folder, items: [], startIndex: 0, loopIndex: undefined }); return }
     if (!trimmed || hasTemplate(folder)) {
       loopFolderPending.current.delete(key)
       templateSeen.current.delete(nodeId)
@@ -1146,7 +1174,7 @@ export default function App() {
     const timer = window.setTimeout(() => {
       void (async () => {
         const root = rooted(graphRef.current, stackRef.current)
-        for (const loop of templateLoops(root)) {
+        for (const loop of templateLoops(root).filter(n => !n.listSource)) {
           if (gen !== templateFillGen.current) return
           const resolved = outsideFolder(root, loop)
           const sig = `${loop.id}\n${resolved}`
@@ -1290,10 +1318,10 @@ export default function App() {
     })
   }
 
-  const run = async (startId?: string) => {
+  const run = async (startId?: string, checkpoint?: { info: CheckpointInfo; snapshot: CheckpointSnapshot }) => {
     if (!loaded || closingRef.current || saveAnswer.current || runningRef.current || libraryBusyRef.current || confirmAnswer.current || missingReport || capturing > 0 || !activeIdRef.current || graphRef.current.nodes.length === 0) return
-    const path = stackRef.current.map(c => c.id)
-    const full = structuredClone(path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current)
+    const path = checkpoint?.snapshot.cursor.packagePath ?? stackRef.current.map(c => c.id)
+    const full = structuredClone(checkpoint?.snapshot.graph ?? (path.length ? rooted(graphRef.current, stackRef.current) : graphRef.current))
     const name = canvasName()
     const canvasId = bookRef.current.tabs.find(t => t.id === activeIdRef.current)?.savedId ?? `tab:${activeIdRef.current}`
     runningRef.current = true
@@ -1304,12 +1332,14 @@ export default function App() {
     pushLog('info', startId ? `“${name}” seçili adımdan çalışıyor…` : `“${name}” çalışıyor…`)
     try {
       if (!await flushSettings()) return
+      const runFiles = checkpoint ? checkpoint.snapshot.cursor.files : fileSetup(full) ? await chooseFiles(full, !!startId) : undefined
+      if (runFiles === null || stopRequested.current || closingRef.current) return
       if (!(await guardMissingPaths([{ name, graph: full, startId, packagePath: path }])) || stopRequested.current || closingRef.current) return
-      if (!startId) { const reset = resetLoopTicks(full); full.nodes = reset.nodes; full.edges = reset.edges; writeCanvas(full) }
+      if (!startId && !checkpoint) { const reset = resetLoopTicks(full); full.nodes = reset.nodes; full.edges = reset.edges; writeCanvas(full) }
       setStepStatus({})
       setRunProgress(beginProgress(activeIdRef.current))
       if (api) {
-        const result = await api.runAgent(full, startId, path, { canvasId, canvasName: name })
+        const result = await api.runAgent(full, startId, path, { canvasId, canvasName: name, ...(runFiles ? { fileRunId: runFiles.id } : {}), ...(checkpoint ? { checkpointId: checkpoint.info.id } : {}) })
         halted = !!result.stopped || !result.ok
         failed = !result.ok && !result.stopped
         // The agent log already explains each error; this one line says the run did not end clean.
@@ -1333,6 +1363,7 @@ export default function App() {
   const stop = () => {
     stopRequested.current = true
     missingAnswer.current?.(false)
+    answerFiles(null)
     sequenceRef.current.stop()
     if (api) void api.stopAgent().catch(e => pushLog('error', errText(e)))
     else stopDemo()
@@ -1381,7 +1412,9 @@ export default function App() {
         pushLog('info', `Tuval sırası ${index + 1}/${total}: “${tab.name}” ${ilk ? 'seçili adımdan' : "Başlangıç'tan"} çalışıyor…`)
         if (!await rememberBook(next)) throw new Error('Tuval kaydedilemedi; sıra başlatılmadı.')
         if (sequenceRef.current.isCancelled()) return { ok: false, stopped: true }
-        const result = api ? await api.runAgent(prepared.graph, ilk, path, { requireEnd: true, canvasId: tab.savedId ?? `tab:${tab.id}`, canvasName: tab.name, ...(index === 0 && checkpoint ? { checkpointId: checkpoint.info.id } : {}) })
+        const runFiles = index === 0 && checkpoint ? checkpoint.snapshot.cursor.files : fileSetup(prepared.graph) ? await chooseFiles(prepared.graph, !!ilk) : undefined
+        if (runFiles === null || sequenceRef.current.isCancelled() || stopRequested.current) return { ok: false, stopped: true }
+        const result = api ? await api.runAgent(prepared.graph, ilk, path, { ...(runFiles ? { fileRunId: runFiles.id } : {}), requireEnd: true, canvasId: tab.savedId ?? `tab:${tab.id}`, canvasName: tab.name, ...(index === 0 && checkpoint ? { checkpointId: checkpoint.info.id } : {}) })
           : await runDemo(prepared.graph, settingsRef.current, pushLog, recordStep, ilk, patchNode, path, true, recordEdge)
         if (!await rememberBook(commitActive())) throw new Error('Koşu sonrası tuval kaydedilemedi; sonraki tuval başlatılmadı.')
         return result
@@ -1429,7 +1462,7 @@ export default function App() {
     }
     let lists = 0
     if (api?.listDir) {
-      for (const id of templateLoops(full).map((n) => n.id)) {
+      for (const id of templateLoops(full).filter(n => !n.listSource).map((n) => n.id)) {
         const loop = find(full, id)
         if (!loop) continue
         const resolved = outsideFolder(full, loop)
@@ -1551,7 +1584,7 @@ export default function App() {
   }, [commitActive, loaded])
 
   return (
-    <div className="desktop">
+    <FileValuesContext.Provider value={{ values: { ...Object.fromEntries(fileFolders.map(f => [`klasor.${f.id}`, f.path])), ...fileValues }, folders: fileFolders }}><div className="desktop">
       <div className="xp-window">
         <TitleBar onClose={() => api ? void api.close() : void closeProgram()} />
         <div className="menubar">
@@ -1629,7 +1662,8 @@ export default function App() {
           onCapture={captureAsNewNode}
           onOpenScanner={() => openScanner(null)}
           onRun={() => run()}
-          onRunFromSelected={() => { if (selectedNodeId) void runAllCanvases(selectedNodeId) }}
+          onRunFromSelected={() => { if (selectedNodeId) void (fileSetup(rooted(graphRef.current, stackRef.current)) ? run(selectedNodeId) : runAllCanvases(selectedNodeId)) }}
+          onOpenFiles={api?.fileInfo ? () => setFilesOpen(true) : undefined}
           onStop={stop}
           onLayout={() => setGraph((g) => autoLayout(g))}
           onForget={forgetAll}
@@ -1642,7 +1676,11 @@ export default function App() {
           if (!api?.checkpointSnapshot) return
           const snapshot = await api.checkpointSnapshot(info.id)
           setCheckpointsOpen(false)
-          await runAllCanvases(snapshot.cursor.startId, { info, snapshot })
+          if (fileSetup(snapshot.graph)) {
+            const restored = restoreCheckpointTab(commitActive(), info, snapshot)
+            showCanvas(restored, restored.activeId, false)
+            await run(snapshot.cursor.startId, { info, snapshot })
+          } else await runAllCanvases(snapshot.cursor.startId, { info, snapshot })
         }} />}
         <CanvasTabs
           onRegisterRenameFlush={registerCanvasRenameFlush}
@@ -1881,6 +1919,8 @@ export default function App() {
           />
         </div>
       </div>
+      {filesOpen && api && <FilesPanel api={api} onClose={() => setFilesOpen(false)} onChanged={i => setFileFolders(i.folders)} />}
+      {fileQuestion && api && <RunFilesDialog api={api} graph={fileQuestion.graph} resume={fileQuestion.resume} onAnswer={answerFiles} />}
       {confirmQuestion && (
         <ConfirmDialog question={confirmQuestion} onYes={() => answerSure(true)} onNo={() => answerSure(false)} />
       )}
@@ -1906,6 +1946,6 @@ export default function App() {
           onClose={() => setScanner(null)}
         />
       )}
-    </div>
+    </div></FileValuesContext.Provider>
   )
 }

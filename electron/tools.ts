@@ -119,6 +119,7 @@ export type ToolContext = {
    */
   clearStop?: () => void
   /** Starts a real run on the engine. Returns when the run has finished. */
+  fileVars?: (graph: AgentGraph) => Record<string, string> | undefined
   startRun: (
     graph: AgentGraph,
     startId?: string,
@@ -1082,6 +1083,7 @@ const stepRun: ToolDef = {
       }, timeoutMs)
       const started = Date.now()
       const r = await probeOnce(graph, nodeId, agent.executor, {
+        fileVars: ctx.fileVars?.(graph),
         packagePath: place.packagePath,
         maxSteps: Math.max(1, s.maxSteps),
         stepDelayMs: Math.max(0, s.stepDelayMs),

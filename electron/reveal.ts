@@ -1,3 +1,4 @@
+import { scopedItemVars } from './file-contract'
 import { enclosingLoop } from './enclosing'
 import { itemVars, listItems, loopStartIndex, renderTemplate, type AgentGraph } from './graph-types'
 
@@ -5,7 +6,12 @@ export type VarReveal = { value: string; where: string; resolved: boolean }
 
 /** Read-only preview of the nearest loop's marked row, including ancestors outside packages. */
 export function revealAt(root: AgentGraph, nodeId: string, token: string, seen = new Set<string>()): VarReveal {
-  const loop = enclosingLoop(root, nodeId)
+  let loop = enclosingLoop(root, nodeId)
+  const explicit = token.match(/^\{\{\s*dongu\.([^.]+)\./i)
+  if (explicit) {
+    const visited = new Set<string>()
+    while (loop && loop.id.toLowerCase() !== explicit[1].toLowerCase() && !visited.has(loop.id)) { visited.add(loop.id); loop = enclosingLoop(root, loop.id) }
+  }
   if (!loop || seen.has(loop.id)) {
     const value = renderTemplate(token, { sira: '1' }) ?? token
     return { value: value === token ? 'Döngü dışında' : value, resolved: value !== token,
@@ -23,7 +29,7 @@ export function revealAt(root: AgentGraph, nodeId: string, token: string, seen =
   }
   const total = items.length || Math.max(1, loop.count ?? 1)
   const index = loopStartIndex(loop, total, true)
-  const value = renderTemplate(token, itemVars(items[index] ?? String(index + 1), index, total)) ?? token
+  const value = renderTemplate(token, { ...itemVars(items[index] ?? String(index + 1), index, total), ...scopedItemVars(loop, items[index] ?? String(index + 1), index, total) }) ?? token
   return { value: value === token ? 'Bilinmeyen değişken' : value, resolved: value !== token,
     where: `“${loop.title}”, işaretli ${items.length ? 'öğe' : 'tur'} ${index + 1}/${total}. Bu değer işaretli konum içindir; döngü ilerledikçe değişir.` }
 }

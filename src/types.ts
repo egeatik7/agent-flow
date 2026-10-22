@@ -61,6 +61,13 @@ export type XpAgentApi = {
   getCanvases: () => Promise<CanvasBook>
   /** Saves only the working session. ZIP documents use zipLibraryAction. */
   saveCanvases: (book: CanvasBook) => Promise<boolean | { conflict: boolean }>
+  fileInfo?: () => Promise<import('../electron/file-contract').FileLibraryInfo>
+  fileDefaults?: (graph: AgentGraph) => Promise<import('../electron/file-contract').FileDefaults>
+  prepareFiles?: (graph: AgentGraph, selection: import('../electron/file-contract').FileSelection) => Promise<import('../electron/file-contract').FileRunContext>
+  fileBrowse?: (id: string, relative?: string) => Promise<{ folder: import('../electron/file-contract').FileFolder; relative: string; entries: import('../electron/file-contract').FileEntry[] }>
+  fileAction?: (action: { kind: 'create' | 'link' | 'import' | 'rename' | 'forget' | 'tools' | 'root'; id?: string; name?: string; paths?: string[]; relative?: string }) => Promise<import('../electron/file-contract').FileLibraryInfo>
+  fileDropPath?: (file: File) => string
+  listFileSource?: (dir: string, spec: import('../electron/file-contract').ListSource) => Promise<string[]>
   listWindows: () => Promise<{ title: string; handle: string }[]>
   scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => Promise<ScanResult>
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => Promise<{ text: string; type: string } | null>
@@ -71,7 +78,7 @@ export type XpAgentApi = {
     startId?: string,
     packagePath?: string[],
     /** `derived`: this graph is a branch being tried, not the saved flow; do not store it. */
-    opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }
+    opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string; fileRunId?: string }
   ) => Promise<{ ok: boolean; stopped?: boolean; failed?: number; reachedEnd?: boolean }>
   listCheckpoints?: () => Promise<import('../electron/checkpoint-types').CheckpointInfo[]>
   checkpointDetail?: (id: string) => Promise<import('../electron/checkpoint-types').CheckpointDetail>

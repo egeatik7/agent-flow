@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 function on(channel: string) {
   return (cb: (payload: unknown) => void) => {
@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('xpAgent', {
   getCanvases: () => ipcRenderer.invoke('canvases:get'),
   saveCanvases: (book: unknown) => ipcRenderer.invoke('canvases:save', book),
 
+  fileInfo: () => ipcRenderer.invoke('files:info'),
+  fileDefaults: (graph: unknown) => ipcRenderer.invoke('files:defaults', graph),
+  prepareFiles: (graph: unknown, selection: unknown) => ipcRenderer.invoke('files:prepare', graph, selection),
+  fileBrowse: (id: string, relative?: string) => ipcRenderer.invoke('files:browse', id, relative),
+  fileAction: (action: unknown) => ipcRenderer.invoke('files:action', action),
+  fileDropPath: (file: File) => webUtils.getPathForFile(file),
+  listFileSource: (dir: string, spec: unknown) => ipcRenderer.invoke('files:listSource', dir, spec),
   listWindows: () => ipcRenderer.invoke('windows:list'),
   scanScreen: (windowTitle?: string, ramp?: { lo: number; hi: number }) => ipcRenderer.invoke('screen:scan', windowTitle, ramp),
   matchChrome: (rect: { x: number; y: number; w: number; h: number }) => ipcRenderer.invoke('chrome:match', rect),
@@ -40,7 +47,7 @@ contextBridge.exposeInMainWorld('xpAgent', {
 
   captureAfter: (ms: number) => ipcRenderer.invoke('capture:afterDelay', ms),
 
-  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string }) =>
+  runAgent: (graph: unknown, startId?: string, packagePath?: string[], opts?: { derived?: boolean; requireEnd?: boolean; canvasId?: string; canvasName?: string; checkpointId?: string; fileRunId?: string }) =>
     ipcRenderer.invoke('agent:run', graph, startId, packagePath, opts),
   listCheckpoints: () => ipcRenderer.invoke('checkpoints:list'),
   checkpointDetail: (id: string) => ipcRenderer.invoke('checkpoints:detail', id),
