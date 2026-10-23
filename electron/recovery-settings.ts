@@ -1,5 +1,33 @@
+export type HarnessSettings = {
+  command: string
+  args: string[]
+  cwd: string
+  instructions: string
+  fullControl: boolean
+  /** 0 = continue until the user stops, a terminal result, or a transport failure. */
+  timeoutMs: number
+  autoContinue: boolean
+}
+export const DEFAULT_HARNESS_INSTRUCTIONS = 'Sorunun nedenini kapsamlı araştır. Günlükleri, önceki adımları ve uygulama durumunu incele; uygun düzeltmeyi uygula, sonucu doğrula ve ayrıntılı Türkçe rapor ver. Kanıtlanan nedenleri olasılıklardan ayır; kalıcı iyileştirme önerilerini de açıkla.'
+export const DEFAULT_HARNESS: HarnessSettings = {
+  instructions: DEFAULT_HARNESS_INSTRUCTIONS, command: '', args: ['--profile', 'acp'], cwd: '', fullControl: true, timeoutMs: 0, autoContinue: true,
+}
+export function harnessSettings(value?: Partial<HarnessSettings>): HarnessSettings {
+  return {
+    command: typeof value?.command === 'string' ? value.command.trim() : '',
+    args: Array.isArray(value?.args) && value.args.every(v => typeof v === 'string') ? value.args.slice(0, 64) : [...DEFAULT_HARNESS.args],
+    cwd: typeof value?.cwd === 'string' ? value.cwd.trim() : '',
+    instructions: typeof value?.instructions === 'string' ? value.instructions.slice(0, 30_000) : DEFAULT_HARNESS_INSTRUCTIONS,
+    fullControl: value?.fullControl !== false,
+    timeoutMs: typeof value?.timeoutMs === 'number' && Number.isFinite(value.timeoutMs) ? Math.max(0, Math.floor(value.timeoutMs)) : 0,
+    autoContinue: value?.autoContinue !== false,
+  }
+}
+
 export type RecoverySettings = {
   enabled: boolean
+  provider?: 'nubbo' | 'harness'
+  harness?: HarnessSettings
   /** Dedicated OpenRouter credential; never falls back to the general key. */
   apiKey?: string
   model: string
@@ -46,6 +74,8 @@ export function recoverySettings(value?: Partial<RecoverySettings>): RecoverySet
     : []
   return {
     enabled: value?.enabled === true,
+    provider: value?.provider === 'harness' ? 'harness' : 'nubbo',
+    harness: harnessSettings(value?.harness),
     apiKey: typeof value?.apiKey === 'string' ? value.apiKey.trim() : '',
     model: typeof value?.model === 'string' ? value.model.trim() : '',
     backups: strings(value?.backups, 4),

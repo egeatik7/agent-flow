@@ -45,6 +45,7 @@ export function recoveryReportText(report: RecoveryReport): string {
     report.evidence ? `Gözlem: ${report.evidence}` : '',
     report.completionBasis === 'model-observed' ? 'Hedefin gerçekleştiğine model ekran gözlemine göre karar verdi.' : '',
     report.summary,
+    report.details ? `Ayrıntılı analiz ve çözüm raporu:\n${report.details}` : '',
     report.resumeError ? `Devam hatası: ${report.resumeError}` : '',
     'Yapılanlar',
     report.actions.length ? report.actions.map((action, index) => `${index + 1}. ${action.tool} · ${action.message}`).join('\n') : 'Eylem kaydı yok.',

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { NODE_SPECS, type AgentGraph, type AppSettings, type ModelInfo } from '../types'
-import { DEFAULT_RECOVERY_INSTRUCTIONS, recoverySettings, type RecoverySettings } from '../../electron/recovery-settings'
+import { DEFAULT_RECOVERY_INSTRUCTIONS, DEFAULT_HARNESS_INSTRUCTIONS, recoverySettings, harnessSettings, type RecoverySettings } from '../../electron/recovery-settings'
 import { walkGraph } from '../../electron/tool-context'
 import ModelChain from './ModelChain'
 import type { SettingsPatch } from '../../electron/settings-patch'
@@ -19,6 +19,23 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
   disabled?: boolean
 }) {
   const s = recoverySettings(settings.recovery)
+  const h = harnessSettings(s.harness)
+  const external = s.provider === 'harness'
+  const [harnessStatus, setHarnessStatus] = useState('')
+  const [testingHarness, setTestingHarness] = useState(false)
+  const updateHarness = (patch: Partial<typeof h>) => update({ harness: { ...h, ...patch } })
+  const chooseHarness = async () => {
+    try { const command = await window.xpAgent?.pickHarness?.(); if (command) { updateHarness({ command }); setHarnessStatus('Program seçildi. Bağlantıyı deneyip kaydet.') } }
+    catch (error) { setHarnessStatus(String(error)) }
+  }
+  const testHarness = async () => {
+    setTestingHarness(true); setHarnessStatus('Harness ve Nubbo MCP bağlantısı deneniyor…')
+    try {
+      if (!window.xpAgent?.testHarness) throw new Error('Bu sürüm Harness bağlantı testini desteklemiyor.')
+      const result = await window.xpAgent.testHarness(h); setHarnessStatus(result.message)
+    } catch (error) { setHarnessStatus(String(error)) }
+    finally { setTestingHarness(false) }
+  }
   const [reports, setReports] = useState<RecoveryReport[]>([])
   const [reportError, setReportError] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
@@ -67,17 +84,43 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
   const vision = info?.vision
   return <div className="settings-grid recovery-settings">
     <fieldset className="recovery-edit" disabled={disabled}>
-    <p className="hint">Akış bir eylemde hata verince bu model devreye girer. Tuvalin JSON'unu, mevcut öğeyi, günlükleri ve önceki kurtarma raporlarını okur; düzeltmeden sonra aynı yerden devam edilir.</p>
+    <p className="hint">Akış bir eylemde hata verince seçili ajan devreye girer. Tuvalin JSON'unu, mevcut öğeyi, günlükleri ve önceki kurtarma raporlarını okur; düzeltmeden sonra aynı yerden devam edilir.</p>
     <label className="check"><input type="checkbox" checked={s.enabled} onChange={e => update({ enabled: e.target.checked })} /> Hata olduğunda kurtarma ajanını kullan</label>
-    <div className="field"><label htmlFor="recovery-api-key">Kurtarma ajanı OpenRouter API Key</label>
+    <div className="field"><label htmlFor="recovery-provider">Kurtarma yöntemi</label>
+      <select id="recovery-provider" className="xp-input" value={s.provider ?? 'nubbo'} onChange={e => update({ provider: e.target.value === 'harness' ? 'harness' : 'nubbo' })}>
+        <option value="nubbo">Nubbo kurtarma ajanı</option><option value="harness">DeepSeek Harness</option>
+      </select>
+      <p className="hint">Koşu başladığında seçilir. Harness seçiliyse açılamasa veya başarısız olsa da diğer kurtarma ajanı çağrılmaz; koşu durur.</p>
+    </div>
+    {external && <div className="field">
+      <label htmlFor="harness-program">Harness CLI programı</label>
+      <input id="harness-program" className="xp-input" value={h.command} onChange={e => { updateHarness({ command: e.target.value }); setHarnessStatus('') }} placeholder="dsh.cmd, dsh.exe veya CLI giriş dosyası" />
+      <div className="field-row"><button type="button" className="xp-btn" onClick={() => void chooseHarness()}>Program seç…</button>
+        <button type="button" className="xp-btn" disabled={testingHarness || !h.command} onClick={() => void testHarness()}>{testingHarness ? 'Deneniyor…' : 'Bağlantıyı dene'}</button></div>
+      {harnessStatus && <p role="status" className="hint">{harnessStatus}</p>}
+      <label className="check"><input type="checkbox" checked={h.fullControl} onChange={e => updateHarness({ fullControl: e.target.checked })} />Tam bilgisayar kontrolü: masaüstü, dosyalar, PowerShell ve izinli eylem node’ları</label>
+      <p className="hint">Mevcut Windows kullanıcısının haklarıyla çalışır. Harness’ın bu oturumdaki izin istekleri otomatik kabul edilir. Yönetici/UAC yetkisi kendiliğinden verilmez. Durdur, yeni işlemleri keser ve Harness oturumunu kapatır.</p>
+      <label className="check"><input type="checkbox" checked={h.timeoutMs === 0} onChange={e => updateHarness({ timeoutMs: e.target.checked ? 0 : 600_000 })} />Durdurana veya sonuç bildirene kadar devam et (süre ve kurtarma sayısı sınırı yok)</label>
+      {h.timeoutMs > 0 && <label>Kurtarma süresi (dakika)<NumberDraft min={1} max={1440} value={h.timeoutMs / 60_000} onCommit={value => updateHarness({ timeoutMs: value * 60_000 })} /></label>}
+      <label className="check"><input type="checkbox" checked={h.autoContinue} onChange={e => updateHarness({ autoContinue: e.target.checked })} />Tur biterse aynı oturumda araştırma ve rapora devam et</label>
+      <p className="hint">MCP otomatik bağlanır. Harness sorunu araştırır, düzeltir, doğrular ve ayrıntılı Türkçe rapor verir. Yalnız sohbet cevabı akışı ilerletmez.</p>
+      <details><summary>Harness başlatma ayarları</summary>
+        <label htmlFor="harness-args">CLI argümanları (her satır bir argüman)</label>
+        <textarea id="harness-args" className="xp-input" rows={3} value={h.args.join('\n')} onChange={e => updateHarness({ args: e.target.value.split('\n').filter(Boolean) })} />
+        <label htmlFor="harness-cwd">Çalışma klasörü (boşsa çalıştırıcının klasörü)</label>
+        <input id="harness-cwd" className="xp-input" value={h.cwd} onChange={e => updateHarness({ cwd: e.target.value })} />
+        <p className="hint">Varsayılan argümanlar --profile ve acp. Model ve API bilgileri Harness profilinden gelir. Masaüstü uygulaması yerine ACP destekli CLI seç.</p>
+      </details>
+    </div>}
+    {!external && <div className="field"><label htmlFor="recovery-api-key">Kurtarma ajanı OpenRouter API Key</label>
       <div className="save-row">
         <input id="recovery-api-key" className="xp-input" type="password" value={settings.recovery?.apiKey ?? ''} placeholder="sk-or-v1-..." onChange={e => update({ apiKey: e.target.value })} />
         <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Kaydet</button>
       </div>
       <p className="hint">Genel sekmeden bağımsızdır. Kurtarma ajanı yalnız burada kaydettiğin anahtarı kullanır.</p>
-    </div>
+    </div>}
     </fieldset>
-    <fieldset className="recovery-edit">
+    {!external && <fieldset className="recovery-edit">
     <div className="field"><label htmlFor="recovery-model">Kurtarma modelleri (OpenRouter)</label>
       <ModelChain primary={settings.recovery?.model ?? s.model} backups={settings.recovery?.backups ?? []}
         inputId="recovery-model" listId="recovery-models" placeholder="Sağlayıcı/model kimliği"
@@ -91,18 +134,18 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <p className="hint">Akış sürerken de kaydedilir. Sonraki yeni kurtarma çağrısı bu sırayla başlar; süren çağrı değişmez.</p>
       <button type="button" className="xp-btn save" onClick={() => onSave({ recovery: s })}>Model sırasını kaydet</button>
     </div>
-    </fieldset>
+    </fieldset>}
     <fieldset className="recovery-edit" disabled={disabled}>
-      {vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
-      {info && <p className="hint">{info.vision ? 'Görsel giriş: destekli.' : 'Görsel giriş: desteklenmiyor.'}{info.pricing ? ` Girdi ≈ $${info.pricing.promptPerM.toFixed(2)}/M · çıktı ≈ $${info.pricing.completionPerM.toFixed(2)}/M (OpenRouter listesi; sağlayıcıya göre değişir).` : ' Fiyat bilgisi listede yok.'} Destek işareti doğru kararı garanti etmez; gerçek ölçüm kendi hatalı akışında yapılır.</p>}
+      {!external && vision === false && <p className="hint">Bu model görsel desteklemiyor. Ekranı görebilen bir model seçmelisin.</p>}
+      {!external && info && <p className="hint">{info.vision ? 'Görsel giriş: destekli.' : 'Görsel giriş: desteklenmiyor.'}{info.pricing ? ` Girdi ≈ $${info.pricing.promptPerM.toFixed(2)}/M · çıktı ≈ $${info.pricing.completionPerM.toFixed(2)}/M (OpenRouter listesi; sağlayıcıya göre değişir).` : ' Fiyat bilgisi listede yok.'} Destek işareti doğru kararı garanti etmez; gerçek ölçüm kendi hatalı akışında yapılır.</p>}
     <div className="field"><label htmlFor="recovery-task">Akışın amacı ve çalışma bilgileri</label>
       <textarea id="recovery-task" className="xp-input" rows={6} value={s.task} placeholder="Ne yapılmalı? Hangi uygulamalar, klasörler ve sonuçlar önemli? Tamamlanan hangi işlemler tekrarlanmamalı?" onChange={e => update({ task: e.target.value })} />
     </div>
     <div className="field"><label htmlFor="recovery-instructions">Kurtarma talimatı</label>
-      <textarea id="recovery-instructions" className="xp-input" rows={8} value={s.instructions} onChange={e => update({ instructions: e.target.value })} />
-      <button type="button" className="xp-btn" onClick={() => update({ instructions: DEFAULT_RECOVERY_INSTRUCTIONS })}>Varsayılan talimatı getir</button>
+      <textarea id="recovery-instructions" className="xp-input" rows={8} value={external ? h.instructions : s.instructions} onChange={e => external ? updateHarness({ instructions: e.target.value }) : update({ instructions: e.target.value })} />
+      <button type="button" className="xp-btn" onClick={() => external ? updateHarness({ instructions: DEFAULT_HARNESS_INSTRUCTIONS }) : update({ instructions: DEFAULT_RECOVERY_INSTRUCTIONS })}>Varsayılan talimatı getir</button>
     </div>
-    <fieldset><legend>Araç yetkileri</legend>
+    {(!external || !h.fullControl) && <fieldset><legend>Araç yetkileri</legend>
       <label className="check"><input type="checkbox" checked={s.allowDesktop} onChange={e => update({ allowDesktop: e.target.checked })} /> Tıkla, yaz, tuş gönder, bekle ve pencereyi yönet</label>
       <label className="check"><input type="checkbox" checked={s.allowNodes} onChange={e => update({ allowNodes: e.target.checked })} /> Hata veren eylem node'unu tek adım olarak çağır</label>
       <label className="check"><input type="checkbox" checked={s.allowCode === true} onChange={e => update({ allowCode: e.target.checked })} />PowerShell çalıştırabilir</label>
@@ -113,12 +156,12 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
           <span>{node.title}<small>{node.kind}{node.path ? ` · ${node.path}` : ''}</small></span>
         </label>) : <p className="hint">Bu tuvalde eylem node'u yok.</p>}</div>
       </details>
-    </fieldset>
-    <div className="field-row recovery-limits">
+    </fieldset>}
+    {!external && <div className="field-row recovery-limits">
       <label>Araç çağrısı sınırı<input className="xp-input" type="number" min={1} max={60} value={s.maxCalls} onChange={e => update({ maxCalls: Number(e.target.value) })} /></label>
       <label>Kurtarma süresi (sn)<NumberDraft min={10} max={900} value={s.timeoutMs / 1000} onCommit={value => update({ timeoutMs: value * 1000 })} /></label>
       <label>Koşu başına kurtarma<input className="xp-input" type="number" min={1} max={100} value={s.maxRecoveries} onChange={e => update({ maxRecoveries: Number(e.target.value) })} /></label>
-    </div>
+    </div>}
     <button type="button" className="xp-btn save block" onClick={() => onSave({ recovery: s })}>Kurtarma Ayarlarını Kaydet</button>
     </fieldset>
     <fieldset><legend>Kurtarma raporları</legend>
@@ -140,6 +183,7 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
         <p><b>Olası neden:</b> {report.probableCause || 'Belirlenemedi.'}</p>
         <p><b>Gözlem:</b> {report.evidence || 'Model kanıt belirtmedi.'}</p>
         <p>{report.summary}</p>
+        {report.details && <details><summary>Ayrıntılı analiz ve çözüm raporu</summary><div style={{ whiteSpace: 'pre-wrap' }}>{report.details}</div></details>}
         {report.resumeError && <p>{report.resumeError}</p>}
         <ol>{report.actions.map((action, index) => <li key={index}><b>{action.tool}</b> · {action.message}</li>)}</ol>
       </details>)}

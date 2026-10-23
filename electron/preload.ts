@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('xpAgent', {
   openLogs: () => ipcRenderer.invoke('logs:open'),
   showInFolder: (path: string) => ipcRenderer.invoke('shell:showItem', path),
   openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
+  pickHarness: () => ipcRenderer.invoke('recovery:pickHarness'),
+  testHarness: (settings: unknown) => ipcRenderer.invoke('recovery:testHarness', settings),
   recoveryReports: () => ipcRenderer.invoke('recovery:reports'),
   removeRecoveryReport: (id: string) => ipcRenderer.invoke('recovery:removeReport', id),
   clearRecoveryReports: () => ipcRenderer.invoke('recovery:clearReports'),

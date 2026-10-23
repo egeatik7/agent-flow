@@ -10,6 +10,9 @@ export const RECOVERY_WAIT_MAX_MS = 60_000
 
 export type RecoveryReport = {
   id: string
+  provider?: 'nubbo' | 'harness'
+  details?: string
+  harnessSessionId?: string
   startedAt: number
   endedAt: number
   model: string
@@ -35,7 +38,7 @@ export type RecoveryReport = {
 }
 
 export type RecoveryToolResult = { ok: boolean; outcome: string; message: string; data?: Record<string, unknown> }
-type Dependencies = {
+export type RecoveryDependencies = {
   settings: RecoverySettings
   shouldStop: () => boolean
   clock?: () => number
@@ -91,9 +94,11 @@ export function recoveryGraphJson(graph: AgentGraph): string {
 
 const names: Record<string, string> = { screen_read: 'screen.read', flow_read: 'flow.read', flow_context: 'flow.context', target_preview: 'target.preview', step_run: 'step.run', act_click: 'act.click', act_move: 'act.move', act_click_current: 'act.clickCurrent', act_click_point: 'act.clickPoint', act_type: 'act.type', act_key: 'act.key', act_wait: 'act.wait' }
 
-export async function runRecovery(request: RecoveryRequest, deps: Dependencies): Promise<{ decision: RecoveryDecision; report?: RecoveryReport }> {
+export async function runRecovery(request: RecoveryRequest, deps: RecoveryDependencies): Promise<{ decision: RecoveryDecision; report?: RecoveryReport }> {
   const settings = recoverySettings(deps.settings)
   if (!settings.enabled) return { decision: 'disabled' }
+  // Exclusive dispatch: external failures never enter the built-in model chain.
+  if (settings.provider === 'harness') return (await import('./harness-recovery')).runHarnessRecovery(request, { ...deps, settings })
   const startedAt = Date.now()
   const clock = deps.clock ?? (() => performance.now())
   const startedClock = clock()

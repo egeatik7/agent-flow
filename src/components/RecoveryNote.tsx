@@ -62,6 +62,7 @@ export default function RecoveryNote({ reports, title, onClose, readOnly }: { re
       {report.evidence && <p><b>Gözlem:</b> {report.evidence}</p>}
       {report.completionBasis === 'model-observed' && <p>Hedefin gerçekleştiğine model ekran gözlemine göre karar verdi.</p>}
       {report.summary && <p>{report.summary}</p>}
+      {report.details && <details><summary>Ayrıntılı analiz ve çözüm raporu</summary><div style={{ whiteSpace: 'pre-wrap' }}>{report.details}</div></details>}
       {report.resumeError && <p><b>Devam hatası:</b> {report.resumeError}</p>}
       <b>Yapılanlar</b>
       {report.actions.length ? <ol>{report.actions.map((a,i) => <li key={i}><b>{a.tool}</b> · {a.message}</li>)}</ol> : <p>Eylem kaydı yok.</p>}
