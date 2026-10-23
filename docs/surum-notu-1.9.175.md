@@ -65,4 +65,8 @@ Kaynak paket: `C:\Users\ASUS TUF\Downloads\Nubbo-Harness-Kurtarma-Patch-1.9.175`
 
 ## EXE
 
-`Nubbo-1.9.175.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.175.exe` · SHA256 `BEKLENIYOR`.
+`Nubbo-1.9.175.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.175.exe` · SHA256
+`1E525DC3414362D53A21BEEB20B338221DF7F668FF715BC6ED71DAACB96348A7` (build = masaüstü kopyası,
+97.611.130 bayt). Build damgası `resources/build.json` içinde `6ba164c`, `dirty=false`,
+`version=1.9.175` — etiketli commit ile aynı ağaçtan üretildi. Masaüstündeki eski `Nubbo-*.exe`
+dosyaları silinmedi.
