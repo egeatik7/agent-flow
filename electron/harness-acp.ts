@@ -24,6 +24,7 @@ export class HarnessAcp {
   private buffer = ''
   private failure?: Error
   private closed = false
+  private closing?: Promise<void>
   private stderr = ''
   sessionId = ''
   constructor(settings: HarnessSettings, private stopped: () => boolean, private notify: (params: any) => void = () => {}) {
@@ -77,7 +78,7 @@ export class HarnessAcp {
   }
   call(method: string, params: unknown, timeoutMs = 60_000): Promise<any> {
     if (this.failure) return Promise.reject(this.failure)
-    if (this.closed) return Promise.reject(new Error('Harness bağlantısı kapalı.'))
+    if (this.closed || this.closing && !['session/cancel', 'session/close'].includes(method)) return Promise.reject(new Error('Harness bağlantısı kapalı.'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       const timer = timeoutMs > 0 ? setTimeout(() => { this.pending.delete(id); reject(new Error(`Harness yanıt vermedi: ${method}`)) }, timeoutMs) : undefined
@@ -86,13 +87,15 @@ export class HarnessAcp {
     })
   }
   async initialize() {
-    const result = await this.call('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'nubbo-recovery', version: '1.9.175' } })
+    const result = await this.call('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'nubbo-recovery', version: '1.9.176' } })
     if (result?.protocolVersion !== 1 || result?.agentCapabilities?.mcpCapabilities?.http !== true) throw new Error('Bu Harness sürümü ACP v1 + HTTP MCP desteğini bildirmiyor. CLI sürümünü güncelle veya uygun çalıştırıcıyı seç.')
     return result
   }
-  async close() {
-    if (this.closed) return
-    // Stop accepting fresh work first. Cancellation alone does not revoke the MCP capability.
+  close(): Promise<void> {
+    return this.closing ??= this.shutdown()
+  }
+  private async shutdown() {
+    // Caller revokes the MCP capability first. Cancellation alone does not undo dispatched input.
     if (!this.failure && this.sessionId) {
       try { await this.call('session/cancel', { sessionId: this.sessionId }, 1000) } catch { /* bounded shutdown */ }
       try { await this.call('session/close', { sessionId: this.sessionId }, 1000) } catch { /* old ACP versions may omit close */ }
@@ -101,12 +104,29 @@ export class HarnessAcp {
     this.fail(new Error('Harness bağlantısı kapatıldı.'))
     this.child.stdin.end()
     const pid = this.child.pid
-    if (pid && this.child.exitCode === null) {
-      if (process.platform === 'win32') await new Promise<void>(resolve => {
-        const killer = spawn('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' })
-        killer.on('exit', () => resolve()); killer.on('error', () => { this.child.kill(); resolve() })
+    if (!pid) return
+    if (process.platform !== 'win32') {
+      // The group can still contain a shell child after the Harness leader has crashed.
+      try { process.kill(-pid, 'SIGKILL') } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    } else if (this.child.exitCode === null && this.child.signalCode === null) {
+      await new Promise<void>(resolve => {
+        const killer = spawn('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore', timeout: 4000 })
+        let settled = false
+        const done = () => { if (!settled) { settled = true; resolve() } }
+        killer.on('exit', done); killer.on('error', done)
       })
-      else { try { process.kill(-pid, 'SIGKILL') } catch { this.child.kill('SIGKILL') } }
+      if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill('SIGKILL')
+    }
+    if (this.child.exitCode === null && this.child.signalCode === null) {
+      const exited = await new Promise<boolean>(resolve => {
+        const onExit = () => { clearTimeout(timer); resolve(true) }
+        const timer = setTimeout(() => { this.child.removeListener('exit', onExit); resolve(false) }, 1500)
+        this.child.once('exit', onExit)
+        if (this.child.exitCode !== null || this.child.signalCode !== null) onExit()
+      })
+      if (!exited) throw new Error('Harness sürecinin kapandığı doğrulanamadı.')
     }
   }
 }

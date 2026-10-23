@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
 import { runRecovery } from '../electron/recovery'
 import { testHarnessConnection } from '../electron/harness-recovery'
 import { harnessSettings, recoverySettings, DEFAULT_RECOVERY } from '../electron/recovery-settings'
@@ -127,4 +129,34 @@ it('permits retry after the original node only moved the mouse and sent no input
     ? { ok: true, outcome: 'tamam', message: 'move only', data: { sent: false } }
     : original(name))
   expect((await runRecovery(request, h.deps)).decision).toBe('retry')
+})
+
+it('returns after a durable terminal result even if the Harness prompt never settles', async () => {
+  const h = setup('finished-hang'); h.deps.settings.harness!.timeoutMs = 1500
+  expect((await runRecovery(request, h.deps)).decision).toBe('completed')
+  expect(h.turn).not.toHaveBeenCalled()
+})
+it('allows an explicit whole-desktop read when the failed node window disappeared', async () => {
+  const h = setup('all-screen')
+  const node = { ...target, locator: { windowTitle: 'Closed Blender window', name: '', controlType: '', path: '' } }
+  expect((await runRecovery({ ...request, node, live: node }, h.deps)).decision).toBe('completed')
+  expect(h.execute).toHaveBeenCalledWith('screen.read', { windowTitle: '' })
+})
+it('records executor-admission failure and stops without falling back', async () => {
+  const h = setup()
+  const result = await runRecovery(request, { ...h.deps, makeExecute: () => { throw new Error('executor unavailable') } })
+  expect(result.decision).toBe('failed')
+  expect(h.reports.at(-1)!.summary).toContain('executor unavailable')
+  expect(h.turn).not.toHaveBeenCalled()
+})
+it.skipIf(process.platform === 'win32')('kills the owned process group even after the Harness leader crashes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nubbo-harness-orphan-'))
+  const file = path.join(dir, 'late-input.txt')
+  const h = setup('orphan'); h.deps.settings.harness!.args.push('--orphan-file=' + file)
+  try {
+    expect((await runRecovery(request, h.deps)).decision).toBe('failed')
+    expect(fs.existsSync(file + '.spawned')).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    expect(fs.existsSync(file)).toBe(false)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

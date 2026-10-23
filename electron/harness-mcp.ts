@@ -35,11 +35,16 @@ export async function startHarnessMcp(options: {
   let revoked = false
   let tail: Promise<unknown> = Promise.resolve()
   const token = crypto.randomBytes(32).toString('hex')
-  type Job = { name: string; result: Promise<any>; output?: RecoveryToolResult; done: boolean }
+  const deliveredToTransport = Symbol('deliveredToTransport')
+  type Job = { name: string; result: Promise<any>; output?: RecoveryToolResult; done: boolean; observed: boolean }
   const jobs = new Map<string, Job>()
   let jobCounter = 0
   const ledger = new Map<string, { signature: string; jobId: string }>()
   const jobTool: McpTool = { name: 'nubbo_job', description: 'Uzun araç işleminin sonucunu bekle. Pending cevabındaki jobId ile çağır; aynı eylemi yeniden gönderme. Ekran görüntüsü hazırsa bu sonuçta gelir.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' }, waitMs: { type: 'integer', minimum: 0, maximum: 10000 } }, required: ['jobId'], additionalProperties: false } }
+  const pruneReads = () => {
+    const readJobs = [...jobs.entries()].filter(([, job]) => job.done && job.observed && !isMutation(job.name))
+    for (const [id] of readJobs.slice(0, -64)) jobs.delete(id)
+  }
   const deliver = async (jobId: string, waitMs: number) => {
     const job = jobs.get(jobId)
     if (!job) throw new Error('Bu oturuma ait işlem bulunamadı.')
@@ -47,8 +52,12 @@ export async function startHarnessMcp(options: {
     const pending = { content: [{ type: 'text', text: JSON.stringify({ pending: true, jobId, instruction: 'İşlem sürüyor. nubbo_job ile sonucu bekle; eylemi yeniden gönderme.' }) }], isError: false }
     try {
       const value = await Promise.race([job.result, new Promise(resolve => { timer = setTimeout(() => resolve(pending), waitMs) })])
-      if (value !== pending && job.output) options.delivered?.(job.name, job.output)
-      return value
+      if (value === pending) return value
+      return { ...value, [deliveredToTransport]: () => {
+        job.observed = true
+        if (job.output) options.delivered?.(job.name, job.output)
+        pruneReads()
+      } }
     } finally { clearTimeout(timer) }
   }
   const tools = options.tools.map(tool => isMutation(tool.name) ? { ...tool, inputSchema: { ...tool.inputSchema,
@@ -63,8 +72,8 @@ export async function startHarnessMcp(options: {
     if (name === 'nubbo_job') { check(); return deliver(String(args.jobId), Number(args.waitMs ?? 5000)) }
     const operationId = args.operationId; delete args.operationId
     const jobId = `job-${++jobCounter}`
-    const job: Job = { name, result: Promise.resolve(), done: false }
-    const signature = JSON.stringify([name, args])
+    const job: Job = { name, result: Promise.resolve(), done: false, observed: false }
+    const signature = JSON.stringify([name, Object.fromEntries(Object.keys(args).sort().map(key => [key, args[key]]))])
     const run = async () => {
       check()
       try {
@@ -84,7 +93,15 @@ export async function startHarnessMcp(options: {
       const old = ledger.get(key)
       if (old) { if (old.signature !== signature) throw new Error('operationId başka bir işlemde kullanılmış.'); return deliver(old.jobId, options.deferAfterMs ?? 1500) }
     }
-    const result = tail.then(run).finally(() => { job.done = true })
+    const stopping = name === 'recovery_finish' && args.decision === 'stop'
+    if (!stopping) {
+      const unread = [...jobs.entries()].find(([, current]) => isMutation(current.name) && !current.observed)
+      if (isMutation(name) && unread) throw new Error(`Önce bekleyen işlemin sonucunu nubbo_job ile al: ${unread[0]}. Yeni eylem gönderilmedi.`)
+      if ([...jobs.values()].filter(current => !current.observed).length >= 16) throw new Error('Bekleyen sonuç sınırına ulaşıldı; yeni araç çağırmadan önce nubbo_job ile sonuçları al.')
+    }
+    // Stop/report can interrupt a long-running tool; ordinary inputs stay sequential.
+    const previous = tail
+    const result = (stopping ? run() : tail.then(run)).finally(() => { job.done = true })
     job.result = result
     jobs.set(jobId, job)
     // Keep only the latest two screen images after a new observation. Older text/path evidence remains.
@@ -95,7 +112,7 @@ export async function startHarnessMcp(options: {
         void old.result.then(value => { if (value?.content) value.content = value.content.filter((c: any) => c.type !== 'image') })
       }
     }).catch(() => {})
-    tail = result.catch(() => {})
+    tail = stopping ? Promise.allSettled([previous, result]) : result.catch(() => {})
     if (key) ledger.set(key, { signature, jobId }) // reserve before execution; failures are never replayed
     return deliver(jobId, options.deferAfterMs ?? 1500)
   }
@@ -115,7 +132,7 @@ export async function startHarnessMcp(options: {
         if (message.method === 'initialize') {
           const requested = message.params?.protocolVersion
           const supported = ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25', '2026-07-28']
-          value = { protocolVersion: supported.includes(requested) ? requested : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'nubbo-recovery', version: '1.9.175' }, instructions: options.instructions }
+          value = { protocolVersion: supported.includes(requested) ? requested : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'nubbo-recovery', version: '1.9.176' }, instructions: options.instructions }
         } else if (message.method === 'ping') value = {}
         else if (message.method === 'tools/list') value = { tools }
         else if (message.method === 'tools/call') value = await invoke(message.params?.name, message.params?.arguments ?? {})
@@ -126,7 +143,14 @@ export async function startHarnessMcp(options: {
     return result
   }
   const server = http.createServer(async (req, res) => {
-    const reply = (status: number, body?: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(body === undefined ? undefined : JSON.stringify(body)) }
+    const reply = (status: number, body?: any) => {
+      if (res.destroyed || res.writableEnded || res.headersSent) return
+      res.once('finish', () => {
+        try { body?.result?.[deliveredToTransport]?.() } catch { revoked = true }
+      })
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(body === undefined ? undefined : JSON.stringify(body))
+    }
     if (req.url !== '/mcp') { reply(404); return }
     if (req.headers.authorization !== `Bearer ${token}` || req.headers.origin) { reply(403); return }
     if (revoked || options.stopped()) { reply(410); return }

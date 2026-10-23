@@ -40,10 +40,14 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
   const context = { task: settings.task, failure: { node: request.live, error: request.error.message, stepNo: request.stepNo, ahead: request.ahead, vars: request.vars,
     inputAlreadySent: failedNodeSent, inputDelivery: request.inputDelivery, typeProgress: request.typeProgress }, context: report.context,
     canvas: JSON.parse(recoveryGraphJson(request.graph)), allowedNodeIds: [...allowedNodes], previousReports: deps.previousReports ?? [], fullControl: config.fullControl }
-  const execute = deps.makeExecute(stopped)
+  let execute: ReturnType<RecoveryDependencies['makeExecute']>
+  let signalFinished!: () => void
+  const finished = new Promise<void>(resolve => { signalFinished = resolve })
   const success = (value: unknown): RecoveryToolResult => ({ ok: true, outcome: 'tamam', message: 'Nubbo kurtarma verisi.', data: { value } })
   const condition = request.node.kind === 'condition'
   const tools = recoveryTools(effective, 60_000).filter(t => !t.function.name.startsWith('recovery_') && (!condition || ['screen_read', 'flow_read', 'flow_context'].includes(t.function.name))).map(mcpTool)
+  const screenTool = tools.find(t => t.name === 'screen_read')
+  if (screenTool) screenTool.description += ' windowTitle alanını açıkça boş dize verirsen tüm masaüstü okunur; alanı atlayınca hata veren node penceresi tercih edilir.'
   tools.push(tool('nubbo_status', 'Nubbo kurtarma bağlantısını doğrula; koşu başka bir ajan devreye girmeden duraklatıldı.'))
   tools.push(tool('nubbo_context', 'Görev, hata, tam tuval, aktif döngü ve izinli node kimliklerini oku.'))
   tools.push(tool('nubbo_logs', 'Bu kurtarmanın başlangıcındaki ilgili günlükleri sayfalayarak oku.', { offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }))
@@ -54,6 +58,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
   const save = () => { report.endedAt = Date.now(); report.elapsedMs = performance.now() - startedClock; deps.saveReport(report) }
   try {
     save() // persist admission even if the selected executable cannot launch
+    execute = deps.makeExecute(stopped)
     if (!config.command) throw new Error('Kurtarma sekmesinden Harness CLI programını seç.')
     const cwd = config.cwd || path.dirname(path.resolve(config.command))
     if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error('Harness çalışma klasörü bulunamadı.')
@@ -81,6 +86,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
           if (report.result === 'completed') report.completionBasis = 'model-observed'
           // Durable report must succeed BEFORE granting a terminal decision to the runner.
           save(); terminal = args.decision as RecoveryDecision
+          signalFinished()
           return success({ accepted: true, decision: terminal, recoveryId: report.id })
         }
         if (name === 'step_run' || name === 'target_preview') {
@@ -89,7 +95,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
         }
         if (isMutation(name)) { freshScreen = false; latestFrame = undefined; if (name === 'step_run' && args.nodeId === request.node.id) failedNodeSent = true }
         if (name === 'screen_read') { freshScreen = false; latestFrame = undefined }
-        const runArgs = name === 'screen_read' ? { ...args, ...(request.node.locator?.windowTitle && !args.hwnd && !args.windowTitle ? { windowTitle: request.node.locator.windowTitle } : {}) } : args
+        const runArgs = name === 'screen_read' ? { ...args, ...(request.node.locator?.windowTitle && args.hwnd === undefined && args.windowTitle === undefined ? { windowTitle: request.node.locator.windowTitle } : {}) } : args
         result = await execute(aliases[name] || name, runArgs)
         check()
         if (name === 'screen_read') { latestFrame = result; freshScreen = false }
@@ -105,7 +111,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
       if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
         const message = String(update.content.text)
         deps.log('info', `Harness: ${message.slice(0, 1200)}`)
-        report.details = ((report.details || '') + message).slice(-150_000)
+        if (!terminal) report.details = ((report.details || '') + message).slice(-150_000)
       }
     })
     const client = acp
@@ -118,7 +124,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
     let prompt = `${HARNESS_INSTRUCTIONS}\n\nKullanıcının kurtarma talimatı:\n${config.instructions}\n\nAkışın amacı:\n${settings.task || 'Mevcut çalışmayı toparla, nedenini araştır ve raporla.'}\n\nHata: ${request.node.title}: ${request.error.message}\nNubbo MCP araçları bu oturuma bağlandı. Önce nubbo_status ve nubbo_context çağır. Tam PC kontrolü: ${config.fullControl ? 'kullanıcı tarafından açık; görev kapsamında masaüstü, dosyalar ve komutlar kullanılabilir' : 'kapalı; yalnız tanımlı araç yetkileri'}.`
     while (true) {
       check()
-      const response = await guarded(client.call('session/prompt', { sessionId: client.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0))
+      const response = await guarded(Promise.race([client.call('session/prompt', { sessionId: client.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0), finished.then(() => ({ stopReason: 'nubbo_finished' }))]))
       check()
       if (terminal) break
       if (['cancelled', 'refusal'].includes(response?.stopReason)) throw new Error(`Harness görevi sonlandırdı: ${response.stopReason}`)
@@ -135,11 +141,14 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
     return { decision: 'failed', report }
   } finally {
     revoked = true; bridge?.revoke(); clearInterval(poll)
-    await acp?.close()
-    await bridge?.close()
+    let cleanupError: unknown
+    try { await acp?.close() } catch (error) { cleanupError = error }
+    try { await bridge?.close() } catch (error) { cleanupError ??= error }
+    if (cleanupError) { report.result = deps.shouldStop() ? 'stopped' : 'failed'; report.summary = `Harness kapanışı doğrulanamadı; akış sürdürülmedi: ${(cleanupError as Error).message}` }
     report.endedAt = Date.now(); report.elapsedMs = performance.now() - startedClock
     try { deps.saveReport(report) } catch (error) { deps.log('warn', `Harness raporu kaydedilemedi: ${(error as Error).message}`) }
     deps.log(report.result === 'completed' || report.result === 'retry' ? 'info' : 'warn', report.summary || 'Harness sonuç vermeden durdu.')
+    if (cleanupError) throw cleanupError
   }
 }
 
@@ -157,5 +166,5 @@ export async function testHarnessConnection(value: HarnessSettings): Promise<{ o
     client.sessionId = session.sessionId
     return { ok: true, message: 'Harness ACP ve Nubbo MCP araç kaydı hazır. Masaüstüne işlem gönderilmedi. Model kimlik bilgileri ve görsel desteği gerçek görevde ayrıca doğrulanır.' }
   } catch (error) { return { ok: false, message: (error as Error).message } }
-  finally { bridge?.revoke(); await client?.close(); await bridge?.close() }
+  finally { bridge?.revoke(); try { await client?.close() } finally { await bridge?.close() } }
 }

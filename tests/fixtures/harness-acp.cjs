@@ -27,6 +27,12 @@ async function prompt(id) {
   const ctx = await call('nubbo_context')
   if (!ctx || ctx.isError) throw new Error('Context missing')
   if (scenario === 'hang') return
+  if (scenario === 'orphan') {
+    const output = process.argv.find(a => a.startsWith('--orphan-file='))?.slice('--orphan-file='.length)
+    const child = require('node:child_process').spawn(process.execPath, ['-e', `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(output)}, 'late-input'), 700)`], { stdio: 'ignore' })
+    require('node:fs').writeFileSync(output + '.spawned', String(child.pid))
+    process.exit(7)
+  }
   if (scenario === 'continue' && turn === 1) { send({ jsonrpc: '2.0', id, result: { stopReason: 'max_tokens' } }); return }
   if (scenario === 'permission') {
     send({ jsonrpc: '2.0', id: 'permission-request', method: 'session/request_permission', params: { sessionId, options: [{ optionId: 'yes', kind: 'allow_once' }] } })
@@ -37,7 +43,7 @@ async function prompt(id) {
     if (scenario === 'drop') process.exit(7)
   }
   if (scenario === 'move-only') await call('step_run', { nodeId: 'target', operationId: 'move-original' })
-  if (scenario !== 'noframe') await call('screen_read')
+  if (scenario !== 'noframe') await call('screen_read', scenario === 'all-screen' ? { windowTitle: '' } : {})
   if (scenario === 'failed-refresh') await call('screen_read')
   if (scenario === 'stale-frame') await call('act_key', { keys: 'enter', operationId: 'after-frame' })
   const decision = ['sent-retry', 'move-only'].includes(scenario) ? 'retry' : 'completed'
@@ -45,6 +51,7 @@ async function prompt(id) {
   if (finish.isError) {
     await call('recovery_finish', { operationId: 'stop-once', decision: 'stop', probableCause: 'Kanıt veya tekrar engeli', evidence: 'Reddedilen karar', summary: 'Fixture rejected completion', details })
   }
+  if (scenario === 'finished-hang') return
   if (scenario === 'complete') {
     const late = await call('act_key', { operationId: 'late', keys: 'enter' })
     if (!late.isError) throw new Error('Late action accepted')
