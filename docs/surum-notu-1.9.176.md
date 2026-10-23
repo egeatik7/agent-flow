@@ -77,4 +77,8 @@ Kaynak paket: `C:\Users\ASUS TUF\Downloads\Nubbo-Harness-Bugfix-Patch-1.9.176\Nu
 
 ## EXE
 
-`Nubbo-1.9.176.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.176.exe` · SHA256 `BEKLENIYOR`.
+`Nubbo-1.9.176.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.176.exe` · SHA256
+`02A00F4771D6748D1C4D14FDA8252E6381C0CB81F10721BB3744BE77447FA7A1` (build = masaüstü kopyası,
+97.619.539 bayt). Build damgası `resources/build.json` içinde `f38b7d2`, `dirty=false`,
+`version=1.9.176` — etiketli commit ile aynı ağaçtan üretildi. Masaüstündeki eski `Nubbo-*.exe`
+dosyaları silinmedi.
