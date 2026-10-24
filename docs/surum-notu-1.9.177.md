@@ -89,4 +89,8 @@ GUI yok):
 
 ## EXE
 
-`Nubbo-1.9.177.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.177.exe` · SHA256 `BEKLENIYOR`.
+`Nubbo-1.9.177.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.177.exe` · SHA256
+`AF273E71356DB564F01A1787D9B3355CE61F0566714501D59056A50815EC0249` (build = masaüstü kopyası,
+97.623.246 bayt). Build damgası `resources/build.json` içinde `c5a2f25`, `dirty=false`,
+`version=1.9.177` — etiketli commit ile aynı ağaçtan üretildi. Masaüstündeki eski `Nubbo-*.exe`
+dosyaları silinmedi.
