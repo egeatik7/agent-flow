@@ -160,3 +160,31 @@ it.skipIf(process.platform === 'win32')('kills the owned process group even afte
     expect(fs.existsSync(file)).toBe(false)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+it('rejects an exit-code-zero GUI-like startup as failed and records launch mode/stage without secrets', async () => {
+  const h = setup('exit-zero')
+  const result = await runRecovery(request, h.deps)
+  expect(result.decision).toBe('failed')
+  expect(result.report!.summary).toContain('initialize')
+  expect(result.report!.summary).toContain('ACP görevi tamamlanmadı')
+  expect(result.report!.summary).not.toContain('fixture-secret')
+  expect(result.report!.harnessLaunch).toMatchObject({ selectedCommand: command, mode: 'script' })
+  expect(h.execute).not.toHaveBeenCalled(); expect(h.turn).not.toHaveBeenCalled()
+})
+it('does not report a successful connection when the server never discovers Nubbo tools', async () => {
+  const config = harnessSettings({ command, args: ['--scenario=no-discovery'] })
+  const result = await testHarnessConnection(config)
+  expect(result.ok).toBe(false); expect(result.message).toContain('araç listesini keşfetmedi')
+  const h = setup('no-discovery')
+  expect((await runRecovery(request, h.deps)).decision).toBe('failed')
+  expect(h.turn).not.toHaveBeenCalled(); expect(h.execute).not.toHaveBeenCalled()
+})
+it('tests and performs recovery using the same automatic writable workspace', async () => {
+  const h = setup()
+  const connection = await testHarnessConnection(h.deps.settings.harness!)
+  expect(connection.ok).toBe(true)
+  const result = await runRecovery(request, h.deps)
+  expect(result.decision).toBe('completed')
+  expect(connection.message).toContain(result.report!.harnessLaunch!.cwd)
+  expect(result.report!.harnessLaunch!.cwd).not.toBe(path.dirname(command))
+})

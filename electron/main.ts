@@ -1533,7 +1533,7 @@ export async function startApp(report: (pct: number, line: string) => void, clos
   recoveryToolContext = toolContext
   ipcMain.handle('recovery:pickHarness', async () => {
     if (running) throw new Error('Koşu sürerken program seçilemez.')
-    const answer = await dialog.showOpenDialog({ title: 'DeepSeek Harness CLI çalıştırıcısını seç', properties: ['openFile'], filters: [{ name: 'Çalıştırıcı', extensions: ['exe', 'cmd', 'bat', 'js', 'cjs', 'mjs'] }, { name: 'Tüm dosyalar', extensions: ['*'] }] })
+    const answer = await dialog.showOpenDialog({ title: 'DeepSeek Harness programını veya CLI çalıştırıcısını seç', properties: ['openFile'], filters: [{ name: 'Çalıştırıcı', extensions: ['exe', 'cmd', 'bat', 'js', 'cjs', 'mjs'] }, { name: 'Tüm dosyalar', extensions: ['*'] }] })
     return answer.canceled ? null : answer.filePaths[0] ?? null
   })
   ipcMain.handle('recovery:testHarness', async (_event, value: unknown) => {

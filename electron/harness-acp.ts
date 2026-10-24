@@ -1,20 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import path from 'node:path'
-import { harnessSettings, type HarnessSettings } from './recovery-settings'
-
-export function harnessLaunch(value: HarnessSettings, platform = process.platform, executable = process.execPath) {
-  const settings = harnessSettings(value)
-  if (!settings.command) throw new Error('Harness CLI programını seç.')
-  const env = { ...process.env, DSH_PERMISSION_MODE: settings.fullControl ? 'danger-full-access' : 'workspace-write' }
-  if (/\.[cm]?js$/i.test(settings.command)) return { command: executable, args: [settings.command, ...settings.args], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }
-  if (platform === 'win32' && /\.(cmd|bat)$/i.test(settings.command)) {
-    // cmd expands percent even inside quotes. Refuse ambiguous command strings instead of shell interpolation.
-    if (/[\r\n"%!]/.test(settings.command) || settings.args.some(arg => /[\r\n"%!^&|<>]/.test(arg))) throw new Error('CMD çalıştırıcı yolu/argümanlarında desteklenmeyen kabuk karakterleri var; doğrudan EXE veya JS çalıştırıcısını seç.')
-    const line = `""${settings.command}" ${settings.args.map(arg => `"${arg}"`).join(' ')}"`
-    return { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/v:off', '/s', '/c', line], env, windowsVerbatimArguments: true }
-  }
-  return { command: settings.command, args: settings.args, env }
-}
+import type { HarnessSettings } from './recovery-settings'
+import { harnessLaunch, harnessWorkspace, harnessDiagnostic } from './harness-launch'
+export { harnessLaunch } from './harness-launch'
 
 /** ACP v1 NDJSON over stdio. No model API is called by Nubbo on this path. */
 export class HarnessAcp {
@@ -27,12 +14,16 @@ export class HarnessAcp {
   private closing?: Promise<void>
   private stderr = ''
   sessionId = ''
+  private stage = 'başlatma'
+  readonly launchInfo: { selectedCommand: string; command: string; cwd: string; mode: string }
   constructor(settings: HarnessSettings, private stopped: () => boolean, private notify: (params: any) => void = () => {}) {
     const launch = harnessLaunch(settings)
-    this.child = spawn(launch.command, launch.args, { env: launch.env, cwd: settings.cwd || path.dirname(path.resolve(settings.command)), windowsHide: true,
+    const cwd = harnessWorkspace(settings)
+    this.launchInfo = { selectedCommand: launch.selectedCommand, command: launch.command, cwd, mode: launch.mode }
+    this.child = spawn(launch.command, launch.args, { env: launch.env, cwd, windowsHide: true,
       windowsVerbatimArguments: 'windowsVerbatimArguments' in launch && launch.windowsVerbatimArguments, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
     this.child.on('error', error => this.fail(new Error(`Harness başlatılamadı: ${error.message}`)))
-    this.child.on('exit', (code, signal) => this.fail(new Error(`Harness kapandı (${code ?? signal}). ${this.stderr.slice(-1500).replace(/Bearer\s+[^\s"']+/gi, 'Bearer [gizli]').replace(/sk-[A-Za-z0-9_-]+/g, '[gizli anahtar]')}`)))
+    this.child.on('exit', (code, signal) => this.fail(new Error(`Harness ${this.stage} aşamasında kapandı (${code ?? signal}); ACP görevi tamamlanmadı. ${this.stderr.slice(-1500)} ${/cache|disk_cache/i.test(this.stderr) ? 'Cache mesajı GUI sürecinden gelebilir; ACP çalıştırıcısı ve başlatma modu denetlenmeli.' : ''}`)))
     this.child.stdin.on('error', error => this.fail(new Error(`Harness bağlantısı kapandı: ${error.message}`)))
     this.child.stderr.on('data', chunk => { this.stderr = (this.stderr + chunk.toString()).slice(-8000) })
     this.child.stdout.setEncoding('utf8')
@@ -49,7 +40,7 @@ export class HarnessAcp {
     })
   }
   private fail(error: Error) {
-    this.failure ??= error
+    this.failure ??= new Error(harnessDiagnostic(`${error.message} · Seçilen: ${this.launchInfo.selectedCommand} · Mod: ${this.launchInfo.mode} · Çalışma: ${this.launchInfo.cwd} · Aşama: ${this.stage}`))
     for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(this.failure) }
     this.pending.clear()
   }
@@ -79,15 +70,16 @@ export class HarnessAcp {
   call(method: string, params: unknown, timeoutMs = 60_000): Promise<any> {
     if (this.failure) return Promise.reject(this.failure)
     if (this.closed || this.closing && !['session/cancel', 'session/close'].includes(method)) return Promise.reject(new Error('Harness bağlantısı kapalı.'))
+    this.stage = method
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      const timer = timeoutMs > 0 ? setTimeout(() => { this.pending.delete(id); reject(new Error(`Harness yanıt vermedi: ${method}`)) }, timeoutMs) : undefined
+      const timer = timeoutMs > 0 ? setTimeout(() => { this.pending.delete(id); reject(new Error(harnessDiagnostic(`Harness yanıt vermedi: ${method} · Seçilen: ${this.launchInfo.selectedCommand} · Mod: ${this.launchInfo.mode} · Çalışma: ${this.launchInfo.cwd}`))) }, timeoutMs) : undefined
       this.pending.set(id, { resolve, reject, timer })
       try { this.send({ jsonrpc: '2.0', id, method, params }) } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error) }
     })
   }
   async initialize() {
-    const result = await this.call('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'nubbo-recovery', version: '1.9.176' } })
+    const result = await this.call('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'nubbo-recovery', version: '1.9.177' } })
     if (result?.protocolVersion !== 1 || result?.agentCapabilities?.mcpCapabilities?.http !== true) throw new Error('Bu Harness sürümü ACP v1 + HTTP MCP desteğini bildirmiyor. CLI sürümünü güncelle veya uygun çalıştırıcıyı seç.')
     return result
   }

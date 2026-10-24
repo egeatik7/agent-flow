@@ -93,8 +93,8 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <p className="hint">Koşu başladığında seçilir. Harness seçiliyse açılamasa veya başarısız olsa da diğer kurtarma ajanı çağrılmaz; koşu durur.</p>
     </div>
     {external && <div className="field">
-      <label htmlFor="harness-program">Harness CLI programı</label>
-      <input id="harness-program" className="xp-input" value={h.command} onChange={e => { updateHarness({ command: e.target.value }); setHarnessStatus('') }} placeholder="dsh.cmd, dsh.exe veya CLI giriş dosyası" />
+      <label htmlFor="harness-program">Harness programı / CLI</label>
+      <input id="harness-program" className="xp-input" value={h.command} onChange={e => { updateHarness({ command: e.target.value }); setHarnessStatus('') }} placeholder="DeepSeek Harness.exe veya dsh.cmd" />
       <div className="field-row"><button type="button" className="xp-btn" onClick={() => void chooseHarness()}>Program seç…</button>
         <button type="button" className="xp-btn" disabled={testingHarness || !h.command} onClick={() => void testHarness()}>{testingHarness ? 'Deneniyor…' : 'Bağlantıyı dene'}</button></div>
       {harnessStatus && <p role="status" className="hint">{harnessStatus}</p>}
@@ -107,9 +107,9 @@ export default function RecoverySettingsPanel({ settings, setSettings, onSave, g
       <details><summary>Harness başlatma ayarları</summary>
         <label htmlFor="harness-args">CLI argümanları (her satır bir argüman)</label>
         <textarea id="harness-args" className="xp-input" rows={3} value={h.args.join('\n')} onChange={e => updateHarness({ args: e.target.value.split('\n').filter(Boolean) })} />
-        <label htmlFor="harness-cwd">Çalışma klasörü (boşsa çalıştırıcının klasörü)</label>
+        <label htmlFor="harness-cwd">Çalışma klasörü (boşsa otomatik yazılabilir klasör)</label>
         <input id="harness-cwd" className="xp-input" value={h.cwd} onChange={e => updateHarness({ cwd: e.target.value })} />
-        <p className="hint">Varsayılan argümanlar --profile ve acp. Model ve API bilgileri Harness profilinden gelir. Masaüstü uygulaması yerine ACP destekli CLI seç.</p>
+        <p className="hint">Varsayılan argümanlar --profile ve acp. Model ve API bilgileri Harness profilinden gelir. Windows DeepSeek Harness.exe seçilirse aynı kurulumdaki paketli CLI otomatik kullanılır; masaüstü penceresi açılmaz. CLI bulunamazsa uygulamayı onar/güncelle veya dsh.cmd seç.</p>
       </details>
     </div>}
     {!external && <div className="field"><label htmlFor="recovery-api-key">Kurtarma ajanı OpenRouter API Key</label>

@@ -1,7 +1,5 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
 import { HarnessAcp } from './harness-acp'
+import { harnessWorkspace } from './harness-launch'
 import { startHarnessMcp, mcpTool, isMutation, type McpTool } from './harness-mcp'
 import { recoveryTools, recoveryGraphJson, type RecoveryDependencies, type RecoveryReport, type RecoveryToolResult } from './recovery'
 import { harnessSettings, recoverySettings, type HarnessSettings } from './recovery-settings'
@@ -60,8 +58,7 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
     save() // persist admission even if the selected executable cannot launch
     execute = deps.makeExecute(stopped)
     if (!config.command) throw new Error('Kurtarma sekmesinden Harness CLI programını seç.')
-    const cwd = config.cwd || path.dirname(path.resolve(config.command))
-    if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error('Harness çalışma klasörü bulunamadı.')
+    const cwd = harnessWorkspace(config)
     deps.log('info', `DeepSeek Harness kurtarması başladı: ${request.node.title}. ${config.timeoutMs === 0 ? 'Kullanıcı durdurana veya sonuç gelene kadar devam.' : `Sınır ${Math.round(config.timeoutMs / 1000)} sn.`}`)
     bridge = await startHarnessMcp({ tools, stopped, instructions: HARNESS_INSTRUCTIONS, delivered: (name, result) => {
       if (name === 'screen_read' && result === latestFrame) freshScreen = result.ok && result.outcome === 'tamam' && result.data?.matched !== false && !!(result.data?.image as { data?: string } | undefined)?.data
@@ -114,12 +111,16 @@ export async function runHarnessRecovery(request: RecoveryRequest, deps: Recover
         if (!terminal) report.details = ((report.details || '') + message).slice(-150_000)
       }
     })
+    report.harnessLaunch = acp.launchInfo
+    deps.log('info', `Harness başlatma: ${acp.launchInfo.selectedCommand} · mod=${acp.launchInfo.mode} · çalışma=${acp.launchInfo.cwd}`)
+    save()
     const client = acp
     const interruption = new Promise<never>((_, reject) => { poll = setInterval(() => { if (stopped() || bridge?.isRevoked()) reject(new Error(deps.shouldStop() ? 'Kullanıcı durdurdu.' : timedOut() ? 'Harness kurtarma süresi doldu.' : 'MCP çağrısı iptal edildi; işlem sonucu belirsiz.')) }, 100) })
     const guarded = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, interruption])
     await guarded(client.initialize())
     const session = await guarded(client.call('session/new', { cwd, mcpServers: [bridge.declaration] }))
     if (typeof session?.sessionId !== 'string' || !session.sessionId) throw new Error('Harness oturum kimliği dönmedi.')
+    if (!bridge.wasDiscovered()) throw new Error('Harness oturum açtı fakat Nubbo MCP araç listesini keşfetmedi; bağlantı hazır değil.')
     client.sessionId = session.sessionId; report.harnessSessionId = session.sessionId; save()
     let prompt = `${HARNESS_INSTRUCTIONS}\n\nKullanıcının kurtarma talimatı:\n${config.instructions}\n\nAkışın amacı:\n${settings.task || 'Mevcut çalışmayı toparla, nedenini araştır ve raporla.'}\n\nHata: ${request.node.title}: ${request.error.message}\nNubbo MCP araçları bu oturuma bağlandı. Önce nubbo_status ve nubbo_context çağır. Tam PC kontrolü: ${config.fullControl ? 'kullanıcı tarafından açık; görev kapsamında masaüstü, dosyalar ve komutlar kullanılabilir' : 'kapalı; yalnız tanımlı araç yetkileri'}.`
     while (true) {
@@ -160,11 +161,12 @@ export async function testHarnessConnection(value: HarnessSettings): Promise<{ o
     bridge = await startHarnessMcp({ tools: [tool('nubbo_status', 'Bağlantı testi; masaüstüne dokunmaz.')], instructions: 'Yalnız bağlantı testi.', stopped: () => false, execute: async () => ({ ok: true, outcome: 'tamam', message: 'Bağlı.' }) })
     client = new HarnessAcp(config, () => false)
     await client.initialize()
-    const cwd = config.cwd || (config.command ? path.dirname(path.resolve(config.command)) : os.tmpdir())
+    const cwd = harnessWorkspace(config)
     const session = await client.call('session/new', { cwd, mcpServers: [bridge.declaration] })
-    if (typeof session?.sessionId !== 'string') throw new Error('Oturum kimliği dönmedi.')
+    if (typeof session?.sessionId !== 'string' || !session.sessionId) throw new Error('Oturum kimliği dönmedi.')
+    if (!bridge.wasDiscovered()) throw new Error('Harness oturum açtı fakat Nubbo MCP araç listesini keşfetmedi; bağlantı hazır değil.')
     client.sessionId = session.sessionId
-    return { ok: true, message: 'Harness ACP ve Nubbo MCP araç kaydı hazır. Masaüstüne işlem gönderilmedi. Model kimlik bilgileri ve görsel desteği gerçek görevde ayrıca doğrulanır.' }
+    return { ok: true, message: `Harness ACP ve Nubbo MCP araç keşfi doğrulandı. Mod: ${client.launchInfo.mode} · Çalışma: ${cwd}. Masaüstüne işlem gönderilmedi; model/API erişimi gerçek görevde ayrıca doğrulanır.` }
   } catch (error) { return { ok: false, message: (error as Error).message } }
   finally { bridge?.revoke(); try { await client?.close() } finally { await bridge?.close() } }
 }

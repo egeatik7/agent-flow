@@ -13,6 +13,7 @@ export type RecoveryReport = {
   provider?: 'nubbo' | 'harness'
   details?: string
   harnessSessionId?: string
+  harnessLaunch?: { selectedCommand: string; command: string; cwd: string; mode: string }
   startedAt: number
   endedAt: number
   model: string

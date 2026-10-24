@@ -32,6 +32,7 @@ export async function startHarnessMcp(options: {
   delivered?: (name: string, result: RecoveryToolResult) => void
   deferAfterMs?: number
 }) {
+  let discovered = false
   let revoked = false
   let tail: Promise<unknown> = Promise.resolve()
   const token = crypto.randomBytes(32).toString('hex')
@@ -132,9 +133,9 @@ export async function startHarnessMcp(options: {
         if (message.method === 'initialize') {
           const requested = message.params?.protocolVersion
           const supported = ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25', '2026-07-28']
-          value = { protocolVersion: supported.includes(requested) ? requested : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'nubbo-recovery', version: '1.9.176' }, instructions: options.instructions }
+          value = { protocolVersion: supported.includes(requested) ? requested : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'nubbo-recovery', version: '1.9.177' }, instructions: options.instructions }
         } else if (message.method === 'ping') value = {}
-        else if (message.method === 'tools/list') value = { tools }
+        else if (message.method === 'tools/list') { discovered = true; value = { tools } }
         else if (message.method === 'tools/call') value = await invoke(message.params?.name, message.params?.arguments ?? {})
         else return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } }
         return { jsonrpc: '2.0', id, result: value }
@@ -169,6 +170,7 @@ export async function startHarnessMcp(options: {
   if (!address || typeof address === 'string') throw new Error('MCP adresi oluşturulamadı.')
   return {
     declaration: { type: 'http', name: 'nubbo', url: `http://127.0.0.1:${address.port}/mcp`, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] },
+    wasDiscovered: () => discovered,
     isRevoked: () => revoked,
     revoke: () => { revoked = true },
     async close() { revoked = true; server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await tail },

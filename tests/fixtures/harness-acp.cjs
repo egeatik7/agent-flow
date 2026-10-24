@@ -62,8 +62,10 @@ readline.createInterface({ input: process.stdin }).on('line', async line => {
   const m = JSON.parse(line)
   if (!m.method) { if (m.id === 'permission-request' && m.result?.outcome?.optionId !== 'yes') process.exit(9); return }
   try {
+    if (m.method === 'initialize' && scenario === 'exit-zero') { process.stderr.write('Unable to create cache; token=fixture-secret\n'); process.exit(0) }
     if (m.method === 'initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1, agentCapabilities: { mcpCapabilities: { http: scenario !== 'unsupported' } } } })
     else if (m.method === 'session/new') {
+      if (scenario === 'no-discovery') { send({ jsonrpc: '2.0', id: m.id, result: { sessionId } }); return }
       mcp = m.params.mcpServers[0]
       await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } })
       const catalog = await request('tools/list', {})
