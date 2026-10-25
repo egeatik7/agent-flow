@@ -161,7 +161,8 @@ describe('Condition: bounded independent confidence review', () => {
     respond(request => ({ satisfied, id: null, basis: 'absence', reason: 'The relevant surface is covered and the requested state is absent.',
       confidence: request.model === 'primary/model' ? 0.6 : 0.9 }))
     expect(await agent().exists('', condition())).toBe(satisfied)
-    expect(state.requests.map(r => r.model)).toEqual(['primary/model', 'backup/model'])
+    expect(state.requests.map(r => r.model)).toEqual(['primary/model', 'backup/model', 'primary/model', 'backup/model'])
+    expect(state.scans).toHaveLength(2)
   })
   it('honors Stop after the backup response without accepting its verdict or asking OCR', async () => {
     respond(request => { if (request.model === 'backup/model') state.stopped = true; return scored('uia', false, request.model === 'primary/model' ? 0.6 : 0.9) })
@@ -226,7 +227,7 @@ describe('Condition: evidence-backed decisions finish the method pass', () => {
   it.each([true, false])('a justified absence decision can finish with satisfied=%s and no ID', async satisfied => {
     respond(() => ({ satisfied, id: null, basis: 'absence', reason: 'The requested surface was observed; the specified state is absent.' }))
     expect(await agent().exists('', { ...condition(), text: satisfied ? 'Is the error absent?' : 'Is an error present?' })).toBe(satisfied)
-    expect(state.scans).toHaveLength(1); expect(state.requests).toHaveLength(1)
+    expect(state.scans).toHaveLength(2); expect(state.requests).toHaveLength(2)
   })
   it('legacy false with a valid evidence ID remains supported and immediate', async () => {
     respond(() => ({ satisfied: false, id: 27, text: '0' }))
@@ -273,5 +274,40 @@ describe('Condition: evidence-backed decisions finish the method pass', () => {
     respond(() => { state.stopped = true; return observed('uia') })
     await expect(agent().exists('', condition())).rejects.toBeInstanceOf(StoppedError)
     expect(state.scans).toHaveLength(1); expect(state.requests).toHaveLength(1)
+  })
+})
+
+describe('Condition: visual absence must cover both readers', () => {
+  it('finds a visible label in OCR after UIA confidently reports it absent', async () => {
+    state.uia = []
+    state.ocr = [row(91, 'ocr', 'Run Remesh for Multiple Objects')]
+    respond(request => request.source === 'uia'
+      ? { satisfied: false, id: null, basis: 'absence', reason: 'No matching UIA control.', confidence: 0.99 }
+      : observed('ocr', true, 'Run Remesh for Multiple Objects'))
+    expect(await agent().exists('', { ...condition(), text: 'Is Run Remesh for Multiple Objects visible?' })).toBe(true)
+    expect(state.scans).toHaveLength(2)
+    expect(state.requests.map(r => r.source)).toEqual(['uia', 'ocr'])
+  })
+  it('does not confirm disappearance from UIA absence when OCR observes the counterexample', async () => {
+    state.uia = []; state.ocr = [row(91, 'ocr', 'Loading')]
+    respond(request => request.source === 'uia'
+      ? { satisfied: true, id: null, basis: 'absence', reason: 'Loading is not in the UIA tree.', confidence: 0.95 }
+      : observed('ocr', false, 'Loading'))
+    expect(await agent().exists('', { ...condition(), text: 'Has the Loading label disappeared?' })).toBe(false)
+    expect(state.scans).toHaveLength(2)
+  })
+  it('returns a stable negative after both independent readers report absence', async () => {
+    state.uia = []; state.ocr = []
+    respond(() => ({ satisfied: false, id: null, basis: 'absence', reason: 'The current reader does not observe the requested label.', confidence: 0.9 }))
+    expect(await agent().exists('', { ...condition(), text: 'Is the error banner visible?' })).toBe(false)
+    expect(state.requests).toHaveLength(2)
+  })
+  it('does not convert failed OCR into a negative after UIA absence', async () => {
+    vi.useFakeTimers()
+    respond(request => request.source === 'uia'
+      ? { satisfied: false, id: null, basis: 'absence', reason: 'Not in UIA.', confidence: 0.95 }
+      : unknown)
+    const result = expect(agent().exists('', condition())).rejects.toBeInstanceOf(ConditionUndecidedError)
+    await vi.runAllTimersAsync(); await result
   })
 })

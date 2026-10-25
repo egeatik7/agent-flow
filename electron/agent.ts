@@ -1528,8 +1528,8 @@ export function createAgent(ctx: AgentContext) {
         log('info', `“${node.title}” gördü: ${how}.`)
         return true
       }
-      // Same readers and target-list model as Click. A supported yes OR no completes
-      // the pass; only an inconclusive reader advances to the next observation method.
+      // Observed state evidence can finish a pass. UIA cannot establish visual absence
+      // by itself: a drawn label may exist only in OCR.
       // No Click retries, popup recovery, input or memory writes.
       const preferredWindow = node.conditionWindow?.trim() || ''
       const scanCondition = async (source: 'uia' | 'ocr'): Promise<ScanResult> => {
@@ -1549,6 +1549,7 @@ export function createAgent(ctx: AgentContext) {
       return repeatMethodCycle(async () => {
         let failed = false
         let confidenceUndecided = false
+        let absenceDecision: boolean | undefined
         for (const source of ['uia', 'ocr'] as const) {
         try {
         ctx.setMethod?.(source === 'uia' ? 'Koşul: uygulama öğeleri (UIA)' : 'Koşul: Windows + ONNX OCR')
@@ -1566,6 +1567,16 @@ export function createAgent(ctx: AgentContext) {
         checkStopped()
         checkObservation(signal)
         const hit = choice.id === null ? undefined : items.find(item => item.id === choice.id)
+        if (!hit && choice.basis === 'absence') {
+          if (source === 'uia') {
+            absenceDecision = choice.satisfied
+            log('info', `Koşul UIA: okuyucu yokluk bildiriyor; ekranda görünmediği kabul edilmeden OCR ile de bakılıyor.${choice.reason ? ` — ${choice.reason}` : ''}`)
+            continue
+          }
+          if (absenceDecision !== undefined && absenceDecision !== choice.satisfied) {
+            throw new ConditionUndecidedError('Koşul için UIA ve OCR yokluk yorumları çelişti; bu gözlemden dal seçilmedi.')
+          }
+        }
         if (choice.satisfied === true) return found(`${source}: ${hit ? `“${hit.text}”` : 'model koşulu doğruladı'}${choice.reason ? ` — ${choice.reason}` : ''}`)
         if (choice.satisfied === false && (hit || choice.basis === 'absence')) {
           log('info', `Koşul ${source}: koşul sağlanmıyor${hit ? ` — güncel kanıt: “${hit.text}”` : ' — gerekçeli yokluk kararı'}${choice.reason ? ` — ${choice.reason}` : ''}.`)

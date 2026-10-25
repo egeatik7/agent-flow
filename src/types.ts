@@ -98,8 +98,6 @@ export type XpAgentApi = {
   openPath?: (path: string) => Promise<boolean>
   onRecoveryReport?: (cb: (report: import('../electron/recovery').RecoveryReport) => void) => () => void
   onRecoveryStatus?: (cb: (status: { active: boolean; nodeTitle: string; message: string }) => void) => () => void
-  pickHarness?: () => Promise<string | null>
-  testHarness?: (settings: import('../electron/recovery-settings').HarnessSettings) => Promise<{ ok: boolean; message: string }>
   recoveryReports?: () => Promise<import('../electron/recovery').RecoveryReport[]>
   removeRecoveryReport?: (id: string) => Promise<boolean>
   clearRecoveryReports?: () => Promise<boolean>

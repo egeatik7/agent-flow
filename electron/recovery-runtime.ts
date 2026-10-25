@@ -13,13 +13,8 @@ import { yapDetailPage } from './yap-context'
 export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, shouldStop: () => boolean, sharedExecutor?: Executor, taskMode = false, snapshot?: RecoverySettings) {
   const graph = structuredClone(request.graph)
   const config = () => snapshot ?? recoverySettings(base.getSettings().recovery)
-  const harnessFull = () => !taskMode && config().provider === 'harness' && config().harness?.fullControl === true
-  const selected = () => harnessFull() ? { ...config(), allowCode: true, allowDesktop: true, allowNodes: true } : config()
+  const selected = config
   const allowed = new Set([request.node.id, ...selected().allowedNodeIds])
-  if (harnessFull()) {
-    const visit = (graph: typeof request.graph) => { for (const node of graph.nodes) { if (RECOVERY_ACTION_KINDS.includes(node.kind)) allowed.add(node.id); if (node.inner) visit(node.inner) } }
-    visit(graph)
-  }
   const check = () => { if (shouldStop()) throw new StoppedError() }
   let area: { x: number; y: number; w: number; h: number } | undefined
   const isolated = sharedExecutor ? { executor: sharedExecutor } : createAgent({
@@ -115,7 +110,7 @@ export function recoveryExecutor(request: RecoveryRequest, base: ToolContext, sh
       }
       if (kind === 'click' && !node.prompt?.trim() || kind === 'type' && !node.text?.trim() || kind === 'key' && !node.keys?.trim()) throw new Error('Kurtarma eyleminin hedefi/metni/tuşu boş.')
       // Modelin canlı tuş seçimi kapatma/silme kombinasyonlarını kullanamaz (key-guard).
-      if (kind === 'key' && !harnessFull()) assertModelKeysAllowed(node.keys)
+      if (kind === 'key') assertModelKeysAllowed(node.keys)
     }
     if (name === 'step.run' && !selected().allowNodes) throw new Error('Node çağırma kapalı.')
     check()

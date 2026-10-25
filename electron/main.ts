@@ -26,8 +26,6 @@ import { callTool, toolList, type ToolSource, type ToolContext } from './tools'
 import { recoverySettings } from './recovery-settings'
 import { removeRecoveryReportFiles } from './recovery-report-files'
 import { runRecovery, type RecoveryReport } from './recovery'
-import { testHarnessConnection } from './harness-recovery'
-import { harnessSettings } from './recovery-settings'
 import { recoveryExecutor } from './recovery-runtime'
 import { endpointInfo, startEndpoint, stopEndpoint } from './tool-http'
 import {
@@ -1221,14 +1219,14 @@ async function runFlow(
         } finally { clearInterval(yapProgressTimer); recoveryAbort = () => false; pushMethod('') }
       },
       recover: async (request: import('./runner').RecoveryRequest) => {
-        const settings = selectedRecovery.provider === 'harness' ? selectedRecovery : { ...recoverySettings(getSettings().recovery), provider: selectedRecovery.provider, enabled: selectedRecovery.enabled }
+        const settings = { ...recoverySettings(getSettings().recovery), enabled: selectedRecovery.enabled }
         if (!settings.enabled || opts?.fast || opts?.debug) {
           const reason = !settings.enabled ? 'Kurtarma sekmesinde kapalı.' : opts?.fast ? 'Hızlı koşu model çağırmaz.' : 'Hata ayıklama koşusu hata anında durur.'
           log('warn', `Kurtarma aşamasına ulaşıldı; ajan çalıştırılmadı: ${reason}`)
           recoveryStatus(false, request.node.title, `Kurtarma aşamasına ulaşıldı; ajan çalıştırılmadı: ${reason}`)
           return 'disabled' as const
         }
-        if (++recoveries > settings.maxRecoveries && !(settings.provider === 'harness' && settings.harness?.timeoutMs === 0)) {
+        if (++recoveries > settings.maxRecoveries) {
           log('warn', `Bu koşunun ${settings.maxRecoveries} kurtarma sınırı doldu; mevcut öğede kalınıyor.`)
           recoveryStatus(false, request.node.title, 'Koşunun kurtarma sınırı doldu; akış tamamlanamadı.')
           return 'failed' as const
@@ -1531,15 +1529,6 @@ export async function startApp(report: (pct: number, line: string) => void, clos
     commitMergeUndo: () => false,
   }
   recoveryToolContext = toolContext
-  ipcMain.handle('recovery:pickHarness', async () => {
-    if (running) throw new Error('Koşu sürerken program seçilemez.')
-    const answer = await dialog.showOpenDialog({ title: 'DeepSeek Harness programını veya CLI çalıştırıcısını seç', properties: ['openFile'], filters: [{ name: 'Çalıştırıcı', extensions: ['exe', 'cmd', 'bat', 'js', 'cjs', 'mjs'] }, { name: 'Tüm dosyalar', extensions: ['*'] }] })
-    return answer.canceled ? null : answer.filePaths[0] ?? null
-  })
-  ipcMain.handle('recovery:testHarness', async (_event, value: unknown) => {
-    if (running) throw new Error('Koşu sürerken bağlantı sınanamaz.')
-    return testHarnessConnection(harnessSettings(value as import('./recovery-settings').HarnessSettings | undefined))
-  })
   ipcMain.handle('recovery:reports', () => readRecoveryReports())
   const removeReports = (ids?: string[]) => {
     removeRecoveryReportFiles(recoveryReportsDir(), ids, removed => {

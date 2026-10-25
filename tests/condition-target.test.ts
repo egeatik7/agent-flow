@@ -64,12 +64,12 @@ describe('Condition: one whole-screen observation with model decisions', () => {
     state.items = [{ ...row('Blender project is ready'), src: 'uia' }]
     respond({ satisfied: true, id: null, basis: 'absence', reason: 'the requested context is observed and the error is absent' })
     expect(await make().exists('', condition('hata mesajı yoksa evet ver'))).toBe(true)
-    expect(state.requests).toHaveLength(1)
+    expect(state.requests).toHaveLength(2)
   })
   it('empty-list verdict is also the model decision, never inferred from an ID', async () => {
     respond({ satisfied: true, id: null, basis: 'absence', reason: 'fixture model absence verdict' })
     expect(await make().exists('', condition('hata yok mu?'))).toBe(true)
-    expect(state.requests).toHaveLength(1)
+    expect(state.requests).toHaveLength(2)
   })
   it('satisfied:false remains false even with a valid evidence ID', async () => {
     state.items = [{ ...row('Running 6/60'), src: 'uia' }]

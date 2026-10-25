@@ -515,7 +515,7 @@ function NodeFields(p: Props & { n: AgentNode }) {
             </div>
           )}
           <div className="field"><label>Pencere / uygulama bağlamı (isteğe bağlı)</label><input className="xp-input" value={n.conditionWindow || ''} onChange={e => upd({ conditionWindow: e.target.value })} /></div>
-          <p className="field-hint">Tüm ekranda bir kez UIA, gerekirse bir kez Windows + ONNX OCR okunur. Pencere bilgisi yalnız modele bağlam olarak gider; pencere seçilmez. Boş okuma da modele sorulur. Tekrar bakmak için Zamanlayıcı ile döngü kur. Koşul tıklama veya pencereyi öne getirme yapmaz.</p>
+          <p className="field-hint">Tüm ekranda önce UIA, gerekirse Windows + ONNX OCR okunur. UIA tek başına yokluk kararı vermez; yokluk OCR ile de kontrol edilir. Pencere bilgisi yalnız modele bağlam olarak gider; pencere seçilmez. Boş okuma da modele sorulur. Tekrar bakmak için Zamanlayıcı ile döngü kur. Koşul tıklama veya pencereyi öne getirme yapmaz.</p>
         </>
       )}
 

@@ -10,10 +10,7 @@ export const RECOVERY_WAIT_MAX_MS = 60_000
 
 export type RecoveryReport = {
   id: string
-  provider?: 'nubbo' | 'harness'
   details?: string
-  harnessSessionId?: string
-  harnessLaunch?: { selectedCommand: string; command: string; cwd: string; mode: string }
   startedAt: number
   endedAt: number
   model: string
@@ -98,8 +95,6 @@ const names: Record<string, string> = { screen_read: 'screen.read', flow_read: '
 export async function runRecovery(request: RecoveryRequest, deps: RecoveryDependencies): Promise<{ decision: RecoveryDecision; report?: RecoveryReport }> {
   const settings = recoverySettings(deps.settings)
   if (!settings.enabled) return { decision: 'disabled' }
-  // Exclusive dispatch: external failures never enter the built-in model chain.
-  if (settings.provider === 'harness') return (await import('./harness-recovery')).runHarnessRecovery(request, { ...deps, settings })
   const startedAt = Date.now()
   const clock = deps.clock ?? (() => performance.now())
   const startedClock = clock()
