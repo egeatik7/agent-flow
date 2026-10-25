@@ -84,4 +84,8 @@ tam taramanın varsayılan işçi sayısıyla `%100 yeşil` olmadığı da gizle
 
 ## EXE
 
-`Nubbo-1.9.178.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.178.exe` · SHA256 `BEKLENIYOR`.
+`Nubbo-1.9.178.exe` · `C:\Users\ASUS TUF\Desktop\Nubbo-1.9.178.exe` · SHA256
+`E15041FFC1217EB6432A0608ABF553BF3B5C7E6FADD3E61635C091022FE9C05A` (build = masaüstü kopyası,
+97.605.563 bayt). Build damgası `resources/build.json` içinde `952ff69`, `dirty=false`,
+`version=1.9.178` — etiketli commit ile aynı ağaçtan üretildi. Paketlenmiş `resources` içinde
+`harness-*` dosyası **yok**. Masaüstündeki eski `Nubbo-*.exe` dosyaları silinmedi.
