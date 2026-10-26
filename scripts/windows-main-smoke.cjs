@@ -8,7 +8,7 @@ const results=[], logs=[]; let seq=0,host,bridge;
 const report={scope:'Exact main checkout; native event oracle; no production overlays',revision:process.env.NUBBO_MAIN_SHA,results};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function state(){try{return JSON.parse(fs.readFileSync(path.join(fixture,'state.json'),'utf8'));}catch(e){if(['ENOENT','EBUSY'].includes(e.code)||e instanceof SyntaxError)return null;throw e;}}
-async function until(fn,label){const end=Date.now()+8000;while(Date.now()<end){const v=fn();if(v)return v;await sleep(100);}throw Error('Timed out: '+label);}
+async function until(fn,label,timeout=8000){const end=Date.now()+timeout;while(Date.now()<end){const v=fn();if(v)return v;await sleep(100);}throw Error('Timed out: '+label);}
 async function command(kind){const n=++seq;fs.writeFileSync(path.join(fixture,'command.json'),JSON.stringify({seq:n,kind}));const s=await until(()=>{const s=state();return s?.commandSeq===n&&s;},kind);assert.equal(s.error,'');return s;}
 function agent(stages){const {createAgent}=require('./dist-electron/agent.js'),{DEFAULT_SETTINGS}=require('./dist-electron/graph-types.js');return createAgent({log:(level,message)=>logs.push({level,message}),send:()=>{},shouldStop:()=>false,settings:()=>({...DEFAULT_SETTINGS,apiKey:'',targetWindow:'Nubbo Click Test Host',findOrder:stages,findOff:['chrome','uia','icon','windows','onnx','list','tars','offset'].filter(s=>!stages.includes(s))})});}
 const ahead={next:{id:'oracle',kind:'condition',title:'Independent event oracle'}};
@@ -20,7 +20,16 @@ app.whenReady().then(async()=>{
  try{
   assert.equal(process.platform,'win32');fs.mkdirSync(fixture,{recursive:true});
   const exe=path.join(fixture,'Host.exe');await promisify(execFile)('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(root,'scripts/windows/build-host.ps1'),'-Output',exe]);
-  host=spawn(exe,[fixture]);host.on('error',e=>{report.hostError=e.message;});await until(()=>state(),'visible main fixture');
+  report.hostOutput={stdout:'',stderr:''};
+  host=spawn(exe,[fixture]);host.on('error',e=>{report.hostError=e.message;});
+  host.stdout.on('data',d=>{report.hostOutput.stdout=(report.hostOutput.stdout+d).slice(-8000);});
+  host.stderr.on('data',d=>{report.hostOutput.stderr=(report.hostOutput.stderr+d).slice(-8000);});
+  host.on('exit',(code,signal)=>{report.hostExit={code,signal};});
+  await until(()=>{
+   if(report.hostError)throw Error('Fixture launch: '+report.hostError);
+   if(report.hostExit)throw Error('Fixture exited before ready: '+JSON.stringify(report.hostExit)+' '+report.hostOutput.stderr);
+   return state();
+  },'visible main fixture',30000);
   assert(state().interactive,'actual input desktop required');bridge=require('./dist-electron/a11y-bridge.js');
   await test('Main UIA click uses real button event',()=>actualClick(agent(['uia']),click('Devam','Button'),'continue'));
   await test('Main fresh Windows scan clicks actual control',()=>actualClick(agent(['windows']),click('Devam'),'continue'));
